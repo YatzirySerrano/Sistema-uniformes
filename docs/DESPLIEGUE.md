@@ -58,7 +58,7 @@ php artisan schedule:work          # si se añaden tareas programadas
 - HTTPS obligatorio. Cabeceras recomendadas: `Strict-Transport-Security`,
   `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` (o CSP
   `frame-ancestors`), CSP razonable para la SPA de Inertia.
-- Servir sólo `public/` como *document root*.
+- Servir sólo `public/` como _document root_.
 - `storage/app/private` **no** debe ser accesible por URL (firmas y PDF se
   entregan por Controller).
 

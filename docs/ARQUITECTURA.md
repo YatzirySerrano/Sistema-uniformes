@@ -16,15 +16,15 @@ la empresa activa, delegan en una Acción y devuelven `Inertia::render` o `redir
 
 ## Capas propias
 
-| Carpeta | Rol |
-| --- | --- |
-| `app/Acciones/` | Casos de uso escritos como clase con un método `ejecutar()`. Transaccionales. |
-| `app/Servicios/` | Lógica reutilizable entre acciones/controladores. |
-| `app/Soporte/` | Utilidades transversales sin estado de dominio (`ContextoEmpresa`, `Permisos`, `ValidadorFirma`). |
-| `app/Excepciones/` | Errores de negocio; producen respuesta controlada en español. |
-| `app/Enums/` | Enumeraciones de dominio con etiquetas en español. |
-| `app/Policies/` | Autorización por recurso (IDOR + tenant). |
-| `app/Exports/` | Clases de exportación Excel (Maatwebsite). |
+| Carpeta            | Rol                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `app/Acciones/`    | Casos de uso escritos como clase con un método `ejecutar()`. Transaccionales.                     |
+| `app/Servicios/`   | Lógica reutilizable entre acciones/controladores.                                                 |
+| `app/Soporte/`     | Utilidades transversales sin estado de dominio (`ContextoEmpresa`, `Permisos`, `ValidadorFirma`). |
+| `app/Excepciones/` | Errores de negocio; producen respuesta controlada en español.                                     |
+| `app/Enums/`       | Enumeraciones de dominio con etiquetas en español.                                                |
+| `app/Policies/`    | Autorización por recurso (IDOR + tenant).                                                         |
+| `app/Exports/`     | Clases de exportación Excel (Maatwebsite).                                                        |
 
 Se conservan los nombres/directorios de Laravel (`app/Http`, `app/Models`,
 `app/Providers`, `database/`, `routes/`, etc.) y los sufijos `Controller`,

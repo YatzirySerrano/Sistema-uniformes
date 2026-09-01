@@ -30,12 +30,12 @@ se toma de `ContextoEmpresa` y las FKs se validan con `Rule::exists()->where('em
 
 ## Archivos
 
-| Tipo | Disco | Ruta |
-| --- | --- | --- |
-| Branding (logos), imágenes de prenda | `public` (`storage/app/public`, requiere `storage:link`) | `empresas/{id}/…`, `prendas/{id}/…` |
-| Firmas manuscritas | `local` **privado** (`storage/app/private`) | `firmas/{empresa}/{uuid}.png` |
-| Comprobantes PDF | `local` **privado** | `acuses/{empresa}/{uuid}.pdf` |
-| Archivos temporales de importación | `local` **privado** | `importaciones/{empresa}/…` (se borran tras confirmar) |
+| Tipo                                 | Disco                                                    | Ruta                                                   |
+| ------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------ |
+| Branding (logos), imágenes de prenda | `public` (`storage/app/public`, requiere `storage:link`) | `empresas/{id}/…`, `prendas/{id}/…`                    |
+| Firmas manuscritas                   | `local` **privado** (`storage/app/private`)              | `firmas/{empresa}/{uuid}.png`                          |
+| Comprobantes PDF                     | `local` **privado**                                      | `acuses/{empresa}/{uuid}.pdf`                          |
+| Archivos temporales de importación   | `local` **privado**                                      | `importaciones/{empresa}/…` (se borran tras confirmar) |
 
 Las firmas y los PDF sólo se sirven por Controller con Policy.
 
@@ -51,7 +51,7 @@ UX.
 `App\Excepciones\ExcepcionDeNegocio` (y subclases: `ExistenciasInsuficientesException`,
 `EntregaYaFirmadaException`, `AccesoEmpresaNoAutorizadoException`,
 `ExcepcionDeNegocioSimple`) producen `redirect()->back()` con el mensaje en el
-saco de errores y como *toast*, o `422` JSON para peticiones `expectsJson`. Nunca
+saco de errores y como _toast_, o `422` JSON para peticiones `expectsJson`. Nunca
 un 500 para una operación inválida previsible.
 
 ## Firma de recepción
