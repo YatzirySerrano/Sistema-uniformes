@@ -105,10 +105,11 @@ it('el titular con cuenta puede ver su propio comprobante', function () {
         ->assertOk();
 });
 
-it('un usuario de otra empresa recibe 403 al intentar ver el PDF', function () {
+it('un usuario de rol restringido de otra empresa recibe 403 al intentar ver el PDF', function () {
     $acuse = $this->confirmar->ejecutar($this->entrega, firmaDemoBase64(), null, null, null);
 
-    $ajeno = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaB']]);
+    // Supervisor (tiene acuses.ver-pdf) limitado a la empresa B: no alcanza a la empresa A.
+    $ajeno = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaB']]);
 
     $this->actingAs($ajeno)
         ->withSession([ContextoEmpresa::SESSION_KEY => $this->datos['empresaB']->id])

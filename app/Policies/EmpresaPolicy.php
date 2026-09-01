@@ -33,6 +33,15 @@ class EmpresaPolicy
         return $user->puedeAccederEmpresa($empresa) && $user->can('configuracion-empresa.editar');
     }
 
+    /**
+     * Activar / desactivar una empresa es una acción sensible: exige el permiso
+     * específico de empresas, no basta con el de personalización.
+     */
+    public function cambiarEstado(User $user, Empresa $empresa): bool
+    {
+        return $user->puedeAccederEmpresa($empresa) && $user->can('empresas.editar');
+    }
+
     public function delete(User $user, Empresa $empresa): bool
     {
         return $user->can('empresas.administrar');

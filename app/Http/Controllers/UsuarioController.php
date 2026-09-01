@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\RolSistema;
 use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Models\Empresa;
 use App\Models\User;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Http\RedirectResponse;
@@ -183,7 +184,7 @@ class UsuarioController extends Controller
      */
     private function validarEmpresas(Request $request, array $empresas): void
     {
-        if ($request->user()->esSuperadministrador()) {
+        if ($request->user()->tieneAlcanceGlobal()) {
             return;
         }
 
@@ -197,6 +198,10 @@ class UsuarioController extends Controller
      */
     private function empresasGestionables(User $user): array
     {
+        if ($user->tieneAlcanceGlobal()) {
+            return Empresa::query()->pluck('id')->all();
+        }
+
         return $user->empresas()->pluck('empresas.id')->all();
     }
 

@@ -150,11 +150,11 @@ final class Permisos
     {
         return [
             RolSistema::Superadministrador->value => '*',
-            RolSistema::Administrador->value => array_values(array_filter(
-                self::todos(),
-                fn (string $p): bool => ! in_array($p, ['empresas.crear', 'empresas.administrar'], true),
-            )),
+            // La dirección del cliente administra todos los módulos de negocio,
+            // incluidas todas las empresas de la plataforma.
+            RolSistema::Administrador->value => self::todos(),
             RolSistema::Supervisor->value => [
+                'empresas.ver',
                 'sucursales.ver',
                 'colaboradores.ver', 'colaboradores.crear', 'colaboradores.editar', 'colaboradores.importar',
                 'prendas.ver',

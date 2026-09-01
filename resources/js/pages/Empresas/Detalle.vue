@@ -1,0 +1,539 @@
+<script setup lang="ts">
+import { Head, Link, router } from '@inertiajs/vue3';
+import {
+    ArrowLeft,
+    Building2,
+    CircleDot,
+    Hash,
+    Mail,
+    MapPin,
+    Palette,
+    Pencil,
+    Phone,
+    Power,
+    ScrollText,
+    Store,
+    Users,
+} from '@lucide/vue';
+import { computed, ref } from 'vue';
+import type { EmpresaEditable } from '@/components/empresas/FormularioEmpresa.vue';
+import FormularioEmpresa from '@/components/empresas/FormularioEmpresa.vue';
+import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+
+type EmpresaDetalle = EmpresaEditable & {
+    color_principal: string;
+    color_secundario: string;
+    color_acento: string;
+    logo_url: string | null;
+    es_empresa_activa: boolean;
+    sucursales_total: number;
+    sucursales_activas: number;
+    colaboradores_total: number;
+    colaboradores_activos: number;
+};
+
+const props = defineProps<{
+    empresa: EmpresaDetalle;
+    puedeEditar: boolean;
+    puedeCambiarEstado: boolean;
+    puedePersonalizar: boolean;
+}>();
+
+defineOptions({
+    layout: {
+        breadcrumbs: [
+            { title: 'Empresas', href: '/empresas' },
+            { title: 'Detalle', href: '#' },
+        ],
+    },
+});
+
+const modalEditar = ref(false);
+const claveFormulario = ref(0);
+const modalEstado = ref(false);
+const procesandoEstado = ref(false);
+const cambiandoEmpresa = ref(false);
+
+const empresaEditable = computed<EmpresaEditable>(() => ({
+    id: props.empresa.id,
+    codigo: props.empresa.codigo,
+    nombre_comercial: props.empresa.nombre_comercial,
+    razon_social: props.empresa.razon_social,
+    rfc: props.empresa.rfc,
+    telefono: props.empresa.telefono,
+    correo: props.empresa.correo,
+    direccion: props.empresa.direccion,
+    activa: props.empresa.activa,
+}));
+
+const telefonoLegible = computed(() => {
+    const t = props.empresa.telefono;
+    if (!t) return null;
+    return t.length === 10
+        ? `${t.slice(0, 2)} ${t.slice(2, 6)} ${t.slice(6)}`
+        : t;
+});
+
+const colores = computed(() => [
+    { nombre: 'Principal', valor: props.empresa.color_principal },
+    { nombre: 'Secundario', valor: props.empresa.color_secundario },
+    { nombre: 'Acento', valor: props.empresa.color_acento },
+]);
+
+function abrirEditar(): void {
+    claveFormulario.value++;
+    modalEditar.value = true;
+}
+
+function alGuardar(): void {
+    modalEditar.value = false;
+}
+
+function confirmarEstado(): void {
+    procesandoEstado.value = true;
+    router.post(
+        `/empresas/${props.empresa.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                modalEstado.value = false;
+            },
+        },
+    );
+}
+
+function usarEmpresa(): void {
+    if (props.empresa.es_empresa_activa) return;
+    cambiandoEmpresa.value = true;
+    router.post(
+        '/empresa-activa',
+        { empresa_id: props.empresa.id },
+        {
+            preserveScroll: true,
+            onFinish: () => (cambiandoEmpresa.value = false),
+        },
+    );
+}
+
+const navegando = ref(false);
+
+/**
+ * Navega a otro módulo asegurando que esta empresa sea la activa. Si no lo es,
+ * primero cambia el contexto de forma autorizada (el backend valida el acceso)
+ * y después abre la ruta destino con la empresa correcta ya cargada.
+ */
+function irA(ruta: string): void {
+    if (props.empresa.es_empresa_activa) {
+        router.visit(ruta);
+        return;
+    }
+    navegando.value = true;
+    router.post(
+        '/empresa-activa',
+        { empresa_id: props.empresa.id },
+        {
+            onSuccess: () => router.visit(ruta),
+            onFinish: () => (navegando.value = false),
+        },
+    );
+}
+</script>
+
+<template>
+    <Head :title="empresa.nombre_comercial" />
+
+    <div class="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4">
+        <Button variant="ghost" size="sm" as-child class="w-fit">
+            <Link href="/empresas">
+                <ArrowLeft class="size-4" /> Volver a empresas
+            </Link>
+        </Button>
+
+        <!-- Encabezado -->
+        <div
+            class="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+            <div class="flex min-w-0 items-center gap-3">
+                <span
+                    class="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border"
+                    :style="{ background: empresa.color_principal }"
+                >
+                    <img
+                        v-if="empresa.logo_url"
+                        :src="empresa.logo_url"
+                        :alt="`Logotipo de ${empresa.nombre_comercial}`"
+                        class="size-full object-contain"
+                    />
+                    <Building2
+                        v-else
+                        class="size-6 text-white mix-blend-difference"
+                    />
+                </span>
+                <div class="min-w-0">
+                    <h1 class="truncate text-xl font-semibold tracking-tight">
+                        {{ empresa.nombre_comercial }}
+                    </h1>
+                    <p class="text-muted-foreground font-mono text-sm">
+                        {{ empresa.codigo }}
+                    </p>
+                    <div class="mt-1.5 flex flex-wrap items-center gap-2">
+                        <Badge
+                            :variant="empresa.activa ? 'default' : 'secondary'"
+                        >
+                            {{ empresa.activa ? 'Activa' : 'Inactiva' }}
+                        </Badge>
+                        <span
+                            v-if="empresa.es_empresa_activa"
+                            class="text-primary inline-flex items-center gap-1 text-xs font-medium"
+                        >
+                            <CircleDot class="size-3.5" />
+                            Empresa activa en tu sesión
+                            <AyudaTooltip
+                                texto="Es la empresa sobre la que estás trabajando ahora. No debe confundirse con el estado operativo 'Activa'."
+                                etiqueta="Ayuda sobre la empresa activa"
+                            />
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    v-if="!empresa.es_empresa_activa"
+                    variant="outline"
+                    size="sm"
+                    :disabled="cambiandoEmpresa"
+                    @click="usarEmpresa"
+                >
+                    Usar esta empresa
+                </Button>
+                <Button
+                    v-if="puedeEditar"
+                    variant="outline"
+                    size="sm"
+                    @click="abrirEditar"
+                >
+                    <Pencil class="size-3.5" /> Editar
+                </Button>
+                <Button
+                    v-if="puedeCambiarEstado"
+                    :variant="empresa.activa ? 'ghost' : 'default'"
+                    size="sm"
+                    @click="modalEstado = true"
+                >
+                    <Power class="size-3.5" />
+                    {{ empresa.activa ? 'Desactivar' : 'Activar' }}
+                </Button>
+            </div>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+            <!-- Información general -->
+            <section class="rounded-xl border p-4">
+                <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
+                    <ScrollText class="text-muted-foreground size-4" />
+                    Información general
+                </h2>
+                <dl class="grid gap-3 text-sm">
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Nombre comercial
+                        </dt>
+                        <dd>{{ empresa.nombre_comercial }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Razón social
+                        </dt>
+                        <dd>{{ empresa.razon_social ?? '—' }}</dd>
+                    </div>
+                    <div class="flex gap-6">
+                        <div>
+                            <dt
+                                class="text-muted-foreground flex items-center gap-1 text-xs"
+                            >
+                                <Hash class="size-3" /> Código
+                            </dt>
+                            <dd class="font-mono">{{ empresa.codigo }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-muted-foreground text-xs">RFC</dt>
+                            <dd class="font-mono">
+                                {{ empresa.rfc ?? '—' }}
+                            </dd>
+                        </div>
+                    </div>
+                </dl>
+            </section>
+
+            <!-- Contacto -->
+            <section class="rounded-xl border p-4">
+                <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
+                    <Phone class="text-muted-foreground size-4" />
+                    Contacto
+                </h2>
+                <dl class="grid gap-3 text-sm">
+                    <div>
+                        <dt
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <Phone class="size-3" /> Teléfono
+                        </dt>
+                        <dd>{{ telefonoLegible ?? '—' }}</dd>
+                    </div>
+                    <div>
+                        <dt
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <Mail class="size-3" /> Correo
+                        </dt>
+                        <dd class="break-all">{{ empresa.correo ?? '—' }}</dd>
+                    </div>
+                    <div>
+                        <dt
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <MapPin class="size-3" /> Dirección
+                        </dt>
+                        <dd>{{ empresa.direccion ?? '—' }}</dd>
+                    </div>
+                </dl>
+            </section>
+
+            <!-- Resumen operativo -->
+            <section class="rounded-xl border p-4">
+                <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
+                    <Users class="text-muted-foreground size-4" />
+                    Resumen operativo
+                </h2>
+                <div class="grid gap-3 sm:grid-cols-2">
+                    <!-- Sucursales -->
+                    <div class="bg-muted/40 flex flex-col gap-2 rounded-lg p-3">
+                        <p
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <Store class="size-3" /> Sucursales activas
+                            <AyudaTooltip
+                                texto="Sucursales de esta empresa con estado activo. Entre paréntesis, el total incluyendo inactivas."
+                                etiqueta="Ayuda sobre sucursales activas"
+                            />
+                        </p>
+                        <template v-if="empresa.sucursales_total > 0">
+                            <p class="text-2xl font-semibold">
+                                {{ empresa.sucursales_activas }}
+                                <span
+                                    class="text-muted-foreground text-sm font-normal"
+                                >
+                                    / {{ empresa.sucursales_total }}
+                                </span>
+                            </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                class="w-fit"
+                                :disabled="navegando"
+                                @click="irA('/sucursales')"
+                            >
+                                Ver sucursales
+                            </Button>
+                        </template>
+                        <template v-else>
+                            <p class="text-muted-foreground text-sm">
+                                No hay sucursales registradas para esta empresa.
+                            </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                class="w-fit"
+                                :disabled="navegando"
+                                @click="irA('/sucursales')"
+                            >
+                                Registrar sucursal
+                            </Button>
+                        </template>
+                    </div>
+
+                    <!-- Colaboradores -->
+                    <div class="bg-muted/40 flex flex-col gap-2 rounded-lg p-3">
+                        <p
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <Users class="size-3" /> Colaboradores activos
+                            <AyudaTooltip
+                                texto="Colaboradores con estado activo. Entre paréntesis, el total incluyendo inactivos."
+                                etiqueta="Ayuda sobre colaboradores activos"
+                            />
+                        </p>
+                        <template v-if="empresa.colaboradores_total > 0">
+                            <p class="text-2xl font-semibold">
+                                {{ empresa.colaboradores_activos }}
+                                <span
+                                    class="text-muted-foreground text-sm font-normal"
+                                >
+                                    / {{ empresa.colaboradores_total }}
+                                </span>
+                            </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                class="w-fit"
+                                :disabled="navegando"
+                                @click="irA('/colaboradores')"
+                            >
+                                Ver colaboradores
+                            </Button>
+                        </template>
+                        <template v-else>
+                            <p class="text-muted-foreground text-sm">
+                                Aún no hay colaboradores registrados.
+                            </p>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                class="w-fit"
+                                :disabled="navegando"
+                                @click="irA('/colaboradores')"
+                            >
+                                Registrar colaborador
+                            </Button>
+                        </template>
+                    </div>
+                </div>
+                <p
+                    v-if="!empresa.es_empresa_activa"
+                    class="text-muted-foreground mt-3 text-xs"
+                >
+                    Al continuar, esta empresa se activará automáticamente en tu
+                    sesión.
+                </p>
+            </section>
+
+            <!-- Identidad -->
+            <section class="rounded-xl border p-4">
+                <div class="mb-3 flex items-center justify-between gap-2">
+                    <h2 class="flex items-center gap-2 text-sm font-semibold">
+                        <Palette class="text-muted-foreground size-4" />
+                        Identidad
+                        <AyudaTooltip
+                            texto="Logotipo y colores con los que se identifica visualmente esta empresa. Se editan en Personalización."
+                            etiqueta="Ayuda sobre la identidad de la empresa"
+                        />
+                    </h2>
+                    <Button
+                        v-if="puedePersonalizar"
+                        variant="outline"
+                        size="sm"
+                        :disabled="navegando"
+                        @click="irA('/personalizacion')"
+                    >
+                        <Palette class="size-3.5" /> Personalizar empresa
+                    </Button>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span
+                        class="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border"
+                        :style="{ background: empresa.color_principal }"
+                    >
+                        <img
+                            v-if="empresa.logo_url"
+                            :src="empresa.logo_url"
+                            :alt="`Logotipo de ${empresa.nombre_comercial}`"
+                            class="size-full object-contain"
+                        />
+                        <Building2
+                            v-else
+                            class="size-6 text-white mix-blend-difference"
+                        />
+                    </span>
+                    <ul class="grid flex-1 gap-2">
+                        <li
+                            v-for="c in colores"
+                            :key="c.nombre"
+                            class="flex items-center gap-2 text-sm"
+                        >
+                            <span
+                                class="size-5 shrink-0 rounded border"
+                                :style="{ background: c.valor }"
+                            />
+                            <span class="text-muted-foreground">{{
+                                c.nombre
+                            }}</span>
+                            <span class="ml-auto font-mono text-xs uppercase">{{
+                                c.valor
+                            }}</span>
+                        </li>
+                    </ul>
+                </div>
+            </section>
+        </div>
+
+        <!-- Modal editar -->
+        <Dialog v-model:open="modalEditar">
+            <DialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
+                <DialogHeader>
+                    <DialogTitle>Editar empresa</DialogTitle>
+                    <DialogDescription>
+                        Actualiza los datos generales y de contacto de la
+                        empresa.
+                    </DialogDescription>
+                </DialogHeader>
+                <FormularioEmpresa
+                    :key="claveFormulario"
+                    :empresa="empresaEditable"
+                    @guardado="alGuardar"
+                    @cancelar="modalEditar = false"
+                />
+            </DialogContent>
+        </Dialog>
+
+        <!-- Modal confirmar cambio de estado -->
+        <Dialog v-model:open="modalEstado">
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>
+                        {{
+                            empresa.activa
+                                ? '¿Desactivar esta empresa?'
+                                : '¿Activar esta empresa?'
+                        }}
+                    </DialogTitle>
+                    <DialogDescription>
+                        {{
+                            empresa.activa
+                                ? 'Los datos históricos se conservarán. Los usuarios y operaciones de esta empresa pueden quedar temporalmente restringidos hasta reactivarla.'
+                                : 'La empresa volverá a estar disponible para operar con normalidad.'
+                        }}
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="modalEstado = false"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        :variant="empresa.activa ? 'destructive' : 'default'"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEstado"
+                    >
+                        {{ empresa.activa ? 'Desactivar' : 'Activar' }}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    </div>
+</template>

@@ -7,8 +7,8 @@ Se usa `spatie/laravel-permission` (guard `web`).
 | Rol interno | Etiqueta | Alcance |
 | --- | --- | --- |
 | `superadministrador` | Superadministrador | Global (bypass `Gate::before`). Equipo técnico / proveedor. |
-| `administrador` | Administrador | Todo dentro de sus empresas autorizadas (sin crear empresas ni auditoría global). |
-| `supervisor` | Supervisor | Según permisos y sucursales asignadas. |
+| `administrador` | Administrador | Alcance global sobre los módulos de negocio: **todos los permisos** y **todas las empresas** de la plataforma (incluye `empresas.crear` y `empresas.administrar`). No depende de `empresa_usuario`. |
+| `supervisor` | Supervisor | Según permisos y **empresas/sucursales asignadas** (`empresa_usuario` / `sucursal_usuario`). Incluye `empresas.ver` para consultar y cambiar entre sus empresas. |
 | `encargado` | Encargado | Operación de entregas/firmas/devoluciones. |
 | `colaborador` | Colaborador | Portal propio + firmar su recepción. |
 
@@ -41,7 +41,9 @@ Fuente de verdad: `App\Soporte\Permisos::GRUPOS`. Notación `recurso.accion`.
 
 `Permisos::porRol()` define los permisos por defecto de cada rol base. La
 autorización se resuelve por permiso (Spatie registra cada permiso como
-*gate ability*), nunca por nombre de rol, salvo el bypass del Superadministrador.
+*gate ability*), nunca por nombre de rol, salvo el bypass del Superadministrador
+y el helper `User::tieneAlcanceGlobal()` (Superadministrador o Administrador), que
+concede acceso global a los módulos de negocio (empresas, sucursales, …).
 
 ## Dónde se aplica
 

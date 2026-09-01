@@ -67,11 +67,34 @@ class Empresa extends Model
     }
 
     /**
+     * Sucursales activas de la empresa. La condición replica `Sucursal::scopeActivas`
+     * y es la única definición de "sucursal activa" usada en los contadores.
+     *
+     * @return HasMany<Sucursal, $this>
+     */
+    public function sucursalesActivas(): HasMany
+    {
+        return $this->hasMany(Sucursal::class)->where('activa', true);
+    }
+
+    /**
      * @return HasMany<Colaborador, $this>
      */
     public function colaboradores(): HasMany
     {
         return $this->hasMany(Colaborador::class);
+    }
+
+    /**
+     * Colaboradores activos de la empresa. La condición replica
+     * `Colaborador::scopeActivos` y es la única definición de "colaborador activo"
+     * usada en los contadores.
+     *
+     * @return HasMany<Colaborador, $this>
+     */
+    public function colaboradoresActivos(): HasMany
+    {
+        return $this->hasMany(Colaborador::class)->where('activo', true);
     }
 
     /**

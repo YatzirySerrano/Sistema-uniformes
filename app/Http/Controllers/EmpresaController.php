@@ -3,10 +3,13 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Requests\Empresas\GuardarEmpresaRequest;
 use App\Models\Empresa;
 use App\Servicios\ServicioAuditoria;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -22,95 +25,165 @@ class EmpresaController extends Controller
     {
         $this->authorize('viewAny', Empresa::class);
 
-        $empresas = ($request->user()->esSuperadministrador()
+        $filtros = $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'estado' => ['nullable', Rule::in(['activas', 'inactivas'])],
+            'sucursales' => ['nullable', Rule::in(['con', 'sin'])],
+            'colaboradores' => ['nullable', Rule::in(['con', 'sin'])],
+            'orden' => ['nullable', Rule::in(['az', 'za'])],
+        ]);
+
+        $usuario = $request->user();
+        $empresaActivaId = $this->contexto()->id();
+        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
+
+        // Superadministrador y Administrador ven todas las empresas de la
+        // plataforma; los roles restringidos, sólo las de `empresa_usuario`.
+        $base = $usuario->tieneAlcanceGlobal()
             ? Empresa::query()
-            : $request->user()->empresas()->getQuery())
-            ->withCount(['sucursales', 'colaboradores'])
-            ->orderBy('nombre_comercial')
+            : $usuario->empresas()->getQuery();
+
+        $empresas = $base
+            ->withCount(['sucursalesActivas', 'colaboradoresActivos'])
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
+                $q->where(function (Builder $sub) use ($buscar): void {
+                    $sub->where('nombre_comercial', 'like', "%{$buscar}%")
+                        ->orWhere('razon_social', 'like', "%{$buscar}%")
+                        ->orWhere('codigo', 'like', "%{$buscar}%")
+                        ->orWhere('rfc', 'like', "%{$buscar}%");
+                });
+            })
+            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
+            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
+            ->when(($filtros['sucursales'] ?? null) === 'con', fn (Builder $q) => $q->has('sucursalesActivas'))
+            ->when(($filtros['sucursales'] ?? null) === 'sin', fn (Builder $q) => $q->doesntHave('sucursalesActivas'))
+            ->when(($filtros['colaboradores'] ?? null) === 'con', fn (Builder $q) => $q->has('colaboradoresActivos'))
+            ->when(($filtros['colaboradores'] ?? null) === 'sin', fn (Builder $q) => $q->doesntHave('colaboradoresActivos'))
+            ->orderBy('nombre_comercial', $orden)
             ->paginate($this->porPagina())
+            ->withQueryString()
             ->through(fn (Empresa $e): array => [
                 'id' => $e->id,
                 'codigo' => $e->codigo,
                 'nombre_comercial' => $e->nombre_comercial,
                 'razon_social' => $e->razon_social,
+                'rfc' => $e->rfc,
+                'telefono' => $e->telefono,
+                'correo' => $e->correo,
+                'direccion' => $e->direccion,
                 'activa' => $e->activa,
-                'sucursales' => $e->sucursales_count,
-                'colaboradores' => $e->colaboradores_count,
+                'es_empresa_activa' => $e->id === $empresaActivaId,
+                'sucursales_activas' => (int) $e->sucursales_activas_count,
+                'colaboradores_activos' => (int) $e->colaboradores_activos_count,
                 'color_principal' => $e->color_principal,
+                'logo_url' => $this->logoUrl($e),
             ]);
 
         return Inertia::render('Empresas/Index', [
             'empresas' => $empresas,
-            'puedeCrear' => $request->user()->can('create', Empresa::class),
+            'filtros' => [
+                'buscar' => $filtros['buscar'] ?? '',
+                'estado' => $filtros['estado'] ?? '',
+                'sucursales' => $filtros['sucursales'] ?? '',
+                'colaboradores' => $filtros['colaboradores'] ?? '',
+                'orden' => $filtros['orden'] ?? 'az',
+            ],
+            'puedeCrear' => $usuario->can('create', Empresa::class),
+            'puedeEditar' => $usuario->can('empresas.editar') || $usuario->can('configuracion-empresa.editar'),
         ]);
     }
 
-    public function create(): Response
+    public function show(Request $request, Empresa $empresa): Response
     {
-        $this->authorize('create', Empresa::class);
+        $this->authorize('view', $empresa);
 
-        return Inertia::render('Empresas/Formulario', ['empresa' => null]);
+        $empresa->loadCount([
+            'sucursales',
+            'sucursalesActivas',
+            'colaboradores',
+            'colaboradoresActivos',
+        ]);
+
+        return Inertia::render('Empresas/Detalle', [
+            'empresa' => [
+                ...$empresa->only([
+                    'id', 'codigo', 'nombre_comercial', 'razon_social', 'rfc',
+                    'telefono', 'correo', 'direccion', 'activa',
+                    'color_principal', 'color_secundario', 'color_acento',
+                ]),
+                'logo_url' => $this->logoUrl($empresa),
+                'es_empresa_activa' => $empresa->id === $this->contexto()->id(),
+                'sucursales_total' => (int) $empresa->sucursales_count,
+                'sucursales_activas' => (int) $empresa->sucursales_activas_count,
+                'colaboradores_total' => (int) $empresa->colaboradores_count,
+                'colaboradores_activos' => (int) $empresa->colaboradores_activos_count,
+            ],
+            'puedeEditar' => $request->user()->can('update', $empresa),
+            'puedeCambiarEstado' => $request->user()->can('cambiarEstado', $empresa),
+            'puedePersonalizar' => $request->user()->can('personalizar', $empresa),
+        ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(GuardarEmpresaRequest $request): RedirectResponse
     {
-        $this->authorize('create', Empresa::class);
-
-        $datos = $this->validar($request, null);
-        $datos['codigo'] = $datos['codigo'] ?: $this->generarCodigo($datos['nombre_comercial']);
+        $datos = $request->validated();
+        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($datos['nombre_comercial']);
 
         $empresa = Empresa::query()->create($datos);
 
         $this->auditoria->registrar('empresas', 'crear', [
             'empresa_id' => $empresa->id,
-            'tipo_entidad' => Empresa::class, 'entidad_id' => $empresa->id,
+            'tipo_entidad' => Empresa::class,
+            'entidad_id' => $empresa->id,
             'descripcion' => 'Alta de empresa '.$empresa->nombre_comercial,
         ]);
 
-        return to_route('empresas.index')->with('toast', ['type' => 'success', 'message' => 'Empresa creada.']);
+        return to_route('empresas.index')
+            ->with('toast', ['type' => 'success', 'message' => 'Empresa registrada correctamente.']);
     }
 
-    public function edit(Empresa $empresa): Response
+    public function update(GuardarEmpresaRequest $request, Empresa $empresa): RedirectResponse
     {
-        $this->authorize('update', $empresa);
-
-        return Inertia::render('Empresas/Formulario', [
-            'empresa' => $empresa->only(['id', 'codigo', 'nombre_comercial', 'razon_social', 'rfc', 'telefono', 'correo', 'direccion', 'activa']),
-        ]);
-    }
-
-    public function update(Request $request, Empresa $empresa): RedirectResponse
-    {
-        $this->authorize('update', $empresa);
-
         $anteriores = $empresa->toArray();
-        $empresa->update($this->validar($request, $empresa));
+        $empresa->update($request->validated());
 
         $this->auditoria->registrar('empresas', 'editar', [
             'empresa_id' => $empresa->id,
-            'tipo_entidad' => Empresa::class, 'entidad_id' => $empresa->id,
+            'tipo_entidad' => Empresa::class,
+            'entidad_id' => $empresa->id,
             'descripcion' => 'Edición de empresa '.$empresa->nombre_comercial,
-            'valores_anteriores' => $anteriores, 'valores_nuevos' => $empresa->toArray(),
+            'valores_anteriores' => $anteriores,
+            'valores_nuevos' => $empresa->toArray(),
         ]);
 
-        return to_route('empresas.index')->with('toast', ['type' => 'success', 'message' => 'Empresa actualizada.']);
+        return back()->with('toast', ['type' => 'success', 'message' => 'Empresa actualizada correctamente.']);
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function validar(Request $request, ?Empresa $empresa): array
+    public function toggleEstado(Request $request, Empresa $empresa): RedirectResponse
     {
-        return $request->validate([
-            'nombre_comercial' => ['required', 'string', 'max:255'],
-            'razon_social' => ['nullable', 'string', 'max:255'],
-            'rfc' => ['nullable', 'string', 'max:20'],
-            'codigo' => ['nullable', 'string', 'max:20', 'alpha_dash', Rule::unique('empresas', 'codigo')->ignore($empresa?->id)],
-            'telefono' => ['nullable', 'string', 'max:40'],
-            'correo' => ['nullable', 'email', 'max:255'],
-            'direccion' => ['nullable', 'string', 'max:255'],
-            'activa' => ['boolean'],
+        $this->authorize('cambiarEstado', $empresa);
+
+        $empresa->update(['activa' => ! $empresa->activa]);
+
+        $this->auditoria->registrar('empresas', $empresa->activa ? 'activar' : 'desactivar', [
+            'empresa_id' => $empresa->id,
+            'tipo_entidad' => Empresa::class,
+            'entidad_id' => $empresa->id,
+            'descripcion' => ($empresa->activa ? 'Activación' : 'Desactivación').' de empresa '.$empresa->nombre_comercial,
         ]);
+
+        $mensaje = $empresa->activa
+            ? 'Empresa activada correctamente.'
+            : 'Empresa desactivada correctamente.';
+
+        return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
+    }
+
+    private function logoUrl(Empresa $empresa): ?string
+    {
+        return $empresa->logo_ruta
+            ? Storage::disk('public')->url($empresa->logo_ruta)
+            : null;
     }
 
     private function generarCodigo(string $nombre): string

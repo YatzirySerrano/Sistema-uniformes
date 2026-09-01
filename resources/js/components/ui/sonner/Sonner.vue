@@ -6,7 +6,15 @@ import { cn } from "@/lib/utils"
 
 import 'vue-sonner/style.css';
 
-const props = defineProps<ToasterProps>()
+// Valores por defecto del sistema: notificaciones arriba a la derecha, con
+// color e icono por tipo, botón de cierre y tiempo de lectura holgado. Se
+// pueden sobreescribir pasando props a <Toaster />.
+const props = withDefaults(defineProps<ToasterProps>(), {
+  position: 'top-right',
+  richColors: true,
+  closeButton: true,
+  duration: 5000,
+})
 </script>
 
 <template>
