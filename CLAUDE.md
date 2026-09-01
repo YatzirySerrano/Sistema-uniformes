@@ -242,10 +242,13 @@ comprobantes PDF, devoluciones, correcciones, reportes y auditoría.
 ## Multiempresa
 
 - Jerarquía: PLATAFORMA → EMPRESA → SUCURSALES → OPERACIÓN.
-- Relación N:M `empresa_usuario` y `sucursal_usuario` (columna `usuario_id`).
+- Las **empresas son entidades globales** de la plataforma, no se particionan por usuario.
+- Relación N:M `empresa_usuario` y `sucursal_usuario` (columna `usuario_id`): acota a los **roles restringidos** (Supervisor, Encargado, roles personalizados). **No** limita a Superadministrador ni Administrador.
 - La **empresa activa** vive en sesión (`empresa_activa_id`) y se resuelve en el middleware `ResolverEmpresaActiva` hacia el singleton `ContextoEmpresa`, validando siempre el acceso. Un contexto vacío NO concede acceso a nada.
 - **Superadministrador**: equipo técnico/proveedor. Alcance global (`Gate::before`). Se crea por seeder.
-- **Administrador**: dueños/directivos del cliente. Puede administrar **varias** empresas autorizadas; nunca entra a empresas no asignadas.
+- **Administrador**: dirección del cliente. **Alcance global sobre los módulos de negocio**: ve y administra **todas** las empresas registradas (crear, editar, cambiar estado, seleccionar como activa) sin depender de `empresa_usuario`. La diferencia con Superadministrador es de naturaleza (soporte técnico), no de qué empresas ve.
+- `User::tieneAlcanceGlobal()` (Superadministrador || Administrador) centraliza esta regla; la consumen `puedeAccederEmpresa()`, `ContextoEmpresa::empresasAutorizadas()`/`sucursalesDisponibles()` y `EmpresaController@index`.
+- **Supervisor / Encargado**: sólo las empresas de `empresa_usuario` y las sucursales de `sucursal_usuario` (o todas las de la empresa si no tienen sucursales asignadas). Enviar un `empresa_id` fuera de su alcance → rechazo controlado.
 - Aislamiento en varias capas: contexto + consultas explícitas (`scopeDeEmpresa`) + Policies (revalidan `puedeAccederEmpresa`) + Form Requests (validación cruzada de FKs) + tests.
 
 ## Roles y permisos

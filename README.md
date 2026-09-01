@@ -29,14 +29,14 @@ BD de desarrollo: SQLite (`database/database.sqlite`).
 
 Contraseña de todos: `password`.
 
-| Correo | Rol | Empresas |
-| --- | --- | --- |
-| `superadmin@example.test` | Superadministrador | todas |
-| `admin.ab@example.test` | Administrador | Industrias del Valle + Alimentos Sierra Verde |
-| `admin.c@example.test` | Administrador | Logística Ferro |
-| `supervisor.a@example.test` | Supervisor | Industrias del Valle (2 sucursales) |
-| `encargado.a@example.test` | Encargado | Industrias del Valle (1 sucursal) |
-| `colaborador.a@example.test` | Colaborador | Industrias del Valle (portal propio) |
+| Correo                       | Rol                | Empresas                                      |
+| ---------------------------- | ------------------ | --------------------------------------------- |
+| `superadmin@example.test`    | Superadministrador | todas                                         |
+| `admin.ab@example.test`      | Administrador      | Industrias del Valle + Alimentos Sierra Verde |
+| `admin.c@example.test`       | Administrador      | Logística Ferro                               |
+| `supervisor.a@example.test`  | Supervisor         | Industrias del Valle (2 sucursales)           |
+| `encargado.a@example.test`   | Encargado          | Industrias del Valle (1 sucursal)             |
+| `colaborador.a@example.test` | Colaborador        | Industrias del Valle (portal propio)          |
 
 ## Verificaciones
 

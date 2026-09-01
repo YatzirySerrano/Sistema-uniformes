@@ -91,10 +91,10 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     // Administración
     Route::get('empresas', [EmpresaController::class, 'index'])->name('empresas.index');
-    Route::get('empresas/crear', [EmpresaController::class, 'create'])->name('empresas.create');
     Route::post('empresas', [EmpresaController::class, 'store'])->name('empresas.store');
-    Route::get('empresas/{empresa}/editar', [EmpresaController::class, 'edit'])->name('empresas.edit');
+    Route::get('empresas/{empresa}', [EmpresaController::class, 'show'])->name('empresas.show');
     Route::put('empresas/{empresa}', [EmpresaController::class, 'update'])->name('empresas.update');
+    Route::post('empresas/{empresa}/estado', [EmpresaController::class, 'toggleEstado'])->name('empresas.estado');
 
     Route::get('personalizacion', [PersonalizacionEmpresaController::class, 'edit'])->name('personalizacion.edit');
     Route::post('personalizacion', [PersonalizacionEmpresaController::class, 'update'])->name('personalizacion.update');

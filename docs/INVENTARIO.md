@@ -6,7 +6,7 @@ Dos conceptos separados:
 
 - **`saldos_inventario`** — existencia actual (`cantidad`) y `minimo`, único por
   `empresa_id + sucursal_id + prenda_id + talla_id`. Es una vista rápida.
-- **`movimientos_inventario`** — historia *append-only*. Cada fila registra
+- **`movimientos_inventario`** — historia _append-only_. Cada fila registra
   `existencia_anterior` y `existencia_resultante`, por lo que el porqué de cada
   cambio queda trazado. No se edita ni se borra en operación normal.
 

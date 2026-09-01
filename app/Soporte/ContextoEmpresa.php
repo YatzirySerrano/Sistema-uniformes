@@ -88,7 +88,9 @@ class ContextoEmpresa
     }
 
     /**
-     * Empresas que el usuario puede activar (todas si es Superadministrador).
+     * Empresas que el usuario puede activar. Superadministrador y Administrador
+     * tienen alcance global (todas las empresas de la plataforma); el resto de
+     * roles queda acotado a las empresas de `empresa_usuario`.
      *
      * @return Collection<int, Empresa>
      */
@@ -98,7 +100,7 @@ class ContextoEmpresa
             return collect();
         }
 
-        if ($this->usuario->esSuperadministrador()) {
+        if ($this->usuario->tieneAlcanceGlobal()) {
             return Empresa::query()->orderBy('nombre_comercial')->get();
         }
 
@@ -120,7 +122,7 @@ class ContextoEmpresa
             ->where('empresa_id', $this->empresa->getKey())
             ->orderBy('nombre');
 
-        if ($this->usuario->esSuperadministrador() || $this->usuario->esAdministrador()) {
+        if ($this->usuario->tieneAlcanceGlobal()) {
             return $consulta->get();
         }
 

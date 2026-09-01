@@ -21,7 +21,7 @@ valida de nuevo.
 
 ## Firma de recepción
 
-- `components/entregas/PadFirma.vue`: lienzo con *pointer events* (mouse, touch,
+- `components/entregas/PadFirma.vue`: lienzo con _pointer events_ (mouse, touch,
   dedo, lápiz), botón **Limpiar**, se re-dimensiona conservando el trazo. Área
   amplia, apta para móvil/tablet. La firma también puede capturarse desde el
   dispositivo del encargado.

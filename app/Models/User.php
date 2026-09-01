@@ -95,11 +95,27 @@ class User extends Authenticatable implements MustVerifyEmailContract, PasskeyUs
     }
 
     /**
+     * ¿El usuario tiene alcance global sobre los módulos de negocio (empresas,
+     * sucursales, colaboradores, inventario, …)?
+     *
+     * Cierto para el equipo técnico/proveedor (Superadministrador) y para la
+     * dirección del cliente (Administrador). Las empresas son entidades globales
+     * de la plataforma: estos roles ven y administran todas, sin depender de la
+     * relación `empresa_usuario`. Los roles restringidos (Supervisor, Encargado,
+     * roles personalizados) sí quedan acotados por `empresa_usuario` /
+     * `sucursal_usuario`.
+     */
+    public function tieneAlcanceGlobal(): bool
+    {
+        return $this->esSuperadministrador() || $this->esAdministrador();
+    }
+
+    /**
      * ¿El usuario tiene acceso autorizado a la empresa indicada?
      */
     public function puedeAccederEmpresa(Empresa|int $empresa): bool
     {
-        if ($this->esSuperadministrador()) {
+        if ($this->tieneAlcanceGlobal()) {
             return true;
         }
 
@@ -117,7 +133,7 @@ class User extends Authenticatable implements MustVerifyEmailContract, PasskeyUs
             return false;
         }
 
-        if ($this->esSuperadministrador() || $this->esAdministrador()) {
+        if ($this->tieneAlcanceGlobal()) {
             return true;
         }
 
