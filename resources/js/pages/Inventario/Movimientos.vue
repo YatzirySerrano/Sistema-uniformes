@@ -1,0 +1,184 @@
+<script setup lang="ts">
+import { Head, router } from '@inertiajs/vue3';
+import { ref, watch } from 'vue';
+import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import Paginacion from '@/components/sistema/Paginacion.vue';
+import type { Paginado } from '@/types/sistema';
+
+type Movimiento = {
+    id: number;
+    tipo_etiqueta: string;
+    direccion: string;
+    cantidad: number;
+    existencia_anterior: number;
+    existencia_resultante: number;
+    sucursal: string;
+    prenda: string;
+    talla: string;
+    motivo: string | null;
+    realizado_por: string | null;
+    ocurrido_en: string;
+};
+
+const props = defineProps<{
+    movimientos: Paginado<Movimiento>;
+    filtros: Record<string, string | number | undefined>;
+    sucursales: { id: number; nombre: string }[];
+    prendas: { id: number; nombre: string }[];
+    tipos: { valor: string; etiqueta: string }[];
+}>();
+
+defineOptions({
+    layout: {
+        breadcrumbs: [
+            { title: 'Inventario', href: '/inventario' },
+            { title: 'Movimientos', href: '/inventario/movimientos' },
+        ],
+    },
+});
+
+const f = ref({
+    sucursal_id: props.filtros.sucursal_id ?? '',
+    prenda_id: props.filtros.prenda_id ?? '',
+    tipo: props.filtros.tipo ?? '',
+    desde: props.filtros.desde ?? '',
+    hasta: props.filtros.hasta ?? '',
+});
+
+watch(
+    f,
+    () => {
+        router.get(
+            '/inventario/movimientos',
+            { ...f.value },
+            {
+                preserveState: true,
+                replace: true,
+                preserveScroll: true,
+            },
+        );
+    },
+    { deep: true },
+);
+
+function fecha(iso: string) {
+    return new Date(iso).toLocaleString('es-MX');
+}
+</script>
+
+<template>
+    <Head title="Movimientos de inventario" />
+
+    <div class="flex flex-col gap-4 p-4">
+        <EncabezadoPagina
+            titulo="Movimientos de inventario"
+            descripcion="Historial completo de entradas y salidas. Cada cambio de existencia queda registrado."
+        />
+
+        <div class="flex flex-wrap gap-2">
+            <select
+                v-model="f.sucursal_id"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+            >
+                <option value="">Todas las sucursales</option>
+                <option v-for="s in sucursales" :key="s.id" :value="s.id">
+                    {{ s.nombre }}
+                </option>
+            </select>
+            <select
+                v-model="f.prenda_id"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+            >
+                <option value="">Todas las prendas</option>
+                <option v-for="p in prendas" :key="p.id" :value="p.id">
+                    {{ p.nombre }}
+                </option>
+            </select>
+            <select
+                v-model="f.tipo"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+            >
+                <option value="">Todos los tipos</option>
+                <option v-for="t in tipos" :key="t.valor" :value="t.valor">
+                    {{ t.etiqueta }}
+                </option>
+            </select>
+            <input
+                v-model="f.desde"
+                type="date"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+            />
+            <input
+                v-model="f.hasta"
+                type="date"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+            />
+        </div>
+
+        <EstadoVacio
+            v-if="!movimientos.data.length"
+            titulo="Sin movimientos"
+            descripcion="No hay movimientos que coincidan con los filtros."
+        />
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[820px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Fecha</th>
+                        <th class="px-3 py-2 font-medium">Tipo</th>
+                        <th class="px-3 py-2 font-medium">Sucursal</th>
+                        <th class="px-3 py-2 font-medium">Prenda / Talla</th>
+                        <th class="px-3 py-2 text-right font-medium">Cambio</th>
+                        <th class="px-3 py-2 text-right font-medium">
+                            Antes → Después
+                        </th>
+                        <th class="px-3 py-2 font-medium">Usuario</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="m in movimientos.data"
+                        :key="m.id"
+                        class="border-t"
+                    >
+                        <td
+                            class="text-muted-foreground px-3 py-2 whitespace-nowrap"
+                        >
+                            {{ fecha(m.ocurrido_en) }}
+                        </td>
+                        <td class="px-3 py-2">{{ m.tipo_etiqueta }}</td>
+                        <td class="px-3 py-2">{{ m.sucursal }}</td>
+                        <td class="px-3 py-2">
+                            {{ m.prenda }}
+                            <span class="text-muted-foreground"
+                                >· {{ m.talla }}</span
+                            >
+                        </td>
+                        <td
+                            class="px-3 py-2 text-right font-medium"
+                            :class="
+                                m.direccion === 'entrada'
+                                    ? 'text-emerald-600'
+                                    : 'text-rose-600'
+                            "
+                        >
+                            {{ m.direccion === 'entrada' ? '+' : '−'
+                            }}{{ m.cantidad }}
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2 text-right">
+                            {{ m.existencia_anterior }} →
+                            {{ m.existencia_resultante }}
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ m.realizado_por ?? '—' }}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <Paginacion :links="movimientos.links" :total="movimientos.total" />
+    </div>
+</template>

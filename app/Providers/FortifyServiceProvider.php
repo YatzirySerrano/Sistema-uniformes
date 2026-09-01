@@ -3,12 +3,17 @@
 namespace App\Providers;
 
 use App\Actions\Fortify\ResetUserPassword;
+use App\Models\User;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
@@ -31,6 +36,7 @@ class FortifyServiceProvider extends ServiceProvider
         $this->configureActions();
         $this->configureViews();
         $this->configureRateLimiting();
+        $this->configureAutenticacion();
     }
 
     /**
@@ -39,6 +45,36 @@ class FortifyServiceProvider extends ServiceProvider
     private function configureActions(): void
     {
         Fortify::resetUserPasswordsUsing(ResetUserPassword::class);
+    }
+
+    /**
+     * Valida credenciales y bloquea el acceso a usuarios desactivados. También
+     * registra la marca de último acceso.
+     */
+    private function configureAutenticacion(): void
+    {
+        Fortify::authenticateUsing(function (Request $request): ?User {
+            /** @var User|null $usuario */
+            $usuario = User::query()->where('email', Str::lower((string) $request->email))->first();
+
+            if ($usuario === null || ! Hash::check((string) $request->password, $usuario->password)) {
+                return null;
+            }
+
+            if (! $usuario->activo) {
+                throw ValidationException::withMessages([
+                    Fortify::username() => ['Tu cuenta está desactivada. Contacta al administrador.'],
+                ]);
+            }
+
+            return $usuario;
+        });
+
+        Event::listen(function (Login $event): void {
+            if ($event->user instanceof User) {
+                $event->user->forceFill(['ultimo_acceso_en' => now()])->saveQuietly();
+            }
+        });
     }
 
     /**

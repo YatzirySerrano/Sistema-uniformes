@@ -1,0 +1,35 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('colaboradores', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('empresa_id')->constrained('empresas')->cascadeOnUpdate()->restrictOnDelete();
+            $table->foreignId('sucursal_id')->constrained('sucursales')->cascadeOnUpdate()->restrictOnDelete();
+            $table->foreignId('usuario_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('numero_empleado', 60);
+            $table->string('nombre_completo');
+            $table->string('puesto')->nullable();
+            $table->string('area')->nullable();
+            $table->string('correo')->nullable();
+            $table->boolean('activo')->default(true);
+            $table->timestamps();
+            $table->softDeletes();
+
+            $table->unique(['empresa_id', 'numero_empleado']);
+            $table->index(['empresa_id', 'sucursal_id', 'activo']);
+            $table->index('nombre_completo');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('colaboradores');
+    }
+};

@@ -2,33 +2,34 @@
 
 namespace App\Providers;
 
+use App\Enums\RolSistema;
+use App\Models\User;
+use App\Soporte\ContextoEmpresa;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
-        //
+        // El contexto de empresa vive durante toda la petición.
+        $this->app->scoped(ContextoEmpresa::class);
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
         $this->configureDefaults();
+        $this->configureAutorizacion();
+
+        Carbon::setLocale(config('app.locale'));
+        CarbonImmutable::setLocale(config('app.locale'));
     }
 
-    /**
-     * Configure default behaviors for production-ready applications.
-     */
     protected function configureDefaults(): void
     {
         Date::use(CarbonImmutable::class);
@@ -37,14 +38,26 @@ class AppServiceProvider extends ServiceProvider
             app()->isProduction(),
         );
 
-        Password::defaults(fn (): ?Password => app()->isProduction()
+        Password::defaults(fn (): Password => app()->isProduction()
             ? Password::min(12)
                 ->mixedCase()
                 ->letters()
                 ->numbers()
                 ->symbols()
                 ->uncompromised()
-            : null,
+            : Password::min(8)->letters(),
         );
+    }
+
+    /**
+     * El Superadministrador (equipo técnico / proveedor) tiene alcance global.
+     * El resto de la autorización se resuelve por permisos y por acceso a la
+     * empresa correspondiente en cada Policy.
+     */
+    protected function configureAutorizacion(): void
+    {
+        Gate::before(function (User $user, string $ability): ?bool {
+            return $user->hasRole(RolSistema::Superadministrador->value) ? true : null;
+        });
     }
 }

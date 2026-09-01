@@ -10,6 +10,7 @@ The Laravel Boost guidelines are specifically curated by Laravel maintainers for
 This application is a Laravel application running on PHP 8.4. You are an expert with the Laravel ecosystem. Always use the APIs that match the installed major version of each package — do not assume a version.
 
 Before relying on a package's API, confirm its installed version:
+
 - PHP packages: run `composer show --direct` to list direct dependencies with versions, or `composer show <vendor/package>` for a single package.
 - JS packages: check `package.json` for the installed versions.
 
@@ -85,7 +86,7 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 
 - Execute PHP in app context for debugging and testing code. Do not create models without user approval, prefer tests with factories instead. Prefer existing Artisan commands over custom tinker code.
 - Always use single quotes to prevent shell expansion: `php artisan tinker --execute 'Your::code();'`
-  - Double quotes for PHP strings inside: `php artisan tinker --execute 'User::where("active", true)->count();'`
+    - Double quotes for PHP strings inside: `php artisan tinker --execute 'User::where("active", true)->count();'`
 
 === php rules ===
 
@@ -200,6 +201,87 @@ Use Wayfinder to generate TypeScript functions for Laravel routes. Import from `
 # Inertia + Vue
 
 Vue components must have a single root element.
+
 - IMPORTANT: Activate `inertia-vue-development` when working with Inertia Vue client-side patterns.
 
 </laravel-boost-guidelines>
+
+# Sistema de Control y Gestión de Uniformes
+
+Sistema web empresarial multiempresa para controlar la entrega de uniformes a
+colaboradores: inventario por sucursal, entregas con firma de recepción,
+comprobantes PDF, devoluciones, correcciones, reportes y auditoría.
+
+## Reglas permanentes de este proyecto
+
+- **NO HACER COMMIT. NO HACER PUSH. NO HACER MERGE. NO HACER PULL / REBASE.**
+- **NO MODIFICAR `.env`.** Si se necesitan variables nuevas, actualizar `.env.example`.
+- **NO EJECUTAR OPERACIONES DESTRUCTIVAS** (`migrate:fresh`, `db:wipe`, `DROP`, `rm -rf`, `composer update` masivo) sin autorización expresa.
+- **INTERFAZ EN ESPAÑOL.** Todo texto visible (menús, botones, validaciones, errores, correos, PDF, Excel) va en español.
+- **CÓDIGO DE DOMINIO NUEVO EN ESPAÑOL** cuando sea técnicamente razonable (modelos, acciones, servicios, componentes Vue, tablas y columnas).
+- **RESPETAR LAS CONVENCIONES OBLIGATORIAS DE LARAVEL** (`id`, `created_at`, `updated_at`, `deleted_at`, sufijos `Controller`/`Policy`/`Request`, namespaces autodescubiertos).
+
+## Stack
+
+- Backend: PHP 8.4, Laravel 13, Fortify (login, verificación de correo, 2FA, confirmación de contraseña), Spatie Laravel Permission, Wayfinder.
+- Frontend: Vue 3 `<script setup lang="ts">`, Inertia 3, Tailwind 4, shadcn-vue/reka-ui, Lucide, Vite.
+- Documentos: `maatwebsite/excel` (import/export), `barryvdh/laravel-dompdf` (PDF).
+- BD de desarrollo: SQLite (`database/database.sqlite`). Producción recomendada: MySQL/MariaDB InnoDB utf8mb4 (ver `docs/DESPLIEGUE.md`). Las migraciones son agnósticas al motor.
+- Calidad: Pint, Larastan/PHPStan (nivel 7, sin errores), ESLint + Prettier (`npm run check`), `vue-tsc`, Pest.
+
+## Arquitectura
+
+`Ruta → Controller (delgado) → Form Request → Acción/Servicio → Modelo → BD`
+
+- `app/Acciones/` — casos de uso transaccionales: `CrearEntregaUniforme`, `ConfirmarAcuseRecepcion`, `RegistrarEntradaInventario`, `AjustarInventario`, `RegistrarDevolucion`, `CorregirEntrega`.
+- `app/Servicios/` — lógica reutilizable: `ServicioInventario` (única puerta del inventario), `ServicioAuditoria` (única puerta de la bitácora), `ServicioFolios`, `ServicioAcusePdf`, `ServicioImportacionColaboradores`, `ServicioDashboard`, `ServicioReportes`.
+- `app/Soporte/` — `ContextoEmpresa` (empresa activa por petición), `Permisos` (catálogo), `ValidadorFirma`.
+- `app/Excepciones/` — reglas de negocio (`ExcepcionDeNegocio` → respuesta controlada en español, nunca 500).
+- `app/Enums/` — `RolSistema`, `EstadoEntrega`, `TipoMovimiento`, `DireccionMovimiento`, `CondicionDevolucion`.
+
+## Multiempresa
+
+- Jerarquía: PLATAFORMA → EMPRESA → SUCURSALES → OPERACIÓN.
+- Relación N:M `empresa_usuario` y `sucursal_usuario` (columna `usuario_id`).
+- La **empresa activa** vive en sesión (`empresa_activa_id`) y se resuelve en el middleware `ResolverEmpresaActiva` hacia el singleton `ContextoEmpresa`, validando siempre el acceso. Un contexto vacío NO concede acceso a nada.
+- **Superadministrador**: equipo técnico/proveedor. Alcance global (`Gate::before`). Se crea por seeder.
+- **Administrador**: dueños/directivos del cliente. Puede administrar **varias** empresas autorizadas; nunca entra a empresas no asignadas.
+- Aislamiento en varias capas: contexto + consultas explícitas (`scopeDeEmpresa`) + Policies (revalidan `puedeAccederEmpresa`) + Form Requests (validación cruzada de FKs) + tests.
+
+## Roles y permisos
+
+- Spatie. Roles base (seeder): `superadministrador`, `administrador`, `supervisor`, `encargado`, `colaborador`.
+- Permisos granulares `recurso.accion` (catálogo en `App\Soporte\Permisos`). El Administrador puede crear roles personalizados y asignar permisos. No se hardcodea autorización por nombre de rol (salvo el bypass del Superadministrador).
+
+## Inventario
+
+- `saldos_inventario` (saldo actual, único por empresa+sucursal+prenda+talla) + `movimientos_inventario` (historia append-only con `existencia_anterior`/`existencia_resultante`).
+- Toda modificación pasa por `ServicioInventario::registrarMovimiento()` dentro de `DB::transaction()` con `lockForUpdate()` sobre la fila de saldo. **No se permite stock negativo** (mensaje en español). Mínimos configurables por saldo.
+
+## Entregas, firmas y acuses
+
+- `entregas_uniformes` + `detalles_entrega` (con snapshot de nombre de prenda y valor de talla).
+- Al registrar la entrega se descuenta el inventario (movimiento `entrega`). Estado inicial `pendiente_firma`.
+- Firma manuscrita (`components/entregas/PadFirma.vue`, pointer events, funciona en móvil/tablet/desktop). Se valida en backend (`ValidadorFirma`: base64 estricto, magic bytes, MIME, peso, dimensiones, no vacía).
+- `ConfirmarAcuseRecepcion`: congela un **snapshot inmutable**, guarda la firma en disco **privado** (`storage/app/private/firmas/{empresa}/{uuid}.png`), calcula `hash_documento` y `hash_firma` (SHA-256), crea el `acuses_recepcion` y marca la entrega firmada. El **PDF se materializa después de confirmar la transacción**; si falla, el acuse sigue siendo válido y el PDF se puede regenerar.
+- Acceso a firma y PDF **sólo por Controller** con Policy (`AcuseRecepcionPolicy`): Superadministrador, Administrador, Supervisor/Encargado autorizados y el colaborador titular. Nunca URL pública.
+- Entrega firmada: no se edita; se aplica **corrección administrativa** (`CorregirEntrega`) que conserva el original y el acuse, compensa el inventario y queda en auditoría.
+
+## Auditoría
+
+- `bitacora_auditoria` append-only (sin `updated_at`). Única escritura desde `ServicioAuditoria::registrar()`.
+
+## Frontend
+
+- Páginas por dominio en `resources/js/pages/{Colaboradores,Prendas,Inventario,Entregas,Acuses,Devoluciones,Reportes,Empresas,Sucursales,Usuarios,Roles,Auditoria,Portal}`.
+- Componentes compartidos en `resources/js/components/sistema/` y `resources/js/components/entregas/`.
+- `usePermisos()` expone `puede()` / `contexto` desde los props compartidos por `HandleInertiaRequests`. El menú lateral (`AppSidebar.vue`) oculta opciones según permisos e incluye el selector de empresa.
+- Branding por empresa: tokens CSS (`--marca-principal`, …) calculados en `Empresa::tokensDeMarca()` con contraste automático.
+
+## Datos de prueba
+
+`php artisan db:seed` prepara empresas A/B/C con branding distinto, sucursales, tallas, prendas, ~165 colaboradores, inventario (normal/bajo/cero), y entregas de ejemplo (pendiente, firmada con PDF, devuelta, corregida). Contraseña de todos los usuarios ficticios: `password`. Superadministrador: `superadmin@example.test`.
+
+## Documentación
+
+`docs/` (en español): `ARQUITECTURA.md`, `DISENO_BASE_DATOS.md`, `MULTIEMPRESA.md`, `PERMISOS.md`, `INVENTARIO.md`, `ENTREGAS_Y_ACUSES.md`, `SEGURIDAD.md`, `DESPLIEGUE.md`.

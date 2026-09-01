@@ -1,0 +1,27 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('folios', function (Blueprint $table): void {
+            $table->id();
+            $table->foreignId('empresa_id')->nullable()->constrained('empresas')->cascadeOnDelete();
+            $table->string('tipo', 20);
+            $table->unsignedSmallInteger('anio');
+            $table->unsignedInteger('consecutivo')->default(0);
+            $table->timestamps();
+
+            $table->unique(['empresa_id', 'tipo', 'anio']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('folios');
+    }
+};
