@@ -16,10 +16,10 @@ class InventarioDemoSeeder extends Seeder
         $inventario = app(ServicioInventario::class);
         $usuario = User::query()->where('email', 'admin.ab@example.test')->first();
 
-        foreach (Empresa::with(['sucursales', 'prendas.tallas'])->get() as $empresa) {
+        foreach (Empresa::with(['sucursales', 'activos.tallas'])->get() as $empresa) {
             foreach ($empresa->sucursales as $s => $sucursal) {
-                foreach ($empresa->prendas as $prenda) {
-                    foreach ($prenda->tallas as $t => $talla) {
+                foreach ($empresa->activos as $activo) {
+                    foreach ($activo->tallas as $t => $talla) {
                         // Escenarios: mayoría con stock normal, algunas bajo mínimo, algunas en cero.
                         $cantidad = match (($s + $t) % 5) {
                             0 => 0,
@@ -27,13 +27,13 @@ class InventarioDemoSeeder extends Seeder
                             default => random_int(20, 120),
                         };
 
-                        $inventario->ajustarMinimo($empresa->id, $sucursal->id, $prenda->id, $talla->id, random_int(3, 8));
+                        $inventario->ajustarMinimo($empresa->id, $sucursal->id, $activo->id, $talla->id, random_int(3, 8));
 
                         if ($cantidad > 0) {
                             $inventario->registrarMovimiento(new MovimientoInventarioDatos(
                                 empresaId: $empresa->id,
                                 sucursalId: $sucursal->id,
-                                prendaId: $prenda->id,
+                                activoId: $activo->id,
                                 tallaId: $talla->id,
                                 tipo: TipoMovimiento::Inicial,
                                 cantidad: $cantidad,

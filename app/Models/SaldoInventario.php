@@ -10,13 +10,16 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Saldo actual de inventario por empresa + sucursal + prenda + talla.
+ * Saldo actual de inventario por empresa + sucursal + activo + talla.
  * Se actualiza únicamente a través de App\Servicios\ServicioInventario.
+ *
+ * Nota: el inventario sigue asociado a la SUCURSAL. La migración a inventario
+ * por ALMACÉN es un bloque posterior.
  *
  * @property int $id
  * @property int $empresa_id
  * @property int $sucursal_id
- * @property int $prenda_id
+ * @property int $activo_id
  * @property int $talla_id
  * @property int $cantidad
  * @property int $minimo
@@ -31,7 +34,7 @@ class SaldoInventario extends Model
     protected $fillable = [
         'empresa_id',
         'sucursal_id',
-        'prenda_id',
+        'activo_id',
         'talla_id',
         'cantidad',
         'minimo',
@@ -54,11 +57,11 @@ class SaldoInventario extends Model
     }
 
     /**
-     * @return BelongsTo<Prenda, $this>
+     * @return BelongsTo<Activo, $this>
      */
-    public function prenda(): BelongsTo
+    public function activo(): BelongsTo
     {
-        return $this->belongsTo(Prenda::class);
+        return $this->belongsTo(Activo::class);
     }
 
     /**

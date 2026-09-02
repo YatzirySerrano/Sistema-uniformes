@@ -3,10 +3,10 @@ import { Plus, Trash2 } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { PrendaOpcion } from '@/types/sistema';
+import type { ActivoOpcion } from '@/types/sistema';
 
 type Item = {
-    prenda_id: number | null;
+    activo_id: number | null;
     talla_id: number | null;
     cantidad: number;
     condicion?: string;
@@ -14,8 +14,8 @@ type Item = {
 
 const props = defineProps<{
     modelValue: Item[];
-    prendas: PrendaOpcion[];
-    disponibles?: Record<string, number>; // clave `${prenda_id}-${talla_id}` => disponible
+    activos: ActivoOpcion[];
+    disponibles?: Record<string, number>; // clave `${activo_id}-${talla_id}` => disponible
     conCondicion?: boolean;
     condiciones?: { valor: string; etiqueta: string }[];
 }>();
@@ -29,20 +29,20 @@ const items = computed({
     set: (v) => emit('update:modelValue', v),
 });
 
-function tallasDe(prendaId: number | null) {
-    return props.prendas.find((p) => p.id === prendaId)?.tallas ?? [];
+function tallasDe(activoId: number | null) {
+    return props.activos.find((p) => p.id === activoId)?.tallas ?? [];
 }
 
 function disponibleDe(item: Item): number | null {
-    if (!props.disponibles || !item.prenda_id || !item.talla_id) return null;
-    return props.disponibles[`${item.prenda_id}-${item.talla_id}`] ?? 0;
+    if (!props.disponibles || !item.activo_id || !item.talla_id) return null;
+    return props.disponibles[`${item.activo_id}-${item.talla_id}`] ?? 0;
 }
 
 function agregar() {
     items.value = [
         ...items.value,
         {
-            prenda_id: null,
+            activo_id: null,
             talla_id: null,
             cantidad: 1,
             ...(props.conCondicion ? { condicion: 'reutilizable' } : {}),
@@ -67,12 +67,12 @@ function quitar(i: number) {
         >
             <div>
                 <select
-                    v-model="item.prenda_id"
+                    v-model="item.activo_id"
                     class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
                     @change="item.talla_id = null"
                 >
-                    <option :value="null" disabled>Selecciona prenda</option>
-                    <option v-for="p in prendas" :key="p.id" :value="p.id">
+                    <option :value="null" disabled>Selecciona activo</option>
+                    <option v-for="p in activos" :key="p.id" :value="p.id">
                         {{ p.nombre }}
                     </option>
                 </select>
@@ -81,11 +81,11 @@ function quitar(i: number) {
                 <select
                     v-model="item.talla_id"
                     class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-                    :disabled="!item.prenda_id"
+                    :disabled="!item.activo_id"
                 >
                     <option :value="null" disabled>Talla</option>
                     <option
-                        v-for="t in tallasDe(item.prenda_id)"
+                        v-for="t in tallasDe(item.activo_id)"
                         :key="t.id"
                         :value="t.id"
                     >
@@ -137,7 +137,7 @@ function quitar(i: number) {
         </div>
 
         <Button type="button" variant="outline" size="sm" @click="agregar">
-            <Plus class="size-4" /> Agregar prenda
+            <Plus class="size-4" /> Agregar activo
         </Button>
     </div>
 </template>

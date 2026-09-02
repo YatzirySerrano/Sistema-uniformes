@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
-import SelectorItemsPrendas from '@/components/sistema/SelectorItemsPrendas.vue';
+import SelectorItemsActivos from '@/components/sistema/SelectorItemsActivos.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { PrendaOpcion } from '@/types/sistema';
+import type { ActivoOpcion } from '@/types/sistema';
 
 defineProps<{
     sucursales: { id: number; nombre: string }[];
-    prendas: PrendaOpcion[];
+    activos: ActivoOpcion[];
 }>();
 
 defineOptions({
@@ -28,7 +28,7 @@ const form = useForm<{
     notas: string;
     carga_inicial: boolean;
     items: {
-        prenda_id: number | null;
+        activo_id: number | null;
         talla_id: number | null;
         cantidad: number;
     }[];
@@ -37,7 +37,7 @@ const form = useForm<{
     motivo: '',
     notas: '',
     carga_inicial: false,
-    items: [{ prenda_id: null, talla_id: null, cantidad: 1 }],
+    items: [{ activo_id: null, talla_id: null, cantidad: 1 }],
 });
 
 function enviar() {
@@ -85,8 +85,8 @@ function enviar() {
             </div>
 
             <div class="grid gap-1.5">
-                <Label>Prendas</Label>
-                <SelectorItemsPrendas v-model="form.items" :prendas="prendas" />
+                <Label>Activos</Label>
+                <SelectorItemsActivos v-model="form.items" :activos="activos" />
                 <InputError :message="form.errors.items" />
             </div>
 

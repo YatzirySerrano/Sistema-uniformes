@@ -5,10 +5,10 @@ namespace App\Acciones;
 use App\Enums\CondicionDevolucion;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
-use App\Models\Prenda;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
@@ -18,8 +18,8 @@ use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Registra la devolución de prendas por parte de un colaborador. Sólo las
- * prendas marcadas como reutilizables (y con reingreso habilitado) vuelven al
+ * Registra la devolución de activos por parte de un colaborador. Sólo los
+ * activos marcados como reutilizables (y con reingreso habilitado) vuelven al
  * inventario disponible mediante un movimiento de tipo devolución.
  */
 class RegistrarDevolucion
@@ -55,13 +55,13 @@ class RegistrarDevolucion
         $items = array_values(array_filter($items, fn ($i): bool => (int) $i['cantidad'] > 0));
 
         if ($items === []) {
-            throw new ExcepcionDeNegocioSimple('Agrega al menos una prenda a la devolución.');
+            throw new ExcepcionDeNegocioSimple('Agrega al menos un activo a la devolución.');
         }
 
-        $prendas = Prenda::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'prenda_id'))->pluck('id')->all();
+        $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->pluck('id')->all();
         $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'talla_id'))->pluck('id')->all();
 
-        return DB::transaction(function () use ($empresaId, $sucursal, $colaborador, $entregaId, $fecha, $items, $registradaPor, $motivo, $notas, $prendas, $tallas): Devolucion {
+        return DB::transaction(function () use ($empresaId, $sucursal, $colaborador, $entregaId, $fecha, $items, $registradaPor, $motivo, $notas, $activos, $tallas): Devolucion {
             $devolucion = Devolucion::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION, $empresaId),
                 'empresa_id' => $empresaId,
@@ -75,15 +75,15 @@ class RegistrarDevolucion
             ]);
 
             foreach ($items as $item) {
-                if (! in_array((int) $item['prenda_id'], $prendas, true) || ! in_array((int) $item['talla_id'], $tallas, true)) {
-                    throw new ExcepcionDeNegocioSimple('Una prenda o talla seleccionada no pertenece a esta empresa.');
+                if (! in_array((int) $item['activo_id'], $activos, true) || ! in_array((int) $item['talla_id'], $tallas, true)) {
+                    throw new ExcepcionDeNegocioSimple('Un activo o talla seleccionado no pertenece a esta empresa.');
                 }
 
                 $condicion = CondicionDevolucion::tryFrom((string) ($item['condicion'] ?? 'reutilizable')) ?? CondicionDevolucion::Reutilizable;
                 $reingresa = $condicion->reingresaInventario();
 
                 $devolucion->detalles()->create([
-                    'prenda_id' => (int) $item['prenda_id'],
+                    'activo_id' => (int) $item['activo_id'],
                     'talla_id' => (int) $item['talla_id'],
                     'cantidad' => (int) $item['cantidad'],
                     'condicion' => $condicion,
@@ -94,7 +94,7 @@ class RegistrarDevolucion
                     $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                         empresaId: $empresaId,
                         sucursalId: $sucursal->getKey(),
-                        prendaId: (int) $item['prenda_id'],
+                        activoId: (int) $item['activo_id'],
                         tallaId: (int) $item['talla_id'],
                         tipo: TipoMovimiento::Devolucion,
                         cantidad: (int) $item['cantidad'],

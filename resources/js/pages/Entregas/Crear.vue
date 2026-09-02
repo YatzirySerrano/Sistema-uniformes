@@ -2,12 +2,12 @@
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
-import SelectorItemsPrendas from '@/components/sistema/SelectorItemsPrendas.vue';
+import SelectorItemsActivos from '@/components/sistema/SelectorItemsActivos.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { PrendaOpcion } from '@/types/sistema';
+import type { ActivoOpcion } from '@/types/sistema';
 
 const props = defineProps<{
     sucursales: { id: number; nombre: string }[];
@@ -17,7 +17,7 @@ const props = defineProps<{
         numero_empleado: string;
         sucursal_id: number;
     }[];
-    prendas: PrendaOpcion[];
+    activos: ActivoOpcion[];
 }>();
 
 defineOptions({
@@ -37,7 +37,7 @@ const form = useForm<{
     fecha_entrega: string;
     notas: string;
     items: {
-        prenda_id: number | null;
+        activo_id: number | null;
         talla_id: number | null;
         cantidad: number;
     }[];
@@ -46,7 +46,7 @@ const form = useForm<{
     colaborador_id: '',
     fecha_entrega: hoy,
     notas: '',
-    items: [{ prenda_id: null, talla_id: null, cantidad: 1 }],
+    items: [{ activo_id: null, talla_id: null, cantidad: 1 }],
 });
 
 const colaboradoresFiltrados = computed(() =>
@@ -72,14 +72,14 @@ watch(
         if (!res.ok) return;
         const json = (await res.json()) as {
             saldos: {
-                prenda_id: number;
+                activo_id: number;
                 talla_id: number;
                 disponible: number;
             }[];
         };
         const mapa: Record<string, number> = {};
         for (const s of json.saldos) {
-            mapa[`${s.prenda_id}-${s.talla_id}`] = s.disponible;
+            mapa[`${s.activo_id}-${s.talla_id}`] = s.disponible;
         }
         disponibles.value = mapa;
     },
@@ -96,7 +96,7 @@ function enviar() {
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar entrega"
-            descripcion="Colaborador → prendas → confirmar. El inventario se descuenta al registrar."
+            descripcion="Colaborador → activos → confirmar. El inventario se descuenta al registrar."
         />
 
         <form class="space-y-6" @submit.prevent="enviar">
@@ -163,10 +163,10 @@ function enviar() {
             </div>
 
             <div class="grid gap-1.5">
-                <Label>Prendas a entregar</Label>
-                <SelectorItemsPrendas
+                <Label>Activos a entregar</Label>
+                <SelectorItemsActivos
                     v-model="form.items"
-                    :prendas="prendas"
+                    :activos="activos"
                     :disponibles="disponibles"
                 />
                 <InputError :message="form.errors.items" />

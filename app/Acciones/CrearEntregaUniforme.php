@@ -5,9 +5,9 @@ namespace App\Acciones;
 use App\Enums\EstadoEntrega;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\EntregaUniforme;
-use App\Models\Prenda;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Registra una entrega de uniformes: valida la coherencia empresa/sucursal/
- * colaborador/prendas, genera folio, crea la cabecera y sus items con snapshot
+ * colaborador/activos, genera folio, crea la cabecera y sus items con snapshot
  * de nombres, y descuenta el inventario a través de ServicioInventario. Todo
  * dentro de una transacción; si falta stock de cualquier item, no se registra
  * nada.
@@ -60,22 +60,22 @@ class CrearEntregaUniforme
         $items = $this->consolidar($items);
 
         if ($items === []) {
-            throw new ExcepcionDeNegocioSimple('Agrega al menos una prenda a la entrega.');
+            throw new ExcepcionDeNegocioSimple('Agrega al menos un activo a la entrega.');
         }
 
-        $prendas = Prenda::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'prenda_id'))->get()->keyBy('id');
+        $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->get()->keyBy('id');
         $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'talla_id'))->get()->keyBy('id');
 
         foreach ($items as $item) {
-            if (! $prendas->has($item['prenda_id'])) {
-                throw new ExcepcionDeNegocioSimple('Una de las prendas seleccionadas no pertenece a esta empresa.');
+            if (! $activos->has($item['activo_id'])) {
+                throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a esta empresa.');
             }
             if (! $tallas->has($item['talla_id'])) {
                 throw new ExcepcionDeNegocioSimple('Una de las tallas seleccionadas no pertenece a esta empresa.');
             }
         }
 
-        return DB::transaction(function () use ($empresaId, $sucursal, $colaborador, $encargadoId, $fechaEntrega, $items, $notas, $prendas, $tallas): EntregaUniforme {
+        return DB::transaction(function () use ($empresaId, $sucursal, $colaborador, $encargadoId, $fechaEntrega, $items, $notas, $activos, $tallas): EntregaUniforme {
             $entrega = EntregaUniforme::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA, $empresaId),
                 'empresa_id' => $empresaId,
@@ -89,17 +89,17 @@ class CrearEntregaUniforme
 
             foreach ($items as $item) {
                 $entrega->detalles()->create([
-                    'prenda_id' => $item['prenda_id'],
+                    'activo_id' => $item['activo_id'],
                     'talla_id' => $item['talla_id'],
                     'cantidad' => $item['cantidad'],
-                    'prenda_nombre_snapshot' => $prendas[$item['prenda_id']]->nombre,
+                    'activo_nombre_snapshot' => $activos[$item['activo_id']]->nombre,
                     'talla_valor_snapshot' => $tallas[$item['talla_id']]->valor,
                 ]);
 
                 $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                     empresaId: $empresaId,
                     sucursalId: $sucursal->getKey(),
-                    prendaId: $item['prenda_id'],
+                    activoId: $item['activo_id'],
                     tallaId: $item['talla_id'],
                     tipo: TipoMovimiento::Entrega,
                     cantidad: $item['cantidad'],
@@ -123,11 +123,11 @@ class CrearEntregaUniforme
     }
 
     /**
-     * Suma cantidades de items repetidos (misma prenda + talla) y descarta los
+     * Suma cantidades de items repetidos (mismo activo + talla) y descarta los
      * de cantidad no positiva.
      *
      * @param  array<int, array<string, mixed>>  $items
-     * @return array<int, array{prenda_id: int, talla_id: int, cantidad: int}>
+     * @return array<int, array{activo_id: int, talla_id: int, cantidad: int}>
      */
     private function consolidar(array $items): array
     {
@@ -140,8 +140,8 @@ class CrearEntregaUniforme
                 continue;
             }
 
-            $clave = $item['prenda_id'].'-'.$item['talla_id'];
-            $mapa[$clave] ??= ['prenda_id' => (int) $item['prenda_id'], 'talla_id' => (int) $item['talla_id'], 'cantidad' => 0];
+            $clave = $item['activo_id'].'-'.$item['talla_id'];
+            $mapa[$clave] ??= ['activo_id' => (int) $item['activo_id'], 'talla_id' => (int) $item['talla_id'], 'cantidad' => 0];
             $mapa[$clave]['cantidad'] += $cantidad;
         }
 

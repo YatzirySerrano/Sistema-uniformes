@@ -7,15 +7,16 @@ import {
     ClipboardList,
     FileBarChart2,
     LayoutGrid,
+    Network,
     Package,
     Palette,
     ScrollText,
     ShieldCheck,
-    Shirt,
     Store,
     Undo2,
     UserCog,
     Users,
+    Warehouse,
 } from '@lucide/vue';
 import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
@@ -68,16 +69,28 @@ const grupos = computed<Grupo[]>(() =>
                     icono: Users,
                     visible: puede('colaboradores.ver'),
                 },
+                {
+                    titulo: 'Áreas / Departamentos',
+                    href: '/areas',
+                    icono: Network,
+                    visible: puede('areas.ver'),
+                },
             ],
         },
         {
-            titulo: 'Uniformes',
+            titulo: 'Catálogo e inventario',
             enlaces: [
                 {
-                    titulo: 'Prendas',
-                    href: '/prendas',
-                    icono: Shirt,
-                    visible: puede('prendas.ver'),
+                    titulo: 'Activos',
+                    href: '/activos',
+                    icono: Package,
+                    visible: puede('activos.ver'),
+                },
+                {
+                    titulo: 'Almacenes',
+                    href: '/almacenes',
+                    icono: Warehouse,
+                    visible: puede('almacenes.ver'),
                 },
                 {
                     titulo: 'Inventario',

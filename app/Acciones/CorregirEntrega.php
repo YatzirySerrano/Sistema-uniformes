@@ -5,9 +5,9 @@ namespace App\Acciones;
 use App\Enums\EstadoEntrega;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Models\Activo;
 use App\Models\CorreccionEntrega;
 use App\Models\EntregaUniforme;
-use App\Models\Prenda;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioAuditoria;
@@ -45,30 +45,30 @@ class CorregirEntrega
 
         $nuevos = $this->consolidar($itemsNuevos);
         if ($nuevos === []) {
-            throw new ExcepcionDeNegocioSimple('La entrega corregida debe conservar al menos una prenda.');
+            throw new ExcepcionDeNegocioSimple('La entrega corregida debe conservar al menos un activo.');
         }
 
-        $prendas = Prenda::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($nuevos, 'prenda_id'))->get()->keyBy('id');
+        $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($nuevos, 'activo_id'))->get()->keyBy('id');
         $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($nuevos, 'talla_id'))->get()->keyBy('id');
 
         $anteriores = [];
         foreach ($entrega->detalles as $d) {
-            $anteriores[$d->prenda_id.'-'.$d->talla_id] = (int) $d->cantidad;
+            $anteriores[$d->activo_id.'-'.$d->talla_id] = (int) $d->cantidad;
         }
 
         $valoresAnteriores = $entrega->detalles->map(fn ($d): array => [
-            'prenda_id' => $d->prenda_id, 'talla_id' => $d->talla_id, 'cantidad' => (int) $d->cantidad,
+            'activo_id' => $d->activo_id, 'talla_id' => $d->talla_id, 'cantidad' => (int) $d->cantidad,
         ])->all();
 
-        return DB::transaction(function () use ($entrega, $nuevos, $anteriores, $valoresAnteriores, $motivo, $corregidaPor, $empresaId, $sucursalId, $prendas, $tallas): EntregaUniforme {
+        return DB::transaction(function () use ($entrega, $nuevos, $anteriores, $valoresAnteriores, $motivo, $corregidaPor, $empresaId, $sucursalId, $activos, $tallas): EntregaUniforme {
             $clavesNuevas = [];
 
             foreach ($nuevos as $item) {
-                if (! $prendas->has($item['prenda_id']) || ! $tallas->has($item['talla_id'])) {
-                    throw new ExcepcionDeNegocioSimple('Una prenda o talla de la corrección no pertenece a esta empresa.');
+                if (! $activos->has($item['activo_id']) || ! $tallas->has($item['talla_id'])) {
+                    throw new ExcepcionDeNegocioSimple('Un activo o talla de la corrección no pertenece a esta empresa.');
                 }
 
-                $clave = $item['prenda_id'].'-'.$item['talla_id'];
+                $clave = $item['activo_id'].'-'.$item['talla_id'];
                 $clavesNuevas[] = $clave;
                 $anterior = $anteriores[$clave] ?? 0;
                 $delta = $item['cantidad'] - $anterior;
@@ -77,7 +77,7 @@ class CorregirEntrega
                     // Se entregó de más: descontar del inventario.
                     $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                         empresaId: $empresaId, sucursalId: $sucursalId,
-                        prendaId: $item['prenda_id'], tallaId: $item['talla_id'],
+                        activoId: $item['activo_id'], tallaId: $item['talla_id'],
                         tipo: TipoMovimiento::AjusteSalida, cantidad: $delta,
                         realizadoPor: $corregidaPor,
                         referenciaTipo: EntregaUniforme::class, referenciaId: $entrega->getKey(),
@@ -87,7 +87,7 @@ class CorregirEntrega
                     // Se entregó de menos: reintegrar al inventario.
                     $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                         empresaId: $empresaId, sucursalId: $sucursalId,
-                        prendaId: $item['prenda_id'], tallaId: $item['talla_id'],
+                        activoId: $item['activo_id'], tallaId: $item['talla_id'],
                         tipo: TipoMovimiento::Correccion, cantidad: abs($delta),
                         realizadoPor: $corregidaPor,
                         referenciaTipo: EntregaUniforme::class, referenciaId: $entrega->getKey(),
@@ -96,29 +96,29 @@ class CorregirEntrega
                 }
 
                 $entrega->detalles()->updateOrCreate(
-                    ['prenda_id' => $item['prenda_id'], 'talla_id' => $item['talla_id']],
+                    ['activo_id' => $item['activo_id'], 'talla_id' => $item['talla_id']],
                     [
                         'cantidad' => $item['cantidad'],
-                        'prenda_nombre_snapshot' => $prendas[$item['prenda_id']]->nombre,
+                        'activo_nombre_snapshot' => $activos[$item['activo_id']]->nombre,
                         'talla_valor_snapshot' => $tallas[$item['talla_id']]->valor,
                     ],
                 );
             }
 
-            // Prendas retiradas por completo en la corrección: reintegrar y borrar.
+            // Activos retirados por completo en la corrección: reintegrar y borrar.
             foreach ($entrega->detalles()->get() as $detalle) {
-                $clave = $detalle->prenda_id.'-'.$detalle->talla_id;
+                $clave = $detalle->activo_id.'-'.$detalle->talla_id;
                 if (in_array($clave, $clavesNuevas, true)) {
                     continue;
                 }
 
                 $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                     empresaId: $empresaId, sucursalId: $sucursalId,
-                    prendaId: $detalle->prenda_id, tallaId: $detalle->talla_id,
+                    activoId: $detalle->activo_id, tallaId: $detalle->talla_id,
                     tipo: TipoMovimiento::Correccion, cantidad: (int) $detalle->cantidad,
                     realizadoPor: $corregidaPor,
                     referenciaTipo: EntregaUniforme::class, referenciaId: $entrega->getKey(),
-                    motivo: 'Corrección de entrega '.$entrega->folio.' (prenda retirada)',
+                    motivo: 'Corrección de entrega '.$entrega->folio.' (activo retirado)',
                 ));
 
                 $detalle->delete();
@@ -152,7 +152,7 @@ class CorregirEntrega
 
     /**
      * @param  array<int, array<string, mixed>>  $items
-     * @return array<int, array{prenda_id: int, talla_id: int, cantidad: int}>
+     * @return array<int, array{activo_id: int, talla_id: int, cantidad: int}>
      */
     private function consolidar(array $items): array
     {
@@ -162,8 +162,8 @@ class CorregirEntrega
             if ($cantidad <= 0) {
                 continue;
             }
-            $clave = ((int) $item['prenda_id']).'-'.((int) $item['talla_id']);
-            $mapa[$clave] ??= ['prenda_id' => (int) $item['prenda_id'], 'talla_id' => (int) $item['talla_id'], 'cantidad' => 0];
+            $clave = ((int) $item['activo_id']).'-'.((int) $item['talla_id']);
+            $mapa[$clave] ??= ['activo_id' => (int) $item['activo_id'], 'talla_id' => (int) $item['talla_id'], 'cantidad' => 0];
             $mapa[$clave]['cantidad'] += $cantidad;
         }
 

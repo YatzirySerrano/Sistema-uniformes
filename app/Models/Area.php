@@ -3,36 +3,36 @@
 namespace App\Models;
 
 use App\Models\Concerns\PerteneceAEmpresa;
-use Database\Factories\PrendaFactory;
+use Database\Factories\AreaFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
+ * Área o departamento organizacional de una empresa. Es la estructura que
+ * sustituye al texto libre `colaboradores.area`.
+ *
  * @property int $id
  * @property int $empresa_id
  * @property string $nombre
- * @property string|null $codigo_interno
- * @property string|null $imagen_ruta
+ * @property string|null $codigo
+ * @property string|null $descripcion
  * @property bool $activa
  */
-class Prenda extends Model
+class Area extends Model
 {
-    /** @use HasFactory<PrendaFactory> */
+    /** @use HasFactory<AreaFactory> */
     use HasFactory, PerteneceAEmpresa, SoftDeletes;
 
-    protected $table = 'prendas';
+    protected $table = 'areas';
 
     protected $fillable = [
         'empresa_id',
         'nombre',
+        'codigo',
         'descripcion',
-        'categoria',
-        'codigo_interno',
-        'imagen_ruta',
         'activa',
     ];
 
@@ -44,19 +44,22 @@ class Prenda extends Model
     }
 
     /**
-     * @return BelongsToMany<Talla, $this>
+     * @return HasMany<Colaborador, $this>
      */
-    public function tallas(): BelongsToMany
+    public function colaboradores(): HasMany
     {
-        return $this->belongsToMany(Talla::class, 'prenda_talla')->withTimestamps()->orderBy('tallas.orden');
+        return $this->hasMany(Colaborador::class);
     }
 
     /**
-     * @return HasMany<SaldoInventario, $this>
+     * Colaboradores activos del área. Replica `Colaborador::scopeActivos` y es la
+     * única definición de "colaborador activo" usada en los contadores.
+     *
+     * @return HasMany<Colaborador, $this>
      */
-    public function saldos(): HasMany
+    public function colaboradoresActivos(): HasMany
     {
-        return $this->hasMany(SaldoInventario::class);
+        return $this->hasMany(Colaborador::class)->where('activo', true);
     }
 
     /**

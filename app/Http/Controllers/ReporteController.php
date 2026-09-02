@@ -36,7 +36,7 @@ class ReporteController extends Controller
             $datos['inventario'] = $this->reportes->consultaInventario($empresa->id, $sucursales, $filtros)
                 ->paginate($this->porPagina())->withQueryString()
                 ->through(fn ($s): array => [
-                    'sucursal' => $s->sucursal?->nombre, 'prenda' => $s->prenda?->nombre, 'talla' => $s->talla?->valor,
+                    'sucursal' => $s->sucursal?->nombre, 'activo' => $s->activo?->nombre, 'talla' => $s->talla?->valor,
                     'cantidad' => $s->cantidad, 'minimo' => $s->minimo, 'bajo_minimo' => $s->estaBajoMinimo(),
                 ]);
         } else {
@@ -50,7 +50,7 @@ class ReporteController extends Controller
                     'numero_empleado' => $e->colaborador?->numero_empleado,
                     'encargado' => $e->encargado?->name,
                     'estado_etiqueta' => $e->estado->etiqueta(),
-                    'prendas' => (int) $e->detalles->sum('cantidad'),
+                    'activos' => (int) $e->detalles->sum('cantidad'),
                 ]);
         }
 
@@ -58,7 +58,7 @@ class ReporteController extends Controller
             ...$datos,
             'catalogos' => [
                 'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
-                'prendas' => $empresa->prendas()->orderBy('nombre')->get(['id', 'nombre']),
+                'activos' => $empresa->activos()->orderBy('nombre')->get(['id', 'nombre']),
                 'tallas' => $empresa->tallas()->ordenadas()->get(['id', 'valor']),
                 'estados' => collect(EstadoEntrega::cases())->map(fn ($e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
             ],
@@ -113,7 +113,7 @@ class ReporteController extends Controller
             'sucursal_id' => ['nullable', 'integer'],
             'colaborador_id' => ['nullable', 'integer'],
             'encargado_id' => ['nullable', 'integer'],
-            'prenda_id' => ['nullable', 'integer'],
+            'activo_id' => ['nullable', 'integer'],
             'talla_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'string'],
             'firmado' => ['nullable', 'in:si,no'],

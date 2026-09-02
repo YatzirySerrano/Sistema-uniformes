@@ -98,11 +98,19 @@ class Empresa extends Model
     }
 
     /**
-     * @return HasMany<Prenda, $this>
+     * @return HasMany<Activo, $this>
      */
-    public function prendas(): HasMany
+    public function activos(): HasMany
     {
-        return $this->hasMany(Prenda::class);
+        return $this->hasMany(Activo::class);
+    }
+
+    /**
+     * @return HasMany<TipoActivo, $this>
+     */
+    public function tiposActivo(): HasMany
+    {
+        return $this->hasMany(TipoActivo::class);
     }
 
     /**
@@ -111,6 +119,22 @@ class Empresa extends Model
     public function tallas(): HasMany
     {
         return $this->hasMany(Talla::class);
+    }
+
+    /**
+     * @return HasMany<Area, $this>
+     */
+    public function areas(): HasMany
+    {
+        return $this->hasMany(Area::class);
+    }
+
+    /**
+     * @return HasMany<Almacen, $this>
+     */
+    public function almacenes(): HasMany
+    {
+        return $this->hasMany(Almacen::class);
     }
 
     /**

@@ -161,7 +161,9 @@ class ConfirmarAcuseRecepcion
                 'notas' => $entrega->notas,
             ],
             'items' => $entrega->detalles->map(fn ($d): array => [
-                'prenda' => $d->prenda_nombre_snapshot,
+                // 'activo' es la clave vigente; los acuses previos guardaron
+                // 'prenda' en su snapshot inmutable y la plantilla lee ambas.
+                'activo' => $d->activo_nombre_snapshot,
                 'talla' => $d->talla_valor_snapshot,
                 'cantidad' => (int) $d->cantidad,
             ])->all(),

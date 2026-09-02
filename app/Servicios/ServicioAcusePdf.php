@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 
 /**
  * Materializa el comprobante PDF del acuse de recepción a partir del snapshot
- * inmutable. Nunca usa datos actuales de empresa/prenda/colaborador.
+ * inmutable. Nunca usa datos actuales de empresa/activo/colaborador.
  */
 class ServicioAcusePdf
 {

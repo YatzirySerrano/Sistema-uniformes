@@ -84,7 +84,7 @@
         <tbody>
             @foreach ($snapshot['items'] ?? [] as $item)
                 <tr>
-                    <td>{{ $item['prenda'] }}</td>
+                    <td>{{ $item['activo'] ?? $item['prenda'] ?? '' }}</td>
                     <td>{{ $item['talla'] }}</td>
                     <td style="text-align:right">{{ $item['cantidad'] }}</td>
                 </tr>

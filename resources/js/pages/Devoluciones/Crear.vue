@@ -2,12 +2,12 @@
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
-import SelectorItemsPrendas from '@/components/sistema/SelectorItemsPrendas.vue';
+import SelectorItemsActivos from '@/components/sistema/SelectorItemsActivos.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { PrendaOpcion } from '@/types/sistema';
+import type { ActivoOpcion } from '@/types/sistema';
 
 const props = defineProps<{
     sucursales: { id: number; nombre: string }[];
@@ -17,7 +17,7 @@ const props = defineProps<{
         numero_empleado: string;
         sucursal_id: number;
     }[];
-    prendas: PrendaOpcion[];
+    activos: ActivoOpcion[];
     condiciones: { valor: string; etiqueta: string }[];
 }>();
 
@@ -40,7 +40,7 @@ const form = useForm<{
     motivo: string;
     notas: string;
     items: {
-        prenda_id: number | null;
+        activo_id: number | null;
         talla_id: number | null;
         cantidad: number;
         condicion: string;
@@ -54,7 +54,7 @@ const form = useForm<{
     notas: '',
     items: [
         {
-            prenda_id: null,
+            activo_id: null,
             talla_id: null,
             cantidad: 1,
             condicion: 'reutilizable',
@@ -81,7 +81,7 @@ function enviar() {
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar devolución"
-            descripcion="Indica la condición de cada prenda. Reutilizable reingresa al inventario; dañado o baja, no."
+            descripcion="Indica la condición de cada activo. Reutilizable reingresa al inventario; dañado o baja, no."
         />
 
         <form class="space-y-6" @submit.prevent="enviar">
@@ -139,10 +139,10 @@ function enviar() {
             </div>
 
             <div class="grid gap-1.5">
-                <Label>Prendas devueltas</Label>
-                <SelectorItemsPrendas
+                <Label>Activos devueltas</Label>
+                <SelectorItemsActivos
                     v-model="form.items"
-                    :prendas="prendas"
+                    :activos="activos"
                     con-condicion
                     :condiciones="condiciones"
                 />

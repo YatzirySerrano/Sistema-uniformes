@@ -20,10 +20,10 @@ import type { Paginado } from '@/types/sistema';
 type Saldo = {
     id: number;
     sucursal_id: number;
-    prenda_id: number;
+    activo_id: number;
     talla_id: number;
     sucursal: string;
-    prenda: string;
+    activo: string;
     talla: string;
     cantidad: number;
     minimo: number;
@@ -34,11 +34,11 @@ const props = defineProps<{
     saldos: Paginado<Saldo>;
     filtros: {
         sucursal_id?: number;
-        prenda_id?: number;
+        activo_id?: number;
         solo_bajo_minimo?: boolean;
     };
     sucursales: { id: number; nombre: string }[];
-    prendas: { id: number; nombre: string }[];
+    activos: { id: number; nombre: string }[];
     permisos: { entrada: boolean; ajustar: boolean; minimos: boolean };
 }>();
 
@@ -47,15 +47,15 @@ defineOptions({
 });
 
 const sucursalId = ref(props.filtros.sucursal_id ?? '');
-const prendaId = ref(props.filtros.prenda_id ?? '');
+const activoId = ref(props.filtros.activo_id ?? '');
 const soloBajo = ref(!!props.filtros.solo_bajo_minimo);
 
-watch([sucursalId, prendaId, soloBajo], () => {
+watch([sucursalId, activoId, soloBajo], () => {
     router.get(
         '/inventario',
         {
             sucursal_id: sucursalId.value || undefined,
-            prenda_id: prendaId.value || undefined,
+            activo_id: activoId.value || undefined,
             solo_bajo_minimo: soloBajo.value ? 1 : undefined,
         },
         { preserveState: true, replace: true, preserveScroll: true },
@@ -67,14 +67,14 @@ const actual = ref<Saldo | null>(null);
 
 const ajuste = useForm({
     sucursal_id: 0,
-    prenda_id: 0,
+    activo_id: 0,
     talla_id: 0,
     existencia_objetivo: 0,
     motivo: '',
 });
 const minimo = useForm({
     sucursal_id: 0,
-    prenda_id: 0,
+    activo_id: 0,
     talla_id: 0,
     minimo: 0,
 });
@@ -85,7 +85,7 @@ function abrir(tipo: 'ajuste' | 'minimo', s: Saldo) {
     if (tipo === 'ajuste') {
         ajuste.defaults({
             sucursal_id: s.sucursal_id,
-            prenda_id: s.prenda_id,
+            activo_id: s.activo_id,
             talla_id: s.talla_id,
             existencia_objetivo: s.cantidad,
             motivo: '',
@@ -94,7 +94,7 @@ function abrir(tipo: 'ajuste' | 'minimo', s: Saldo) {
     } else {
         minimo.defaults({
             sucursal_id: s.sucursal_id,
-            prenda_id: s.prenda_id,
+            activo_id: s.activo_id,
             talla_id: s.talla_id,
             minimo: s.minimo,
         });
@@ -122,7 +122,7 @@ function guardarMinimo() {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Inventario"
-            descripcion="Existencias por sucursal, prenda y talla."
+            descripcion="Existencias por sucursal, activo y talla."
         >
             <template #acciones>
                 <Button v-if="permisos.entrada" as-child>
@@ -144,11 +144,11 @@ function guardarMinimo() {
                 </option>
             </select>
             <select
-                v-model="prendaId"
+                v-model="activoId"
                 class="border-input bg-background h-9 rounded-md border px-3 text-sm"
             >
-                <option value="">Todas las prendas</option>
-                <option v-for="p in prendas" :key="p.id" :value="p.id">
+                <option value="">Todos los activos</option>
+                <option v-for="p in activos" :key="p.id" :value="p.id">
                     {{ p.nombre }}
                 </option>
             </select>
@@ -169,7 +169,7 @@ function guardarMinimo() {
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
                         <th class="px-3 py-2 font-medium">Sucursal</th>
-                        <th class="px-3 py-2 font-medium">Prenda</th>
+                        <th class="px-3 py-2 font-medium">Activo</th>
                         <th class="px-3 py-2 font-medium">Talla</th>
                         <th class="px-3 py-2 text-right font-medium">
                             Existencia
@@ -181,7 +181,7 @@ function guardarMinimo() {
                 <tbody>
                     <tr v-for="s in saldos.data" :key="s.id" class="border-t">
                         <td class="px-3 py-2">{{ s.sucursal }}</td>
-                        <td class="px-3 py-2">{{ s.prenda }}</td>
+                        <td class="px-3 py-2">{{ s.activo }}</td>
                         <td class="px-3 py-2">{{ s.talla }}</td>
                         <td class="px-3 py-2 text-right font-medium">
                             {{ s.cantidad }}
@@ -227,7 +227,7 @@ function guardarMinimo() {
                     <DialogTitle>Ajustar existencia</DialogTitle>
                 </DialogHeader>
                 <p v-if="actual" class="text-muted-foreground text-sm">
-                    {{ actual.prenda }} · {{ actual.talla }} ·
+                    {{ actual.activo }} · {{ actual.talla }} ·
                     {{ actual.sucursal }} — existencia actual
                     {{ actual.cantidad }}
                 </p>
@@ -269,7 +269,7 @@ function guardarMinimo() {
                     <DialogTitle>Configurar mínimo</DialogTitle>
                 </DialogHeader>
                 <p v-if="actual" class="text-muted-foreground text-sm">
-                    {{ actual.prenda }} · {{ actual.talla }} ·
+                    {{ actual.activo }} · {{ actual.talla }} ·
                     {{ actual.sucursal }}
                 </p>
                 <div class="grid gap-3">

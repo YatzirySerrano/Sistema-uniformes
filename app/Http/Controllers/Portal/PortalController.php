@@ -40,7 +40,7 @@ class PortalController extends Controller
             'pendiente_firma' => $e->estado === EstadoEntrega::PendienteFirma,
             'acuse_id' => $e->acuse?->id,
             'items' => array_map(fn ($d): array => [
-                'prenda' => $d->prenda_nombre_snapshot,
+                'activo' => $d->activo_nombre_snapshot,
                 'talla' => $d->talla_valor_snapshot,
                 'cantidad' => $d->cantidad,
             ], $e->detalles->all()),

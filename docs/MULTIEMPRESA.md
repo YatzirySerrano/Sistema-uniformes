@@ -5,9 +5,18 @@
 ```
 PLATAFORMA
    └── EMPRESA
-         └── SUCURSALES
-               └── OPERACIÓN (colaboradores, inventario, entregas, ...)
+         ├── SUCURSALES
+         ├── ALMACENES ──(N:M)── SUCURSALES que abastece
+         ├── ÁREAS / DEPARTAMENTOS
+         ├── COLABORADORES
+         └── ACTIVOS
+               └── OPERACIÓN (inventario, entregas, devoluciones, ...)
 ```
+
+Almacenes, Áreas y Activos se aíslan por `empresa_id` con el mismo modelo de
+capas que Sucursales (contexto + `scopeDeEmpresa` + Policies + Form Requests +
+tests). El inventario por almacén es un bloque posterior. Ver
+`docs/ALMACENES_AREAS_ACTIVOS.md`.
 
 ## Relación usuario ↔ empresa
 

@@ -17,7 +17,7 @@ defineProps<{
         estado_etiqueta: string;
         pendiente_firma: boolean;
         acuse_id: number | null;
-        items: { prenda: string; talla: string; cantidad: number }[];
+        items: { activo: string; talla: string; cantidad: number }[];
     }[];
     sinRegistro: boolean;
 }>();
@@ -69,7 +69,7 @@ defineOptions({
                         :key="i"
                         class="flex justify-between border-b py-1 last:border-0"
                     >
-                        <span>{{ it.prenda }} · {{ it.talla }}</span>
+                        <span>{{ it.activo }} · {{ it.talla }}</span>
                         <span class="font-medium">× {{ it.cantidad }}</span>
                     </li>
                 </ul>

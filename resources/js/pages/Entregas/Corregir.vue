@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
-import SelectorItemsPrendas from '@/components/sistema/SelectorItemsPrendas.vue';
+import SelectorItemsActivos from '@/components/sistema/SelectorItemsActivos.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import type { PrendaOpcion } from '@/types/sistema';
+import type { ActivoOpcion } from '@/types/sistema';
 
 const props = defineProps<{
     entrega: {
@@ -17,14 +17,14 @@ const props = defineProps<{
             numero_empleado: string;
         } | null;
         items: {
-            prenda_id: number;
+            activo_id: number;
             talla_id: number;
-            prenda: string;
+            activo: string;
             talla: string;
             cantidad: number;
         }[];
     };
-    prendas: PrendaOpcion[];
+    activos: ActivoOpcion[];
 }>();
 
 defineOptions({
@@ -39,14 +39,14 @@ defineOptions({
 const form = useForm<{
     motivo: string;
     items: {
-        prenda_id: number | null;
+        activo_id: number | null;
         talla_id: number | null;
         cantidad: number;
     }[];
 }>({
     motivo: '',
     items: props.entrega.items.map((i) => ({
-        prenda_id: i.prenda_id,
+        activo_id: i.activo_id,
         talla_id: i.talla_id,
         cantidad: i.cantidad,
     })),
@@ -70,7 +70,7 @@ function enviar() {
             <p class="font-medium">Contenido actual</p>
             <ul class="text-muted-foreground mt-1 list-disc pl-5">
                 <li v-for="(it, i) in entrega.items" :key="i">
-                    {{ it.prenda }} · {{ it.talla }} × {{ it.cantidad }}
+                    {{ it.activo }} · {{ it.talla }} × {{ it.cantidad }}
                 </li>
             </ul>
         </div>
@@ -91,7 +91,7 @@ function enviar() {
 
             <div class="grid gap-1.5">
                 <Label>Contenido corregido</Label>
-                <SelectorItemsPrendas v-model="form.items" :prendas="prendas" />
+                <SelectorItemsActivos v-model="form.items" :activos="activos" />
                 <InputError :message="form.errors.items" />
             </div>
 

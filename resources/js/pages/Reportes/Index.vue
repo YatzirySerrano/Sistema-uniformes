@@ -11,7 +11,7 @@ import type { Paginado } from '@/types/sistema';
 const props = defineProps<{
     tab: 'entregas' | 'inventario';
     filtros: Record<string, string | number | boolean | undefined>;
-    totales?: { entregas: number; prendas: number; pendientes_firma: number };
+    totales?: { entregas: number; activos: number; pendientes_firma: number };
     entregas?: Paginado<{
         folio: string;
         fecha_entrega: string;
@@ -20,11 +20,11 @@ const props = defineProps<{
         numero_empleado: string;
         encargado: string;
         estado_etiqueta: string;
-        prendas: number;
+        activos: number;
     }>;
     inventario?: Paginado<{
         sucursal: string;
-        prenda: string;
+        activo: string;
         talla: string;
         cantidad: number;
         minimo: number;
@@ -32,7 +32,7 @@ const props = defineProps<{
     }>;
     catalogos: {
         sucursales: { id: number; nombre: string }[];
-        prendas: { id: number; nombre: string }[];
+        activos: { id: number; nombre: string }[];
         tallas: { id: number; valor: string }[];
         estados: { valor: string; etiqueta: string }[];
     };
@@ -46,7 +46,7 @@ defineOptions({
 const f = reactive({
     tab: props.tab,
     sucursal_id: props.filtros.sucursal_id ?? '',
-    prenda_id: props.filtros.prenda_id ?? '',
+    activo_id: props.filtros.activo_id ?? '',
     talla_id: props.filtros.talla_id ?? '',
     estado: props.filtros.estado ?? '',
     firmado: props.filtros.firmado ?? '',
@@ -129,12 +129,12 @@ function urlExport(formato: string) {
                     </option>
                 </select>
                 <select
-                    v-model="f.prenda_id"
+                    v-model="f.activo_id"
                     class="border-input bg-background h-9 rounded-md border px-3 text-sm"
                 >
-                    <option value="">Todas las prendas</option>
+                    <option value="">Todos los activos</option>
                     <option
-                        v-for="p in catalogos.prendas"
+                        v-for="p in catalogos.activos"
                         :key="p.id"
                         :value="p.id"
                     >
@@ -207,9 +207,9 @@ function urlExport(formato: string) {
             >
             <Card
                 ><CardContent class="pt-6">
-                    <p class="text-2xl font-semibold">{{ totales.prendas }}</p>
+                    <p class="text-2xl font-semibold">{{ totales.activos }}</p>
                     <p class="text-muted-foreground text-xs">
-                        Prendas entregadas
+                        Activos entregadas
                     </p>
                 </CardContent></Card
             >
@@ -239,7 +239,7 @@ function urlExport(formato: string) {
                         <th class="px-3 py-2 font-medium">Responsable</th>
                         <th class="px-3 py-2 font-medium">Estado</th>
                         <th class="px-3 py-2 text-right font-medium">
-                            Prendas
+                            Activos
                         </th>
                     </tr>
                 </thead>
@@ -262,7 +262,7 @@ function urlExport(formato: string) {
                         </td>
                         <td class="px-3 py-2">{{ e.encargado }}</td>
                         <td class="px-3 py-2">{{ e.estado_etiqueta }}</td>
-                        <td class="px-3 py-2 text-right">{{ e.prendas }}</td>
+                        <td class="px-3 py-2 text-right">{{ e.activos }}</td>
                     </tr>
                 </tbody>
             </table>
@@ -276,7 +276,7 @@ function urlExport(formato: string) {
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
                         <th class="px-3 py-2 font-medium">Sucursal</th>
-                        <th class="px-3 py-2 font-medium">Prenda</th>
+                        <th class="px-3 py-2 font-medium">Activo</th>
                         <th class="px-3 py-2 font-medium">Talla</th>
                         <th class="px-3 py-2 text-right font-medium">
                             Existencia
@@ -291,7 +291,7 @@ function urlExport(formato: string) {
                         class="border-t"
                     >
                         <td class="px-3 py-2">{{ s.sucursal }}</td>
-                        <td class="px-3 py-2">{{ s.prenda }}</td>
+                        <td class="px-3 py-2">{{ s.activo }}</td>
                         <td class="px-3 py-2">{{ s.talla }}</td>
                         <td
                             class="px-3 py-2 text-right font-medium"

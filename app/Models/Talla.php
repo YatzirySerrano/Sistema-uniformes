@@ -15,6 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  * @property string $valor
  * @property int $orden
  * @property bool $activa
+ *
+ * Compatibilidad: la relación con el catálogo se llama ahora `activos()`
+ * (antes `prendas()`), sobre el pivote `activo_talla`.
  */
 class Talla extends Model
 {
@@ -39,11 +42,11 @@ class Talla extends Model
     }
 
     /**
-     * @return BelongsToMany<Prenda, $this>
+     * @return BelongsToMany<Activo, $this>
      */
-    public function prendas(): BelongsToMany
+    public function activos(): BelongsToMany
     {
-        return $this->belongsToMany(Prenda::class, 'prenda_talla')->withTimestamps();
+        return $this->belongsToMany(Activo::class, 'activo_talla')->withTimestamps();
     }
 
     /**

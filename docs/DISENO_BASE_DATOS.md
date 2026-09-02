@@ -4,6 +4,17 @@ Motor de desarrollo: SQLite. Producción recomendada: MySQL/MariaDB InnoDB
 utf8mb4. Las migraciones usan el constructor de esquema de Laravel (agnóstico) y
 enums se modelan como columnas `string` + cast a PHP enum.
 
+> **Actualización (Almacenes / Áreas / Activos).** Ver
+> `docs/ALMACENES_AREAS_ACTIVOS.md`. Cambios: tablas nuevas `areas`,
+> `almacenes`, `almacen_sucursal` (N:M), `tipos_activo`; `colaboradores.area_id`
+> (FK, con la columna de texto `area` conservada como espejo). La tabla
+> `prendas` se **renombró** a `activos` (`activa`→`activo`,
+> `codigo_interno`→`codigo`, + `tipo_activo_id`, `tipo_control`); `prenda_talla`
+> → `activo_talla`; y `prenda_id` → `activo_id` en `saldos_inventario`,
+> `movimientos_inventario`, `detalles_entrega` (+ `prenda_nombre_snapshot` →
+> `activo_nombre_snapshot`) y `detalles_devolucion`. Renombrado in-place: cero
+> pérdida de datos.
+
 Se conservan `id`, `created_at`, `updated_at`, `deleted_at`. El resto de columnas
 y tablas de dominio están en español.
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresaActiva;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
+use App\Models\Area;
 use App\Models\Colaborador;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Http\RedirectResponse;
@@ -25,6 +26,7 @@ class ColaboradorController extends Controller
         $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
             'sucursal_id' => ['nullable', 'integer'],
+            'area_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'in:activos,inactivos,todos'],
         ]);
 
@@ -34,6 +36,7 @@ class ColaboradorController extends Controller
                 ->where('nombre_completo', 'like', "%{$b}%")
                 ->orWhere('numero_empleado', 'like', "%{$b}%")))
             ->when($filtros['sucursal_id'] ?? null, fn ($q, $s) => $q->where('sucursal_id', $s))
+            ->when($filtros['area_id'] ?? null, fn ($q, $a) => $q->where('area_id', $a))
             ->when(($filtros['estado'] ?? 'activos') === 'activos', fn ($q) => $q->where('activo', true))
             ->when(($filtros['estado'] ?? null) === 'inactivos', fn ($q) => $q->where('activo', false))
             ->with('sucursal:id,nombre')
@@ -45,6 +48,7 @@ class ColaboradorController extends Controller
             'colaboradores' => $colaboradores,
             'filtros' => $filtros,
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
+            'areas' => $this->areasEmpresa(),
             'puedeCrear' => $request->user()->can('create', Colaborador::class),
             'puedeImportar' => $request->user()->can('importar', Colaborador::class),
         ]);
@@ -59,6 +63,7 @@ class ColaboradorController extends Controller
         return Inertia::render('Colaboradores/Formulario', [
             'colaborador' => null,
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
+            'areas' => $this->areasEmpresa(),
             // Preselección desde ?sucursal_id (p. ej. al llegar desde una
             // sucursal específica); sólo se respeta si el usuario tiene
             // acceso a esa sucursal dentro de la empresa activa.
@@ -75,6 +80,7 @@ class ColaboradorController extends Controller
         $colaborador = Colaborador::query()->create([
             ...$request->safe()->except('activo'),
             'empresa_id' => $empresa->id,
+            'area' => $this->nombreAreaEspejo($request->integer('area_id') ?: null, $request->input('area')),
             'activo' => $request->boolean('activo', true),
         ]);
 
@@ -94,8 +100,9 @@ class ColaboradorController extends Controller
         $this->verificarEmpresa($colaborador);
 
         return Inertia::render('Colaboradores/Formulario', [
-            'colaborador' => $colaborador->only(['id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'correo', 'activo']),
+            'colaborador' => $colaborador->only(['id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
+            'areas' => $this->areasEmpresa(),
         ]);
     }
 
@@ -106,6 +113,7 @@ class ColaboradorController extends Controller
 
         $colaborador->update([
             ...$request->safe()->except('activo'),
+            'area' => $this->nombreAreaEspejo($request->integer('area_id') ?: null, $request->input('area')),
             'activo' => $request->boolean('activo', $colaborador->activo),
         ]);
 
@@ -139,5 +147,43 @@ class ColaboradorController extends Controller
     private function verificarEmpresa(Colaborador $colaborador): void
     {
         abort_unless($colaborador->empresa_id === $this->empresaActiva()->id, 404);
+    }
+
+    /**
+     * Áreas activas de la empresa activa para poblar el selector del formulario
+     * y etiquetar el filtro del listado.
+     *
+     * @return array<int, array{id: int, nombre: string}>
+     */
+    private function areasEmpresa(): array
+    {
+        return Area::query()
+            ->where('empresa_id', $this->empresaActiva()->id)
+            ->where('activa', true)
+            ->orderBy('nombre')
+            ->get(['id', 'nombre'])
+            ->map(fn (Area $a): array => ['id' => $a->id, 'nombre' => $a->nombre])
+            ->all();
+    }
+
+    /**
+     * Mantiene la columna de texto `area` sincronizada con el nombre del área
+     * seleccionada (compatibilidad temporal con importador, exportador y
+     * snapshot de acuse). Si no hay `area_id`, respeta el texto recibido.
+     */
+    private function nombreAreaEspejo(?int $areaId, mixed $areaTexto): ?string
+    {
+        if ($areaId !== null) {
+            $area = Area::query()
+                ->where('empresa_id', $this->empresaActiva()->id)
+                ->whereKey($areaId)
+                ->first();
+
+            if ($area !== null) {
+                return $area->nombre;
+            }
+        }
+
+        return is_string($areaTexto) && trim($areaTexto) !== '' ? trim($areaTexto) : null;
     }
 }

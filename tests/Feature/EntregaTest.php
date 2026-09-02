@@ -19,7 +19,7 @@ beforeEach(function () {
     $inventario->registrarMovimiento(new MovimientoInventarioDatos(
         empresaId: $this->datos['empresaA']->id,
         sucursalId: $this->datos['sucursalA']->id,
-        prendaId: $this->datos['prendaA']->id,
+        activoId: $this->datos['activoA']->id,
         tallaId: $this->datos['tallaA']->id,
         tipo: TipoMovimiento::Inicial,
         cantidad: 20,
@@ -34,13 +34,13 @@ it('crea la entrega con sus items, descuenta el inventario y registra el movimie
         $this->datos['colaboradorA']->id,
         1,
         now()->toDateString(),
-        [['prenda_id' => $this->datos['prendaA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 3]],
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 3]],
     );
 
     expect($entrega->estado)->toBe(EstadoEntrega::PendienteFirma)
         ->and($entrega->folio)->toStartWith('ENT-')
         ->and($entrega->detalles)->toHaveCount(1)
-        ->and($entrega->detalles->first()->prenda_nombre_snapshot)->toBe('Camisa')
+        ->and($entrega->detalles->first()->activo_nombre_snapshot)->toBe('Camisa')
         ->and(SaldoInventario::first()->cantidad)->toBe(17)
         ->and(MovimientoInventario::where('tipo', TipoMovimiento::Entrega->value)->count())->toBe(1);
 });
@@ -53,7 +53,7 @@ it('no registra nada si algÃºn item no tiene existencias suficientes (transacciÃ
             $this->datos['colaboradorA']->id,
             $this->encargado->id,
             now()->toDateString(),
-            [['prenda_id' => $this->datos['prendaA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 999]],
+            [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 999]],
         );
     } catch (Throwable) {
         // esperado
@@ -72,6 +72,6 @@ it('rechaza entregar a un colaborador de otra empresa', function () {
         $colaboradorB->id,
         $this->encargado->id,
         now()->toDateString(),
-        [['prenda_id' => $this->datos['prendaA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
     );
 })->throws(ExcepcionDeNegocioSimple::class);

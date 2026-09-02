@@ -20,7 +20,7 @@ class MovimientoInventarioController extends Controller
 
         $filtros = $request->validate([
             'sucursal_id' => ['nullable', 'integer'],
-            'prenda_id' => ['nullable', 'integer'],
+            'activo_id' => ['nullable', 'integer'],
             'tipo' => ['nullable', 'string'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
@@ -32,11 +32,11 @@ class MovimientoInventarioController extends Controller
             ->where('empresa_id', $empresa->id)
             ->whereIn('sucursal_id', $sucursalesIds)
             ->when($filtros['sucursal_id'] ?? null, fn ($q, $s) => $q->where('sucursal_id', $s))
-            ->when($filtros['prenda_id'] ?? null, fn ($q, $p) => $q->where('prenda_id', $p))
+            ->when($filtros['activo_id'] ?? null, fn ($q, $p) => $q->where('activo_id', $p))
             ->when($filtros['tipo'] ?? null, fn ($q, $t) => $q->where('tipo', $t))
             ->when($filtros['desde'] ?? null, fn ($q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
             ->when($filtros['hasta'] ?? null, fn ($q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
-            ->with(['sucursal:id,nombre', 'prenda:id,nombre', 'talla:id,valor', 'realizadoPor:id,name'])
+            ->with(['sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'realizadoPor:id,name'])
             ->latest('ocurrido_en')
             ->paginate($this->porPagina())
             ->withQueryString()
@@ -49,7 +49,7 @@ class MovimientoInventarioController extends Controller
                 'existencia_anterior' => $m->existencia_anterior,
                 'existencia_resultante' => $m->existencia_resultante,
                 'sucursal' => $m->sucursal?->nombre,
-                'prenda' => $m->prenda?->nombre,
+                'activo' => $m->activo?->nombre,
                 'talla' => $m->talla?->valor,
                 'motivo' => $m->motivo,
                 'realizado_por' => $m->realizadoPor?->name,
@@ -60,7 +60,7 @@ class MovimientoInventarioController extends Controller
             'movimientos' => $movimientos,
             'filtros' => $filtros,
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
-            'prendas' => $empresa->prendas()->orderBy('nombre')->get(['id', 'nombre']),
+            'activos' => $empresa->activos()->orderBy('nombre')->get(['id', 'nombre']),
             'tipos' => collect(TipoMovimiento::cases())->map(fn ($t): array => ['valor' => $t->value, 'etiqueta' => $t->etiqueta()]),
         ]);
     }

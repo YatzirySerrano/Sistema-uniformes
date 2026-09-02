@@ -3,9 +3,9 @@
 namespace Database\Factories;
 
 use App\Enums\CondicionDevolucion;
+use App\Models\Activo;
 use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
-use App\Models\Prenda;
 use App\Models\Talla;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -23,7 +23,7 @@ class DetalleDevolucionFactory extends Factory
     {
         return [
             'devolucion_id' => Devolucion::factory(),
-            'prenda_id' => Prenda::factory(),
+            'activo_id' => Activo::factory(),
             'talla_id' => Talla::factory(),
             'cantidad' => fake()->numberBetween(1, 3),
             'condicion' => CondicionDevolucion::Reutilizable,

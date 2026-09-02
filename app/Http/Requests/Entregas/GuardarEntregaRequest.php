@@ -33,7 +33,7 @@ class GuardarEntregaRequest extends FormRequest
             'fecha_entrega' => ['required', 'date', 'before_or_equal:today'],
             'notas' => ['nullable', 'string', 'max:1000'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.prenda_id' => ['required', 'integer', Rule::exists('prendas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId))],
+            'items.*.activo_id' => ['required', 'integer', Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId))],
             'items.*.talla_id' => ['required', 'integer', Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId))],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
         ];
@@ -42,7 +42,7 @@ class GuardarEntregaRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'items.required' => 'Agrega al menos una prenda a la entrega.',
+            'items.required' => 'Agrega al menos un activo a la entrega.',
             'fecha_entrega.before_or_equal' => 'La fecha de entrega no puede ser futura.',
             'colaborador_id.exists' => 'El colaborador seleccionado no es válido para esta empresa.',
             'sucursal_id.exists' => 'La sucursal seleccionada no es válida para esta empresa.',
@@ -51,6 +51,6 @@ class GuardarEntregaRequest extends FormRequest
 
     public function attributes(): array
     {
-        return ['items.*.cantidad' => 'cantidad', 'items.*.prenda_id' => 'prenda', 'items.*.talla_id' => 'talla'];
+        return ['items.*.cantidad' => 'cantidad', 'items.*.activo_id' => 'activo', 'items.*.talla_id' => 'talla'];
     }
 }

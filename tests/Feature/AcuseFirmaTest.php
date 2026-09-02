@@ -21,7 +21,7 @@ beforeEach(function () {
     app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
         empresaId: $this->datos['empresaA']->id,
         sucursalId: $this->datos['sucursalA']->id,
-        prendaId: $this->datos['prendaA']->id,
+        activoId: $this->datos['activoA']->id,
         tallaId: $this->datos['tallaA']->id,
         tipo: TipoMovimiento::Inicial,
         cantidad: 20,
@@ -33,7 +33,7 @@ beforeEach(function () {
         $this->datos['colaboradorA']->id,
         $this->encargado->id,
         now()->toDateString(),
-        [['prenda_id' => $this->datos['prendaA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
     );
 
     $this->confirmar = app(ConfirmarAcuseRecepcion::class);
@@ -45,7 +45,7 @@ it('crea el acuse con firma almacenada de forma privada, huellas y snapshot', fu
     expect($acuse->folio)->toStartWith('ACU-')
         ->and($acuse->hash_documento)->toHaveLength(64)
         ->and($acuse->hash_firma)->toHaveLength(64)
-        ->and($acuse->snapshot_entrega['items'][0]['prenda'])->toBe('Camisa')
+        ->and($acuse->snapshot_entrega['items'][0]['activo'])->toBe('Camisa')
         ->and($this->entrega->fresh()->estado)->toBe(EstadoEntrega::Firmada);
 
     Storage::disk('local')->assertExists($acuse->ruta_firma);
@@ -62,12 +62,12 @@ it('impide firmar dos veces la misma entrega', function () {
     $this->confirmar->ejecutar($this->entrega->fresh(), firmaDemoBase64(), null, null, null);
 })->throws(EntregaYaFirmadaException::class);
 
-it('el snapshot del acuse no cambia aunque después se renombre la prenda', function () {
+it('el snapshot del acuse no cambia aunque después se renombre el activo', function () {
     $acuse = $this->confirmar->ejecutar($this->entrega, firmaDemoBase64(), null, null, null);
 
-    $this->datos['prendaA']->update(['nombre' => 'Camisa Renombrada']);
+    $this->datos['activoA']->update(['nombre' => 'Camisa Renombrada']);
 
-    expect($acuse->fresh()->snapshot_entrega['items'][0]['prenda'])->toBe('Camisa');
+    expect($acuse->fresh()->snapshot_entrega['items'][0]['activo'])->toBe('Camisa');
 });
 
 it('otro colaborador no puede descargar el PDF de un acuse ajeno (IDOR)', function () {

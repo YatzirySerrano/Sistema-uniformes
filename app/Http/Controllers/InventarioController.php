@@ -23,7 +23,7 @@ class InventarioController extends Controller
 
         $filtros = $request->validate([
             'sucursal_id' => ['nullable', 'integer'],
-            'prenda_id' => ['nullable', 'integer'],
+            'activo_id' => ['nullable', 'integer'],
             'solo_bajo_minimo' => ['nullable', 'boolean'],
         ]);
 
@@ -33,19 +33,19 @@ class InventarioController extends Controller
             ->where('empresa_id', $empresa->id)
             ->whereIn('sucursal_id', $sucursalesIds)
             ->when($filtros['sucursal_id'] ?? null, fn ($q, $s) => $q->where('sucursal_id', $s))
-            ->when($filtros['prenda_id'] ?? null, fn ($q, $p) => $q->where('prenda_id', $p))
+            ->when($filtros['activo_id'] ?? null, fn ($q, $p) => $q->where('activo_id', $p))
             ->when($filtros['solo_bajo_minimo'] ?? null, fn ($q) => $q->bajoMinimo())
-            ->with(['sucursal:id,nombre', 'prenda:id,nombre', 'talla:id,valor'])
+            ->with(['sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor'])
             ->orderBy('sucursal_id')
             ->paginate($this->porPagina())
             ->withQueryString()
             ->through(fn ($s): array => [
                 'id' => $s->id,
                 'sucursal_id' => $s->sucursal_id,
-                'prenda_id' => $s->prenda_id,
+                'activo_id' => $s->activo_id,
                 'talla_id' => $s->talla_id,
                 'sucursal' => $s->sucursal?->nombre,
-                'prenda' => $s->prenda?->nombre,
+                'activo' => $s->activo?->nombre,
                 'talla' => $s->talla?->valor,
                 'cantidad' => $s->cantidad,
                 'minimo' => $s->minimo,
@@ -56,7 +56,7 @@ class InventarioController extends Controller
             'saldos' => $saldos,
             'filtros' => $filtros,
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
-            'prendas' => $empresa->prendas()->activas()->orderBy('nombre')->get(['id', 'nombre']),
+            'activos' => $empresa->activos()->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
             'permisos' => [
                 'entrada' => $request->user()->can('inventario.entrada'),
                 'ajustar' => $request->user()->can('inventario.ajustar'),
@@ -72,8 +72,8 @@ class InventarioController extends Controller
 
         return Inertia::render('Inventario/Entrada', [
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
-            'prendas' => $empresa->prendas()->activas()->with('tallas:id,valor')->orderBy('nombre')->get()
-                ->map(fn ($p): array => ['id' => $p->id, 'nombre' => $p->nombre, 'tallas' => $p->tallas->map->only(['id', 'valor'])]),
+            'activos' => $empresa->activos()->where('activo', true)->with('tallas:id,valor')->orderBy('nombre')->get()
+                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'tallas' => $a->tallas->map->only(['id', 'valor'])]),
         ]);
     }
 
@@ -88,7 +88,7 @@ class InventarioController extends Controller
             'notas' => ['nullable', 'string', 'max:1000'],
             'carga_inicial' => ['boolean'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.prenda_id' => ['required', 'integer'],
+            'items.*.activo_id' => ['required', 'integer'],
             'items.*.talla_id' => ['required', 'integer'],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:100000'],
         ]);
@@ -115,7 +115,7 @@ class InventarioController extends Controller
 
         $datos = $request->validate([
             'sucursal_id' => ['required', 'integer'],
-            'prenda_id' => ['required', 'integer'],
+            'activo_id' => ['required', 'integer'],
             'talla_id' => ['required', 'integer'],
             'existencia_objetivo' => ['required', 'integer', 'min:0', 'max:1000000'],
             'motivo' => ['required', 'string', 'max:255'],
@@ -126,7 +126,7 @@ class InventarioController extends Controller
         $accion->ejecutar(
             $empresa->id,
             (int) $datos['sucursal_id'],
-            (int) $datos['prenda_id'],
+            (int) $datos['activo_id'],
             (int) $datos['talla_id'],
             (int) $datos['existencia_objetivo'],
             $datos['motivo'],
@@ -143,7 +143,7 @@ class InventarioController extends Controller
 
         $datos = $request->validate([
             'sucursal_id' => ['required', 'integer'],
-            'prenda_id' => ['required', 'integer'],
+            'activo_id' => ['required', 'integer'],
             'talla_id' => ['required', 'integer'],
             'minimo' => ['required', 'integer', 'min:0', 'max:1000000'],
         ]);
@@ -153,7 +153,7 @@ class InventarioController extends Controller
         $inventario->ajustarMinimo(
             $empresa->id,
             (int) $datos['sucursal_id'],
-            (int) $datos['prenda_id'],
+            (int) $datos['activo_id'],
             (int) $datos['talla_id'],
             (int) $datos['minimo'],
         );

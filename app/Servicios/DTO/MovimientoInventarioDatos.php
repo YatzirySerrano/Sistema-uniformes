@@ -13,7 +13,7 @@ final readonly class MovimientoInventarioDatos
     public function __construct(
         public int $empresaId,
         public int $sucursalId,
-        public int $prendaId,
+        public int $activoId,
         public int $tallaId,
         public TipoMovimiento $tipo,
         public int $cantidad,

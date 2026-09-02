@@ -2,17 +2,18 @@
 
 namespace Database\Factories;
 
+use App\Enums\TipoControlActivo;
+use App\Models\Activo;
 use App\Models\Empresa;
-use App\Models\Prenda;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
 /**
- * @extends Factory<Prenda>
+ * @extends Factory<Activo>
  */
-class PrendaFactory extends Factory
+class ActivoFactory extends Factory
 {
-    protected $model = Prenda::class;
+    protected $model = Activo::class;
 
     /**
      * @return array<string, mixed>
@@ -23,11 +24,23 @@ class PrendaFactory extends Factory
 
         return [
             'empresa_id' => Empresa::factory(),
+            'tipo_activo_id' => null,
             'nombre' => $nombre.' '.Str::random(3),
             'descripcion' => fake()->sentence(),
             'categoria' => fake()->randomElement(['Superior', 'Inferior', 'Abrigo', 'Accesorio', 'Calzado']),
-            'codigo_interno' => Str::upper(fake()->unique()->bothify('PRD-###')),
-            'activa' => true,
+            'tipo_control' => TipoControlActivo::Cantidad,
+            'codigo' => Str::upper(fake()->unique()->bothify('ACT-###')),
+            'activo' => true,
         ];
+    }
+
+    public function serializado(): static
+    {
+        return $this->state(fn (): array => ['tipo_control' => TipoControlActivo::Serializado]);
+    }
+
+    public function inactivo(): static
+    {
+        return $this->state(fn (): array => ['activo' => false]);
     }
 }

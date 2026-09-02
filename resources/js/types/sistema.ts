@@ -40,14 +40,14 @@ export type UsuarioAutenticado = {
 };
 
 export type TallaOpcion = { id: number; valor: string };
-export type PrendaOpcion = {
+export type ActivoOpcion = {
     id: number;
     nombre: string;
     tallas: TallaOpcion[];
 };
 
 export type ItemEntrega = {
-    prenda_id: number | null;
+    activo_id: number | null;
     talla_id: number | null;
     cantidad: number;
 };

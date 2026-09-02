@@ -21,9 +21,9 @@ class TallaController extends Controller
 
     public function index(): Response
     {
-        abort_unless(request()->user()->can('tallas.administrar') || request()->user()->can('prendas.ver'), 403);
+        abort_unless(request()->user()->can('tallas.administrar') || request()->user()->can('activos.ver'), 403);
 
-        return Inertia::render('Prendas/Tallas', [
+        return Inertia::render('Activos/Tallas', [
             'tallas' => $this->empresaActiva()->tallas()->ordenadas()->get(['id', 'valor', 'orden', 'activa']),
             'puedeAdministrar' => request()->user()->can('tallas.administrar'),
         ]);
@@ -46,7 +46,7 @@ class TallaController extends Controller
             'activa' => true,
         ]);
 
-        $this->auditoria->registrar('prendas', 'talla_crear', [
+        $this->auditoria->registrar('activos', 'talla_crear', [
             'tipo_entidad' => Talla::class, 'entidad_id' => $talla->id,
             'descripcion' => 'Alta de talla '.$talla->valor,
         ]);
@@ -80,7 +80,7 @@ class TallaController extends Controller
         abort_unless(request()->user()->can('tallas.administrar'), 403);
         $this->verificarEmpresa($talla);
 
-        $enUso = $talla->prendas()->exists()
+        $enUso = $talla->activos()->exists()
             || SaldoInventario::query()->where('talla_id', $talla->id)->where('cantidad', '>', 0)->exists()
             || DetalleEntrega::query()->where('talla_id', $talla->id)->exists();
 

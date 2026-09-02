@@ -1,6 +1,9 @@
 <?php
 
+use App\Http\Controllers\ActivoController;
 use App\Http\Controllers\AcuseController;
+use App\Http\Controllers\AlmacenController;
+use App\Http\Controllers\AreaController;
 use App\Http\Controllers\BitacoraController;
 use App\Http\Controllers\ColaboradorController;
 use App\Http\Controllers\CorreccionEntregaController;
@@ -13,7 +16,6 @@ use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
 use App\Http\Controllers\PersonalizacionEmpresaController;
 use App\Http\Controllers\Portal\PortalController;
-use App\Http\Controllers\PrendaController;
 use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\RolController;
 use App\Http\Controllers\SelectorEmpresaController;
@@ -42,13 +44,22 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::put('colaboradores/{colaborador}', [ColaboradorController::class, 'update'])->name('colaboradores.update');
     Route::post('colaboradores/{colaborador}/estado', [ColaboradorController::class, 'toggle'])->name('colaboradores.toggle');
 
-    // Prendas y tallas
-    Route::get('prendas', [PrendaController::class, 'index'])->name('prendas.index');
-    Route::get('prendas/crear', [PrendaController::class, 'create'])->name('prendas.create');
-    Route::post('prendas', [PrendaController::class, 'store'])->name('prendas.store');
-    Route::get('prendas/{prenda}', [PrendaController::class, 'show'])->name('prendas.show');
-    Route::get('prendas/{prenda}/editar', [PrendaController::class, 'edit'])->name('prendas.edit');
-    Route::post('prendas/{prenda}', [PrendaController::class, 'update'])->name('prendas.update'); // POST por subida de imagen
+    // Áreas / Departamentos
+    Route::get('areas', [AreaController::class, 'index'])->name('areas.index');
+    Route::post('areas', [AreaController::class, 'store'])->name('areas.store');
+    Route::get('areas/{area}', [AreaController::class, 'show'])->name('areas.show');
+    Route::put('areas/{area}', [AreaController::class, 'update'])->name('areas.update');
+    Route::post('areas/{area}/estado', [AreaController::class, 'toggle'])->name('areas.toggle');
+
+    // Activos y variantes / tallas
+    Route::redirect('prendas', 'activos');
+    Route::get('activos', [ActivoController::class, 'index'])->name('activos.index');
+    Route::get('activos/crear', [ActivoController::class, 'create'])->name('activos.create');
+    Route::post('activos', [ActivoController::class, 'store'])->name('activos.store');
+    Route::get('activos/{activo}', [ActivoController::class, 'show'])->name('activos.show');
+    Route::get('activos/{activo}/editar', [ActivoController::class, 'edit'])->name('activos.edit');
+    Route::post('activos/{activo}', [ActivoController::class, 'update'])->name('activos.update'); // POST por subida de imagen
+    Route::post('activos/{activo}/estado', [ActivoController::class, 'toggle'])->name('activos.toggle');
 
     Route::get('tallas', [TallaController::class, 'index'])->name('tallas.index');
     Route::post('tallas', [TallaController::class, 'store'])->name('tallas.store');
@@ -98,6 +109,15 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     Route::get('personalizacion', [PersonalizacionEmpresaController::class, 'edit'])->name('personalizacion.edit');
     Route::post('personalizacion', [PersonalizacionEmpresaController::class, 'update'])->name('personalizacion.update');
+
+    // Almacenes
+    Route::get('almacenes', [AlmacenController::class, 'index'])->name('almacenes.index');
+    Route::get('almacenes/colaboradores-buscar', [AlmacenController::class, 'colaboradoresBuscar'])->name('almacenes.colaboradores-buscar');
+    Route::post('almacenes', [AlmacenController::class, 'store'])->name('almacenes.store');
+    Route::get('almacenes/{almacen}', [AlmacenController::class, 'show'])->name('almacenes.show');
+    Route::put('almacenes/{almacen}', [AlmacenController::class, 'update'])->name('almacenes.update');
+    Route::put('almacenes/{almacen}/sucursales', [AlmacenController::class, 'sucursales'])->name('almacenes.sucursales');
+    Route::post('almacenes/{almacen}/estado', [AlmacenController::class, 'toggle'])->name('almacenes.toggle');
 
     Route::get('sucursales', [SucursalController::class, 'index'])->name('sucursales.index');
     Route::post('sucursales', [SucursalController::class, 'store'])->name('sucursales.store');

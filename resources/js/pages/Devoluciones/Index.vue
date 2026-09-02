@@ -30,7 +30,7 @@ defineOptions({
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Devoluciones"
-            descripcion="Prendas devueltas por los colaboradores. Solo las reutilizables reingresan al inventario."
+            descripcion="Activos devueltas por los colaboradores. Solo las reutilizables reingresan al inventario."
         >
             <template #acciones>
                 <Button v-if="puedeCrear" as-child>
@@ -44,7 +44,7 @@ defineOptions({
         <EstadoVacio
             v-if="!devoluciones.data.length"
             titulo="No hay devoluciones"
-            descripcion="Registra una devolución cuando un colaborador entregue prendas."
+            descripcion="Registra una devolución cuando un colaborador entregue activos."
         />
 
         <div v-else class="overflow-x-auto rounded-xl border">

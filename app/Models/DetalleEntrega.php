@@ -10,10 +10,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * @property int $id
  * @property int $entrega_uniforme_id
- * @property int $prenda_id
+ * @property int $activo_id
  * @property int $talla_id
  * @property int $cantidad
- * @property string $prenda_nombre_snapshot
+ * @property string $activo_nombre_snapshot
  * @property string $talla_valor_snapshot
  */
 class DetalleEntrega extends Model
@@ -25,10 +25,10 @@ class DetalleEntrega extends Model
 
     protected $fillable = [
         'entrega_uniforme_id',
-        'prenda_id',
+        'activo_id',
         'talla_id',
         'cantidad',
-        'prenda_nombre_snapshot',
+        'activo_nombre_snapshot',
         'talla_valor_snapshot',
     ];
 
@@ -48,11 +48,11 @@ class DetalleEntrega extends Model
     }
 
     /**
-     * @return BelongsTo<Prenda, $this>
+     * @return BelongsTo<Activo, $this>
      */
-    public function prenda(): BelongsTo
+    public function activo(): BelongsTo
     {
-        return $this->belongsTo(Prenda::class);
+        return $this->belongsTo(Activo::class);
     }
 
     /**

@@ -80,6 +80,16 @@ class Sucursal extends Model
     }
 
     /**
+     * Almacenes que abastecen a esta sucursal.
+     *
+     * @return BelongsToMany<Almacen, $this>
+     */
+    public function almacenes(): BelongsToMany
+    {
+        return $this->belongsToMany(Almacen::class, 'almacen_sucursal')->withTimestamps();
+    }
+
+    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

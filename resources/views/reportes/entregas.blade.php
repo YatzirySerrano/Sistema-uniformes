@@ -35,7 +35,7 @@
                         <td>{{ $entrega->colaborador?->nombre_completo }}</td>
                         <td>{{ $entrega->encargado?->name }}</td>
                         <td>{{ $entrega->estado->etiqueta() }}</td>
-                        <td>{{ $detalle->prenda_nombre_snapshot }}</td>
+                        <td>{{ $detalle->activo_nombre_snapshot }}</td>
                         <td>{{ $detalle->talla_valor_snapshot }}</td>
                         <td>{{ $detalle->cantidad }}</td>
                     </tr>

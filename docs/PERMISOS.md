@@ -2,6 +2,14 @@
 
 Se usa `spatie/laravel-permission` (guard `web`).
 
+> **Actualización.** El grupo `prendas.*` se renombró a `activos.*`
+> (`activos.ver/crear/editar/administrar`, `tallas.administrar` se mantiene). Se
+> añadieron los grupos `almacenes.*` (`ver/crear/editar/administrar`) y
+> `areas.*` (`ver/crear/editar/desactivar`). Supervisor recibe
+> `almacenes.ver`, `areas.ver/crear/editar`, `activos.ver`; Encargado recibe
+> `almacenes.ver`, `areas.ver`, `activos.ver`. Administrador y Superadministrador
+> mantienen alcance global.
+
 ## Roles base (seeder `RolesPermisosSeeder`)
 
 | Rol interno          | Etiqueta           | Alcance                                                                                                                                                                                             |

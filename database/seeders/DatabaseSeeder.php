@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             UsuariosDemoSeeder::class,
             CatalogosDemoSeeder::class,
             ColaboradoresDemoSeeder::class,
+            AlmacenesDemoSeeder::class,
             InventarioDemoSeeder::class,
             EntregasDemoSeeder::class,
         ]);

@@ -43,7 +43,7 @@ class AcuseController extends Controller
                 'encargado' => $entrega->encargado?->name,
                 'colaborador' => $entrega->colaborador?->only(['nombre_completo', 'numero_empleado']),
                 'items' => $entrega->detalles->map(fn ($d): array => [
-                    'prenda' => $d->prenda_nombre_snapshot,
+                    'activo' => $d->activo_nombre_snapshot,
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
                 ]),

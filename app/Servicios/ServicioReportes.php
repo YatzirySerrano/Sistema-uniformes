@@ -33,7 +33,7 @@ class ServicioReportes
             ->when(($filtros['firmado'] ?? null) === 'no', fn ($q) => $q->where('estado', 'pendiente_firma'))
             ->when($filtros['desde'] ?? null, fn ($q, $v) => $q->whereDate('fecha_entrega', '>=', $v))
             ->when($filtros['hasta'] ?? null, fn ($q, $v) => $q->whereDate('fecha_entrega', '<=', $v))
-            ->when($filtros['prenda_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('prenda_id', $v)))
+            ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('activo_id', $v)))
             ->when($filtros['talla_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('talla_id', $v)))
             ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'encargado:id,name', 'detalles'])
             ->latest('fecha_entrega');
@@ -54,7 +54,7 @@ class ServicioReportes
     /**
      * @param  array<string, mixed>  $filtros
      * @param  Collection<int, int>|array<int, int>  $sucursalesPermitidas
-     * @return array{entregas: int, prendas: int, pendientes_firma: int}
+     * @return array{entregas: int, activos: int, pendientes_firma: int}
      */
     public function totalesEntregas(int $empresaId, $sucursalesPermitidas, array $filtros): array
     {
@@ -62,7 +62,7 @@ class ServicioReportes
 
         return [
             'entregas' => $ids->count(),
-            'prendas' => (int) DetalleEntrega::query()->whereIn('entrega_uniforme_id', $ids)->sum('cantidad'),
+            'activos' => (int) DetalleEntrega::query()->whereIn('entrega_uniforme_id', $ids)->sum('cantidad'),
             'pendientes_firma' => EntregaUniforme::query()->whereIn('id', $ids)->where('estado', 'pendiente_firma')->count(),
         ];
     }
@@ -78,9 +78,9 @@ class ServicioReportes
             ->where('empresa_id', $empresaId)
             ->whereIn('sucursal_id', $sucursalesPermitidas)
             ->when($filtros['sucursal_id'] ?? null, fn ($q, $v) => $q->where('sucursal_id', $v))
-            ->when($filtros['prenda_id'] ?? null, fn ($q, $v) => $q->where('prenda_id', $v))
+            ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->where('activo_id', $v))
             ->when(($filtros['solo_bajo_minimo'] ?? false), fn ($q) => $q->bajoMinimo())
-            ->with(['sucursal:id,nombre', 'prenda:id,nombre', 'talla:id,valor'])
+            ->with(['sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor'])
             ->orderBy('sucursal_id');
     }
 }

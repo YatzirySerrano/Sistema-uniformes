@@ -14,7 +14,7 @@ type Resumen = {
     colaboradores_activos: number;
     entregas_mes: number;
     pendientes_firma: number;
-    prendas_entregadas_mes: number;
+    activos_entregados_mes: number;
     stock_bajo: number;
     entregas_recientes: {
         id: number;
@@ -29,13 +29,13 @@ type Resumen = {
         tipo_etiqueta: string;
         direccion: string;
         cantidad: number;
-        prenda: string;
+        activo: string;
         talla: string;
         sucursal: string;
         existencia_resultante: number;
     }[];
     stock_bajo_detalle: {
-        prenda: string;
+        activo: string;
         talla: string;
         sucursal: string;
         cantidad: number;
@@ -109,12 +109,12 @@ defineOptions({
                         class="flex flex-row items-center justify-between pb-2"
                     >
                         <CardTitle class="text-muted-foreground text-sm"
-                            >Prendas entregadas (mes)</CardTitle
+                            >Activos entregadas (mes)</CardTitle
                         >
                         <Shirt class="text-muted-foreground size-4" />
                     </CardHeader>
                     <CardContent class="text-2xl font-semibold">
-                        {{ resumen.prendas_entregadas_mes }}
+                        {{ resumen.activos_entregados_mes }}
                     </CardContent>
                 </Card>
             </div>
@@ -182,7 +182,7 @@ defineOptions({
                                     class="border-b last:border-0"
                                 >
                                     <td class="py-1.5">
-                                        {{ s.prenda }}
+                                        {{ s.activo }}
                                         <span class="text-muted-foreground"
                                             >· {{ s.talla }}</span
                                         >
@@ -217,7 +217,7 @@ defineOptions({
                         <thead class="text-muted-foreground text-left text-xs">
                             <tr>
                                 <th class="py-1.5">Tipo</th>
-                                <th class="py-1.5">Prenda / Talla</th>
+                                <th class="py-1.5">Activo / Talla</th>
                                 <th class="py-1.5">Sucursal</th>
                                 <th class="py-1.5 text-right">Cantidad</th>
                                 <th class="py-1.5 text-right">Resultante</th>
@@ -231,7 +231,7 @@ defineOptions({
                             >
                                 <td class="py-1.5">{{ m.tipo_etiqueta }}</td>
                                 <td class="py-1.5">
-                                    {{ m.prenda }}
+                                    {{ m.activo }}
                                     <span class="text-muted-foreground"
                                         >· {{ m.talla }}</span
                                     >

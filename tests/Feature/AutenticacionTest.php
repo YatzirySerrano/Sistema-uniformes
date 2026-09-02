@@ -28,7 +28,7 @@ it('exige autenticación en las rutas del sistema', function (string $ruta) {
 })->with([
     '/dashboard',
     '/colaboradores',
-    '/prendas',
+    '/activos',
     '/inventario',
     '/entregas',
     '/devoluciones',

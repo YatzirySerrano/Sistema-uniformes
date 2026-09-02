@@ -41,6 +41,10 @@ class GuardarColaboradorRequest extends FormRequest
             ],
             'puesto' => ['nullable', 'string', 'max:255'],
             'area' => ['nullable', 'string', 'max:255'],
+            'area_id' => [
+                'nullable', 'integer',
+                Rule::exists('areas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+            ],
             'correo' => ['nullable', 'email', 'max:255'],
             'activo' => ['boolean'],
         ];
@@ -51,6 +55,7 @@ class GuardarColaboradorRequest extends FormRequest
         return [
             'numero_empleado.unique' => 'El número de empleado ya se encuentra registrado en esta empresa.',
             'sucursal_id.exists' => 'La sucursal seleccionada no pertenece a esta empresa.',
+            'area_id.exists' => 'El área seleccionada no pertenece a esta empresa.',
         ];
     }
 }

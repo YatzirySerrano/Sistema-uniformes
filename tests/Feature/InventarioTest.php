@@ -17,7 +17,7 @@ function movimiento(array $datos, TipoMovimiento $tipo, int $cantidad): Movimien
     return new MovimientoInventarioDatos(
         empresaId: $datos['empresaA']->id,
         sucursalId: $datos['sucursalA']->id,
-        prendaId: $datos['prendaA']->id,
+        activoId: $datos['activoA']->id,
         tallaId: $datos['tallaA']->id,
         tipo: $tipo,
         cantidad: $cantidad,
@@ -62,7 +62,7 @@ it('un ajuste absoluto genera el movimiento con la diferencia y exige motivo', f
     $mov = $this->inventario->fijarExistencia(
         $this->datos['empresaA']->id,
         $this->datos['sucursalA']->id,
-        $this->datos['prendaA']->id,
+        $this->datos['activoA']->id,
         $this->datos['tallaA']->id,
         4,
         'Merma detectada en conteo físico',

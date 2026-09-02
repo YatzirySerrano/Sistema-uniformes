@@ -15,7 +15,7 @@ defineProps<{
 defineOptions({
     layout: {
         breadcrumbs: [
-            { title: 'Prendas', href: '/prendas' },
+            { title: 'Activos', href: '/activos' },
             { title: 'Tallas', href: '/tallas' },
         ],
     },
@@ -47,7 +47,7 @@ function eliminar(id: number) {
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Tallas"
-            descripcion="Configura las tallas disponibles para las prendas. Admite letras y numeración."
+            descripcion="Configura las variantes de los activos. Admite letras y numeración."
         />
 
         <form

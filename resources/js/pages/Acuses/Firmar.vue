@@ -18,7 +18,7 @@ const props = defineProps<{
             nombre_completo: string;
             numero_empleado: string;
         } | null;
-        items: { prenda: string; talla: string; cantidad: number }[];
+        items: { activo: string; talla: string; cantidad: number }[];
     };
 }>();
 
@@ -88,7 +88,7 @@ function confirmar() {
                 <table class="w-full">
                     <thead class="text-muted-foreground text-left">
                         <tr>
-                            <th class="py-1.5">Prenda</th>
+                            <th class="py-1.5">Activo</th>
                             <th class="py-1.5">Talla</th>
                             <th class="py-1.5 text-right">Cantidad</th>
                         </tr>
@@ -99,7 +99,7 @@ function confirmar() {
                             :key="i"
                             class="border-t"
                         >
-                            <td class="py-1.5">{{ it.prenda }}</td>
+                            <td class="py-1.5">{{ it.activo }}</td>
                             <td class="py-1.5">{{ it.talla }}</td>
                             <td class="py-1.5 text-right">{{ it.cantidad }}</td>
                         </tr>
@@ -114,7 +114,7 @@ function confirmar() {
             </CardHeader>
             <CardContent class="space-y-3">
                 <p class="text-muted-foreground text-sm">
-                    Declaro haber recibido a mi entera satisfacción las prendas
+                    Declaro haber recibido a mi entera satisfacción los activos
                     descritas.
                 </p>
                 <PadFirma ref="pad" @cambio="(v: boolean) => (vacio = v)" />

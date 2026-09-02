@@ -34,7 +34,7 @@ class ServicioDashboard
             ->where('estado', EstadoEntrega::PendienteFirma->value)
             ->count();
 
-        $prendasEntregadasMes = (int) DetalleEntrega::query()
+        $activosEntregadosMes = (int) DetalleEntrega::query()
             ->whereHas('entrega', fn ($q) => $q->where('empresa_id', $empresa->id)->where('fecha_entrega', '>=', $inicioMes))
             ->sum('cantidad');
 
@@ -47,7 +47,7 @@ class ServicioDashboard
             'colaboradores_activos' => Colaborador::query()->where('empresa_id', $empresa->id)->where('activo', true)->count(),
             'entregas_mes' => $entregasMes,
             'pendientes_firma' => $pendientesFirma,
-            'prendas_entregadas_mes' => $prendasEntregadasMes,
+            'activos_entregados_mes' => $activosEntregadosMes,
             'stock_bajo' => $stockBajo,
             'entregas_recientes' => EntregaUniforme::query()
                 ->where('empresa_id', $empresa->id)
@@ -66,7 +66,7 @@ class ServicioDashboard
                 ])->all(),
             'movimientos_recientes' => MovimientoInventario::query()
                 ->where('empresa_id', $empresa->id)
-                ->with(['prenda:id,nombre', 'talla:id,valor', 'sucursal:id,nombre'])
+                ->with(['activo:id,nombre', 'talla:id,valor', 'sucursal:id,nombre'])
                 ->latest('ocurrido_en')
                 ->limit(8)
                 ->get()
@@ -76,7 +76,7 @@ class ServicioDashboard
                     'tipo_etiqueta' => $m->tipo->etiqueta(),
                     'direccion' => $m->direccion->value,
                     'cantidad' => $m->cantidad,
-                    'prenda' => $m->prenda?->nombre,
+                    'activo' => $m->activo?->nombre,
                     'talla' => $m->talla?->valor,
                     'sucursal' => $m->sucursal?->nombre,
                     'existencia_resultante' => $m->existencia_resultante,
@@ -85,11 +85,11 @@ class ServicioDashboard
             'stock_bajo_detalle' => SaldoInventario::query()
                 ->where('empresa_id', $empresa->id)
                 ->bajoMinimo()
-                ->with(['prenda:id,nombre', 'talla:id,valor', 'sucursal:id,nombre'])
+                ->with(['activo:id,nombre', 'talla:id,valor', 'sucursal:id,nombre'])
                 ->limit(10)
                 ->get()
                 ->map(fn (SaldoInventario $s): array => [
-                    'prenda' => $s->prenda?->nombre,
+                    'activo' => $s->activo?->nombre,
                     'talla' => $s->talla?->valor,
                     'sucursal' => $s->sucursal?->nombre,
                     'cantidad' => $s->cantidad,

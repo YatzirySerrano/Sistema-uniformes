@@ -25,7 +25,7 @@ class InventarioExport implements FromArray, WithHeadings, WithTitle
         foreach ($this->saldos as $saldo) {
             $filas[] = [
                 (string) $saldo->sucursal?->nombre,
-                (string) $saldo->prenda?->nombre,
+                (string) $saldo->activo?->nombre,
                 (string) $saldo->talla?->valor,
                 (int) $saldo->cantidad,
                 (int) $saldo->minimo,
@@ -41,7 +41,7 @@ class InventarioExport implements FromArray, WithHeadings, WithTitle
      */
     public function headings(): array
     {
-        return ['Sucursal', 'Prenda', 'Talla', 'Existencia', 'Mínimo', 'Bajo mínimo'];
+        return ['Sucursal', 'Activo', 'Talla', 'Existencia', 'Mínimo', 'Bajo mínimo'];
     }
 
     public function title(): string

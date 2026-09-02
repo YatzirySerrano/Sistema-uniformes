@@ -76,8 +76,8 @@ class EntregaController extends Controller
             'colaboradores' => $empresa->colaboradores()->where('activo', true)
                 ->orderBy('nombre_completo')
                 ->get(['id', 'nombre_completo', 'numero_empleado', 'sucursal_id']),
-            'prendas' => $empresa->prendas()->activas()->with('tallas:id,valor')->orderBy('nombre')->get()
-                ->map(fn ($p): array => ['id' => $p->id, 'nombre' => $p->nombre, 'tallas' => $p->tallas->map->only(['id', 'valor'])->values()]),
+            'activos' => $empresa->activos()->where('activo', true)->with('tallas:id,valor')->orderBy('nombre')->get()
+                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'tallas' => $a->tallas->map->only(['id', 'valor'])->values()]),
         ]);
     }
 
@@ -92,8 +92,8 @@ class EntregaController extends Controller
         $saldos = SaldoInventario::query()
             ->where('empresa_id', $empresa->id)
             ->where('sucursal_id', $datos['sucursal_id'])
-            ->get(['prenda_id', 'talla_id', 'cantidad'])
-            ->map(fn ($s): array => ['prenda_id' => $s->prenda_id, 'talla_id' => $s->talla_id, 'disponible' => (int) $s->cantidad]);
+            ->get(['activo_id', 'talla_id', 'cantidad'])
+            ->map(fn ($s): array => ['activo_id' => $s->activo_id, 'talla_id' => $s->talla_id, 'disponible' => (int) $s->cantidad]);
 
         return response()->json(['saldos' => $saldos]);
     }
@@ -126,7 +126,7 @@ class EntregaController extends Controller
         $this->authorize('view', $entrega);
         abort_unless($entrega->empresa_id === $this->empresaActiva()->id, 404);
 
-        $entrega->load(['detalles.prenda:id,nombre', 'detalles.talla:id,valor', 'colaborador:id,nombre_completo,numero_empleado,usuario_id', 'sucursal:id,nombre', 'encargado:id,name', 'acuse', 'correcciones.corregidaPor:id,name']);
+        $entrega->load(['detalles.activo:id,nombre', 'detalles.talla:id,valor', 'colaborador:id,nombre_completo,numero_empleado,usuario_id', 'sucursal:id,nombre', 'encargado:id,name', 'acuse', 'correcciones.corregidaPor:id,name']);
 
         return Inertia::render('Entregas/Detalle', [
             'entrega' => [
@@ -141,7 +141,7 @@ class EntregaController extends Controller
                 'sucursal' => $entrega->sucursal?->nombre,
                 'encargado' => $entrega->encargado?->name,
                 'items' => $entrega->detalles->map(fn ($d): array => [
-                    'prenda' => $d->prenda_nombre_snapshot,
+                    'activo' => $d->activo_nombre_snapshot,
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
                 ]),

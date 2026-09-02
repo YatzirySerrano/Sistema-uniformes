@@ -1,5 +1,12 @@
 # Inventario
 
+> **Actualización.** `prenda_id` → `activo_id` en `saldos_inventario` y
+> `movimientos_inventario` (la tabla `prendas` se renombró a `activos`). El
+> inventario **sigue siendo por sucursal**. La migración a **inventario por
+> almacén** (`ALMACÉN + ACTIVO + VARIANTE = STOCK`) es el bloque siguiente; hasta
+> entonces no se duplican saldos ni se crea una segunda fuente de inventario.
+> Ver `docs/ALMACENES_AREAS_ACTIVOS.md`.
+
 ## Modelo de datos
 
 Dos conceptos separados:

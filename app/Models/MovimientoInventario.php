@@ -18,7 +18,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int $empresa_id
  * @property int $sucursal_id
- * @property int $prenda_id
+ * @property int $activo_id
  * @property int $talla_id
  * @property TipoMovimiento $tipo
  * @property DireccionMovimiento $direccion
@@ -37,7 +37,7 @@ class MovimientoInventario extends Model
     protected $fillable = [
         'empresa_id',
         'sucursal_id',
-        'prenda_id',
+        'activo_id',
         'talla_id',
         'tipo',
         'direccion',
@@ -73,11 +73,11 @@ class MovimientoInventario extends Model
     }
 
     /**
-     * @return BelongsTo<Prenda, $this>
+     * @return BelongsTo<Activo, $this>
      */
-    public function prenda(): BelongsTo
+    public function activo(): BelongsTo
     {
-        return $this->belongsTo(Prenda::class);
+        return $this->belongsTo(Activo::class);
     }
 
     /**

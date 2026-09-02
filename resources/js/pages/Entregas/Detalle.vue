@@ -21,7 +21,7 @@ const props = defineProps<{
         } | null;
         sucursal: string;
         encargado: string;
-        items: { prenda: string; talla: string; cantidad: number }[];
+        items: { activo: string; talla: string; cantidad: number }[];
         correcciones: {
             id: number;
             motivo: string;
@@ -141,13 +141,13 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
 
         <Card>
             <CardHeader>
-                <CardTitle class="text-base">Prendas</CardTitle>
+                <CardTitle class="text-base">Activos</CardTitle>
             </CardHeader>
             <CardContent class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="text-muted-foreground text-left">
                         <tr>
-                            <th class="py-1.5">Prenda</th>
+                            <th class="py-1.5">Activo</th>
                             <th class="py-1.5">Talla</th>
                             <th class="py-1.5 text-right">Cantidad</th>
                         </tr>
@@ -158,7 +158,7 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                             :key="i"
                             class="border-t"
                         >
-                            <td class="py-1.5">{{ it.prenda }}</td>
+                            <td class="py-1.5">{{ it.activo }}</td>
                             <td class="py-1.5">{{ it.talla }}</td>
                             <td class="py-1.5 text-right">{{ it.cantidad }}</td>
                         </tr>

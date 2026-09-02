@@ -14,7 +14,7 @@ type Movimiento = {
     existencia_anterior: number;
     existencia_resultante: number;
     sucursal: string;
-    prenda: string;
+    activo: string;
     talla: string;
     motivo: string | null;
     realizado_por: string | null;
@@ -25,7 +25,7 @@ const props = defineProps<{
     movimientos: Paginado<Movimiento>;
     filtros: Record<string, string | number | undefined>;
     sucursales: { id: number; nombre: string }[];
-    prendas: { id: number; nombre: string }[];
+    activos: { id: number; nombre: string }[];
     tipos: { valor: string; etiqueta: string }[];
 }>();
 
@@ -40,7 +40,7 @@ defineOptions({
 
 const f = ref({
     sucursal_id: props.filtros.sucursal_id ?? '',
-    prenda_id: props.filtros.prenda_id ?? '',
+    activo_id: props.filtros.activo_id ?? '',
     tipo: props.filtros.tipo ?? '',
     desde: props.filtros.desde ?? '',
     hasta: props.filtros.hasta ?? '',
@@ -87,11 +87,11 @@ function fecha(iso: string) {
                 </option>
             </select>
             <select
-                v-model="f.prenda_id"
+                v-model="f.activo_id"
                 class="border-input bg-background h-9 rounded-md border px-3 text-sm"
             >
-                <option value="">Todas las prendas</option>
-                <option v-for="p in prendas" :key="p.id" :value="p.id">
+                <option value="">Todos los activos</option>
+                <option v-for="p in activos" :key="p.id" :value="p.id">
                     {{ p.nombre }}
                 </option>
             </select>
@@ -129,7 +129,7 @@ function fecha(iso: string) {
                         <th class="px-3 py-2 font-medium">Fecha</th>
                         <th class="px-3 py-2 font-medium">Tipo</th>
                         <th class="px-3 py-2 font-medium">Sucursal</th>
-                        <th class="px-3 py-2 font-medium">Prenda / Talla</th>
+                        <th class="px-3 py-2 font-medium">Activo / Talla</th>
                         <th class="px-3 py-2 text-right font-medium">Cambio</th>
                         <th class="px-3 py-2 text-right font-medium">
                             Antes → Después
@@ -151,7 +151,7 @@ function fecha(iso: string) {
                         <td class="px-3 py-2">{{ m.tipo_etiqueta }}</td>
                         <td class="px-3 py-2">{{ m.sucursal }}</td>
                         <td class="px-3 py-2">
-                            {{ m.prenda }}
+                            {{ m.activo }}
                             <span class="text-muted-foreground"
                                 >· {{ m.talla }}</span
                             >

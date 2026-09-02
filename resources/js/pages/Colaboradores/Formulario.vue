@@ -13,6 +13,7 @@ type Colaborador = {
     sucursal_id: number;
     puesto: string | null;
     area: string | null;
+    area_id: number | null;
     correo: string | null;
     activo: boolean;
 };
@@ -20,6 +21,7 @@ type Colaborador = {
 const props = defineProps<{
     colaborador: Colaborador | null;
     sucursales: { id: number; nombre: string }[];
+    areas: { id: number; nombre: string }[];
     sucursalPreseleccionadaId?: number | null;
 }>();
 
@@ -43,7 +45,7 @@ const form = useForm({
         props.sucursales[0]?.id ??
         '',
     puesto: props.colaborador?.puesto ?? '',
-    area: props.colaborador?.area ?? '',
+    area_id: props.colaborador?.area_id ?? '',
     correo: props.colaborador?.correo ?? '',
     activo: props.colaborador?.activo ?? true,
 });
@@ -114,9 +116,27 @@ function enviar() {
                     <InputError :message="form.errors.puesto" />
                 </div>
                 <div class="grid gap-1.5">
-                    <Label for="area">Área / Departamento</Label>
-                    <Input id="area" v-model="form.area" />
-                    <InputError :message="form.errors.area" />
+                    <Label for="area_id">Área / Departamento</Label>
+                    <select
+                        id="area_id"
+                        v-model="form.area_id"
+                        class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                    >
+                        <option value="">Sin área</option>
+                        <option v-for="a in areas" :key="a.id" :value="a.id">
+                            {{ a.nombre }}
+                        </option>
+                    </select>
+                    <InputError :message="form.errors.area_id" />
+                    <p
+                        v-if="!areas.length"
+                        class="text-muted-foreground text-xs"
+                    >
+                        No hay áreas registradas.
+                        <Link href="/areas" class="underline"
+                            >Crear un área</Link
+                        >.
+                    </p>
                 </div>
             </div>
 

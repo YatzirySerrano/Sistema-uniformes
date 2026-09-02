@@ -3,8 +3,8 @@
 namespace App\Acciones;
 
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Models\Activo;
 use App\Models\MovimientoInventario;
-use App\Models\Prenda;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\ServicioAuditoria;
@@ -25,7 +25,7 @@ class AjustarInventario
     public function ejecutar(
         int $empresaId,
         int $sucursalId,
-        int $prendaId,
+        int $activoId,
         int $tallaId,
         int $existenciaObjetivo,
         string $motivo,
@@ -39,16 +39,16 @@ class AjustarInventario
         }
 
         Sucursal::query()->where('empresa_id', $empresaId)->findOr($sucursalId, fn () => throw new ExcepcionDeNegocioSimple('La sucursal no pertenece a esta empresa.'));
-        Prenda::query()->where('empresa_id', $empresaId)->findOr($prendaId, fn () => throw new ExcepcionDeNegocioSimple('La prenda no pertenece a esta empresa.'));
+        Activo::query()->where('empresa_id', $empresaId)->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('El activo no pertenece a esta empresa.'));
         Talla::query()->where('empresa_id', $empresaId)->findOr($tallaId, fn () => throw new ExcepcionDeNegocioSimple('La talla no pertenece a esta empresa.'));
 
-        return DB::transaction(function () use ($empresaId, $sucursalId, $prendaId, $tallaId, $existenciaObjetivo, $motivo, $realizadoPor): ?MovimientoInventario {
-            $anterior = $this->inventario->saldoActual($empresaId, $sucursalId, $prendaId, $tallaId);
+        return DB::transaction(function () use ($empresaId, $sucursalId, $activoId, $tallaId, $existenciaObjetivo, $motivo, $realizadoPor): ?MovimientoInventario {
+            $anterior = $this->inventario->saldoActual($empresaId, $sucursalId, $activoId, $tallaId);
 
             $movimiento = $this->inventario->fijarExistencia(
                 $empresaId,
                 $sucursalId,
-                $prendaId,
+                $activoId,
                 $tallaId,
                 $existenciaObjetivo,
                 $motivo,

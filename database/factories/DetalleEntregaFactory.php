@@ -2,9 +2,9 @@
 
 namespace Database\Factories;
 
+use App\Models\Activo;
 use App\Models\DetalleEntrega;
 use App\Models\EntregaUniforme;
-use App\Models\Prenda;
 use App\Models\Talla;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -22,10 +22,10 @@ class DetalleEntregaFactory extends Factory
     {
         return [
             'entrega_uniforme_id' => EntregaUniforme::factory(),
-            'prenda_id' => Prenda::factory(),
+            'activo_id' => Activo::factory(),
             'talla_id' => Talla::factory(),
             'cantidad' => fake()->numberBetween(1, 5),
-            'prenda_nombre_snapshot' => fake()->word(),
+            'activo_nombre_snapshot' => fake()->word(),
             'talla_valor_snapshot' => 'M',
         ];
     }

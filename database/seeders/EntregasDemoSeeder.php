@@ -51,7 +51,7 @@ class EntregasDemoSeeder extends Seeder
             ->inRandomOrder()
             ->limit(2)
             ->get()
-            ->map(fn ($s): array => ['prenda_id' => $s->prenda_id, 'talla_id' => $s->talla_id, 'cantidad' => 2])
+            ->map(fn ($s): array => ['activo_id' => $s->activo_id, 'talla_id' => $s->talla_id, 'cantidad' => 2])
             ->all();
 
         // 1) Entrega pendiente de firma
@@ -75,7 +75,7 @@ class EntregasDemoSeeder extends Seeder
         $primerItem = $conDevolucion->detalles->first();
         $devolver->ejecutar(
             $empresa->id, $sucursal->id, $colaboradores[3]->id, $conDevolucion->id, now()->subDays(1)->toDateString(),
-            [['prenda_id' => $primerItem->prenda_id, 'talla_id' => $primerItem->talla_id, 'cantidad' => 1, 'condicion' => 'reutilizable']],
+            [['activo_id' => $primerItem->activo_id, 'talla_id' => $primerItem->talla_id, 'cantidad' => 1, 'condicion' => 'reutilizable']],
             $encargado->id, 'Cambio de talla',
         );
 
@@ -84,9 +84,9 @@ class EntregasDemoSeeder extends Seeder
             $aCorregir = $crear->ejecutar($empresa->id, $sucursal->id, $colaboradores[4]->id, $encargado->id, now()->subDays(15)->toDateString(), $itemsDisponibles());
             $confirmar->ejecutar($aCorregir, $firma, $encargado->id, '127.0.0.1', 'SeederDemo/1.0');
             $nuevos = $aCorregir->detalles->map(fn ($d): array => [
-                'prenda_id' => $d->prenda_id, 'talla_id' => $d->talla_id, 'cantidad' => max(1, $d->cantidad - 1),
+                'activo_id' => $d->activo_id, 'talla_id' => $d->talla_id, 'cantidad' => max(1, $d->cantidad - 1),
             ])->all();
-            $corregir->ejecutar($aCorregir->fresh('detalles'), $nuevos, 'Se registró una prenda de más por error de captura.', $encargado->id);
+            $corregir->ejecutar($aCorregir->fresh('detalles'), $nuevos, 'Se registró un activo de más por error de captura.', $encargado->id);
         }
 
         Auth::logout();

@@ -16,8 +16,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $empresa_id
  * @property int $sucursal_id
  * @property int|null $usuario_id
+ * @property int|null $area_id
  * @property string $numero_empleado
  * @property string $nombre_completo
+ * @property string|null $area
  * @property bool $activo
  */
 class Colaborador extends Model
@@ -35,6 +37,7 @@ class Colaborador extends Model
         'nombre_completo',
         'puesto',
         'area',
+        'area_id',
         'correo',
         'activo',
     ];
@@ -52,6 +55,18 @@ class Colaborador extends Model
     public function sucursal(): BelongsTo
     {
         return $this->belongsTo(Sucursal::class);
+    }
+
+    /**
+     * Relación estructurada con el área/departamento. Se llama `departamento`
+     * (no `area`) para no colisionar con la columna de texto `area`, que se
+     * conserva como espejo temporal. La fuente de verdad es `area_id`.
+     *
+     * @return BelongsTo<Area, $this>
+     */
+    public function departamento(): BelongsTo
+    {
+        return $this->belongsTo(Area::class, 'area_id');
     }
 
     /**

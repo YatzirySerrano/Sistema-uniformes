@@ -2,8 +2,8 @@
 
 namespace Database\Factories;
 
+use App\Models\Activo;
 use App\Models\Empresa;
-use App\Models\Prenda;
 use App\Models\SaldoInventario;
 use App\Models\Sucursal;
 use App\Models\Talla;
@@ -24,7 +24,7 @@ class SaldoInventarioFactory extends Factory
         return [
             'empresa_id' => Empresa::factory(),
             'sucursal_id' => Sucursal::factory(),
-            'prenda_id' => Prenda::factory(),
+            'activo_id' => Activo::factory(),
             'talla_id' => Talla::factory(),
             'cantidad' => fake()->numberBetween(0, 100),
             'minimo' => fake()->numberBetween(0, 10),

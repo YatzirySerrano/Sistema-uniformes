@@ -1,8 +1,8 @@
 <?php
 
+use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\Empresa;
-use App\Models\Prenda;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Models\User;
@@ -66,14 +66,14 @@ function sembrarRolesPermisos(): void
 
 /**
  * Crea un escenario mínimo multiempresa: dos empresas con una sucursal cada
- * una, tallas y una prenda por empresa, y devuelve las referencias.
+ * una, tallas y un activo por empresa, y devuelve las referencias.
  *
  * @return array{
  *     empresaA: Empresa,
  *     empresaB: Empresa,
  *     sucursalA: Sucursal,
  *     sucursalB: Sucursal,
- *     prendaA: Prenda,
+ *     activoA: Activo,
  *     tallaA: Talla,
  *     colaboradorA: Colaborador
  * }
@@ -91,12 +91,12 @@ function escenarioMultiempresa(): array
     $tallaA = Talla::factory()->for($empresaA)->create(['valor' => 'M']);
     Talla::factory()->for($empresaB)->create(['valor' => 'M']);
 
-    $prendaA = Prenda::factory()->for($empresaA)->create(['nombre' => 'Camisa']);
-    $prendaA->tallas()->attach($tallaA);
+    $activoA = Activo::factory()->for($empresaA)->create(['nombre' => 'Camisa']);
+    $activoA->tallas()->attach($tallaA);
 
     $colaboradorA = Colaborador::factory()->for($empresaA)->for($sucursalA)->create();
 
-    return compact('empresaA', 'empresaB', 'sucursalA', 'sucursalB', 'prendaA', 'tallaA', 'colaboradorA');
+    return compact('empresaA', 'empresaB', 'sucursalA', 'sucursalB', 'activoA', 'tallaA', 'colaboradorA');
 }
 
 /**

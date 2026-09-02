@@ -61,13 +61,32 @@ final class Permisos
                 'colaboradores.importar' => 'Importar colaboradores desde Excel',
             ],
         ],
-        'prendas' => [
-            'etiqueta' => 'Prendas y tallas',
+        'areas' => [
+            'etiqueta' => 'Áreas / Departamentos',
             'permisos' => [
-                'prendas.ver' => 'Ver prendas',
-                'prendas.crear' => 'Crear prendas',
-                'prendas.editar' => 'Editar prendas',
-                'tallas.administrar' => 'Administrar tallas',
+                'areas.ver' => 'Ver áreas / departamentos',
+                'areas.crear' => 'Crear áreas / departamentos',
+                'areas.editar' => 'Editar áreas / departamentos',
+                'areas.desactivar' => 'Activar / desactivar áreas / departamentos',
+            ],
+        ],
+        'almacenes' => [
+            'etiqueta' => 'Almacenes',
+            'permisos' => [
+                'almacenes.ver' => 'Ver almacenes',
+                'almacenes.crear' => 'Crear almacenes',
+                'almacenes.editar' => 'Editar almacenes',
+                'almacenes.administrar' => 'Administrar almacenes (estado y sucursales abastecidas)',
+            ],
+        ],
+        'activos' => [
+            'etiqueta' => 'Activos y variantes',
+            'permisos' => [
+                'activos.ver' => 'Ver activos',
+                'activos.crear' => 'Crear activos',
+                'activos.editar' => 'Editar activos',
+                'activos.administrar' => 'Administrar activos (estado y tipos)',
+                'tallas.administrar' => 'Administrar variantes / tallas',
             ],
         ],
         'inventario' => [
@@ -156,8 +175,10 @@ final class Permisos
             RolSistema::Supervisor->value => [
                 'empresas.ver',
                 'sucursales.ver',
+                'almacenes.ver',
                 'colaboradores.ver', 'colaboradores.crear', 'colaboradores.editar', 'colaboradores.importar',
-                'prendas.ver',
+                'areas.ver', 'areas.crear', 'areas.editar',
+                'activos.ver',
                 'inventario.ver', 'inventario.entrada', 'inventario.minimos',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf', 'acuses.ver-firma',
@@ -166,7 +187,9 @@ final class Permisos
             ],
             RolSistema::Encargado->value => [
                 'colaboradores.ver',
-                'prendas.ver',
+                'areas.ver',
+                'almacenes.ver',
+                'activos.ver',
                 'inventario.ver',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf',

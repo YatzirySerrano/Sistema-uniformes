@@ -1,0 +1,458 @@
+<script setup lang="ts">
+import { Head, router } from '@inertiajs/vue3';
+import {
+    Building2,
+    MapPin,
+    Pencil,
+    Plus,
+    Search,
+    SquareArrowOutUpRight,
+    Store,
+    UserRound,
+    Warehouse,
+    X,
+} from '@lucide/vue';
+import { computed, ref, watch } from 'vue';
+import type { AlmacenEditable } from '@/components/almacenes/FormularioAlmacen.vue';
+import FormularioAlmacen from '@/components/almacenes/FormularioAlmacen.vue';
+import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import Paginacion from '@/components/sistema/Paginacion.vue';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from '@/components/ui/tooltip';
+import type { Paginado } from '@/types/sistema';
+
+type SucursalOpcion = {
+    id: number;
+    nombre: string;
+    codigo: string;
+    activa: boolean;
+};
+
+type AlmacenFila = {
+    id: number;
+    nombre: string;
+    codigo: string | null;
+    direccion: string | null;
+    activo: boolean;
+    sucursales_count: number;
+    responsable: {
+        id: number;
+        nombre_completo: string;
+        numero_empleado: string;
+    } | null;
+};
+
+const props = defineProps<{
+    almacenes: Paginado<AlmacenFila>;
+    empresa: { id: number; nombre_comercial: string };
+    sucursales: SucursalOpcion[];
+    filtros: {
+        buscar: string;
+        estado: '' | 'activos' | 'inactivos';
+        orden: 'az' | 'za';
+    };
+    permisos: { crear: boolean; editar: boolean; administrar: boolean };
+}>();
+
+defineOptions({
+    layout: { breadcrumbs: [{ title: 'Almacenes', href: '/almacenes' }] },
+});
+
+const buscar = ref(props.filtros.buscar);
+const estado = ref<'' | 'activos' | 'inactivos'>(props.filtros.estado);
+const orden = ref<'az' | 'za'>(props.filtros.orden);
+
+const hayFiltrosActivos = computed(
+    () => buscar.value !== '' || estado.value !== '' || orden.value !== 'az',
+);
+
+let temporizador: ReturnType<typeof setTimeout> | undefined;
+watch([buscar, estado, orden], () => {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(() => {
+        router.get(
+            '/almacenes',
+            {
+                buscar: buscar.value || undefined,
+                estado: estado.value || undefined,
+                orden: orden.value === 'az' ? undefined : orden.value,
+            },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                replace: true,
+                only: ['almacenes', 'filtros'],
+            },
+        );
+    }, 300);
+});
+
+function limpiarFiltros(): void {
+    buscar.value = '';
+    estado.value = '';
+    orden.value = 'az';
+}
+
+const filtrosEstado: { valor: '' | 'activos' | 'inactivos'; texto: string }[] =
+    [
+        { valor: '', texto: 'Todos' },
+        { valor: 'activos', texto: 'Activos' },
+        { valor: 'inactivos', texto: 'Inactivos' },
+    ];
+
+const claseSelect =
+    'border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none';
+
+const modalAbierto = ref(false);
+const enEdicion = ref<AlmacenEditable | null>(null);
+const claveFormulario = ref(0);
+
+function nuevo(): void {
+    enEdicion.value = null;
+    claveFormulario.value++;
+    modalAbierto.value = true;
+}
+
+function editar(a: AlmacenFila): void {
+    // El formulario de edición completo (con sucursales y responsable) se abre
+    // desde el detalle; aquí sólo datos base + responsable ya conocido.
+    router.visit(`/almacenes/${a.id}`);
+}
+
+function alGuardar(): void {
+    modalAbierto.value = false;
+}
+
+function verDetalle(a: AlmacenFila): void {
+    router.visit(`/almacenes/${a.id}`);
+}
+
+const confirmando = ref<AlmacenFila | null>(null);
+const procesandoEstado = ref(false);
+
+function confirmarEstado(): void {
+    if (!confirmando.value) return;
+    procesandoEstado.value = true;
+    router.post(
+        `/almacenes/${confirmando.value.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                confirmando.value = null;
+            },
+        },
+    );
+}
+
+function alternarEstado(a: AlmacenFila): void {
+    if (a.activo) {
+        confirmando.value = a;
+    } else {
+        router.post(`/almacenes/${a.id}/estado`, {}, { preserveScroll: true });
+    }
+}
+</script>
+
+<template>
+    <Head title="Almacenes" />
+
+    <div class="flex flex-col gap-4 p-4">
+        <EncabezadoPagina
+            titulo="Almacenes"
+            :descripcion="`Almacenes de ${empresa.nombre_comercial} (empresa activa) y las sucursales que abastecen.`"
+        >
+            <template #acciones>
+                <Button v-if="permisos.crear" @click="nuevo">
+                    <Plus class="size-4" /> Nuevo almacén
+                </Button>
+            </template>
+        </EncabezadoPagina>
+
+        <div class="flex flex-col gap-3">
+            <div class="relative w-full sm:w-[420px]">
+                <Search
+                    class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+                />
+                <Input
+                    v-model="buscar"
+                    class="pl-8"
+                    placeholder="Buscar por nombre, código o dirección"
+                    aria-label="Buscar por nombre, código o dirección"
+                />
+            </div>
+
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div
+                    class="flex gap-1"
+                    role="group"
+                    aria-label="Filtrar por estado"
+                >
+                    <Button
+                        v-for="f in filtrosEstado"
+                        :key="f.valor"
+                        type="button"
+                        size="sm"
+                        :variant="estado === f.valor ? 'default' : 'outline'"
+                        @click="estado = f.valor"
+                    >
+                        {{ f.texto }}
+                    </Button>
+                </div>
+
+                <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Orden</span>
+                    <select
+                        v-model="orden"
+                        :class="claseSelect"
+                        aria-label="Ordenar almacenes"
+                    >
+                        <option value="az">Nombre A–Z</option>
+                        <option value="za">Nombre Z–A</option>
+                    </select>
+                </label>
+
+                <Button
+                    v-if="hayFiltrosActivos"
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    @click="limpiarFiltros"
+                >
+                    <X class="size-3.5" /> Limpiar filtros
+                </Button>
+            </div>
+        </div>
+
+        <EstadoVacio
+            v-if="!almacenes.data.length"
+            titulo="No hay almacenes para mostrar"
+            :descripcion="
+                hayFiltrosActivos
+                    ? 'Ningún almacén coincide con la búsqueda o los filtros aplicados.'
+                    : 'No hay almacenes registrados para esta empresa.'
+            "
+        >
+            <template v-if="hayFiltrosActivos" #acciones>
+                <Button variant="outline" @click="limpiarFiltros">
+                    <X class="size-4" /> Limpiar filtros
+                </Button>
+            </template>
+            <template v-else-if="permisos.crear" #acciones>
+                <Button @click="nuevo">
+                    <Plus class="size-4" /> Registrar primer almacén
+                </Button>
+            </template>
+        </EstadoVacio>
+
+        <TooltipProvider v-else :delay-duration="150">
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div
+                    v-for="a in almacenes.data"
+                    :key="a.id"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="`Ver detalles de ${a.nombre}`"
+                    class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    @click="verDetalle(a)"
+                    @keydown.enter="verDetalle(a)"
+                    @keydown.space.prevent="verDetalle(a)"
+                >
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex min-w-0 items-center gap-2.5">
+                            <span
+                                class="bg-muted/60 flex size-9 shrink-0 items-center justify-center rounded-lg border"
+                            >
+                                <Warehouse
+                                    class="text-muted-foreground size-4"
+                                />
+                            </span>
+                            <div class="min-w-0">
+                                <p class="truncate font-medium">
+                                    {{ a.nombre }}
+                                </p>
+                                <p
+                                    class="text-muted-foreground flex items-center gap-1 font-mono text-xs"
+                                >
+                                    {{ a.codigo ?? '—' }}
+                                    <AyudaTooltip
+                                        texto="Identificador interno del almacén dentro de la empresa."
+                                        etiqueta="Ayuda sobre el código"
+                                    />
+                                </p>
+                            </div>
+                        </div>
+                        <Tooltip>
+                            <TooltipTrigger as-child>
+                                <Badge
+                                    :variant="
+                                        a.activo ? 'default' : 'secondary'
+                                    "
+                                >
+                                    {{ a.activo ? 'Activo' : 'Inactivo' }}
+                                </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {{
+                                    a.activo
+                                        ? 'Disponible para operaciones.'
+                                        : 'No disponible para operaciones desde este almacén; el catálogo de activos y los históricos no se modifican.'
+                                }}
+                            </TooltipContent>
+                        </Tooltip>
+                    </div>
+
+                    <p
+                        class="text-muted-foreground flex items-center gap-1.5 text-xs"
+                    >
+                        <Building2 class="size-3" />
+                        {{ empresa.nombre_comercial }}
+                    </p>
+
+                    <div
+                        class="text-muted-foreground flex flex-col gap-1 text-sm"
+                    >
+                        <p class="flex items-center gap-1.5">
+                            <UserRound class="size-3.5 shrink-0" />
+                            <span class="line-clamp-1">
+                                {{
+                                    a.responsable
+                                        ? a.responsable.nombre_completo
+                                        : 'Sin responsable asignado'
+                                }}
+                            </span>
+                        </p>
+                        <p v-if="a.direccion" class="flex items-center gap-1.5">
+                            <MapPin class="size-3.5 shrink-0" />
+                            <span class="line-clamp-1">{{ a.direccion }}</span>
+                        </p>
+                    </div>
+
+                    <div
+                        class="bg-muted/40 w-fit rounded-lg px-3 py-2"
+                        aria-label="Sucursales abastecidas"
+                    >
+                        <p
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <Store class="size-3" /> Sucursales abastecidas
+                        </p>
+                        <p class="text-lg font-semibold">
+                            {{ a.sucursales_count }}
+                        </p>
+                    </div>
+
+                    <div class="mt-auto flex flex-wrap gap-2 pt-1">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            @click.stop="verDetalle(a)"
+                        >
+                            <SquareArrowOutUpRight class="size-3.5" />
+                            Ver detalles
+                        </Button>
+                        <Button
+                            v-if="permisos.editar"
+                            variant="ghost"
+                            size="sm"
+                            @click.stop="editar(a)"
+                        >
+                            <Pencil class="size-3.5" /> Editar
+                        </Button>
+                        <Button
+                            v-if="permisos.administrar"
+                            variant="ghost"
+                            size="sm"
+                            @click.stop="alternarEstado(a)"
+                        >
+                            {{ a.activo ? 'Desactivar' : 'Activar' }}
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </TooltipProvider>
+
+        <Paginacion :links="almacenes.links" :total="almacenes.total" />
+
+        <Dialog v-model:open="modalAbierto">
+            <DialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+                <DialogHeader>
+                    <DialogTitle>
+                        {{ enEdicion ? 'Editar almacén' : 'Nuevo almacén' }}
+                    </DialogTitle>
+                    <DialogDescription>
+                        {{
+                            enEdicion
+                                ? 'Actualiza los datos del almacén.'
+                                : `El almacén se registrará en ${empresa.nombre_comercial} (empresa activa).`
+                        }}
+                    </DialogDescription>
+                </DialogHeader>
+                <FormularioAlmacen
+                    :key="claveFormulario"
+                    :almacen="enEdicion"
+                    :sucursales="sucursales"
+                    @guardado="alGuardar"
+                    @cancelar="modalAbierto = false"
+                />
+            </DialogContent>
+        </Dialog>
+
+        <Dialog
+            :open="confirmando !== null"
+            @update:open="
+                (v) => {
+                    if (!v) confirmando = null;
+                }
+            "
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>¿Desactivar este almacén?</DialogTitle>
+                    <DialogDescription>
+                        <span v-if="confirmando" class="font-medium">{{
+                            confirmando.nombre
+                        }}</span>
+                        dejará de estar disponible para operaciones. El catálogo
+                        de activos y los registros históricos no se modifican, y
+                        podrás reactivarlo cuando quieras.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="confirmando = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEstado"
+                    >
+                        Desactivar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    </div>
+</template>

@@ -54,8 +54,8 @@ class DevolucionController extends Controller
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
             'colaboradores' => $empresa->colaboradores()->orderBy('nombre_completo')
                 ->get(['id', 'nombre_completo', 'numero_empleado', 'sucursal_id']),
-            'prendas' => $empresa->prendas()->with('tallas:id,valor')->orderBy('nombre')->get()
-                ->map(fn ($p): array => ['id' => $p->id, 'nombre' => $p->nombre, 'tallas' => $p->tallas->map->only(['id', 'valor'])->values()]),
+            'activos' => $empresa->activos()->with('tallas:id,valor')->orderBy('nombre')->get()
+                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'tallas' => $a->tallas->map->only(['id', 'valor'])->values()]),
             'condiciones' => collect(CondicionDevolucion::cases())->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
         ]);
     }
@@ -73,7 +73,7 @@ class DevolucionController extends Controller
             'motivo' => ['nullable', 'string', 'max:255'],
             'notas' => ['nullable', 'string', 'max:1000'],
             'items' => ['required', 'array', 'min:1'],
-            'items.*.prenda_id' => ['required', 'integer'],
+            'items.*.activo_id' => ['required', 'integer'],
             'items.*.talla_id' => ['required', 'integer'],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
             'items.*.condicion' => ['required', Rule::enum(CondicionDevolucion::class)],
