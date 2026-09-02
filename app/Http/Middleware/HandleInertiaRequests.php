@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Soporte\ContextoEmpresa;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Inertia\Inertia;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -61,9 +62,14 @@ class HandleInertiaRequests extends Middleware
                     ->values()->all(),
                 'branding' => $empresaActiva?->tokensDeMarca() ?? [],
             ],
-            'flash' => [
-                'toast' => $request->session()->get('toast'),
-            ],
+            // Inertia::always: sin esto, un partial reload (p. ej. cambiar un
+            // filtro con `only`) no incluye 'flash' en la respuesta y el
+            // cliente conserva el toast anterior en memoria, reapareciendo en
+            // cada navegación posterior. pull() lo consume una sola vez para
+            // que las siguientes respuestas sobrescriban el prop con null.
+            'flash' => Inertia::always([
+                'toast' => $request->session()->pull('toast'),
+            ]),
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];
     }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Empresas;
 
+use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Models\Empresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
@@ -13,6 +14,8 @@ use Illuminate\Validation\Rule;
  */
 class GuardarEmpresaRequest extends FormRequest
 {
+    use NormalizaEntrada;
+
     public function authorize(): bool
     {
         $empresa = $this->route('empresa');
@@ -24,15 +27,12 @@ class GuardarEmpresaRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $telefono = $this->limpiar($this->input('telefono'));
-        $telefonoDigitos = $telefono === null ? null : preg_replace('/\D+/', '', $telefono);
-
         $this->merge([
             'nombre_comercial' => $this->limpiar($this->input('nombre_comercial')),
             'razon_social' => $this->limpiar($this->input('razon_social')),
             'rfc' => $this->rfc(),
             'codigo' => $this->codigo(),
-            'telefono' => ($telefonoDigitos === '' || $telefonoDigitos === null) ? null : $telefonoDigitos,
+            'telefono' => $this->soloDigitos($this->input('telefono')),
             'correo' => $this->limpiar($this->input('correo')),
             'direccion' => $this->limpiar($this->input('direccion')),
             'activa' => $this->boolean('activa'),
@@ -80,17 +80,6 @@ class GuardarEmpresaRequest extends FormRequest
             'correo.email' => 'Introduce un correo electrónico válido.',
             'direccion.max' => 'La dirección no puede superar los 500 caracteres.',
         ];
-    }
-
-    private function limpiar(mixed $valor): ?string
-    {
-        if (! is_string($valor) && ! is_numeric($valor)) {
-            return null;
-        }
-
-        $valor = trim((string) $valor);
-
-        return $valor === '' ? null : $valor;
     }
 
     private function rfc(): ?string

@@ -20,6 +20,7 @@ type Colaborador = {
 const props = defineProps<{
     colaborador: Colaborador | null;
     sucursales: { id: number; nombre: string }[];
+    sucursalPreseleccionadaId?: number | null;
 }>();
 
 defineOptions({
@@ -37,7 +38,10 @@ const form = useForm({
     numero_empleado: props.colaborador?.numero_empleado ?? '',
     nombre_completo: props.colaborador?.nombre_completo ?? '',
     sucursal_id:
-        props.colaborador?.sucursal_id ?? props.sucursales[0]?.id ?? '',
+        props.colaborador?.sucursal_id ??
+        props.sucursalPreseleccionadaId ??
+        props.sucursales[0]?.id ??
+        '',
     puesto: props.colaborador?.puesto ?? '',
     area: props.colaborador?.area ?? '',
     correo: props.colaborador?.correo ?? '',

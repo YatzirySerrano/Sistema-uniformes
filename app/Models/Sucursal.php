@@ -16,6 +16,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $empresa_id
  * @property string $codigo
  * @property string $nombre
+ * @property string|null $direccion
+ * @property string|null $telefono
  * @property bool $activa
  */
 class Sucursal extends Model
@@ -55,6 +57,18 @@ class Sucursal extends Model
     public function colaboradores(): HasMany
     {
         return $this->hasMany(Colaborador::class);
+    }
+
+    /**
+     * Colaboradores activos de la sucursal. La condición replica
+     * `Colaborador::scopeActivos` y es la única definición de "colaborador
+     * activo" usada en los contadores del módulo Sucursales.
+     *
+     * @return HasMany<Colaborador, $this>
+     */
+    public function colaboradoresActivos(): HasMany
+    {
+        return $this->hasMany(Colaborador::class)->where('activo', true);
     }
 
     /**

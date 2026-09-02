@@ -358,7 +358,7 @@ function irA(ruta: string): void {
                                 size="sm"
                                 class="w-fit"
                                 :disabled="navegando"
-                                @click="irA('/sucursales')"
+                                @click="irA('/sucursales?nueva=1')"
                             >
                                 Registrar sucursal
                             </Button>
