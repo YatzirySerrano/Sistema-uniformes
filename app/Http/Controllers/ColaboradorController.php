@@ -50,13 +50,21 @@ class ColaboradorController extends Controller
         ]);
     }
 
-    public function create(): Response
+    public function create(Request $request): Response
     {
         $this->authorize('create', Colaborador::class);
+
+        $sucursalId = $request->integer('sucursal_id') ?: null;
 
         return Inertia::render('Colaboradores/Formulario', [
             'colaborador' => null,
             'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
+            // Preselección desde ?sucursal_id (p. ej. al llegar desde una
+            // sucursal específica); sólo se respeta si el usuario tiene
+            // acceso a esa sucursal dentro de la empresa activa.
+            'sucursalPreseleccionadaId' => $sucursalId && $this->contexto()->puedeVerSucursal($sucursalId)
+                ? $sucursalId
+                : null,
         ]);
     }
 

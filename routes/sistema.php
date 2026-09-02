@@ -101,6 +101,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     Route::get('sucursales', [SucursalController::class, 'index'])->name('sucursales.index');
     Route::post('sucursales', [SucursalController::class, 'store'])->name('sucursales.store');
+    Route::get('sucursales/{sucursal}', [SucursalController::class, 'show'])->name('sucursales.show');
     Route::put('sucursales/{sucursal}', [SucursalController::class, 'update'])->name('sucursales.update');
     Route::post('sucursales/{sucursal}/estado', [SucursalController::class, 'toggle'])->name('sucursales.toggle');
 

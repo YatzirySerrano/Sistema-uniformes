@@ -1,35 +1,57 @@
 <script setup lang="ts">
-import { Head, router, useForm } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
-import { ref } from 'vue';
+import { Head, router } from '@inertiajs/vue3';
+import {
+    ArrowUpRight,
+    Building2,
+    MapPin,
+    Pencil,
+    Phone,
+    Plus,
+    Search,
+    SquareArrowOutUpRight,
+    Store,
+    Users,
+    X,
+} from '@lucide/vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import type { SucursalEditable } from '@/components/sucursales/FormularioSucursal.vue';
+import FormularioSucursal from '@/components/sucursales/FormularioSucursal.vue';
+import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
-import InputError from '@/components/InputError.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
+    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from '@/components/ui/tooltip';
 import type { Paginado } from '@/types/sistema';
 
-type Sucursal = {
-    id: number;
-    codigo: string;
-    nombre: string;
-    direccion: string | null;
-    telefono: string | null;
+type SucursalFila = SucursalEditable & {
     activa: boolean;
-    colaboradores: number;
+    colaboradores_activos: number;
 };
 
-defineProps<{
-    sucursales: Paginado<Sucursal>;
+const props = defineProps<{
+    sucursales: Paginado<SucursalFila>;
+    empresa: { id: number; nombre_comercial: string };
+    filtros: {
+        buscar: string;
+        estado: '' | 'activas' | 'inactivas';
+        orden: 'az' | 'za';
+    };
     permisos: { crear: boolean; editar: boolean; desactivar: boolean };
 }>();
 
@@ -37,39 +59,129 @@ defineOptions({
     layout: { breadcrumbs: [{ title: 'Sucursales', href: '/sucursales' }] },
 });
 
-const abierto = ref(false);
-const editando = ref<Sucursal | null>(null);
+// --- Filtros ---
+const buscar = ref(props.filtros.buscar);
+const estado = ref<'' | 'activas' | 'inactivas'>(props.filtros.estado);
+const orden = ref<'az' | 'za'>(props.filtros.orden);
 
-const form = useForm({ nombre: '', codigo: '', direccion: '', telefono: '' });
+const hayFiltrosActivos = computed(
+    () => buscar.value !== '' || estado.value !== '' || orden.value !== 'az',
+);
 
-function nueva() {
-    editando.value = null;
-    form.reset();
-    form.clearErrors();
-    abierto.value = true;
+let temporizador: ReturnType<typeof setTimeout> | undefined;
+watch([buscar, estado, orden], () => {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(() => {
+        router.get(
+            '/sucursales',
+            {
+                buscar: buscar.value || undefined,
+                estado: estado.value || undefined,
+                orden: orden.value === 'az' ? undefined : orden.value,
+            },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                replace: true,
+                only: ['sucursales', 'filtros'],
+            },
+        );
+    }, 300);
+});
+
+function limpiarFiltros(): void {
+    buscar.value = '';
+    estado.value = '';
+    orden.value = 'az';
 }
-function editar(s: Sucursal) {
-    editando.value = s;
-    form.nombre = s.nombre;
-    form.codigo = s.codigo;
-    form.direccion = s.direccion ?? '';
-    form.telefono = s.telefono ?? '';
-    form.clearErrors();
-    abierto.value = true;
+
+const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
+    [
+        { valor: '', texto: 'Todas' },
+        { valor: 'activas', texto: 'Activas' },
+        { valor: 'inactivas', texto: 'Inactivas' },
+    ];
+
+const claseSelect =
+    'border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none';
+
+// --- Alta / edición ---
+const modalAbierto = ref(false);
+const enEdicion = ref<SucursalEditable | null>(null);
+const claveFormulario = ref(0);
+
+function nueva(): void {
+    enEdicion.value = null;
+    claveFormulario.value++;
+    modalAbierto.value = true;
 }
-function guardar() {
-    if (editando.value) {
-        form.put(`/sucursales/${editando.value.id}`, {
-            onSuccess: () => (abierto.value = false),
-        });
-    } else {
-        form.post('/sucursales', {
-            onSuccess: () => (abierto.value = false),
-        });
+
+function editar(s: SucursalFila): void {
+    enEdicion.value = {
+        id: s.id,
+        codigo: s.codigo,
+        nombre: s.nombre,
+        direccion: s.direccion,
+        telefono: s.telefono,
+    };
+    claveFormulario.value++;
+    modalAbierto.value = true;
+}
+
+function alGuardar(): void {
+    modalAbierto.value = false;
+}
+
+function verDetalle(s: SucursalFila): void {
+    router.visit(`/sucursales/${s.id}`);
+}
+
+function irAColaboradores(s: SucursalFila): void {
+    router.visit(`/colaboradores?sucursal_id=${s.id}`);
+}
+
+function telefonoLegible(telefono: string | null): string | null {
+    if (!telefono) return null;
+    return telefono.length === 10
+        ? `${telefono.slice(0, 2)} ${telefono.slice(2, 6)} ${telefono.slice(6)}`
+        : telefono;
+}
+
+// Apertura automática al llegar desde el detalle de Empresa (?nueva=1).
+onMounted(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('nueva') === '1' && props.permisos.crear) {
+        nueva();
     }
+});
+
+// --- Activar / desactivar ---
+const confirmando = ref<SucursalFila | null>(null);
+const procesandoEstado = ref(false);
+
+function confirmarEstado(): void {
+    if (!confirmando.value) return;
+    procesandoEstado.value = true;
+    router.post(
+        `/sucursales/${confirmando.value.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                confirmando.value = null;
+            },
+        },
+    );
 }
-function toggle(s: Sucursal) {
-    router.post(`/sucursales/${s.id}/estado`, {}, { preserveScroll: true });
+
+function alternarEstado(s: SucursalFila): void {
+    if (s.activa) {
+        confirmando.value = s; // desactivar => confirmación
+    } else {
+        // reactivar es seguro: sin confirmación
+        router.post(`/sucursales/${s.id}/estado`, {}, { preserveScroll: true });
+    }
 }
 </script>
 
@@ -79,7 +191,7 @@ function toggle(s: Sucursal) {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Sucursales"
-            descripcion="Ubicaciones de la empresa activa."
+            :descripcion="`Ubicaciones de ${empresa.nombre_comercial} (empresa activa).`"
         >
             <template #acciones>
                 <Button v-if="permisos.crear" @click="nueva">
@@ -88,103 +200,279 @@ function toggle(s: Sucursal) {
             </template>
         </EncabezadoPagina>
 
+        <div class="flex flex-col gap-3">
+            <div class="relative w-full sm:w-[420px]">
+                <Search
+                    class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+                />
+                <Input
+                    v-model="buscar"
+                    class="pl-8"
+                    placeholder="Buscar por nombre, código o dirección"
+                    aria-label="Buscar por nombre, código o dirección"
+                />
+            </div>
+
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div
+                    class="flex gap-1"
+                    role="group"
+                    aria-label="Filtrar por estado"
+                >
+                    <Button
+                        v-for="f in filtrosEstado"
+                        :key="f.valor"
+                        type="button"
+                        size="sm"
+                        :variant="estado === f.valor ? 'default' : 'outline'"
+                        @click="estado = f.valor"
+                    >
+                        {{ f.texto }}
+                    </Button>
+                </div>
+
+                <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Orden</span>
+                    <select
+                        v-model="orden"
+                        :class="claseSelect"
+                        aria-label="Ordenar sucursales"
+                    >
+                        <option value="az">Nombre A–Z</option>
+                        <option value="za">Nombre Z–A</option>
+                    </select>
+                </label>
+
+                <Button
+                    v-if="hayFiltrosActivos"
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    @click="limpiarFiltros"
+                >
+                    <X class="size-3.5" /> Limpiar filtros
+                </Button>
+            </div>
+        </div>
+
         <EstadoVacio
             v-if="!sucursales.data.length"
-            titulo="No hay sucursales"
-            descripcion="Crea la primera sucursal de esta empresa."
-        />
+            titulo="No hay sucursales para mostrar"
+            :descripcion="
+                hayFiltrosActivos
+                    ? 'Ninguna sucursal coincide con la búsqueda o los filtros aplicados.'
+                    : 'No hay sucursales registradas para esta empresa.'
+            "
+        >
+            <template v-if="hayFiltrosActivos" #acciones>
+                <Button variant="outline" @click="limpiarFiltros">
+                    <X class="size-4" /> Limpiar filtros
+                </Button>
+            </template>
+            <template v-else-if="permisos.crear" #acciones>
+                <Button @click="nueva">
+                    <Plus class="size-4" /> Registrar primera sucursal
+                </Button>
+            </template>
+        </EstadoVacio>
 
-        <div v-else class="overflow-x-auto rounded-xl border">
-            <table class="w-full min-w-[640px] text-sm">
-                <thead class="bg-muted/50 text-muted-foreground text-left">
-                    <tr>
-                        <th class="px-3 py-2 font-medium">Código</th>
-                        <th class="px-3 py-2 font-medium">Nombre</th>
-                        <th class="px-3 py-2 font-medium">Contacto</th>
-                        <th class="px-3 py-2 text-right font-medium">
-                            Colaboradores
-                        </th>
-                        <th class="px-3 py-2 font-medium">Estado</th>
-                        <th class="px-3 py-2"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr
-                        v-for="s in sucursales.data"
-                        :key="s.id"
-                        class="border-t"
+        <TooltipProvider v-else :delay-duration="150">
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div
+                    v-for="s in sucursales.data"
+                    :key="s.id"
+                    role="button"
+                    tabindex="0"
+                    :aria-label="`Ver detalles de ${s.nombre}`"
+                    class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    @click="verDetalle(s)"
+                    @keydown.enter="verDetalle(s)"
+                    @keydown.space.prevent="verDetalle(s)"
+                >
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex min-w-0 items-center gap-2.5">
+                            <span
+                                class="bg-muted/60 flex size-9 shrink-0 items-center justify-center rounded-lg border"
+                            >
+                                <Store class="text-muted-foreground size-4" />
+                            </span>
+                            <div class="min-w-0">
+                                <p class="truncate font-medium">
+                                    {{ s.nombre }}
+                                </p>
+                                <p
+                                    class="text-muted-foreground flex items-center gap-1 font-mono text-xs"
+                                >
+                                    {{ s.codigo }}
+                                    <AyudaTooltip
+                                        texto="Identificador interno de la sucursal dentro de la empresa."
+                                        etiqueta="Ayuda sobre el código"
+                                    />
+                                </p>
+                            </div>
+                        </div>
+                        <Tooltip>
+                            <TooltipTrigger as-child>
+                                <Badge
+                                    :variant="
+                                        s.activa ? 'default' : 'secondary'
+                                    "
+                                >
+                                    {{ s.activa ? 'Activa' : 'Inactiva' }}
+                                </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {{
+                                    s.activa
+                                        ? 'Disponible para nuevas operaciones.'
+                                        : 'No disponible para nuevas operaciones; sus registros históricos se conservan.'
+                                }}
+                            </TooltipContent>
+                        </Tooltip>
+                    </div>
+
+                    <p
+                        class="text-muted-foreground flex items-center gap-1.5 text-xs"
                     >
-                        <td class="px-3 py-2 font-mono">{{ s.codigo }}</td>
-                        <td class="px-3 py-2">{{ s.nombre }}</td>
-                        <td class="text-muted-foreground px-3 py-2">
-                            {{
-                                [s.direccion, s.telefono]
-                                    .filter(Boolean)
-                                    .join(' · ') || '—'
-                            }}
-                        </td>
-                        <td class="px-3 py-2 text-right">
-                            {{ s.colaboradores }}
-                        </td>
-                        <td class="px-3 py-2">
-                            <Badge
-                                :variant="s.activa ? 'default' : 'secondary'"
-                                >{{ s.activa ? 'Activa' : 'Inactiva' }}</Badge
-                            >
-                        </td>
-                        <td class="px-3 py-2 text-right whitespace-nowrap">
-                            <button
-                                v-if="permisos.editar"
-                                class="text-primary text-xs hover:underline"
-                                @click="editar(s)"
-                            >
-                                Editar
-                            </button>
-                            <button
-                                v-if="permisos.desactivar"
-                                class="text-primary ml-3 text-xs hover:underline"
-                                @click="toggle(s)"
-                            >
-                                {{ s.activa ? 'Desactivar' : 'Activar' }}
-                            </button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+                        <Building2 class="size-3" />
+                        {{ empresa.nombre_comercial }}
+                    </p>
+
+                    <div
+                        v-if="s.direccion || s.telefono"
+                        class="text-muted-foreground flex flex-col gap-1 text-sm"
+                    >
+                        <p v-if="s.direccion" class="flex items-center gap-1.5">
+                            <MapPin class="size-3.5 shrink-0" />
+                            <span class="line-clamp-1">{{ s.direccion }}</span>
+                        </p>
+                        <p v-if="s.telefono" class="flex items-center gap-1.5">
+                            <Phone class="size-3.5 shrink-0" />
+                            {{ telefonoLegible(s.telefono) }}
+                        </p>
+                    </div>
+
+                    <div
+                        role="button"
+                        tabindex="0"
+                        :aria-label="`Ver colaboradores activos de ${s.nombre}`"
+                        class="bg-muted/40 hover:bg-muted/70 hover:border-primary/40 focus-visible:ring-ring w-fit rounded-lg border border-transparent px-3 py-2 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                        @click.stop="irAColaboradores(s)"
+                        @keydown.enter.stop="irAColaboradores(s)"
+                        @keydown.space.stop.prevent="irAColaboradores(s)"
+                    >
+                        <p
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <Users class="size-3" /> Colaboradores activos
+                            <span @click.stop>
+                                <AyudaTooltip
+                                    texto="Colaboradores con estado activo asignados a esta sucursal. No incluye inactivos ni dados de baja."
+                                    etiqueta="Ayuda sobre colaboradores activos"
+                                />
+                            </span>
+                            <ArrowUpRight
+                                class="text-muted-foreground/70 ml-auto size-3.5"
+                            />
+                        </p>
+                        <p class="text-lg font-semibold">
+                            {{ s.colaboradores_activos }}
+                        </p>
+                    </div>
+
+                    <div class="mt-auto flex flex-wrap gap-2 pt-1">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            @click.stop="verDetalle(s)"
+                        >
+                            <SquareArrowOutUpRight class="size-3.5" />
+                            Ver detalles
+                        </Button>
+                        <Button
+                            v-if="permisos.editar"
+                            variant="ghost"
+                            size="sm"
+                            @click.stop="editar(s)"
+                        >
+                            <Pencil class="size-3.5" /> Editar
+                        </Button>
+                        <Button
+                            v-if="permisos.desactivar"
+                            variant="ghost"
+                            size="sm"
+                            @click.stop="alternarEstado(s)"
+                        >
+                            {{ s.activa ? 'Desactivar' : 'Activar' }}
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        </TooltipProvider>
 
         <Paginacion :links="sucursales.links" :total="sucursales.total" />
 
-        <Dialog v-model:open="abierto">
+        <!-- Modal alta / edición -->
+        <Dialog v-model:open="modalAbierto">
+            <DialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+                <DialogHeader>
+                    <DialogTitle>
+                        {{ enEdicion ? 'Editar sucursal' : 'Nueva sucursal' }}
+                    </DialogTitle>
+                    <DialogDescription>
+                        {{
+                            enEdicion
+                                ? 'Actualiza los datos de la sucursal.'
+                                : `La sucursal se registrará en ${empresa.nombre_comercial} (empresa activa).`
+                        }}
+                    </DialogDescription>
+                </DialogHeader>
+                <FormularioSucursal
+                    :key="claveFormulario"
+                    :sucursal="enEdicion"
+                    @guardado="alGuardar"
+                    @cancelar="modalAbierto = false"
+                />
+            </DialogContent>
+        </Dialog>
+
+        <!-- Confirmar desactivación -->
+        <Dialog
+            :open="confirmando !== null"
+            @update:open="
+                (v) => {
+                    if (!v) confirmando = null;
+                }
+            "
+        >
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>{{
-                        editando ? 'Editar sucursal' : 'Nueva sucursal'
-                    }}</DialogTitle>
+                    <DialogTitle>¿Desactivar esta sucursal?</DialogTitle>
+                    <DialogDescription>
+                        <span v-if="confirmando" class="font-medium">{{
+                            confirmando.nombre
+                        }}</span>
+                        dejará de estar disponible para nuevas operaciones. Los
+                        registros históricos no se eliminarán y podrás
+                        reactivarla cuando quieras.
+                    </DialogDescription>
                 </DialogHeader>
-                <form class="grid gap-3" @submit.prevent="guardar">
-                    <div class="grid gap-1.5">
-                        <Label for="s-nombre">Nombre</Label>
-                        <Input id="s-nombre" v-model="form.nombre" required />
-                        <InputError :message="form.errors.nombre" />
-                    </div>
-                    <div class="grid gap-1.5">
-                        <Label for="s-codigo">Código</Label>
-                        <Input id="s-codigo" v-model="form.codigo" required />
-                        <InputError :message="form.errors.codigo" />
-                    </div>
-                    <div class="grid gap-1.5">
-                        <Label for="s-dir">Dirección</Label>
-                        <Input id="s-dir" v-model="form.direccion" />
-                    </div>
-                    <div class="grid gap-1.5">
-                        <Label for="s-tel">Teléfono</Label>
-                        <Input id="s-tel" v-model="form.telefono" />
-                    </div>
-                    <Button type="submit" :disabled="form.processing"
-                        >Guardar</Button
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="confirmando = null"
                     >
-                </form>
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEstado"
+                    >
+                        Desactivar
+                    </Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -59,6 +59,14 @@ function limpiar() {
     sucursalId.value = '';
     estado.value = 'todos';
 }
+
+// Registrar colaborador conserva la sucursal filtrada actual (llegada desde
+// una sucursal específica o elegida en el filtro) como preselección.
+const hrefNuevoColaborador = computed(() =>
+    sucursalId.value
+        ? `/colaboradores/crear?sucursal_id=${sucursalId.value}`
+        : '/colaboradores/crear',
+);
 </script>
 
 <template>
@@ -76,7 +84,7 @@ function limpiar() {
                     </Link>
                 </Button>
                 <Button v-if="puedeCrear" as-child>
-                    <Link href="/colaboradores/crear">
+                    <Link :href="hrefNuevoColaborador">
                         <Plus class="size-4" /> Nuevo colaborador
                     </Link>
                 </Button>
@@ -123,7 +131,7 @@ function limpiar() {
                     >Limpiar filtros</Button
                 >
                 <Button v-if="puedeCrear" size="sm" as-child>
-                    <Link href="/colaboradores/crear"
+                    <Link :href="hrefNuevoColaborador"
                         >Registrar colaborador</Link
                     >
                 </Button>
