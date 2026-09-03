@@ -3,14 +3,29 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
-type Opcion = { id: number; nombre: string };
+type OpcionTipo = { id: number; nombre: string };
+type OpcionCategoria = {
+    id: number;
+    nombre: string;
+    tipo_activo_id: number | null;
+    tipo?: string | null;
+};
 
 type Activo = {
     id: number;
@@ -27,14 +42,11 @@ type Activo = {
 };
 
 type Variante = { id: number; valor: string };
-type Catalogo = {
-    tallas: Variante[];
-    tiposActivo: Opcion[];
-    categorias: Opcion[];
-};
+type Catalogo = { tallas: Variante[] };
 
 const props = defineProps<{
     activo: Activo | null;
+    seleccion: { tipo: OpcionTipo | null; categoria: OpcionCategoria | null };
     empresasAutorizadas: EmpresaAutorizada[];
     catalogosPorEmpresa: Record<number, Catalogo>;
     tiposControl: { valor: string; etiqueta: string }[];
@@ -64,33 +76,31 @@ const empresaId = ref<number | ''>(
             : ''),
 );
 
-function catalogoDe(id: number | ''): Catalogo {
-    return (
-        (id !== '' && props.catalogosPorEmpresa[id]) || {
-            tallas: [],
-            tiposActivo: [],
-            categorias: [],
-        }
-    );
+function tallasDe(id: number | ''): Variante[] {
+    return (id !== '' && props.catalogosPorEmpresa[id]?.tallas) || [];
 }
 
-// Listas locales (para añadir tipos / categorías / variantes creados en línea).
-const tiposLocal = ref<Opcion[]>([...catalogoDe(empresaId.value).tiposActivo]);
-const categoriasLocal = ref<Opcion[]>([
-    ...catalogoDe(empresaId.value).categorias,
-]);
-const tallasLocal = ref<Variante[]>([...catalogoDe(empresaId.value).tallas]);
+// Las variantes / tallas siguen viajando por empresa (lista corta y con
+// checkboxes). Tipo y categoría se buscan en vivo con la empresa como
+// dependencia (BuscadorAsync).
+const tallasLocal = ref<Variante[]>([...tallasDe(empresaId.value)]);
 
-// Al cambiar de empresa se recargan los catálogos y se limpia la selección.
+// Objeto seleccionado en cada combobox (el id vive en `form`).
+const tipoSel = ref<OpcionTipo | null>(props.seleccion.tipo);
+const categoriaSel = ref<OpcionCategoria | null>(props.seleccion.categoria);
+const avisoCategoria = ref('');
+
+// Al cambiar de empresa: se limpia todo lo dependiente y BuscadorAsync descarta
+// sus resultados (prop `dependencia`).
 watch(empresaId, (id) => {
-    const cat = catalogoDe(id);
-    tiposLocal.value = [...cat.tiposActivo];
-    categoriasLocal.value = [...cat.categorias];
-    tallasLocal.value = [...cat.tallas];
+    tallasLocal.value = [...tallasDe(id)];
     form.empresa_id = id === '' ? null : id;
     form.tipo_activo_id = '';
     form.categoria_id = '';
     form.tallas = [];
+    tipoSel.value = null;
+    categoriaSel.value = null;
+    avisoCategoria.value = '';
 });
 
 const buscarTalla = ref('');
@@ -133,26 +143,122 @@ watch(esSerializado, (serializado) => {
     if (serializado) form.tallas = [];
 });
 
-// --- Alta rápida en línea (tipo / categoría) ---------------------------------
 function xsrf(): string {
     const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
     return m ? decodeURIComponent(m[1]) : '';
 }
 
-const nuevoTipo = ref('');
-const nuevaCategoria = ref('');
-const nuevaVariante = ref('');
+// --- Tipo de activo (combobox con búsqueda + alta inline) --------------------
+async function buscarTipos(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionTipo[]> {
+    if (empresaId.value === '') return [];
+    const res = await fetch(
+        `/tipos-activo/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).tipos ?? [];
+}
+
+function alElegirTipo(o: OpcionTipo | null): void {
+    tipoSel.value = o;
+    form.tipo_activo_id = o?.id ?? '';
+    form.clearErrors('tipo_activo_id');
+}
+
+// Coherencia: si el tipo cambia a otro concreto y la categoría elegida está
+// ligada a un tipo distinto, se quita la categoría (el backend también lo valida).
+watch(
+    () => form.tipo_activo_id,
+    (nuevo) => {
+        const cat = categoriaSel.value;
+        if (
+            cat &&
+            cat.tipo_activo_id != null &&
+            nuevo !== '' &&
+            cat.tipo_activo_id !== nuevo
+        ) {
+            categoriaSel.value = null;
+            form.categoria_id = '';
+            avisoCategoria.value =
+                'Se quitó la categoría porque pertenece a otro tipo de activo.';
+        }
+    },
+);
+
+// --- Categoría (combobox con búsqueda + alta inline) ------------------------
+async function buscarCategorias(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionCategoria[]> {
+    if (empresaId.value === '') return [];
+    const tipo = form.tipo_activo_id
+        ? `&tipo_activo_id=${form.tipo_activo_id}`
+        : '';
+    const res = await fetch(
+        `/categorias-activo/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}${tipo}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).categorias ?? [];
+}
+
+function alElegirCategoria(o: OpcionCategoria | null): void {
+    categoriaSel.value = o;
+    form.categoria_id = o?.id ?? '';
+    form.clearErrors('categoria_id');
+    avisoCategoria.value = '';
+
+    // Si la categoría trae tipo y el activo aún no tiene, se completa solo.
+    if (o?.tipo_activo_id != null && form.tipo_activo_id === '') {
+        form.tipo_activo_id = o.tipo_activo_id;
+        tipoSel.value = { id: o.tipo_activo_id, nombre: o.tipo ?? '' };
+    }
+}
+
+// --- Diálogos de alta rápida ----------------------------------------------
+const dialogoTipo = ref(false);
+const nombreNuevoTipo = ref('');
+const errorNuevoTipo = ref('');
 const creandoTipo = ref(false);
+
+const dialogoCategoria = ref(false);
+const nombreNuevaCategoria = ref('');
+const tipoNuevaCategoria = ref<OpcionTipo | null>(null);
+const errorNuevaCategoria = ref('');
 const creandoCategoria = ref(false);
-const creandoVariante = ref(false);
-const mostrarNuevoTipo = ref(false);
-const mostrarNuevaCategoria = ref(false);
-const mostrarNuevaVariante = ref(false);
+
+function abrirDialogoTipo(termino: string): void {
+    nombreNuevoTipo.value = termino;
+    errorNuevoTipo.value = '';
+    dialogoTipo.value = true;
+}
+
+function abrirDialogoCategoria(termino: string): void {
+    nombreNuevaCategoria.value = termino;
+    tipoNuevaCategoria.value = tipoSel.value;
+    errorNuevaCategoria.value = '';
+    dialogoCategoria.value = true;
+}
+
+type RespuestaRapida =
+    | { ok: true; datos: Record<string, unknown> }
+    | { ok: false; errores: Record<string, string[]> };
 
 async function crearRapido(
     url: string,
-    nombre: string,
-): Promise<Opcion | null> {
+    cuerpo: Record<string, unknown>,
+): Promise<RespuestaRapida> {
     const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -161,12 +267,66 @@ async function crearRapido(
             'X-XSRF-TOKEN': xsrf(),
         },
         credentials: 'same-origin',
-        body: JSON.stringify({ nombre, empresa_id: empresaId.value }),
+        body: JSON.stringify({ ...cuerpo, empresa_id: empresaId.value }),
     });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return (json.tipo ?? json.categoria) as Opcion;
+    const json = (await res.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+    >;
+    if (!res.ok) {
+        return {
+            ok: false,
+            errores: (json.errors ?? {}) as Record<string, string[]>,
+        };
+    }
+    return { ok: true, datos: json };
 }
+
+async function guardarNuevoTipo(): Promise<void> {
+    if (!nombreNuevoTipo.value.trim() || creandoTipo.value) return;
+    creandoTipo.value = true;
+    errorNuevoTipo.value = '';
+    const r = await crearRapido('/tipos-activo/rapido', {
+        nombre: nombreNuevoTipo.value.trim(),
+    });
+    creandoTipo.value = false;
+
+    if (!r.ok) {
+        errorNuevoTipo.value =
+            r.errores.nombre?.[0] ?? 'No se pudo crear el tipo.';
+        return;
+    }
+
+    alElegirTipo(r.datos.tipo as OpcionTipo);
+    dialogoTipo.value = false;
+}
+
+async function guardarNuevaCategoria(): Promise<void> {
+    if (!nombreNuevaCategoria.value.trim() || creandoCategoria.value) return;
+    creandoCategoria.value = true;
+    errorNuevaCategoria.value = '';
+    const r = await crearRapido('/categorias-activo/rapido', {
+        nombre: nombreNuevaCategoria.value.trim(),
+        tipo_activo_id: tipoNuevaCategoria.value?.id ?? null,
+    });
+    creandoCategoria.value = false;
+
+    if (!r.ok) {
+        errorNuevaCategoria.value =
+            r.errores.nombre?.[0] ??
+            r.errores.tipo_activo_id?.[0] ??
+            'No se pudo crear la categoría.';
+        return;
+    }
+
+    alElegirCategoria(r.datos.categoria as OpcionCategoria);
+    dialogoCategoria.value = false;
+}
+
+// --- Alta rápida de variante / talla (sin cambios de alcance en este bloque) --
+const nuevaVariante = ref('');
+const creandoVariante = ref(false);
+const mostrarNuevaVariante = ref(false);
 
 async function agregarVariante() {
     if (!nuevaVariante.value.trim()) return;
@@ -191,42 +351,6 @@ async function agregarVariante() {
     if (!form.tallas.includes(creada.id)) form.tallas.push(creada.id);
     nuevaVariante.value = '';
     mostrarNuevaVariante.value = false;
-}
-
-async function agregarTipo() {
-    if (!nuevoTipo.value.trim()) return;
-    creandoTipo.value = true;
-    const creado = await crearRapido(
-        '/tipos-activo/rapido',
-        nuevoTipo.value.trim(),
-    );
-    creandoTipo.value = false;
-    if (creado) {
-        tiposLocal.value = [...tiposLocal.value, creado].sort((a, b) =>
-            a.nombre.localeCompare(b.nombre),
-        );
-        form.tipo_activo_id = creado.id;
-        nuevoTipo.value = '';
-        mostrarNuevoTipo.value = false;
-    }
-}
-
-async function agregarCategoria() {
-    if (!nuevaCategoria.value.trim()) return;
-    creandoCategoria.value = true;
-    const creada = await crearRapido(
-        '/categorias-activo/rapido',
-        nuevaCategoria.value.trim(),
-    );
-    creandoCategoria.value = false;
-    if (creada) {
-        categoriasLocal.value = [...categoriasLocal.value, creada].sort(
-            (a, b) => a.nombre.localeCompare(b.nombre),
-        );
-        form.categoria_id = creada.id;
-        nuevaCategoria.value = '';
-        mostrarNuevaCategoria.value = false;
-    }
 }
 
 function enviar() {
@@ -308,63 +432,51 @@ const selectClass =
                             class="flex items-center gap-1.5"
                         >
                             Categoría
+                            <span class="text-muted-foreground"
+                                >(opcional)</span
+                            >
                             <AyudaTooltip
-                                texto="Qué es el activo dentro de su tipo (Camisola, Pantalón, Laptop, Teléfono celular…). Se elige de un catálogo por empresa."
+                                texto="Qué es el activo dentro de su tipo (Camisola, Pantalón, Laptop, Teléfono celular…). Se elige de un catálogo por empresa. Puedes dejarlo en blanco."
                                 etiqueta="Ayuda sobre la categoría"
                             />
                         </Label>
-                        <div class="flex flex-wrap items-center gap-2">
-                            <select
-                                id="categoria_id"
-                                v-model="form.categoria_id"
-                                :class="[selectClass, 'flex-1']"
-                            >
-                                <option value="">Sin categoría</option>
-                                <option
-                                    v-for="c in categoriasLocal"
-                                    :key="c.id"
-                                    :value="c.id"
-                                >
-                                    {{ c.nombre }}
-                                </option>
-                            </select>
-                            <Button
-                                v-if="permisos.crear_categoria"
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                @click="
-                                    mostrarNuevaCategoria =
-                                        !mostrarNuevaCategoria
-                                "
-                            >
-                                <Plus class="size-4" /> Otra
-                            </Button>
-                        </div>
-                        <div
-                            v-if="mostrarNuevaCategoria"
-                            class="flex flex-wrap items-center gap-2"
-                        >
-                            <Input
-                                v-model="nuevaCategoria"
-                                placeholder="Nombre de la nueva categoría"
-                                class="flex-1"
-                                @keydown.enter.prevent="agregarCategoria"
-                            />
-                            <Button
-                                type="button"
-                                size="sm"
-                                :disabled="
-                                    creandoCategoria || !nuevaCategoria.trim()
-                                "
-                                @click="agregarCategoria"
-                            >
-                                Agregar
-                            </Button>
-                        </div>
+                        <BuscadorAsync
+                            id="categoria_id"
+                            :model-value="categoriaSel"
+                            :buscar="buscarCategorias"
+                            :dependencia="`${empresaId}|${form.tipo_activo_id}`"
+                            :disabled="empresaId === ''"
+                            :etiqueta="(c) => (c as OpcionCategoria).nombre"
+                            :descripcion="
+                                (c) => (c as OpcionCategoria).tipo ?? 'Sin tipo'
+                            "
+                            :placeholder="
+                                empresaId === ''
+                                    ? 'Selecciona primero una empresa'
+                                    : 'Sin categoría'
+                            "
+                            placeholder-busqueda="Buscar categoría por nombre"
+                            sin-resultados="No hay categorías activas para esta empresa."
+                            :permite-crear="permisos.crear_categoria"
+                            texto-crear="Crear nueva categoría"
+                            :invalido="!!form.errors.categoria_id"
+                            @update:model-value="
+                                (v) =>
+                                    alElegirCategoria(
+                                        v as OpcionCategoria | null,
+                                    )
+                            "
+                            @crear="abrirDialogoCategoria"
+                        />
                         <p class="text-muted-foreground text-xs">
                             Clasificación específica dentro del tipo. Ejemplo:
                             Camisola, Laptop o Teléfono celular.
+                        </p>
+                        <p
+                            v-if="avisoCategoria"
+                            class="text-xs text-amber-600 dark:text-amber-500"
+                        >
+                            {{ avisoCategoria }}
                         </p>
                         <InputError :message="form.errors.categoria_id" />
                     </div>
@@ -389,55 +501,34 @@ const selectClass =
                         class="flex items-center gap-1.5"
                     >
                         Tipo de activo
+                        <span class="text-muted-foreground">(opcional)</span>
                         <AyudaTooltip
-                            texto="Naturaleza del activo: Prenda, Equipo de cómputo, Dispositivo móvil, Electrónico, Accesorio, Herramienta / Equipo, Otro. El administrador puede crear tipos nuevos."
+                            texto="Naturaleza del activo: Prenda, Equipo de cómputo, Dispositivo móvil, Electrónico, Accesorio, Herramienta / Equipo, Otro. El administrador puede crear tipos nuevos. Puedes dejarlo en blanco."
                             etiqueta="Ayuda sobre el tipo de activo"
                         />
                     </Label>
-                    <div class="flex flex-wrap items-center gap-2">
-                        <select
-                            id="tipo_activo_id"
-                            v-model="form.tipo_activo_id"
-                            :class="[selectClass, 'flex-1']"
-                        >
-                            <option value="">Sin tipo</option>
-                            <option
-                                v-for="t in tiposLocal"
-                                :key="t.id"
-                                :value="t.id"
-                            >
-                                {{ t.nombre }}
-                            </option>
-                        </select>
-                        <Button
-                            v-if="permisos.crear_tipo"
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            @click="mostrarNuevoTipo = !mostrarNuevoTipo"
-                        >
-                            <Plus class="size-4" /> Otro
-                        </Button>
-                    </div>
-                    <div
-                        v-if="mostrarNuevoTipo"
-                        class="flex flex-wrap items-center gap-2"
-                    >
-                        <Input
-                            v-model="nuevoTipo"
-                            placeholder="Nombre del nuevo tipo"
-                            class="flex-1"
-                            @keydown.enter.prevent="agregarTipo"
-                        />
-                        <Button
-                            type="button"
-                            size="sm"
-                            :disabled="creandoTipo || !nuevoTipo.trim()"
-                            @click="agregarTipo"
-                        >
-                            Agregar
-                        </Button>
-                    </div>
+                    <BuscadorAsync
+                        id="tipo_activo_id"
+                        :model-value="tipoSel"
+                        :buscar="buscarTipos"
+                        :dependencia="empresaId"
+                        :disabled="empresaId === ''"
+                        :etiqueta="(t) => (t as OpcionTipo).nombre"
+                        :placeholder="
+                            empresaId === ''
+                                ? 'Selecciona primero una empresa'
+                                : 'Sin tipo'
+                        "
+                        placeholder-busqueda="Buscar tipo por nombre"
+                        sin-resultados="No hay tipos activos para esta empresa."
+                        :permite-crear="permisos.crear_tipo"
+                        texto-crear="Crear nuevo tipo"
+                        :invalido="!!form.errors.tipo_activo_id"
+                        @update:model-value="
+                            (v) => alElegirTipo(v as OpcionTipo | null)
+                        "
+                        @crear="abrirDialogoTipo"
+                    />
                     <p class="text-muted-foreground text-xs">
                         Clasificación general del activo. Ejemplo: Prenda,
                         Equipo de cómputo o Dispositivo móvil.
@@ -637,5 +728,117 @@ const selectClass =
                 </Button>
             </div>
         </form>
+
+        <!-- Alta rápida de tipo -->
+        <Dialog
+            :open="dialogoTipo"
+            @update:open="(v: boolean) => (dialogoTipo = v)"
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Nuevo tipo de activo</DialogTitle>
+                    <DialogDescription>
+                        Se agrega al catálogo de la empresa seleccionada y queda
+                        elegido en el formulario.
+                    </DialogDescription>
+                </DialogHeader>
+                <div class="grid gap-1.5">
+                    <Label for="nuevo-tipo-nombre">Nombre</Label>
+                    <Input
+                        id="nuevo-tipo-nombre"
+                        v-model="nombreNuevoTipo"
+                        placeholder="p. ej. Equipo de protección"
+                        @keydown.enter.prevent="guardarNuevoTipo"
+                    />
+                    <p v-if="errorNuevoTipo" class="text-destructive text-xs">
+                        {{ errorNuevoTipo }}
+                    </p>
+                </div>
+                <DialogFooter>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        @click="dialogoTipo = false"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        type="button"
+                        :disabled="creandoTipo || !nombreNuevoTipo.trim()"
+                        @click="guardarNuevoTipo"
+                    >
+                        Crear y seleccionar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Alta rápida de categoría -->
+        <Dialog
+            :open="dialogoCategoria"
+            @update:open="(v: boolean) => (dialogoCategoria = v)"
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Nueva categoría</DialogTitle>
+                    <DialogDescription>
+                        Se agrega al catálogo de la empresa seleccionada y queda
+                        elegida en el formulario.
+                    </DialogDescription>
+                </DialogHeader>
+                <div class="grid gap-3">
+                    <div class="grid gap-1.5">
+                        <Label for="nueva-cat-nombre">Nombre</Label>
+                        <Input
+                            id="nueva-cat-nombre"
+                            v-model="nombreNuevaCategoria"
+                            placeholder="p. ej. Camisola"
+                            @keydown.enter.prevent="guardarNuevaCategoria"
+                        />
+                    </div>
+                    <div class="grid gap-1.5">
+                        <Label>Tipo relacionado (opcional)</Label>
+                        <BuscadorAsync
+                            :model-value="tipoNuevaCategoria"
+                            :buscar="buscarTipos"
+                            :dependencia="empresaId"
+                            :etiqueta="(t) => (t as OpcionTipo).nombre"
+                            placeholder="Sin tipo"
+                            placeholder-busqueda="Buscar tipo por nombre"
+                            sin-resultados="No hay tipos activos para esta empresa."
+                            @update:model-value="
+                                (v) =>
+                                    (tipoNuevaCategoria =
+                                        v as OpcionTipo | null)
+                            "
+                        />
+                    </div>
+                    <p
+                        v-if="errorNuevaCategoria"
+                        class="text-destructive text-xs"
+                    >
+                        {{ errorNuevaCategoria }}
+                    </p>
+                </div>
+                <DialogFooter>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        @click="dialogoCategoria = false"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        type="button"
+                        :disabled="
+                            creandoCategoria || !nombreNuevaCategoria.trim()
+                        "
+                        @click="guardarNuevaCategoria"
+                    >
+                        Crear y seleccionar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

@@ -93,8 +93,16 @@ class ActivoController extends Controller
         return Inertia::render('Activos/Index', [
             'activos' => $activos,
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'tiposActivo' => $this->tiposActivoDe($idsScope->all()),
-            'categorias' => $this->categoriasDe($idsScope->all()),
+            'filtrosSeleccion' => [
+                'tipo' => ($filtros['tipo_activo_id'] ?? null)
+                    ? TipoActivo::query()->whereIn('empresa_id', $idsScope->all())
+                        ->whereKey($filtros['tipo_activo_id'])->first(['id', 'nombre'])
+                    : null,
+                'categoria' => ($filtros['categoria_id'] ?? null)
+                    ? CategoriaActivo::query()->whereIn('empresa_id', $idsScope->all())
+                        ->whereKey($filtros['categoria_id'])->first(['id', 'nombre', 'tipo_activo_id'])
+                    : null,
+            ],
             'filtros' => [
                 'buscar' => $filtros['buscar'] ?? '',
                 'empresa_id' => $empresaFiltro?->id,
@@ -166,6 +174,7 @@ class ActivoController extends Controller
 
         return Inertia::render('Activos/Formulario', [
             'activo' => null,
+            'seleccion' => ['tipo' => null, 'categoria' => null],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request),
             'tiposControl' => TipoControlActivo::opciones(),
@@ -205,12 +214,26 @@ class ActivoController extends Controller
     {
         $this->authorize('update', $activo);
 
+        $activo->load('tipoActivo:id,nombre', 'categoriaActivo:id,nombre,tipo_activo_id');
+
         return Inertia::render('Activos/Formulario', [
             'activo' => [
                 ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'empresa_id', 'tipo_activo_id', 'categoria_id', 'activo']),
                 'tipo_control' => $activo->tipo_control->value,
                 'imagen_url' => $activo->imagen_ruta ? Storage::disk('public')->url($activo->imagen_ruta) : null,
                 'tallas' => $activo->tallas()->pluck('tallas.id'),
+            ],
+            // El tipo / la categoría asignados se muestran aunque estén
+            // desactivados (los buscadores sólo ofrecen los activos).
+            'seleccion' => [
+                'tipo' => $activo->tipoActivo === null ? null : [
+                    'id' => $activo->tipoActivo->id, 'nombre' => $activo->tipoActivo->nombre,
+                ],
+                'categoria' => $activo->categoriaActivo === null ? null : [
+                    'id' => $activo->categoriaActivo->id,
+                    'nombre' => $activo->categoriaActivo->nombre,
+                    'tipo_activo_id' => $activo->categoriaActivo->tipo_activo_id,
+                ],
             ],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request, [$activo->empresa_id]),
@@ -304,11 +327,13 @@ class ActivoController extends Controller
     }
 
     /**
-     * Catálogos (variantes, tipos, categorías) de cada empresa autorizada, para
-     * que el formulario los muestre según la empresa elegida.
+     * Variantes / tallas seleccionables de cada empresa autorizada, para que el
+     * formulario las muestre según la empresa elegida. Los tipos y las categorías
+     * ya no viajan aquí: el formulario los busca en vivo (`/tipos-activo/buscar`,
+     * `/categorias-activo/buscar`) con la empresa como dependencia.
      *
      * @param  array<int, int>  $soloEmpresas  restringe a estos ids (edición)
-     * @return array<int, array{tallas: mixed, tiposActivo: array<int, mixed>, categorias: array<int, mixed>}>
+     * @return array<int, array{tallas: mixed}>
      */
     private function catalogosPorEmpresa(Request $request, array $soloEmpresas = []): array
     {
@@ -317,39 +342,7 @@ class ActivoController extends Controller
 
         return $empresas->mapWithKeys(fn (Empresa $e): array => [$e->id => [
             'tallas' => $e->tallas()->seleccionables()->ordenadas()->get(['id', 'valor']),
-            'tiposActivo' => $this->tiposActivoDe([$e->id]),
-            'categorias' => $this->categoriasDe([$e->id]),
         ]])->all();
-    }
-
-    /**
-     * @param  array<int, int>  $empresaIds
-     * @return array<int, array{id: int, nombre: string}>
-     */
-    private function tiposActivoDe(array $empresaIds): array
-    {
-        return TipoActivo::query()
-            ->whereIn('empresa_id', $empresaIds)
-            ->where('activo', true)
-            ->orderBy('nombre')
-            ->get(['id', 'nombre'])
-            ->map(fn (TipoActivo $t): array => ['id' => $t->id, 'nombre' => $t->nombre])
-            ->all();
-    }
-
-    /**
-     * @param  array<int, int>  $empresaIds
-     * @return array<int, array{id: int, nombre: string}>
-     */
-    private function categoriasDe(array $empresaIds): array
-    {
-        return CategoriaActivo::query()
-            ->whereIn('empresa_id', $empresaIds)
-            ->where('activa', true)
-            ->orderBy('nombre')
-            ->get(['id', 'nombre'])
-            ->map(fn (CategoriaActivo $c): array => ['id' => $c->id, 'nombre' => $c->nombre])
-            ->all();
     }
 
     /**

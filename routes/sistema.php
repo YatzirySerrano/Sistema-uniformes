@@ -71,10 +71,12 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     // Catálogos de activos: tipos y categorías (dentro del área de Activos)
     Route::get('activos-catalogos', [CatalogoActivoController::class, 'index'])->name('activos.catalogos');
+    Route::get('tipos-activo/buscar', [TipoActivoController::class, 'buscar'])->name('tipos-activo.buscar');
     Route::post('tipos-activo', [TipoActivoController::class, 'store'])->name('tipos-activo.store');
     Route::post('tipos-activo/rapido', [TipoActivoController::class, 'rapido'])->name('tipos-activo.rapido');
     Route::put('tipos-activo/{tipo}', [TipoActivoController::class, 'update'])->name('tipos-activo.update');
     Route::post('tipos-activo/{tipo}/estado', [TipoActivoController::class, 'toggle'])->name('tipos-activo.toggle');
+    Route::get('categorias-activo/buscar', [CategoriaActivoController::class, 'buscar'])->name('categorias-activo.buscar');
     Route::post('categorias-activo', [CategoriaActivoController::class, 'store'])->name('categorias-activo.store');
     Route::post('categorias-activo/rapido', [CategoriaActivoController::class, 'rapido'])->name('categorias-activo.rapido');
     Route::put('categorias-activo/{categoria}', [CategoriaActivoController::class, 'update'])->name('categorias-activo.update');

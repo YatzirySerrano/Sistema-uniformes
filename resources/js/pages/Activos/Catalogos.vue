@@ -5,6 +5,14 @@ import { computed, ref, watch } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { EmpresaAutorizada } from '@/types/sistema';
@@ -133,8 +141,30 @@ function guardarTipo(id: number) {
         onSuccess: () => (editandoTipo.value = null),
     });
 }
-function toggleTipo(id: number) {
-    router.post(`/tipos-activo/${id}/estado`, {}, { preserveScroll: true });
+// --- Confirmación de activar / desactivar ---
+type Confirmacion = {
+    recurso: 'tipo' | 'categoria';
+    id: number;
+    nombre: string;
+    activar: boolean;
+};
+const confirmacion = ref<Confirmacion | null>(null);
+
+function pedirConfirmacion(c: Confirmacion) {
+    confirmacion.value = c;
+}
+function confirmarEstado() {
+    const c = confirmacion.value;
+    if (!c) return;
+    const url =
+        c.recurso === 'tipo'
+            ? `/tipos-activo/${c.id}/estado`
+            : `/categorias-activo/${c.id}/estado`;
+    router.post(
+        url,
+        {},
+        { preserveScroll: true, onFinish: () => (confirmacion.value = null) },
+    );
 }
 
 function crearCategoria() {
@@ -157,13 +187,6 @@ function guardarCategoria(id: number) {
         preserveScroll: true,
         onSuccess: () => (editandoCategoria.value = null),
     });
-}
-function toggleCategoria(id: number) {
-    router.post(
-        `/categorias-activo/${id}/estado`,
-        {},
-        { preserveScroll: true },
-    );
 }
 </script>
 
@@ -316,7 +339,14 @@ function toggleCategoria(id: number) {
                                         <button
                                             v-if="permisos.administrar_tipos"
                                             class="text-primary ml-3 text-xs hover:underline"
-                                            @click="toggleTipo(t.id)"
+                                            @click="
+                                                pedirConfirmacion({
+                                                    recurso: 'tipo',
+                                                    id: t.id,
+                                                    nombre: t.nombre,
+                                                    activar: !t.activo,
+                                                })
+                                            "
                                         >
                                             {{
                                                 t.activo
@@ -530,7 +560,14 @@ function toggleCategoria(id: number) {
                                                 permisos.administrar_categorias
                                             "
                                             class="text-primary ml-3 text-xs hover:underline"
-                                            @click="toggleCategoria(c.id)"
+                                            @click="
+                                                pedirConfirmacion({
+                                                    recurso: 'categoria',
+                                                    id: c.id,
+                                                    nombre: c.nombre,
+                                                    activar: !c.activa,
+                                                })
+                                            "
                                         >
                                             {{
                                                 c.activa
@@ -617,5 +654,52 @@ function toggleCategoria(id: number) {
                 </div>
             </section>
         </div>
+
+        <Dialog
+            :open="confirmacion !== null"
+            @update:open="(v: boolean) => !v && (confirmacion = null)"
+        >
+            <DialogContent v-if="confirmacion">
+                <DialogHeader>
+                    <DialogTitle>
+                        {{ confirmacion.activar ? '¿Activar' : '¿Desactivar' }}
+                        {{
+                            confirmacion.recurso === 'tipo'
+                                ? 'tipo de activo?'
+                                : 'categoría?'
+                        }}
+                    </DialogTitle>
+                    <DialogDescription>
+                        <span class="font-medium">{{
+                            confirmacion.nombre
+                        }}</span
+                        >.
+                        {{
+                            confirmacion.activar
+                                ? 'Volverá a estar disponible para nuevas selecciones.'
+                                : 'Dejará de estar disponible para nuevas selecciones. Los activos existentes conservarán su información.'
+                        }}
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        @click="confirmacion = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        type="button"
+                        :variant="
+                            confirmacion.activar ? 'default' : 'destructive'
+                        "
+                        @click="confirmarEstado"
+                    >
+                        {{ confirmacion.activar ? 'Activar' : 'Desactivar' }}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

@@ -7,10 +7,11 @@ use App\Http\Requests\Activos\GuardarTipoActivoRequest;
 use App\Models\Empresa;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioAuditoria;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * CRUD del catálogo de tipos de activo (Prenda, Equipo de cómputo, Dispositivo
@@ -64,7 +65,43 @@ class TipoActivoController extends Controller
     }
 
     /**
-     * Alta rápida desde el formulario de Activo. Devuelve el tipo ya creado.
+     * Búsqueda con autocompletado para el combobox de tipo de activo (formulario
+     * de Activo y filtro del listado). Sólo tipos activos y autorizados; si se
+     * envía `empresa_id` se acota a esa empresa (inválida / sin acceso → lista
+     * vacía), si no, a todas las empresas autorizadas.
+     */
+    public function buscar(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', TipoActivo::class);
+
+        $termino = trim((string) $request->query('q', ''));
+        $consulta = TipoActivo::query()->where('activo', true);
+
+        if ($request->filled('empresa_id')) {
+            $empresa = $this->empresaDelFiltro($request);
+
+            if ($empresa === null) {
+                return response()->json(['tipos' => []]);
+            }
+
+            $consulta->where('empresa_id', $empresa->id);
+        } else {
+            $consulta->whereIn('empresa_id', $this->idsEmpresasAutorizadas($request));
+        }
+
+        $tipos = $consulta
+            ->when($termino !== '', fn (Builder $q) => $q->where('nombre', 'like', "%{$termino}%"))
+            ->orderBy('nombre')
+            ->limit(20)
+            ->get(['id', 'nombre'])
+            ->map(fn (TipoActivo $t): array => ['id' => $t->id, 'nombre' => $t->nombre]);
+
+        return response()->json(['tipos' => $tipos]);
+    }
+
+    /**
+     * Alta rápida desde el combobox del formulario de Activo. Devuelve el tipo
+     * ya creado para seleccionarlo en el acto.
      */
     public function rapido(Request $request): JsonResponse
     {
@@ -72,16 +109,20 @@ class TipoActivoController extends Controller
         $empresa = $this->resolverEmpresa($request);
 
         $datos = $request->validate([
-            'nombre' => [
-                'required', 'string', 'max:120',
-                Rule::unique('tipos_activo', 'nombre')->where(fn ($q) => $q->where('empresa_id', $empresa->id)),
-            ],
+            'nombre' => ['required', 'string', 'max:120'],
         ], [
             'nombre.required' => 'Escribe el nombre del nuevo tipo.',
-            'nombre.unique' => 'Ya existe un tipo de activo con ese nombre en esta empresa.',
         ]);
 
-        $tipo = $this->crear($empresa, trim($datos['nombre']), true);
+        $nombre = trim($datos['nombre']);
+
+        if (TipoActivo::existeNombreEnEmpresa($empresa->id, $nombre)) {
+            throw ValidationException::withMessages([
+                'nombre' => 'Ya existe un tipo de activo con ese nombre en esta empresa.',
+            ]);
+        }
+
+        $tipo = $this->crear($empresa, $nombre, true);
 
         return response()->json(['tipo' => ['id' => $tipo->id, 'nombre' => $tipo->nombre]]);
     }

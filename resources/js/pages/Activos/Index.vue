@@ -12,12 +12,20 @@ import {
     X,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
-import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+
+type OpcionTipo = { id: number; nombre: string };
+type OpcionCategoria = {
+    id: number;
+    nombre: string;
+    tipo_activo_id: number | null;
+    tipo?: string | null;
+};
 
 type Activo = {
     id: number;
@@ -37,8 +45,10 @@ type Activo = {
 const props = defineProps<{
     activos: Activo[];
     empresasAutorizadas: import('@/types/sistema').EmpresaAutorizada[];
-    tiposActivo: { id: number; nombre: string }[];
-    categorias: { id: number; nombre: string }[];
+    filtrosSeleccion: {
+        tipo: OpcionTipo | null;
+        categoria: OpcionCategoria | null;
+    };
     filtros: {
         buscar: string;
         empresa_id: number | null;
@@ -67,6 +77,66 @@ const categoriaId = ref<number | ''>(props.filtros.categoria_id);
 const control = ref<'' | 'cantidad' | 'serializado'>(props.filtros.control);
 const estado = ref<'' | 'activos' | 'inactivos'>(props.filtros.estado);
 const orden = ref<'az' | 'za'>(props.filtros.orden);
+
+// Objeto seleccionado en cada combobox de filtro (el id vive en su ref).
+const tipoSel = ref<OpcionTipo | null>(props.filtrosSeleccion.tipo);
+const categoriaSel = ref<OpcionCategoria | null>(
+    props.filtrosSeleccion.categoria,
+);
+
+async function buscarTipos(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionTipo[]> {
+    const emp = empresaId.value ? `&empresa_id=${empresaId.value}` : '';
+    const res = await fetch(
+        `/tipos-activo/buscar?q=${encodeURIComponent(q)}${emp}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).tipos ?? [];
+}
+
+async function buscarCategorias(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionCategoria[]> {
+    const emp = empresaId.value ? `&empresa_id=${empresaId.value}` : '';
+    const tipo = tipoActivoId.value
+        ? `&tipo_activo_id=${tipoActivoId.value}`
+        : '';
+    const res = await fetch(
+        `/categorias-activo/buscar?q=${encodeURIComponent(q)}${emp}${tipo}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).categorias ?? [];
+}
+
+function alElegirTipo(o: OpcionTipo | null): void {
+    tipoSel.value = o;
+    tipoActivoId.value = o?.id ?? '';
+}
+function alElegirCategoria(o: OpcionCategoria | null): void {
+    categoriaSel.value = o;
+    categoriaId.value = o?.id ?? '';
+}
+
+// Cambiar de empresa invalida tipos / categorías (ids por empresa).
+watch(empresaId, () => {
+    tipoSel.value = null;
+    tipoActivoId.value = '';
+    categoriaSel.value = null;
+    categoriaId.value = '';
+});
 
 const hayFiltrosActivos = computed(
     () =>
@@ -112,6 +182,8 @@ function limpiarFiltros(): void {
     empresaId.value = '';
     tipoActivoId.value = '';
     categoriaId.value = '';
+    tipoSel.value = null;
+    categoriaSel.value = null;
     control.value = '';
     estado.value = '';
     orden.value = 'az';
@@ -192,38 +264,44 @@ function alternarEstado(a: Activo): void {
                 </label>
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Tipo</span>
-                    <select
-                        v-model="tipoActivoId"
-                        :class="claseSelect"
-                        aria-label="Filtrar por tipo de activo"
-                    >
-                        <option value="">Todos</option>
-                        <option
-                            v-for="t in tiposActivo"
-                            :key="t.id"
-                            :value="t.id"
-                        >
-                            {{ t.nombre }}
-                        </option>
-                    </select>
+                    <div class="w-44">
+                        <BuscadorAsync
+                            :model-value="tipoSel"
+                            :buscar="buscarTipos"
+                            :dependencia="empresaId"
+                            :etiqueta="(t) => (t as OpcionTipo).nombre"
+                            placeholder="Todos"
+                            placeholder-busqueda="Buscar tipo"
+                            sin-resultados="Sin tipos"
+                            @update:model-value="
+                                (v) => alElegirTipo(v as OpcionTipo | null)
+                            "
+                        />
+                    </div>
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Categoría</span>
-                    <select
-                        v-model="categoriaId"
-                        :class="claseSelect"
-                        aria-label="Filtrar por categoría"
-                    >
-                        <option value="">Todas</option>
-                        <option
-                            v-for="c in categorias"
-                            :key="c.id"
-                            :value="c.id"
-                        >
-                            {{ c.nombre }}
-                        </option>
-                    </select>
+                    <div class="w-44">
+                        <BuscadorAsync
+                            :model-value="categoriaSel"
+                            :buscar="buscarCategorias"
+                            :dependencia="`${empresaId}|${tipoActivoId}`"
+                            :etiqueta="(c) => (c as OpcionCategoria).nombre"
+                            :descripcion="
+                                (c) => (c as OpcionCategoria).tipo ?? 'Sin tipo'
+                            "
+                            placeholder="Todas"
+                            placeholder-busqueda="Buscar categoría"
+                            sin-resultados="Sin categorías"
+                            @update:model-value="
+                                (v) =>
+                                    alElegirCategoria(
+                                        v as OpcionCategoria | null,
+                                    )
+                            "
+                        />
+                    </div>
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">

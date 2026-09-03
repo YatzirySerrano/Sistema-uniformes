@@ -101,13 +101,43 @@ obtiene el almacén de origen (activo **único** que abastece a la empresa; cero
 varios → `ExcepcionDeNegocioSimple`, nunca 500). `EntregaController` /
 `DevolucionController` reciben `colaborador_id` y derivan todo.
 
-## Tipos, categorías y variantes de activo
+## Tipos, categorías y variantes de activo (Bloque B)
 
-- `tipos_activo`, `categorias_activo`, `tallas`: catálogos **por empresa**. Sus
-  pantallas (`Activos/Catalogos.vue`, `Activos/Tallas.vue`) llevan un selector de
-  empresa que recarga la página con `?empresa_id=`. `store` / `rapido` /
-  `reordenar` envían `empresa_id`.
+- `tipos_activo`, `categorias_activo`, `tallas`: catálogos **por empresa**. La
+  pantalla de administración (`Activos/Catalogos.vue`) lleva un selector de
+  empresa que recarga con `?empresa_id=`. `store` / `rapido` / `reordenar` envían
+  `empresa_id`.
+- **Tipo y categoría son OPCIONALES** (nullable, `Rule::exists` sólo si vienen) e
+  independientes entre sí. En el formulario de Activo son **combobox con
+  búsqueda** (`BuscadorAsync`, `dependencia = empresa_id`):
+    - `GET tipos-activo/buscar?empresa_id=&q=` → `{ tipos: [{id, nombre}] }`.
+    - `GET categorias-activo/buscar?empresa_id=&q=&tipo_activo_id=` →
+      `{ categorias: [{id, nombre, tipo_activo_id, tipo}] }`. Con `tipo_activo_id`
+      **prioriza y acota** a ese tipo + las categorías sin tipo (una categoría de
+      otro tipo no se ofrece; las sin tipo siempre sí).
+    - Ambos: `empresa_id` presente e inválido/sin acceso → lista vacía (nunca cae
+      a "todas mis empresas"); `empresa_id` ausente → todas las autorizadas.
+      Sólo registros `activo`/`activa`. `authorize('viewAny', ...)`.
+- **Alta inline**: el combobox emite `crear` (opción "+ Crear nuevo…" al final,
+  sólo con `tipos-activo.administrar` / `categorias-activo.administrar`) → diálogo
+  → `POST tipos-activo/rapido` / `categorias-activo/rapido` (JSON, devuelven el
+  registro creado). No hay botones "Otro/Otra" ni `<select>` plano.
+- **Coherencia tipo ↔ categoría** (validada en `GuardarActivoRequest` +
+  `withValidator`): si el activo lleva tipo y categoría, y la categoría tiene
+  `tipo_activo_id` no nulo, deben coincidir. Sin tipo, o categoría sin tipo → sin
+  restricción.
+- **Unicidad normalizada**: `tipos_activo` / `categorias_activo` tienen
+  `nombre_normalizado` (índice único `(empresa_id, nombre_normalizado)`).
+  `NombreNormalizado` (trait) lo sincroniza en `saving` y expone
+  `existeNombreEnEmpresa()`, usado por los Form Requests y por `rapido`.
+  `App\Soporte\NormalizadorNombre::catalogo()` es la única definición de "mismo
+  nombre" (minúsculas + `preg_replace('/\s+/u', ' ', trim())`).
+- **Desactivar** tipo/categoría (diálogo de confirmación en `Catalogos.vue`) sólo
+  lo saca de nuevas selecciones; nunca borra ni pone la FK a null. `edit` de
+  Activo manda `seleccion.{tipo,categoria}` para mostrar el nombre asignado
+  aunque esté inactivo.
 - `activos.categoria_id` es la fuente de verdad; `activos.categoria` (texto) es
   espejo temporal que sincroniza `ActivoController`.
 - `Activo::tipo_control` distingue `cantidad` de `serializado`. El flujo de
-  unidades serializadas (`UnidadActivo`, serie / IMEI) sigue **pendiente**.
+  unidades serializadas (`UnidadActivo`, serie / IMEI) sigue **pendiente**
+  (Bloque C).

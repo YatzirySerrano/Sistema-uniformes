@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\NombreNormalizado;
 use App\Models\Concerns\PerteneceAEmpresa;
 use Database\Factories\CategoriaActivoFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -12,20 +13,22 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Categoría de activo por empresa (Camisola, Pantalón, Laptop, Teléfono
- * celular…). Sustituye al texto libre `activos.categoria`. Puede relacionarse
- * opcionalmente con un tipo de activo para organizar el catálogo, sin exigirlo.
+ * celular…): la clasificación ESPECÍFICA dentro del tipo. Sustituye al texto
+ * libre `activos.categoria`. Opcional (un activo puede no tener categoría) y
+ * puede relacionarse opcionalmente con un tipo de activo, sin exigirlo.
  *
  * @property int $id
  * @property int $empresa_id
  * @property int|null $tipo_activo_id
  * @property string $nombre
+ * @property string $nombre_normalizado
  * @property string|null $codigo
  * @property bool $activa
  */
 class CategoriaActivo extends Model
 {
     /** @use HasFactory<CategoriaActivoFactory> */
-    use HasFactory, PerteneceAEmpresa;
+    use HasFactory, NombreNormalizado, PerteneceAEmpresa;
 
     protected $table = 'categorias_activo';
 

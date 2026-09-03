@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\NombreNormalizado;
 use App\Models\Concerns\PerteneceAEmpresa;
 use Database\Factories\TipoActivoFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -10,20 +11,22 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
- * Tipo/categoría de activo por empresa (Uniforme / Prenda, Equipo de cómputo,
- * Dispositivo móvil, Accesorio, Otro…). Catálogo extensible; su pantalla de
- * administración llegará en un bloque posterior.
+ * Tipo de activo por empresa (Prenda, Equipo de cómputo, Dispositivo móvil,
+ * Accesorio, Otro…): la clasificación GENERAL o naturaleza del activo. Catálogo
+ * extensible y opcional (un activo puede no tener tipo). Sin borrado físico: los
+ * tipos en uso sólo se desactivan.
  *
  * @property int $id
  * @property int $empresa_id
  * @property string $nombre
+ * @property string $nombre_normalizado
  * @property string|null $codigo
  * @property bool $activo
  */
 class TipoActivo extends Model
 {
     /** @use HasFactory<TipoActivoFactory> */
-    use HasFactory, PerteneceAEmpresa;
+    use HasFactory, NombreNormalizado, PerteneceAEmpresa;
 
     protected $table = 'tipos_activo';
 

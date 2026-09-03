@@ -51,7 +51,11 @@ talla` (único `saldos_inv_almacen_unico`). **`saldos_inventario.sucursal_id`
 - Tabla `activos`, pivote `activo_talla`, FK `activo_id` en
   `saldos_inventario` / `movimientos_inventario` / `detalles_entrega` /
   `detalles_devolucion`. `Activo` conserva `empresa_id` y `PerteneceAEmpresa`.
-- `tipo_activo_id` / `categoria_id` seguirán siendo **opcionales** (Bloque B).
+- `tipo_activo_id` / `categoria_id` son **opcionales** e independientes (Bloque
+  B). `TipoActivo` y `CategoriaActivo` usan el trait `NombreNormalizado`:
+  columna `nombre_normalizado` + índice único `(empresa_id, nombre_normalizado)`,
+  sincronizada en `saving`; helper `existeNombreEnEmpresa()`. Desactivar un
+  tipo/categoría no toca los activos que ya lo usan.
 - `tipo_control` (`cantidad` | `serializado`). `tallas()` opcional. Talla comodín
   por empresa (`es_comodin = true`, `Empresa::tallaComodin()`).
 - `categoria_id` es la fuente de verdad; `activos.categoria` (texto) es espejo

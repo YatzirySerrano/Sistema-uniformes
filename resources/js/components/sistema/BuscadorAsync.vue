@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, ChevronsUpDown, Loader2, Search, X } from '@lucide/vue';
+import { Check, ChevronsUpDown, Loader2, Plus, Search, X } from '@lucide/vue';
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 
 /**
@@ -50,10 +50,19 @@ const props = defineProps<{
      * apertura vuelve a consultar.
      */
     dependencia?: string | number | boolean | null;
+    /**
+     * Muestra al final del desplegable una opción "+ crear" (p. ej. para dar de
+     * alta un tipo / categoría sin salir del formulario). Gestiónala con el
+     * evento `crear`; muéstrala sólo si el usuario tiene permiso.
+     */
+    permiteCrear?: boolean;
+    /** Texto de la opción de creación (p. ej. "Crear nuevo tipo"). */
+    textoCrear?: string;
 }>();
 
 const emit = defineEmits<{
     (e: 'update:modelValue', value: Opcion | null): void;
+    (e: 'crear', termino: string): void;
 }>();
 
 const abierto = ref(false);
@@ -146,6 +155,11 @@ function cerrar(): void {
 
 function elegir(item: Opcion): void {
     emit('update:modelValue', item);
+    cerrar();
+}
+
+function solicitarCrear(): void {
+    emit('crear', termino.value.trim());
     cerrar();
 }
 
@@ -265,6 +279,21 @@ onBeforeUnmount(() => {
                     </span>
                 </li>
             </ul>
+
+            <button
+                v-if="permiteCrear"
+                type="button"
+                class="text-primary hover:bg-accent flex w-full items-center gap-2 border-t px-3 py-2 text-left text-sm font-medium"
+                @click="solicitarCrear"
+            >
+                <Plus class="size-3.5 shrink-0" />
+                <span class="truncate">
+                    {{ textoCrear ?? 'Crear nuevo' }}
+                    <template v-if="termino.trim()"
+                        >: “{{ termino.trim() }}”</template
+                    >
+                </span>
+            </button>
         </div>
     </div>
 </template>

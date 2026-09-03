@@ -6,10 +6,12 @@ use App\Enums\TipoControlActivo;
 use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Activo;
+use App\Models\CategoriaActivo;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
+use Illuminate\Validation\Validator;
 
 /**
  * Validación de alta y edición de activos. En alta la empresa llega en
@@ -76,6 +78,38 @@ class GuardarActivoRequest extends FormRequest
             ],
             'imagen' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
         ];
+    }
+
+    /**
+     * Coherencia tipo ↔ categoría: si el activo lleva tipo y categoría, y la
+     * categoría está ligada a un tipo concreto, ambos deben coincidir. Una
+     * categoría sin tipo, o un activo sin tipo, no tienen restricción (tipo y
+     * categoría son opcionales).
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $tipoId = $this->integer('tipo_activo_id') ?: null;
+            $categoriaId = $this->integer('categoria_id') ?: null;
+
+            if ($tipoId === null || $categoriaId === null) {
+                return;
+            }
+
+            $empresaId = $this->empresaResuelta('activo')->getKey();
+
+            $tipoDeLaCategoria = CategoriaActivo::query()
+                ->where('empresa_id', $empresaId)
+                ->whereKey($categoriaId)
+                ->value('tipo_activo_id');
+
+            if ($tipoDeLaCategoria !== null && (int) $tipoDeLaCategoria !== $tipoId) {
+                $validator->errors()->add(
+                    'categoria_id',
+                    'La categoría seleccionada pertenece a otro tipo de activo. Cámbiala o quita el tipo.',
+                );
+            }
+        });
     }
 
     /**

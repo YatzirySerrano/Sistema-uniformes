@@ -7,11 +7,14 @@ use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\CategoriaActivo;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * Alta / edición de una categoría de activo. En alta la empresa llega en
  * `empresa_id` y se valida el acceso; en edición queda fijada por el registro.
  * El `tipo_activo_id` es opcional y, si se envía, debe pertenecer a la empresa.
+ * El nombre es único por empresa sin distinguir mayúsculas ni espacios
+ * sobrantes (ver `NombreNormalizado`).
  */
 class GuardarCategoriaActivoRequest extends FormRequest
 {
@@ -40,18 +43,32 @@ class GuardarCategoriaActivoRequest extends FormRequest
 
         return [
             ...($categoriaId === null ? ['empresa_id' => ['required', 'integer']] : []),
-            'nombre' => [
-                'required', 'string', 'max:120',
-                Rule::unique('categorias_activo', 'nombre')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($categoriaId),
-            ],
+            'nombre' => ['required', 'string', 'max:120'],
             'tipo_activo_id' => [
                 'nullable', 'integer',
                 Rule::exists('tipos_activo', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
             'activa' => ['boolean'],
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $nombre = $this->input('nombre');
+
+            if (! is_string($nombre) || trim($nombre) === '') {
+                return;
+            }
+
+            $categoria = $this->route('categoria');
+            $ignorar = $categoria instanceof CategoriaActivo ? $categoria->getKey() : null;
+            $empresaId = $this->empresaResuelta('categoria')->getKey();
+
+            if (CategoriaActivo::existeNombreEnEmpresa($empresaId, $nombre, $ignorar)) {
+                $validator->errors()->add('nombre', 'Ya existe una categoría con ese nombre en esta empresa.');
+            }
+        });
     }
 
     /**
@@ -62,7 +79,6 @@ class GuardarCategoriaActivoRequest extends FormRequest
         return [
             'empresa_id.required' => 'Selecciona la empresa de la categoría.',
             'nombre.required' => 'El nombre de la categoría es obligatorio.',
-            'nombre.unique' => 'Ya existe una categoría con ese nombre en esta empresa.',
             'tipo_activo_id.exists' => 'El tipo de activo seleccionado no pertenece a esta empresa.',
         ];
     }
