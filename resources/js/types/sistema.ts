@@ -16,16 +16,14 @@ export type EmpresaResumen = {
     logo_url?: string | null;
 };
 
-export type ContextoEmpresa = {
-    empresaActivaId: number | null;
-    empresaActiva: EmpresaResumen | null;
-    empresasDisponibles: {
-        id: number;
-        codigo: string;
-        nombre_comercial: string;
-    }[];
-    sucursalesDisponibles: { id: number; codigo: string; nombre: string }[];
-    branding: Record<string, string>;
+/**
+ * Empresa a la que el usuario tiene acceso. Alimenta los combobox de empresa de
+ * formularios y filtros (no hay "empresa activa" global).
+ */
+export type EmpresaAutorizada = {
+    id: number;
+    codigo: string;
+    nombre_comercial: string;
 };
 
 export type UsuarioAutenticado = {

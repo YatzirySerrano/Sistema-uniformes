@@ -4,22 +4,23 @@ namespace App\Servicios;
 
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Almacen;
-use App\Models\Sucursal;
+use App\Models\Empresa;
 
 /**
- * Resuelve el almacén de origen del stock para operaciones que aún seleccionan
- * la sucursal (entregas, devoluciones, correcciones) mientras su reingeniería de
- * UI llega. Regla: el almacén activo que abastece esa sucursal debe ser
- * inequívoco. Si hay cero o varios, la operación se detiene con un mensaje claro
- * en español (nunca un 500).
+ * Resuelve el almacén de origen del stock para operaciones que aún no eligen el
+ * almacén de forma explícita (entregas, devoluciones, correcciones) mientras su
+ * reingeniería de UI llega (Bloque E/F). Regla: el almacén activo que abastece a
+ * la empresa debe ser inequívoco. Si hay cero o varios, la operación se detiene
+ * con un mensaje claro en español (nunca un 500).
  */
 class ResolverAlmacenOperativo
 {
-    public function paraSucursal(Sucursal $sucursal, ?int $almacenPreferidoId = null): Almacen
+    public function paraEmpresa(Empresa $empresa, ?int $almacenPreferidoId = null): Almacen
     {
         if ($almacenPreferidoId !== null) {
-            $preferido = $sucursal->almacenes()
-                ->where('almacenes.activo', true)
+            $preferido = Almacen::query()
+                ->where('activo', true)
+                ->paraEmpresa($empresa->getKey())
                 ->whereKey($almacenPreferidoId)
                 ->first();
 
@@ -28,7 +29,10 @@ class ResolverAlmacenOperativo
             }
         }
 
-        $almacenes = $sucursal->almacenes()->where('almacenes.activo', true)->get();
+        $almacenes = Almacen::query()
+            ->where('activo', true)
+            ->paraEmpresa($empresa->getKey())
+            ->get();
 
         if ($almacenes->count() === 1) {
             return $almacenes->first();
@@ -36,13 +40,13 @@ class ResolverAlmacenOperativo
 
         if ($almacenes->isEmpty()) {
             throw new ExcepcionDeNegocioSimple(
-                "La sucursal «{$sucursal->nombre}» no tiene un almacén que la abastezca. ".
-                'Asígnale un almacén (módulo Almacenes) para poder operar su inventario.'
+                "La empresa «{$empresa->nombre_comercial}» no tiene ningún almacén activo que la abastezca. ".
+                'Registra o activa un almacén (módulo Almacenes) para poder operar su inventario.'
             );
         }
 
         throw new ExcepcionDeNegocioSimple(
-            "La sucursal «{$sucursal->nombre}» es abastecida por varios almacenes. ".
+            "La empresa «{$empresa->nombre_comercial}» es abastecida por varios almacenes. ".
             'Selecciona el almacén de origen de forma explícita.'
         );
     }

@@ -36,10 +36,12 @@ type Activo = {
 
 const props = defineProps<{
     activos: Activo[];
+    empresasAutorizadas: import('@/types/sistema').EmpresaAutorizada[];
     tiposActivo: { id: number; nombre: string }[];
     categorias: { id: number; nombre: string }[];
     filtros: {
         buscar: string;
+        empresa_id: number | null;
         tipo_activo_id: number | '';
         categoria_id: number | '';
         control: '' | 'cantidad' | 'serializado';
@@ -59,6 +61,7 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar);
+const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
 const tipoActivoId = ref<number | ''>(props.filtros.tipo_activo_id);
 const categoriaId = ref<number | ''>(props.filtros.categoria_id);
 const control = ref<'' | 'cantidad' | 'serializado'>(props.filtros.control);
@@ -68,6 +71,7 @@ const orden = ref<'az' | 'za'>(props.filtros.orden);
 const hayFiltrosActivos = computed(
     () =>
         buscar.value !== '' ||
+        empresaId.value !== '' ||
         tipoActivoId.value !== '' ||
         categoriaId.value !== '' ||
         control.value !== '' ||
@@ -76,31 +80,36 @@ const hayFiltrosActivos = computed(
 );
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
-watch([buscar, tipoActivoId, categoriaId, control, estado, orden], () => {
-    clearTimeout(temporizador);
-    temporizador = setTimeout(() => {
-        router.get(
-            '/activos',
-            {
-                buscar: buscar.value || undefined,
-                tipo_activo_id: tipoActivoId.value || undefined,
-                categoria_id: categoriaId.value || undefined,
-                control: control.value || undefined,
-                estado: estado.value || undefined,
-                orden: orden.value === 'az' ? undefined : orden.value,
-            },
-            {
-                preserveState: true,
-                preserveScroll: true,
-                replace: true,
-                only: ['activos', 'filtros'],
-            },
-        );
-    }, 300);
-});
+watch(
+    [buscar, empresaId, tipoActivoId, categoriaId, control, estado, orden],
+    () => {
+        clearTimeout(temporizador);
+        temporizador = setTimeout(() => {
+            router.get(
+                '/activos',
+                {
+                    buscar: buscar.value || undefined,
+                    empresa_id: empresaId.value || undefined,
+                    tipo_activo_id: tipoActivoId.value || undefined,
+                    categoria_id: categoriaId.value || undefined,
+                    control: control.value || undefined,
+                    estado: estado.value || undefined,
+                    orden: orden.value === 'az' ? undefined : orden.value,
+                },
+                {
+                    preserveState: true,
+                    preserveScroll: true,
+                    replace: true,
+                    only: ['activos', 'filtros'],
+                },
+            );
+        }, 300);
+    },
+);
 
 function limpiarFiltros(): void {
     buscar.value = '';
+    empresaId.value = '';
     tipoActivoId.value = '';
     categoriaId.value = '';
     control.value = '';
@@ -161,6 +170,26 @@ function alternarEstado(a: Activo): void {
             </div>
 
             <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <label
+                    v-if="empresasAutorizadas.length > 1"
+                    class="flex items-center gap-1.5 text-sm"
+                >
+                    <span class="text-muted-foreground">Empresa</span>
+                    <select
+                        v-model="empresaId"
+                        :class="claseSelect"
+                        aria-label="Filtrar por empresa"
+                    >
+                        <option value="">Todas</option>
+                        <option
+                            v-for="e in empresasAutorizadas"
+                            :key="e.id"
+                            :value="e.id"
+                        >
+                            {{ e.nombre_comercial }}
+                        </option>
+                    </select>
+                </label>
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Tipo</span>
                     <select

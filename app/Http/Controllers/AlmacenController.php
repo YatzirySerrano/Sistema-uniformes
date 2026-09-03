@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Almacenes\GuardarAlmacenRequest;
 use App\Models\Almacen;
 use App\Models\Colaborador;
+use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Database\Eloquent\Builder;
@@ -13,13 +14,19 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
+/**
+ * Almacenes multiempresa. Un almacén abastece a una o varias empresas (N:M vía
+ * `almacen_empresa`); el inventario se mantiene separado por empresa dentro del
+ * almacén. La empresa nunca es la autoridad global: se recibe como filtro
+ * (listado) o como conjunto `empresa_ids` (alta/edición) y siempre se valida el
+ * acceso del usuario.
+ */
 class AlmacenController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -27,21 +34,23 @@ class AlmacenController extends Controller
     {
         $this->authorize('viewAny', Almacen::class);
 
-        $empresa = $this->empresaActiva();
         $usuario = $request->user();
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
 
         $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
-            'estado' => ['nullable', Rule::in(['activos', 'inactivos'])],
-            'orden' => ['nullable', Rule::in(['az', 'za'])],
+            'estado' => ['nullable', 'in:activos,inactivos'],
+            'orden' => ['nullable', 'in:az,za'],
         ]);
 
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
         $almacenes = Almacen::query()
-            ->where('empresa_id', $empresa->id)
-            ->with('responsable:id,nombre_completo,numero_empleado')
-            ->withCount('sucursales')
+            ->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsAutorizadas))
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->paraEmpresa($empresaFiltro->id))
+            ->with(['responsable:id,nombre_completo,numero_empleado', 'empresas:id,codigo,nombre_comercial'])
+            ->withCount('empresas')
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
                 $q->where(function (Builder $sub) use ($buscar): void {
                     $sub->where('nombre', 'like', "%{$buscar}%")
@@ -60,7 +69,10 @@ class AlmacenController extends Controller
                 'codigo' => $a->codigo,
                 'direccion' => $a->direccion,
                 'activo' => $a->activo,
-                'sucursales_count' => (int) $a->sucursales_count,
+                'empresas_count' => (int) $a->empresas_count,
+                'empresas' => $a->empresas->map(fn (Empresa $e): array => [
+                    'id' => $e->id, 'nombre_comercial' => $e->nombre_comercial,
+                ])->all(),
                 'responsable' => $a->responsable === null ? null : [
                     'id' => $a->responsable->id,
                     'nombre_completo' => $a->responsable->nombre_completo,
@@ -70,12 +82,12 @@ class AlmacenController extends Controller
 
         return Inertia::render('Almacenes/Index', [
             'almacenes' => $almacenes,
-            'empresa' => ['id' => $empresa->id, 'nombre_comercial' => $empresa->nombre_comercial],
-            'sucursales' => $this->sucursalesEmpresa(),
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'filtros' => [
                 'buscar' => $filtros['buscar'] ?? '',
                 'estado' => $filtros['estado'] ?? '',
                 'orden' => $filtros['orden'] ?? 'az',
+                'empresa_id' => $empresaFiltro?->id,
             ],
             'permisos' => [
                 'crear' => $usuario->can('create', Almacen::class),
@@ -88,190 +100,141 @@ class AlmacenController extends Controller
     public function show(Request $request, Almacen $almacen): Response
     {
         $this->authorize('view', $almacen);
-        abort_unless($almacen->empresa_id === $this->empresaActiva()->id, 404);
 
         $almacen->load([
             'responsable:id,nombre_completo,numero_empleado,area_id',
             'responsable.departamento:id,nombre',
-            'sucursales:id,nombre,codigo,direccion,activa',
+            'empresas:id,codigo,nombre_comercial',
         ]);
 
         $saldos = SaldoInventario::query()
-            ->where('empresa_id', $almacen->empresa_id)
             ->where('almacen_id', $almacen->id)
-            ->with(['activo:id,nombre,tipo_control,categoria_id,tipo_activo_id', 'activo.categoriaActivo:id,nombre', 'activo.tipoActivo:id,nombre', 'talla:id,valor'])
+            ->whereIn('empresa_id', $almacen->empresas->pluck('id'))
+            ->with([
+                'empresa:id,nombre_comercial',
+                'activo:id,nombre,tipo_control,categoria_id,tipo_activo_id',
+                'activo.categoriaActivo:id,nombre',
+                'activo.tipoActivo:id,nombre',
+                'talla:id,valor',
+            ])
             ->get();
 
-        $inventario = $this->resumirInventario($saldos);
-
-        $legacyPendiente = SaldoInventario::query()
-            ->where('empresa_id', $almacen->empresa_id)
-            ->pendienteMigracion()
-            ->whereHas('sucursal', fn (Builder $q) => $q->whereHas('almacenes', fn (Builder $a) => $a->whereKey($almacen->id)))
-            ->count();
+        $inventarioPorEmpresa = $saldos
+            ->groupBy('empresa_id')
+            ->map(fn (Collection $filas): array => [
+                'empresa' => [
+                    'id' => (int) $filas->first()->empresa_id,
+                    'nombre_comercial' => $filas->first()->empresa?->nombre_comercial,
+                ],
+                'total' => (int) $filas->sum('cantidad'),
+                'bajo_minimo' => $filas->contains(fn (SaldoInventario $s): bool => $s->estaBajoMinimo()),
+                'activos' => $this->resumirInventario($filas),
+            ])
+            ->sortBy('empresa.nombre_comercial')
+            ->values()
+            ->all();
 
         return Inertia::render('Almacenes/Detalle', [
             'resumen' => [
-                'tipos_activo' => count($inventario),
+                'empresas_abastecidas' => $almacen->empresas->count(),
+                'tipos_activo' => $saldos->pluck('activo_id')->unique()->count(),
                 'existencias' => (int) $saldos->sum('cantidad'),
                 'variantes_bajo_minimo' => $saldos->filter(fn (SaldoInventario $s): bool => $s->estaBajoMinimo())->count(),
-                'sucursales_abastecidas' => $almacen->sucursales->count(),
-                'legacy_pendiente' => $legacyPendiente,
             ],
-            'inventario' => $inventario,
+            'inventarioPorEmpresa' => $inventarioPorEmpresa,
             'almacen' => [
                 ...$almacen->only(['id', 'nombre', 'codigo', 'descripcion', 'direccion', 'telefono', 'correo', 'activo']),
-                'empresa' => [
-                    'id' => $this->empresaActiva()->id,
-                    'nombre_comercial' => $this->empresaActiva()->nombre_comercial,
-                ],
+                'empresas' => $almacen->empresas->map(fn ($e): array => [
+                    'id' => $e->id, 'codigo' => $e->codigo, 'nombre_comercial' => $e->nombre_comercial,
+                ])->all(),
                 'responsable' => $almacen->responsable === null ? null : [
                     'id' => $almacen->responsable->id,
                     'nombre_completo' => $almacen->responsable->nombre_completo,
                     'numero_empleado' => $almacen->responsable->numero_empleado,
                     'area' => $almacen->responsable->departamento?->nombre,
                 ],
-                'sucursales' => $almacen->sucursales->map(fn ($s): array => [
-                    'id' => $s->id,
-                    'nombre' => $s->nombre,
-                    'codigo' => $s->codigo,
-                    'direccion' => $s->direccion,
-                    'activa' => $s->activa,
-                ])->all(),
             ],
-            'sucursalesDisponibles' => $this->sucursalesEmpresa(),
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'permisos' => [
                 'editar' => $request->user()->can('update', $almacen),
                 'administrar' => $request->user()->can('administrar', $almacen),
                 'inventario_ver' => $request->user()->can('inventario.ver'),
                 'inventario_entrada' => $request->user()->can('inventario.entrada'),
                 'inventario_ajustar' => $request->user()->can('inventario.ajustar'),
-                'inventario_migrar' => $request->user()->can('inventario.migrar'),
             ],
         ]);
     }
 
     public function store(GuardarAlmacenRequest $request): RedirectResponse
     {
-        $empresa = $this->empresaActiva();
+        $datos = $request->safe()->except(['empresa_ids']);
+        $empresaIds = $request->collect('empresa_ids')->map(fn ($id): int => (int) $id)->all();
+        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo();
 
-        $datos = $request->safe()->except(['sucursales']);
-        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa->id);
+        $almacen = Almacen::query()->create([...$datos, 'activo' => true]);
+        $almacen->empresas()->sync($empresaIds);
 
-        $almacen = Almacen::query()->create([
-            ...$datos,
-            'empresa_id' => $empresa->id,
-            'activo' => true,
-        ]);
-
-        $almacen->sucursales()->sync($request->input('sucursales', []));
-
-        $this->auditoria->registrar('almacenes', 'crear', [
-            'tipo_entidad' => Almacen::class, 'entidad_id' => $almacen->id,
-            'descripcion' => 'Alta de almacén '.$almacen->nombre,
-        ]);
+        $this->auditar('crear', $almacen, $empresaIds, ['descripcion' => 'Alta de almacén '.$almacen->nombre]);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Almacén registrado correctamente.']);
     }
 
     public function update(GuardarAlmacenRequest $request, Almacen $almacen): RedirectResponse
     {
-        abort_unless($almacen->empresa_id === $this->empresaActiva()->id, 404);
+        $almacen->update($request->safe()->except(['empresa_ids']));
 
-        $almacen->update($request->safe()->except(['sucursales']));
+        $empresaIds = $request->collect('empresa_ids')->map(fn ($id): int => (int) $id)->sort()->values();
+        $antes = $almacen->empresas()->pluck('empresas.id')->sort()->values();
 
-        if ($request->has('sucursales')) {
-            $antes = $almacen->sucursales()->pluck('sucursales.id')->sort()->values()->all();
-            $almacen->sucursales()->sync($request->input('sucursales', []));
-            $despues = $almacen->sucursales()->pluck('sucursales.id')->sort()->values()->all();
-
-            if ($antes !== $despues) {
-                $this->auditoria->registrar('almacenes', 'sucursales', [
-                    'tipo_entidad' => Almacen::class, 'entidad_id' => $almacen->id,
-                    'descripcion' => 'Actualización de sucursales abastecidas de '.$almacen->nombre,
-                    'valores_anteriores' => ['sucursales' => $antes],
-                    'valores_nuevos' => ['sucursales' => $despues],
-                ]);
-            }
+        if ($request->has('empresa_ids') && $antes->all() !== $empresaIds->all()) {
+            $almacen->empresas()->sync($empresaIds->all());
+            $this->auditar('empresas', $almacen, $empresaIds->merge($antes)->unique()->all(), [
+                'descripcion' => 'Actualización de empresas abastecidas de '.$almacen->nombre,
+                'valores_anteriores' => ['empresas' => $antes->all()],
+                'valores_nuevos' => ['empresas' => $empresaIds->all()],
+            ]);
         }
 
-        $this->auditoria->registrar('almacenes', 'editar', [
-            'tipo_entidad' => Almacen::class, 'entidad_id' => $almacen->id,
+        $this->auditar('editar', $almacen, $almacen->empresas()->pluck('empresas.id')->all(), [
             'descripcion' => 'Edición de almacén '.$almacen->nombre,
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Almacén actualizado correctamente.']);
     }
 
-    /**
-     * Sincroniza únicamente las sucursales abastecidas (flujo "Asignar
-     * sucursales" desde el detalle).
-     */
-    public function sucursales(Request $request, Almacen $almacen): RedirectResponse
-    {
-        $this->authorize('administrar', $almacen);
-        abort_unless($almacen->empresa_id === $this->empresaActiva()->id, 404);
-
-        $empresaId = $this->empresaActiva()->id;
-
-        $datos = $request->validate([
-            'sucursales' => ['nullable', 'array'],
-            'sucursales.*' => [
-                'integer',
-                Rule::exists('sucursales', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
-            ],
-        ], [
-            'sucursales.*.exists' => 'Una de las sucursales seleccionadas no pertenece a esta empresa.',
-        ]);
-
-        $antes = $almacen->sucursales()->pluck('sucursales.id')->sort()->values()->all();
-        $almacen->sucursales()->sync($datos['sucursales'] ?? []);
-        $despues = $almacen->sucursales()->pluck('sucursales.id')->sort()->values()->all();
-
-        $this->auditoria->registrar('almacenes', 'sucursales', [
-            'tipo_entidad' => Almacen::class, 'entidad_id' => $almacen->id,
-            'descripcion' => 'Actualización de sucursales abastecidas de '.$almacen->nombre,
-            'valores_anteriores' => ['sucursales' => $antes],
-            'valores_nuevos' => ['sucursales' => $despues],
-        ]);
-
-        return back()->with('toast', ['type' => 'success', 'message' => 'Sucursales abastecidas actualizadas.']);
-    }
-
     public function toggle(Almacen $almacen): RedirectResponse
     {
         $this->authorize('administrar', $almacen);
-        abort_unless($almacen->empresa_id === $this->empresaActiva()->id, 404);
 
         $almacen->update(['activo' => ! $almacen->activo]);
 
-        $this->auditoria->registrar('almacenes', $almacen->activo ? 'activar' : 'desactivar', [
-            'tipo_entidad' => Almacen::class, 'entidad_id' => $almacen->id,
+        $this->auditar($almacen->activo ? 'activar' : 'desactivar', $almacen, $almacen->empresas()->pluck('empresas.id')->all(), [
             'descripcion' => ($almacen->activo ? 'Activación' : 'Desactivación').' de almacén '.$almacen->nombre,
         ]);
 
-        $mensaje = $almacen->activo
-            ? 'Almacén activado correctamente.'
-            : 'Almacén desactivado correctamente.';
-
-        return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => $almacen->activo ? 'Almacén activado correctamente.' : 'Almacén desactivado correctamente.',
+        ]);
     }
 
     /**
      * Búsqueda con autocompletado de almacenes para los combobox (entrada de
-     * inventario, entregas, filtros). Sólo almacenes activos y autorizados de la
-     * empresa activa.
+     * inventario, entregas, filtros). Sólo almacenes activos autorizados; si se
+     * envía `empresa_id`, se acota a los que abastecen esa empresa.
      */
     public function buscar(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Almacen::class);
 
         $termino = trim((string) $request->query('q', ''));
-        $autorizados = $this->contexto()->almacenesDisponibles()->pluck('id');
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
 
         $almacenes = Almacen::query()
-            ->where('empresa_id', $this->empresaActiva()->id)
-            ->whereIn('id', $autorizados)
+            ->where('activo', true)
+            ->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsAutorizadas))
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->paraEmpresa($empresaFiltro->id))
             ->when($termino !== '', function (Builder $q) use ($termino): void {
                 $q->where(function (Builder $sub) use ($termino): void {
                     $sub->where('nombre', 'like', "%{$termino}%")
@@ -294,16 +257,22 @@ class AlmacenController extends Controller
 
     /**
      * Búsqueda con autocompletado para el selector de responsable del almacén.
-     * Sólo colaboradores activos de la empresa activa.
+     * Requiere `empresa_id`: el responsable pertenece a una empresa concreta.
      */
     public function colaboradoresBuscar(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Almacen::class);
 
+        $empresa = $this->empresaDelFiltro($request);
+
+        if ($empresa === null) {
+            return response()->json(['colaboradores' => []]);
+        }
+
         $termino = trim((string) $request->query('q', ''));
 
         $colaboradores = Colaborador::query()
-            ->where('empresa_id', $this->empresaActiva()->id)
+            ->where('empresa_id', $empresa->id)
             ->where('activo', true)
             ->when($termino !== '', function (Builder $q) use ($termino): void {
                 $q->where(function (Builder $sub) use ($termino): void {
@@ -324,7 +293,26 @@ class AlmacenController extends Controller
     }
 
     /**
-     * Agrupa los saldos del almacén por activo para el detalle.
+     * Registra una entrada de auditoría por cada empresa abastecida afectada,
+     * para que el filtro por empresa de la bitácora las muestre.
+     *
+     * @param  array<int, int|string>  $empresaIds
+     * @param  array<string, mixed>  $extra
+     */
+    private function auditar(string $accion, Almacen $almacen, array $empresaIds, array $extra = []): void
+    {
+        foreach (array_unique(array_map('intval', $empresaIds)) as $empresaId) {
+            $this->auditoria->registrar('almacenes', $accion, [
+                'tipo_entidad' => Almacen::class,
+                'entidad_id' => $almacen->id,
+                'empresa_id' => $empresaId,
+                ...$extra,
+            ]);
+        }
+    }
+
+    /**
+     * Agrupa los saldos por activo para el detalle.
      *
      * @param  Collection<int, SaldoInventario>  $saldos
      * @return array<int, array<string, mixed>>
@@ -334,9 +322,7 @@ class AlmacenController extends Controller
         return $saldos
             ->groupBy('activo_id')
             ->map(function (Collection $filas): array {
-                /** @var SaldoInventario|null $primero */
-                $primero = $filas->first();
-                $activo = $primero?->activo;
+                $activo = $filas->first()?->activo;
 
                 $variantes = $filas
                     ->map(fn (SaldoInventario $s): array => [
@@ -367,33 +353,17 @@ class AlmacenController extends Controller
     }
 
     /**
-     * @return array<int, array{id: int, nombre: string, codigo: string, activa: bool}>
+     * Genera un código consecutivo y único a nivel plataforma (ALM-0001, …)
+     * cuando el usuario no captura uno. El almacén ya no pertenece a una empresa.
      */
-    private function sucursalesEmpresa(): array
+    private function generarCodigo(): string
     {
-        return $this->empresaActiva()->sucursales()
-            ->orderBy('nombre')
-            ->get(['id', 'nombre', 'codigo', 'activa'])
-            ->map(fn ($s): array => [
-                'id' => $s->id,
-                'nombre' => $s->nombre,
-                'codigo' => $s->codigo,
-                'activa' => (bool) $s->activa,
-            ])->all();
-    }
-
-    /**
-     * Genera un código consecutivo y único dentro de la empresa
-     * (ALM-0001, ALM-0002, …) cuando el usuario no captura uno.
-     */
-    private function generarCodigo(int $empresaId): string
-    {
-        $n = Almacen::query()->withTrashed()->where('empresa_id', $empresaId)->count() + 1;
+        $n = Almacen::query()->withTrashed()->count() + 1;
 
         do {
             $codigo = 'ALM-'.str_pad((string) $n, 4, '0', STR_PAD_LEFT);
             $n++;
-        } while (Almacen::query()->withTrashed()->where('empresa_id', $empresaId)->where('codigo', $codigo)->exists());
+        } while (Almacen::query()->withTrashed()->where('codigo', $codigo)->exists());
 
         return $codigo;
     }

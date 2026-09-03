@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
 import { Search } from '@lucide/vue';
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import InputError from '@/components/InputError.vue';
@@ -9,18 +9,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Colaborador = {
     id: number;
     nombre_completo: string;
     numero_empleado: string;
-};
-
-type SucursalOpcion = {
-    id: number;
-    nombre: string;
-    codigo: string;
-    activa: boolean;
 };
 
 export type AlmacenEditable = {
@@ -32,12 +26,12 @@ export type AlmacenEditable = {
     telefono: string | null;
     correo: string | null;
     responsable: Colaborador | null;
-    sucursales_ids: number[];
+    empresas_ids: number[];
 };
 
 const props = defineProps<{
     almacen: AlmacenEditable | null;
-    sucursales: SucursalOpcion[];
+    empresasAutorizadas: EmpresaAutorizada[];
 }>();
 const emit = defineEmits<{ (e: 'guardado'): void; (e: 'cancelar'): void }>();
 
@@ -53,7 +47,7 @@ const form = useForm<{
     telefono: string;
     correo: string;
     responsable_colaborador_id: number | null;
-    sucursales: number[];
+    empresa_ids: number[];
 }>({
     nombre: props.almacen?.nombre ?? '',
     codigo: props.almacen?.codigo ?? '',
@@ -62,7 +56,7 @@ const form = useForm<{
     telefono: props.almacen?.telefono ?? '',
     correo: props.almacen?.correo ?? '',
     responsable_colaborador_id: props.almacen?.responsable?.id ?? null,
-    sucursales: [...(props.almacen?.sucursales_ids ?? [])],
+    empresa_ids: [...(props.almacen?.empresas_ids ?? [])],
 });
 
 const tocado = reactive<Record<string, boolean>>({});
@@ -77,8 +71,35 @@ function filtrarTelefono(evento: Event): void {
     objetivo.value = limpio;
 }
 
+// --- Empresas abastecidas ---
+const buscarEmpresa = ref('');
+const empresasFiltradas = computed(() => {
+    const t = buscarEmpresa.value.trim().toLowerCase();
+    if (!t) return props.empresasAutorizadas;
+    return props.empresasAutorizadas.filter(
+        (e) =>
+            e.nombre_comercial.toLowerCase().includes(t) ||
+            e.codigo.toLowerCase().includes(t),
+    );
+});
+
+function alternarEmpresa(id: number): void {
+    const i = form.empresa_ids.indexOf(id);
+    if (i === -1) form.empresa_ids.push(id);
+    else form.empresa_ids.splice(i, 1);
+}
+
+// El responsable pertenece a una empresa concreta: se busca dentro de la
+// primera empresa abastecida seleccionada.
+const empresaResponsableId = computed(() => form.empresa_ids[0] ?? null);
+watch(empresaResponsableId, () => {
+    responsable.value = null;
+    form.responsable_colaborador_id = null;
+});
+
 async function buscarColaboradores(termino: string): Promise<Colaborador[]> {
-    const url = `/almacenes/colaboradores-buscar?q=${encodeURIComponent(termino)}`;
+    if (empresaResponsableId.value === null) return [];
+    const url = `/almacenes/colaboradores-buscar?empresa_id=${empresaResponsableId.value}&q=${encodeURIComponent(termino)}`;
     const res = await fetch(url, {
         headers: { Accept: 'application/json' },
         credentials: 'same-origin',
@@ -93,28 +114,13 @@ function alElegirResponsable(c: { id: number } | null): void {
     form.responsable_colaborador_id = c?.id ?? null;
 }
 
-// --- Sucursales abastecidas ---
-const buscarSucursal = ref('');
-const sucursalesFiltradas = computed(() => {
-    const t = buscarSucursal.value.trim().toLowerCase();
-    if (!t) return props.sucursales;
-    return props.sucursales.filter(
-        (s) =>
-            s.nombre.toLowerCase().includes(t) ||
-            s.codigo.toLowerCase().includes(t),
-    );
-});
-
-function alternarSucursal(id: number): void {
-    const i = form.sucursales.indexOf(id);
-    if (i === -1) form.sucursales.push(id);
-    else form.sucursales.splice(i, 1);
-}
-
 const erroresLocales = computed<Record<string, string>>(() => {
     const e: Record<string, string> = {};
     if (tocado.nombre && form.nombre.trim() === '') {
         e.nombre = 'El nombre del almacén es obligatorio.';
+    }
+    if (tocado.empresa_ids && form.empresa_ids.length === 0) {
+        e.empresa_ids = 'Selecciona al menos una empresa abastecida.';
     }
     if (
         tocado.codigo &&
@@ -153,7 +159,8 @@ const hayErroresLocales = computed(
 
 function enviar(): void {
     tocado.nombre = true;
-    if (form.nombre.trim() === '') return;
+    tocado.empresa_ids = true;
+    if (form.nombre.trim() === '' || form.empresa_ids.length === 0) return;
 
     const opciones = {
         preserveScroll: true,
@@ -194,7 +201,7 @@ function enviar(): void {
                 <Label for="alm-codigo" class="flex items-center gap-1.5">
                     Código
                     <AyudaTooltip
-                        texto="Identificador interno del almacén dentro de la empresa. Si lo dejas vacío se genera automáticamente (ALM-0001)."
+                        texto="Identificador interno del almacén (único a nivel plataforma). Si lo dejas vacío se genera automáticamente (ALM-0001)."
                         etiqueta="Ayuda sobre el código"
                     />
                 </Label>
@@ -245,7 +252,7 @@ function enviar(): void {
                 <Label for="alm-responsable" class="flex items-center gap-1.5">
                     Responsable del almacén
                     <AyudaTooltip
-                        texto="Colaborador activo de la empresa responsable del almacén. Búscalo por nombre o número de empleado. Es opcional."
+                        texto="Colaborador activo responsable del almacén. Se busca dentro de la primera empresa abastecida. Es opcional."
                         etiqueta="Ayuda sobre el responsable"
                     />
                 </Label>
@@ -257,9 +264,16 @@ function enviar(): void {
                     :descripcion="
                         (c) => `N.º ${(c as Colaborador).numero_empleado}`
                     "
+                    :disabled="empresaResponsableId === null"
                     placeholder="Sin responsable"
                     @update:model-value="alElegirResponsable"
                 />
+                <p
+                    v-if="empresaResponsableId === null"
+                    class="text-muted-foreground text-xs"
+                >
+                    Selecciona primero una empresa abastecida.
+                </p>
                 <InputError :message="error('responsable_colaborador_id')" />
             </div>
 
@@ -289,13 +303,14 @@ function enviar(): void {
 
         <div class="grid gap-2">
             <Label class="flex items-center gap-1.5">
-                Sucursales abastecidas
+                Empresas abastecidas
+                <span class="text-destructive">*</span>
                 <AyudaTooltip
-                    texto="Sucursales que este almacén abastece. Un almacén puede abastecer varias sucursales y una sucursal puede recibir de varios almacenes."
-                    etiqueta="Ayuda sobre sucursales abastecidas"
+                    texto="Un almacén puede surtir a varias razones sociales; su inventario se mantiene separado por empresa."
+                    etiqueta="Ayuda sobre empresas abastecidas"
                 />
-                <Badge v-if="form.sucursales.length" variant="secondary">
-                    {{ form.sucursales.length }} seleccionadas
+                <Badge v-if="form.empresa_ids.length" variant="secondary">
+                    {{ form.empresa_ids.length }} seleccionadas
                 </Badge>
             </Label>
 
@@ -304,53 +319,46 @@ function enviar(): void {
                     class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2"
                 />
                 <Input
-                    v-model="buscarSucursal"
+                    v-model="buscarEmpresa"
                     class="h-8 pl-8"
-                    placeholder="Buscar sucursal por nombre o código"
-                    aria-label="Buscar sucursal"
+                    placeholder="Buscar empresa por nombre o código"
+                    aria-label="Buscar empresa"
                 />
             </div>
 
             <div
-                v-if="sucursales.length"
+                v-if="empresasAutorizadas.length"
                 class="max-h-44 overflow-y-auto rounded-md border"
             >
                 <label
-                    v-for="s in sucursalesFiltradas"
-                    :key="s.id"
+                    v-for="e in empresasFiltradas"
+                    :key="e.id"
                     class="hover:bg-accent/60 flex cursor-pointer items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0"
                 >
                     <input
                         type="checkbox"
                         class="size-4 rounded border"
-                        :checked="form.sucursales.includes(s.id)"
-                        @change="alternarSucursal(s.id)"
+                        :checked="form.empresa_ids.includes(e.id)"
+                        @change="alternarEmpresa(e.id)"
                     />
                     <span class="min-w-0 flex-1 truncate">
-                        {{ s.nombre }}
+                        {{ e.nombre_comercial }}
                         <span class="text-muted-foreground font-mono text-xs">
-                            {{ s.codigo }}
+                            {{ e.codigo }}
                         </span>
                     </span>
-                    <Badge
-                        v-if="!s.activa"
-                        variant="outline"
-                        class="shrink-0 text-xs"
-                    >
-                        Inactiva
-                    </Badge>
                 </label>
                 <p
-                    v-if="!sucursalesFiltradas.length"
+                    v-if="!empresasFiltradas.length"
                     class="text-muted-foreground px-3 py-2 text-sm"
                 >
-                    Ninguna sucursal coincide con la búsqueda.
+                    Ninguna empresa coincide con la búsqueda.
                 </p>
             </div>
             <p v-else class="text-muted-foreground text-xs">
-                Esta empresa aún no tiene sucursales registradas.
+                No tienes empresas asignadas.
             </p>
-            <InputError :message="error('sucursales')" />
+            <InputError :message="error('empresa_ids')" />
         </div>
 
         <div class="flex items-center justify-end gap-2 pt-1">

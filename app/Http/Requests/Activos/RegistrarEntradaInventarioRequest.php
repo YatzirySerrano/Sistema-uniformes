@@ -3,8 +3,8 @@
 namespace App\Http\Requests\Activos;
 
 use App\Enums\TipoControlActivo;
+use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Activo;
-use App\Soporte\ContextoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -24,6 +24,8 @@ use Illuminate\Validation\Validator;
  */
 class RegistrarEntradaInventarioRequest extends FormRequest
 {
+    use ResuelveEmpresa;
+
     public function authorize(): bool
     {
         return $this->user()?->can('inventario.entrada') ?? false;
@@ -34,12 +36,14 @@ class RegistrarEntradaInventarioRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = app(ContextoEmpresa::class)->empresaObligatoria()->getKey();
+        $empresaId = $this->empresaResuelta()->getKey();
 
         return [
+            'empresa_id' => ['required', 'integer'],
             'almacen_id' => [
                 'required', 'integer',
-                Rule::exists('almacenes', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)->where('activo', true)),
+                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('almacenes', 'id')->where(fn ($q) => $q->where('activo', true)),
             ],
             'motivo' => ['required', 'string', 'max:255'],
             'notas' => ['nullable', 'string', 'max:1000'],
@@ -63,8 +67,9 @@ class RegistrarEntradaInventarioRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'empresa_id.required' => 'Selecciona la empresa.',
             'almacen_id.required' => 'Selecciona el almacén de destino.',
-            'almacen_id.exists' => 'El almacén seleccionado no está disponible.',
+            'almacen_id.exists' => 'El almacén no abastece a esta empresa o está desactivado.',
             'motivo.required' => 'Indica el motivo o la referencia de la entrada.',
             'items.required' => 'Agrega al menos un activo.',
             'items.min' => 'Agrega al menos un activo.',

@@ -1,5 +1,16 @@
 # Multiempresa
 
+> **BLOQUE A — actualización.** El sistema **ya no tiene "empresa activa"**. No
+> existe `ContextoEmpresa`, ni middleware `ResolverEmpresaActiva`, ni
+> `empresa_activa_id` en sesión, ni selector de empresa en el sidebar. El
+> contexto de empresa se determina por **recurso / formulario / filtro** y el
+> backend siempre valida el acceso (`App\Soporte\AccesoEmpresa` +
+> `User::puedeAccederEmpresa()` + Policies + `ResuelveEmpresa` en Form Requests).
+> Listados: filtro opcional `?empresa_id=`. Altas: campo `empresa_id`. Edición:
+> la empresa la fija el registro. Entregas/Devoluciones: empresa **derivada del
+> colaborador**. Las secciones de "empresa activa" más abajo describen el diseño
+> anterior y ya no aplican.
+
 ## Jerarquía
 
 ```

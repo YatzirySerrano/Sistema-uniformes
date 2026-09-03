@@ -9,6 +9,9 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { EmpresaAutorizada } from '@/types/sistema';
+
+const props = defineProps<{ empresasAutorizadas: EmpresaAutorizada[] }>();
 
 type AlmacenOpcion = {
     id: number;
@@ -37,6 +40,7 @@ defineOptions({
 });
 
 const form = useForm<{
+    empresa_id: number | null;
     almacen_id: number | null;
     motivo: string;
     notas: string;
@@ -47,12 +51,26 @@ const form = useForm<{
         cantidad: number;
     }[];
 }>({
+    empresa_id:
+        props.empresasAutorizadas.length === 1
+            ? props.empresasAutorizadas[0].id
+            : null,
     almacen_id: null,
     motivo: '',
     notas: '',
     carga_inicial: false,
     items: [{ activo_id: null, talla_id: null, cantidad: 1 }],
 });
+
+/** Al cambiar la empresa se reinicia la selección dependiente. */
+function alCambiarEmpresa(): void {
+    almacenSel.value = null;
+    form.almacen_id = null;
+    form.items = [{ activo_id: null, talla_id: null, cantidad: 1 }];
+    Object.keys(activosSel).forEach((k) => delete activosSel[Number(k)]);
+    activosSel[0] = null;
+    form.clearErrors();
+}
 
 // Estado de UI paralelo a form.items (por índice): objeto de almacén/activo
 // seleccionados para poder mostrar su etiqueta en el combobox.
@@ -70,17 +88,19 @@ function errFila(i: number, campo: string): string | undefined {
 }
 
 async function buscarAlmacenes(q: string): Promise<AlmacenOpcion[]> {
-    const res = await fetch(`/almacenes/buscar?q=${encodeURIComponent(q)}`, {
-        headers: { Accept: 'application/json' },
-        credentials: 'same-origin',
-    });
+    if (!form.empresa_id) return [];
+    const res = await fetch(
+        `/almacenes/buscar?empresa_id=${form.empresa_id}&q=${encodeURIComponent(q)}`,
+        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+    );
     if (!res.ok) return [];
     return (await res.json()).almacenes ?? [];
 }
 
 async function buscarActivos(q: string): Promise<ActivoBuscado[]> {
+    if (!form.empresa_id) return [];
     const res = await fetch(
-        `/activos/buscar?control=cantidad&q=${encodeURIComponent(q)}`,
+        `/activos/buscar?empresa_id=${form.empresa_id}&control=cantidad&q=${encodeURIComponent(q)}`,
         { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
     );
     if (!res.ok) return [];
@@ -130,6 +150,7 @@ const duplicados = computed(() => {
 
 const incompleto = computed(
     () =>
+        !form.empresa_id ||
         !form.almacen_id ||
         !form.motivo.trim() ||
         form.items.length === 0 ||
@@ -183,6 +204,31 @@ function enviar() {
 
         <form class="space-y-6" @submit.prevent="enviar">
             <div class="grid gap-4 sm:grid-cols-2">
+                <div class="grid gap-1.5 sm:col-span-2">
+                    <Label for="empresa">Empresa / razón social</Label>
+                    <select
+                        id="empresa"
+                        v-model="form.empresa_id"
+                        class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
+                        @change="alCambiarEmpresa"
+                    >
+                        <option :value="null" disabled>
+                            Selecciona una empresa
+                        </option>
+                        <option
+                            v-for="e in empresasAutorizadas"
+                            :key="e.id"
+                            :value="e.id"
+                        >
+                            {{ e.nombre_comercial }}
+                        </option>
+                    </select>
+                    <p class="text-muted-foreground text-xs">
+                        El almacén y los activos se acotan a esta empresa.
+                    </p>
+                    <InputError :message="form.errors.empresa_id" />
+                </div>
+
                 <div class="grid gap-1.5">
                     <Label for="almacen">Almacén</Label>
                     <BuscadorAsync
@@ -201,6 +247,7 @@ function enviar() {
                         "
                         placeholder="Selecciona un almacén"
                         placeholder-busqueda="Buscar por nombre, código o dirección"
+                        :disabled="!form.empresa_id"
                         :invalido="!!form.errors.almacen_id"
                         @update:model-value="
                             (v) => alElegirAlmacen(v as AlmacenOpcion | null)

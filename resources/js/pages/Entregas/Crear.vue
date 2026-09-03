@@ -9,15 +9,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { ActivoOpcion } from '@/types/sistema';
 
+type ColaboradorOpcion = {
+    id: number;
+    nombre_completo: string;
+    numero_empleado: string;
+    empresa_id: number;
+    empresa: string | null;
+    sucursal_id: number;
+    sucursal: string | null;
+};
+
 const props = defineProps<{
-    sucursales: { id: number; nombre: string }[];
-    colaboradores: {
-        id: number;
-        nombre_completo: string;
-        numero_empleado: string;
-        sucursal_id: number;
-    }[];
-    activos: ActivoOpcion[];
+    colaboradores: ColaboradorOpcion[];
+    activosPorEmpresa: Record<number, ActivoOpcion[]>;
 }>();
 
 defineOptions({
@@ -32,7 +36,6 @@ defineOptions({
 const hoy = new Date().toISOString().slice(0, 10);
 
 const form = useForm<{
-    sucursal_id: number | string;
     colaborador_id: number | string;
     fecha_entrega: string;
     notas: string;
@@ -42,31 +45,38 @@ const form = useForm<{
         cantidad: number;
     }[];
 }>({
-    sucursal_id: '',
     colaborador_id: '',
     fecha_entrega: hoy,
     notas: '',
     items: [{ activo_id: null, talla_id: null, cantidad: 1 }],
 });
 
-const colaboradoresFiltrados = computed(() =>
-    form.sucursal_id
-        ? props.colaboradores.filter(
-              (c) => c.sucursal_id === Number(form.sucursal_id),
-          )
-        : props.colaboradores,
+const colaboradorSel = computed<ColaboradorOpcion | null>(
+    () =>
+        props.colaboradores.find((c) => c.id === Number(form.colaborador_id)) ??
+        null,
+);
+
+// La empresa y la sucursal se DERIVAN del colaborador (contexto, no dimensión
+// de inventario). Los activos disponibles son los de esa empresa.
+const activos = computed<ActivoOpcion[]>(() =>
+    colaboradorSel.value
+        ? (props.activosPorEmpresa[colaboradorSel.value.empresa_id] ?? [])
+        : [],
 );
 
 const disponibles = ref<Record<string, number>>({});
+const almacenOrigen = ref<string | null>(null);
 
 watch(
-    () => form.sucursal_id,
+    () => form.colaborador_id,
     async (id) => {
-        form.colaborador_id = '';
         disponibles.value = {};
+        almacenOrigen.value = null;
+        form.items = [{ activo_id: null, talla_id: null, cantidad: 1 }];
         if (!id) return;
         const res = await window.fetch(
-            `/entregas/disponibilidad?sucursal_id=${id}`,
+            `/entregas/disponibilidad?colaborador_id=${id}`,
             { headers: { Accept: 'application/json' } },
         );
         if (!res.ok) return;
@@ -76,12 +86,14 @@ watch(
                 talla_id: number;
                 disponible: number;
             }[];
+            almacen?: { id: number; nombre: string };
         };
         const mapa: Record<string, number> = {};
         for (const s of json.saldos) {
             mapa[`${s.activo_id}-${s.talla_id}`] = s.disponible;
         }
         disponibles.value = mapa;
+        almacenOrigen.value = json.almacen?.nombre ?? null;
     },
 );
 
@@ -96,31 +108,32 @@ function enviar() {
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar entrega"
-            descripcion="Colaborador → activos → confirmar. El inventario se descuenta al registrar."
+            descripcion="Colaborador → activos → confirmar. La empresa y la sucursal se toman del colaborador; el inventario se descuenta del almacén que abastece a esa empresa."
         />
 
         <form class="space-y-6" @submit.prevent="enviar">
             <div class="grid gap-4 sm:grid-cols-2">
                 <div class="grid gap-1.5">
-                    <Label for="sucursal_id">Sucursal</Label>
+                    <Label for="colaborador_id">Colaborador</Label>
                     <select
-                        id="sucursal_id"
-                        v-model="form.sucursal_id"
+                        id="colaborador_id"
+                        v-model="form.colaborador_id"
                         class="border-input bg-background h-9 rounded-md border px-3 text-sm"
                         required
                     >
                         <option value="" disabled>
-                            Selecciona una sucursal
+                            Selecciona un colaborador
                         </option>
                         <option
-                            v-for="s in sucursales"
-                            :key="s.id"
-                            :value="s.id"
+                            v-for="c in colaboradores"
+                            :key="c.id"
+                            :value="c.id"
                         >
-                            {{ s.nombre }}
+                            {{ c.numero_empleado }} —
+                            {{ c.nombre_completo }} ({{ c.empresa }})
                         </option>
                     </select>
-                    <InputError :message="form.errors.sucursal_id" />
+                    <InputError :message="form.errors.colaborador_id" />
                 </div>
                 <div class="grid gap-1.5">
                     <Label for="fecha_entrega">Fecha de entrega</Label>
@@ -135,31 +148,24 @@ function enviar() {
                 </div>
             </div>
 
-            <div class="grid gap-1.5">
-                <Label for="colaborador_id">Colaborador</Label>
-                <select
-                    id="colaborador_id"
-                    v-model="form.colaborador_id"
-                    class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                    :disabled="!form.sucursal_id"
-                    required
-                >
-                    <option value="" disabled>
-                        {{
-                            form.sucursal_id
-                                ? 'Selecciona un colaborador'
-                                : 'Primero elige una sucursal'
-                        }}
-                    </option>
-                    <option
-                        v-for="c in colaboradoresFiltrados"
-                        :key="c.id"
-                        :value="c.id"
-                    >
-                        {{ c.numero_empleado }} — {{ c.nombre_completo }}
-                    </option>
-                </select>
-                <InputError :message="form.errors.colaborador_id" />
+            <div
+                v-if="colaboradorSel"
+                class="bg-muted/40 grid gap-1 rounded-lg p-3 text-sm sm:grid-cols-3"
+            >
+                <p>
+                    <span class="text-muted-foreground text-xs">Empresa</span
+                    ><br />{{ colaboradorSel.empresa }}
+                </p>
+                <p>
+                    <span class="text-muted-foreground text-xs"
+                        >Sucursal actual</span
+                    ><br />{{ colaboradorSel.sucursal }}
+                </p>
+                <p v-if="almacenOrigen">
+                    <span class="text-muted-foreground text-xs"
+                        >Almacén de origen</span
+                    ><br />{{ almacenOrigen }}
+                </p>
             </div>
 
             <div class="grid gap-1.5">

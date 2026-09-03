@@ -4,7 +4,6 @@ namespace App\Providers;
 
 use App\Enums\RolSistema;
 use App\Models\User;
-use App\Soporte\ContextoEmpresa;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
@@ -17,8 +16,7 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        // El contexto de empresa vive durante toda la petición.
-        $this->app->scoped(ContextoEmpresa::class);
+        //
     }
 
     public function boot(): void

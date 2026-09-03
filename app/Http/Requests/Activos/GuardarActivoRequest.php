@@ -4,21 +4,21 @@ namespace App\Http\Requests\Activos;
 
 use App\Enums\TipoControlActivo;
 use App\Http\Requests\Concerns\NormalizaEntrada;
+use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Activo;
-use App\Soporte\ContextoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
 
 /**
- * Validación de alta y edición de activos. La empresa nunca llega del frontend:
- * se toma de la empresa activa del contexto y es la autoridad final. Las tallas
- * son opcionales (un uniforme las usa; una laptop no).
+ * Validación de alta y edición de activos. En alta la empresa llega en
+ * `empresa_id` y se valida el acceso del usuario; en edición queda fijada por el
+ * registro. Las tallas son opcionales (un uniforme las usa; una laptop no).
  */
 class GuardarActivoRequest extends FormRequest
 {
-    use NormalizaEntrada;
+    use NormalizaEntrada, ResuelveEmpresa;
 
     public function authorize(): bool
     {
@@ -45,11 +45,12 @@ class GuardarActivoRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = app(ContextoEmpresa::class)->empresaObligatoria()->getKey();
+        $empresaId = $this->empresaResuelta('activo')->getKey();
         $activo = $this->route('activo');
         $activoId = $activo instanceof Activo ? $activo->getKey() : null;
 
         return [
+            ...($activoId === null ? ['empresa_id' => ['required', 'integer']] : []),
             'nombre' => ['required', 'string', 'max:255'],
             'descripcion' => ['nullable', 'string', 'max:2000'],
             'categoria_id' => [
@@ -83,6 +84,7 @@ class GuardarActivoRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'empresa_id.required' => 'Selecciona la empresa del activo.',
             'nombre.required' => 'El nombre del activo es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
             'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',

@@ -13,6 +13,7 @@ type Movimiento = {
     cantidad: number;
     existencia_anterior: number;
     existencia_resultante: number;
+    empresa: string | null;
     almacen: string;
     sucursal: string | null;
     activo: string;
@@ -25,8 +26,8 @@ type Movimiento = {
 const props = defineProps<{
     movimientos: Paginado<Movimiento>;
     filtros: Record<string, string | number | undefined>;
+    empresasAutorizadas: import('@/types/sistema').EmpresaAutorizada[];
     almacenes: { id: number; nombre: string }[];
-    activos: { id: number; nombre: string }[];
     tipos: { valor: string; etiqueta: string }[];
 }>();
 
@@ -40,8 +41,8 @@ defineOptions({
 });
 
 const f = ref({
+    empresa_id: props.filtros.empresa_id ?? '',
     almacen_id: props.filtros.almacen_id ?? '',
-    activo_id: props.filtros.activo_id ?? '',
     tipo: props.filtros.tipo ?? '',
     desde: props.filtros.desde ?? '',
     hasta: props.filtros.hasta ?? '',
@@ -79,21 +80,27 @@ function fecha(iso: string) {
 
         <div class="flex flex-wrap gap-2">
             <select
+                v-if="empresasAutorizadas.length > 1"
+                v-model="f.empresa_id"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                aria-label="Filtrar por empresa"
+            >
+                <option value="">Todas las empresas</option>
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
+                </option>
+            </select>
+            <select
                 v-model="f.almacen_id"
                 class="border-input bg-background h-9 rounded-md border px-3 text-sm"
             >
                 <option value="">Todos los almacenes</option>
                 <option v-for="a in almacenes" :key="a.id" :value="a.id">
                     {{ a.nombre }}
-                </option>
-            </select>
-            <select
-                v-model="f.activo_id"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="">Todos los activos</option>
-                <option v-for="p in activos" :key="p.id" :value="p.id">
-                    {{ p.nombre }}
                 </option>
             </select>
             <select

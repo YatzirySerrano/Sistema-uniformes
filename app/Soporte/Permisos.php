@@ -99,7 +99,6 @@ final class Permisos
                 'inventario.ajustar' => 'Ajustar existencias de almacén',
                 'inventario.minimos' => 'Configurar mínimos por almacén',
                 'inventario.transferir' => 'Transferir entre almacenes',
-                'inventario.migrar' => 'Resolver la migración de existencias legacy (sucursal → almacén)',
             ],
         ],
         'entregas' => [

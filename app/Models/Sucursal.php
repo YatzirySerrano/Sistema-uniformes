@@ -72,36 +72,6 @@ class Sucursal extends Model
     }
 
     /**
-     * @return HasMany<SaldoInventario, $this>
-     */
-    public function saldos(): HasMany
-    {
-        return $this->hasMany(SaldoInventario::class);
-    }
-
-    /**
-     * Almacenes que abastecen a esta sucursal.
-     *
-     * @return BelongsToMany<Almacen, $this>
-     */
-    public function almacenes(): BelongsToMany
-    {
-        return $this->belongsToMany(Almacen::class, 'almacen_sucursal')->withTimestamps();
-    }
-
-    /**
-     * Almacén activo que abastece a esta sucursal cuando es inequívoco (exactamente
-     * uno). Devuelve null si hay cero o varios: en ese caso la operación debe
-     * pedir el almacén de forma explícita o resolverse con el asistente.
-     */
-    public function almacenAbastecedorUnico(): ?Almacen
-    {
-        $almacenes = $this->almacenes()->where('almacenes.activo', true)->get();
-
-        return $almacenes->count() === 1 ? $almacenes->first() : null;
-    }
-
-    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

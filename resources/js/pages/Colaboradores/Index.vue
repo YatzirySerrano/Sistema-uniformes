@@ -8,7 +8,7 @@ import Paginacion from '@/components/sistema/Paginacion.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { Paginado } from '@/types/sistema';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Colaborador = {
     id: number;
@@ -18,11 +18,18 @@ type Colaborador = {
     area: string | null;
     activo: boolean;
     sucursal: { nombre: string } | null;
+    empresa?: { id: number; nombre_comercial: string | null } | null;
 };
 
 const props = defineProps<{
     colaboradores: Paginado<Colaborador>;
-    filtros: { buscar?: string; sucursal_id?: number; estado?: string };
+    filtros: {
+        buscar?: string;
+        empresa_id?: number | null;
+        sucursal_id?: number;
+        estado?: string;
+    };
+    empresasAutorizadas: EmpresaAutorizada[];
     sucursales: { id: number; nombre: string }[];
     puedeCrear: boolean;
     puedeImportar: boolean;
@@ -35,17 +42,19 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar ?? '');
+const empresaId = ref(props.filtros.empresa_id ?? '');
 const sucursalId = ref(props.filtros.sucursal_id ?? '');
 const estado = ref(props.filtros.estado ?? 'activos');
 
 let t: ReturnType<typeof setTimeout>;
-watch([buscar, sucursalId, estado], () => {
+watch([buscar, empresaId, sucursalId, estado], () => {
     clearTimeout(t);
     t = setTimeout(() => {
         router.get(
             '/colaboradores',
             {
                 buscar: buscar.value || undefined,
+                empresa_id: empresaId.value || undefined,
                 sucursal_id: sucursalId.value || undefined,
                 estado: estado.value,
             },
@@ -56,6 +65,7 @@ watch([buscar, sucursalId, estado], () => {
 
 function limpiar() {
     buscar.value = '';
+    empresaId.value = '';
     sucursalId.value = '';
     estado.value = 'todos';
 }
@@ -75,7 +85,7 @@ const hrefNuevoColaborador = computed(() =>
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Colaboradores"
-            descripcion="Personal registrado de la empresa activa."
+            descripcion="Personal registrado por empresa. Usa el filtro de empresa para acotar el listado y elegir sucursal."
         >
             <template #acciones>
                 <Button v-if="puedeImportar" variant="outline" as-child>
@@ -103,10 +113,30 @@ const hrefNuevoColaborador = computed(() =>
                 />
             </div>
             <select
+                v-if="empresasAutorizadas.length > 1"
+                v-model="empresaId"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                aria-label="Filtrar por empresa"
+            >
+                <option value="">Todas las empresas</option>
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
+                </option>
+            </select>
+            <select
                 v-model="sucursalId"
+                :disabled="!empresaId"
                 class="border-input bg-background h-9 rounded-md border px-3 text-sm"
             >
-                <option value="">Todas las sucursales</option>
+                <option value="">
+                    {{
+                        empresaId ? 'Todas las sucursales' : 'Elige una empresa'
+                    }}
+                </option>
                 <option v-for="s in sucursales" :key="s.id" :value="s.id">
                     {{ s.nombre }}
                 </option>

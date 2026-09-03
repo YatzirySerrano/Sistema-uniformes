@@ -8,6 +8,7 @@ use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\Devolucion;
+use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\Sucursal;
 use App\Models\Talla;
@@ -57,8 +58,8 @@ class RegistrarDevolucion
 
         // Destino de la devolución: por defecto el almacén de origen de la
         // entrega si sigue disponible; si no, el abastecedor inequívoco de la
-        // sucursal.
-        $almacen = $this->resolverAlmacen->paraSucursal($sucursal, $entregaOrigen?->almacen_id);
+        // empresa.
+        $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId), $entregaOrigen?->almacen_id);
 
         $items = array_values(array_filter($items, fn ($i): bool => (int) $i['cantidad'] > 0));
 
@@ -119,6 +120,7 @@ class RegistrarDevolucion
             $this->auditoria->registrar('devoluciones', 'crear', [
                 'tipo_entidad' => Devolucion::class,
                 'entidad_id' => $devolucion->getKey(),
+                'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursal->getKey(),
                 'descripcion' => 'Devolución '.$devolucion->folio.' registrada para '.$colaborador->nombre_completo,
             ]);

@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Acciones\ConfirmarAcuseRecepcion;
 use App\Enums\EstadoEntrega;
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
 use App\Models\AcuseRecepcion;
 use App\Models\EntregaUniforme;
 use App\Servicios\ServicioAcusePdf;
@@ -18,12 +17,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AcuseController extends Controller
 {
-    use ConEmpresaActiva;
-
     public function firmar(EntregaUniforme $entrega): Response|RedirectResponse
     {
         $this->authorize('firmar', $entrega);
-        abort_unless($entrega->empresa_id === $this->empresaActiva()->id, 404);
 
         if ($entrega->estado !== EstadoEntrega::PendienteFirma) {
             return to_route('entregas.show', $entrega)->with('toast', [
@@ -54,7 +50,6 @@ class AcuseController extends Controller
     public function confirmar(Request $request, EntregaUniforme $entrega, ConfirmarAcuseRecepcion $accion): RedirectResponse
     {
         $this->authorize('firmar', $entrega);
-        abort_unless($entrega->empresa_id === $this->empresaActiva()->id, 404);
 
         $datos = $request->validate([
             'firma' => ['required', 'string', 'max:3000000'],

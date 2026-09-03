@@ -7,7 +7,6 @@ use App\Excepciones\ExcepcionDeNegocio;
 use App\Models\Activo;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
-use App\Soporte\ContextoEmpresa;
 
 beforeEach(function () {
     $this->datos = escenarioMultiempresa();
@@ -24,7 +23,7 @@ it('registra una entrada de inventario contra el almacén y crea el saldo', func
 
     $saldo = SaldoInventario::query()->where('almacen_id', $this->datos['almacenA']->id)->first();
     expect($saldo->cantidad)->toBe(15)
-        ->and($saldo->sucursal_id)->toBeNull();
+        ->and($saldo->empresa_id)->toBe($this->datos['empresaA']->id);
 });
 
 it('un ajuste fija la existencia del almacén y exige motivo', function () {
@@ -72,7 +71,7 @@ it('un almacén desactivado no admite entradas', function () {
     ))->toThrow(ExcepcionDeNegocio::class);
 });
 
-it('rechaza una entrada cuyo almacén pertenece a otra empresa', function () {
+it('rechaza una entrada cuyo almacén no abastece a la empresa', function () {
     expect(fn () => app(RegistrarEntradaInventario::class)->ejecutar(
         $this->datos['empresaA']->id, $this->datos['almacenB']->id,
         [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
@@ -90,40 +89,38 @@ it('rechaza una entrada con un activo o talla de otra empresa', function () {
     ))->toThrow(ExcepcionDeNegocio::class);
 });
 
-it('la pantalla de inventario sólo muestra saldos por almacén (no legacy) y filtra por almacén', function () {
+it('la pantalla de inventario muestra los saldos del almacén y filtra por almacén', function () {
     $empresa = $this->datos['empresaA'];
     $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
 
     SaldoInventario::factory()->create([
-        'empresa_id' => $empresa->id, 'almacen_id' => $this->datos['almacenA']->id, 'sucursal_id' => null,
+        'empresa_id' => $empresa->id, 'almacen_id' => $this->datos['almacenA']->id,
         'activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 7,
     ]);
-    SaldoInventario::factory()->legacy($this->datos['sucursalA'])->create([
-        'empresa_id' => $empresa->id, 'activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 99,
-    ]);
 
-    $this->actingAs($admin)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
-        ->get('/inventario')
+    $this->actingAs($admin)
+        ->get('/inventario?empresa_id='.$empresa->id)
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('Inventario/Index')
             ->where('saldos.data.0.cantidad', 7)
             ->where('saldos.data.0.almacen', 'Almacén A')
-            ->where('saldosLegacyPendientes', 1)
         );
 });
 
-it('un ajuste absoluto por HTTP requiere el permiso y valida el almacén de la empresa activa', function () {
+it('un ajuste absoluto por HTTP valida que el almacén abastezca a la empresa', function () {
     $empresa = $this->datos['empresaA'];
     $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
 
-    $this->actingAs($admin)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
+    $this->actingAs($admin)
+        ->from('/inventario')
         ->post('/inventario/ajuste', [
+            'empresa_id' => $empresa->id,
             'almacen_id' => $this->datos['almacenB']->id,
             'activo_id' => $this->datos['activoA']->id,
             'talla_id' => $this->datos['tallaA']->id,
             'existencia_objetivo' => 5,
             'motivo' => 'Prueba',
         ])
-        ->assertForbidden();
+        ->assertSessionHasErrors('almacen_id');
 });

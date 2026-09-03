@@ -55,7 +55,6 @@ class ServicioInventario
                 $saldo = new SaldoInventario([
                     'empresa_id' => $datos->empresaId,
                     'almacen_id' => $datos->almacenId,
-                    'sucursal_id' => null,
                     'activo_id' => $datos->activoId,
                     'talla_id' => $datos->tallaId,
                     'cantidad' => 0,
@@ -115,7 +114,7 @@ class ServicioInventario
                     'activo_id' => $activoId,
                     'talla_id' => $tallaId,
                 ],
-                ['sucursal_id' => null, 'cantidad' => 0, 'minimo' => 0],
+                ['cantidad' => 0, 'minimo' => 0],
             );
 
             $saldo->update(['minimo' => max(0, $minimo)]);

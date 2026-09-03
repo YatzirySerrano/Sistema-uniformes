@@ -1,80 +1,113 @@
 ---
 paths:
-    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,MigracionInventario}Controller.php'
+    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario}Controller.php'
     - 'app/Http/Requests/{Almacenes,Areas,Activos}/**'
+    - 'app/Http/Requests/Concerns/ResuelveEmpresa.php'
+    - 'app/Soporte/AccesoEmpresa.php'
     - 'app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php'
-    - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario,MigrarSaldosLegacyAAlmacen}.php'
+    - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario}.php'
 ---
 
-# Módulos Almacenes / Áreas / Activos
+# Módulos Almacenes / Áreas / Activos / Inventario
 
-Patrón calcado de `SucursalController` / `EmpresaController` (módulos aprobados):
+## Contexto de empresa: SIN "empresa activa" (Bloque A)
 
-- `use ConEmpresaActiva;` + `ServicioAuditoria` inyectado en el constructor.
-- La **empresa nunca llega del frontend**: `empresaActiva()` del contexto es la
-  autoridad. En `store` se fuerza `empresa_id`; en `show`/`update`/`toggle` se
-  hace `abort_unless($modelo->empresa_id === $this->empresaActiva()->id, 404)`.
-- Autorización: `$this->authorize(...)` con la Policy correspondiente
-  (`ActivoPolicy`, `AlmacenPolicy`, `AreaPolicy`), que combina el permiso
-  granular (`activos.*`, `almacenes.*`, `areas.*`) con
-  `User::puedeAccederEmpresa()`. Sin hardcodear nombres de rol (salvo el bypass
-  de Superadministrador en `AppServiceProvider`).
-- Form Requests con `NormalizaEntrada`, `authorize()` que delega en la Policy,
-  reglas cruzadas contra la empresa activa (responsable, sucursales abastecidas,
-  tipo de activo, tallas). No debe haber 500 con arrays/objetos donde se espera
-  string/id.
-- Códigos autogenerados y únicos por empresa: `ALM-0001`, `ARE-0001`,
-  `ACT-0001` (helper `generarCodigo()` con `withTrashed()`).
-- Auditar `crear` / `editar` / `activar` / `desactivar` y las relaciones
-  críticas (`almacenes` ↔ `sucursales`) vía `ServicioAuditoria::registrar()`.
-- El listado se sirve como cards (ver `.ai/rules/pages.md`) y su query debe ser
-  reutilizable para la futura exportación PDF/Excel.
+**No existe empresa activa en sesión.** No hay `ContextoEmpresa`, ni
+`empresaActiva()`, ni middleware `ResolverEmpresaActiva`, ni ruta
+`empresa-activa`. El contexto de empresa se determina por **recurso / formulario
+/ filtro** y SIEMPRE se valida el acceso; nunca se confía en el `empresa_id` que
+llega del frontend.
 
-## Inventario por almacén (implementado)
+- Controladores: `use ConEmpresa;` (concern con `porPagina()`,
+  `empresasAutorizadas($request)`, `idsEmpresasAutorizadas($request)`,
+  `resolverEmpresa($request)` → 403 si sin acceso, `empresaDelFiltro($request)`
+  → `?Empresa` para filtros opcionales, `opcionesEmpresas($request)`).
+- Servicio `App\Soporte\AccesoEmpresa` (stateless): `empresasAutorizadas(User)`,
+  `sucursalesAutorizadas(User, Empresa)`, `almacenesAutorizados(User, Empresa)`,
+  `puedeAcceder(User, Empresa)`.
+- **Índice**: `whereIn('empresa_id', idsEmpresasAutorizadas)` + filtro opcional
+  `empresa_id` (searchable en cliente). Props: `empresasAutorizadas` +
+  `filtros.empresa_id`. Cada fila expone su `empresa`.
+- **Alta** (`store`): `empresa_id` es campo del formulario. El Form Request usa
+  `use ResuelveEmpresa;` y `$this->empresaResuelta('rutaParam')` (lee el input en
+  alta, el modelo de ruta en edición; lanza `ValidationException` si sin acceso).
+  El controlador: `$empresa = $request->empresaResuelta();`.
+- **Edición / estado / detalle**: `$this->authorize(...)` con la Policy (revalida
+  `puedeAccederEmpresa($modelo->empresa_id)`). NO se usa
+  `abort_unless($modelo->empresa_id === ..., 404)`; un acceso ajeno da **403**
+  (no 404).
+- **Endpoints `buscar`** (`activos/buscar`, `almacenes/buscar`,
+  `almacenes/colaboradores-buscar`, `empresas/buscar`): aceptan/exigen
+  `empresa_id` y filtran por autorización (defensa IDOR). `activos/buscar` y
+  `colaboradores-buscar` devuelven `[]` sin `empresa_id`.
+- `HandleInertiaRequests` comparte `empresasAutorizadas` (no `contextoEmpresa`).
+  `usePermisos()` expone `puede()` + `empresasAutorizadas`.
+- `ServicioAuditoria::registrar()` recibe **siempre** `empresa_id` explícito en
+  `$opciones`.
 
-El inventario vive en el **almacén**: `saldos_inventario` / `movimientos_inventario`
-se llavean por `almacen_id` (índice único `saldos_inv_almacen_unico`);
-`sucursal_id` es nullable (sólo filas legacy y procedencia del historial).
-`ServicioInventario` opera sobre almacén. `InventarioController`,
-`RegistrarEntradaInventario` y `AjustarInventario` reciben `almacen_id`. Un
-almacén desactivado no admite entradas/ajustes.
+## Almacén ↔ Empresa: N:M (`almacen_empresa`)
 
-Entregas / Devoluciones / Correcciones todavía preguntan la sucursal en la UI;
-`ResolverAlmacenOperativo::paraSucursal()` obtiene el almacén de origen
-(abastecedor **único** de la sucursal; cero o varios → `ExcepcionDeNegocioSimple`,
-nunca 500). No reintroducir stock por sucursal como fuente de verdad.
+- El almacén **NO pertenece** a una empresa y **NO** se relaciona con sucursales.
+  `almacenes.empresa_id` y la tabla `almacen_sucursal` **no existen**.
+- `Almacen::empresas()` (BelongsToMany vía `almacen_empresa`);
+  `Almacen::abasteceEmpresa(int)`; `Almacen::scopeParaEmpresa($q, int)`.
+- El inventario se mantiene **separado por empresa dentro del almacén**
+  (`saldos_inventario.empresa_id` + `almacen_id`). Un almacén compartido guarda
+  saldos independientes para cada empresa.
+- `codigo` de almacén: único **a nivel plataforma** (`ALM-0001`);
+  `generarCodigo()` sin parámetro de empresa.
+- Alta/edición: campo `empresa_ids` (array, ≥ 1), cada id validado contra
+  `AccesoEmpresa::idsAutorizados`. El responsable debe pertenecer a alguna de
+  esas empresas. `AlmacenPolicy` autoriza si el usuario accede a **alguna**
+  empresa del almacén.
+- Auditar `crear` / `editar` / `empresas` (cambio de N:M) / `activar` /
+  `desactivar` — una entrada por empresa abastecida afectada.
 
-Saldos legacy: migración automática `..._000014` sólo para sucursales con un
-abastecedor único; el resto lo resuelve el asistente
-(`MigracionInventarioController`, `MigrarSaldosLegacyAAlmacen`) — idempotente y
-sin duplicar saldos.
+## Inventario por EMPRESA + ALMACÉN
+
+Llave de `saldos_inventario` (estado actual): `empresa + ALMACÉN + activo + talla`
+(único `saldos_inv_almacen_unico`). **`saldos_inventario` ya no tiene
+`sucursal_id`.** `movimientos_inventario` **sí** conserva `sucursal_id` nullable
+como procedencia histórica.
+
+- `ServicioInventario` opera sobre `(empresa, almacen, activo, talla)`.
+- `InventarioController` (`entrada` / `ajuste` / `minimos`): reciben `empresa_id`
+  **y** `almacen_id`; validan `puedeAccederEmpresa` + `Rule::exists('almacen_empresa','almacen_id')->where('empresa_id', ...)` + almacén activo.
+- `RegistrarEntradaInventario` / `AjustarInventario`: resuelven el almacén con
+  `Almacen::query()->paraEmpresa($empresaId)->findOr(...)`.
+- Un almacén desactivado no admite entradas/ajustes (para ninguna empresa).
+- **No hay migración legacy** (`MigracionInventarioController`,
+  `MigrarSaldosLegacyAAlmacen`, permiso `inventario.migrar` — eliminados). El
+  enum `TipoMovimiento::MigracionLegacy` se conserva sólo para filas históricas.
 
 ### Registrar entrada de inventario
 
 `RegistrarEntradaInventarioRequest` + `Inventario/Entrada.vue`:
 
-- `items.*.talla_id` es **nullable**. Si el activo tiene variantes propias →
-  `talla_id` obligatorio y debe ser una de ellas (error `items.N.talla_id`); si
-  no tiene → no se debe enviar `talla_id` y la acción resuelve la talla comodín.
-- Activos serializados: rechazados aquí (error `items.N.activo_id`); el
-  formulario sólo lista `tipo_control = cantidad`.
-- Fila duplicada (mismo `activo_id` + `talla_id`) → error en la segunda fila.
-- Errores por fila con clave `items.N.<campo>`; combobox `BuscadorAsync` para
-  almacén (`/almacenes/buscar`) y activo (`/activos/buscar?control=cantidad`).
+- `empresa_id` obligatorio (searchable/selector); el almacén y los activos del
+  formulario se acotan a esa empresa (`/almacenes/buscar?empresa_id=`,
+  `/activos/buscar?empresa_id=&control=cantidad`).
+- `items.*.talla_id` **nullable**: si el activo tiene variantes propias es
+  obligatorio; si no, la acción resuelve la talla comodín.
+- Serializados rechazados aquí (`items.N.activo_id`).
+- Fila duplicada (`activo_id` + `talla_id`) → error en la segunda fila.
 
-## Tipos y categorías de activo
+## Puente Entregas / Devoluciones / Correcciones
 
-- `tipos_activo`: CRUD en `TipoActivoController` (permiso `tipos-activo.administrar`),
-  pantalla `Activos/Catalogos.vue`. Tipos base sembrados por migración. **No**
-  existe "Uniforme" como tipo. Alta rápida: `tipos-activo/rapido` (JSON).
-- `categorias_activo`: catálogo real (`CategoriaActivoController`, permiso
-  `categorias-activo.administrar`). `activos.categoria_id` es la fuente de
-  verdad; `activos.categoria` (texto) es espejo temporal que sincroniza
-  `ActivoController` (mismo patrón que `colaboradores.area`).
+Todavía no rehechas (Bloque E/F). La empresa se **deriva del colaborador**; la
+sucursal es contexto/histórico, no dimensión de stock.
+`ResolverAlmacenOperativo::paraEmpresa(Empresa $empresa, ?int $almacenPreferidoId)`
+obtiene el almacén de origen (activo **único** que abastece a la empresa; cero o
+varios → `ExcepcionDeNegocioSimple`, nunca 500). `EntregaController` /
+`DevolucionController` reciben `colaborador_id` y derivan todo.
 
-## Serializados y variantes
+## Tipos, categorías y variantes de activo
 
-`Activo::tipo_control` distingue `cantidad` de `serializado`. El formulario de
-Activo oculta variantes/tallas cuando es serializado. El flujo de unidades
-serializadas (entidad `UnidadActivo`, serie / IMEI) sigue **pendiente**: no
-implementarlo aquí.
+- `tipos_activo`, `categorias_activo`, `tallas`: catálogos **por empresa**. Sus
+  pantallas (`Activos/Catalogos.vue`, `Activos/Tallas.vue`) llevan un selector de
+  empresa que recarga la página con `?empresa_id=`. `store` / `rapido` /
+  `reordenar` envían `empresa_id`.
+- `activos.categoria_id` es la fuente de verdad; `activos.categoria` (texto) es
+  espejo temporal que sincroniza `ActivoController`.
+- `Activo::tipo_control` distingue `cantidad` de `serializado`. El flujo de
+  unidades serializadas (`UnidadActivo`, serie / IMEI) sigue **pendiente**.

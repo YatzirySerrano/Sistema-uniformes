@@ -2,11 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Empresas\GuardarEmpresaRequest;
 use App\Models\Empresa;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -17,7 +18,7 @@ use Inertia\Response;
 
 class EmpresaController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -34,7 +35,6 @@ class EmpresaController extends Controller
         ]);
 
         $usuario = $request->user();
-        $empresaActivaId = $this->contexto()->id();
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
         // Superadministrador y Administrador ven todas las empresas de la
@@ -72,7 +72,6 @@ class EmpresaController extends Controller
                 'correo' => $e->correo,
                 'direccion' => $e->direccion,
                 'activa' => $e->activa,
-                'es_empresa_activa' => $e->id === $empresaActivaId,
                 'sucursales_activas' => (int) $e->sucursales_activas_count,
                 'colaboradores_activos' => (int) $e->colaboradores_activos_count,
                 'color_principal' => $e->color_principal,
@@ -91,6 +90,31 @@ class EmpresaController extends Controller
             'puedeCrear' => $usuario->can('create', Empresa::class),
             'puedeEditar' => $usuario->can('empresas.editar') || $usuario->can('configuracion-empresa.editar'),
         ]);
+    }
+
+    /**
+     * Búsqueda con autocompletado de empresas autorizadas para los combobox de
+     * formularios y filtros (BuscadorAsync). Respeta el alcance del usuario.
+     */
+    public function buscar(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Empresa::class);
+
+        $termino = trim((string) $request->query('q', ''));
+
+        $empresas = $this->empresasAutorizadas($request)
+            ->when($termino !== '', fn ($c) => $c->filter(fn (Empresa $e): bool => str_contains(
+                Str::lower($e->nombre_comercial.' '.$e->codigo.' '.$e->razon_social),
+                Str::lower($termino),
+            )))
+            ->take(20)
+            ->map(fn (Empresa $e): array => [
+                'id' => $e->id,
+                'codigo' => $e->codigo,
+                'nombre_comercial' => $e->nombre_comercial,
+            ])->values();
+
+        return response()->json(['empresas' => $empresas]);
     }
 
     public function show(Request $request, Empresa $empresa): Response
@@ -112,7 +136,6 @@ class EmpresaController extends Controller
                     'color_principal', 'color_secundario', 'color_acento',
                 ]),
                 'logo_url' => $this->logoUrl($empresa),
-                'es_empresa_activa' => $empresa->id === $this->contexto()->id(),
                 'sucursales_total' => (int) $empresa->sucursales_count,
                 'sucursales_activas' => (int) $empresa->sucursales_activas_count,
                 'colaboradores_total' => (int) $empresa->colaboradores_count,

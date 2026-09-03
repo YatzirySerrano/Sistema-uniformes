@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Models\CategoriaActivo;
 use App\Models\TipoActivo;
 use Illuminate\Http\Request;
@@ -11,19 +11,22 @@ use Inertia\Response;
 
 /**
  * Pantalla de administración de los catálogos de Activos: tipos y categorías.
- * Integrada en el área de Activos (no ocupa una entrada propia del menú).
+ * Integrada en el área de Activos (no ocupa una entrada propia del menú). Los
+ * tipos y categorías son por empresa: se elige la empresa con un selector.
  */
 class CatalogoActivoController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function index(Request $request): Response
     {
         $this->authorize('viewAny', TipoActivo::class);
-        $empresaId = $this->empresaActiva()->id;
+
+        $empresa = $this->empresaDelFiltro($request) ?? $this->empresasAutorizadas($request)->first();
+        abort_if($empresa === null, 403, 'No tienes ninguna empresa asignada.');
 
         $tipos = TipoActivo::query()
-            ->where('empresa_id', $empresaId)
+            ->where('empresa_id', $empresa->id)
             ->withCount('activos')
             ->orderBy('nombre')
             ->get()
@@ -36,7 +39,7 @@ class CatalogoActivoController extends Controller
             ]);
 
         $categorias = CategoriaActivo::query()
-            ->where('empresa_id', $empresaId)
+            ->where('empresa_id', $empresa->id)
             ->withCount('activos')
             ->with('tipoActivo:id,nombre')
             ->orderBy('nombre')
@@ -54,6 +57,8 @@ class CatalogoActivoController extends Controller
             'tipos' => $tipos,
             'categorias' => $categorias,
             'tiposSelect' => $tipos->where('activo', true)->map(fn ($t): array => ['id' => $t['id'], 'nombre' => $t['nombre']])->values(),
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'empresaSeleccionadaId' => $empresa->id,
             'permisos' => [
                 'administrar_tipos' => $request->user()->can('administrar', TipoActivo::class),
                 'administrar_categorias' => $request->user()->can('administrar', CategoriaActivo::class),

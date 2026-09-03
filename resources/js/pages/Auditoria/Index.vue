@@ -21,7 +21,8 @@ type Registro = {
 
 const props = defineProps<{
     registros: Paginado<Registro>;
-    filtros: Record<string, string | undefined>;
+    filtros: Record<string, string | number | undefined>;
+    empresasAutorizadas: import('@/types/sistema').EmpresaAutorizada[];
     modulos: string[];
 }>();
 
@@ -30,6 +31,7 @@ defineOptions({
 });
 
 const f = ref({
+    empresa_id: props.filtros.empresa_id ?? '',
     modulo: props.filtros.modulo ?? '',
     buscar: props.filtros.buscar ?? '',
     desde: props.filtros.desde ?? '',
@@ -71,6 +73,21 @@ function fecha(iso: string) {
         />
 
         <div class="flex flex-wrap gap-2">
+            <select
+                v-if="empresasAutorizadas.length > 1"
+                v-model="f.empresa_id"
+                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                aria-label="Filtrar por empresa"
+            >
+                <option value="">Todas las empresas</option>
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
+                </option>
+            </select>
             <select
                 v-model="f.modulo"
                 class="border-input bg-background h-9 rounded-md border px-3 text-sm"

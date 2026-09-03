@@ -1,5 +1,12 @@
 # Almacenes, Áreas / Departamentos y Activos
 
+> **BLOQUE A — actualización.** `Almacén ↔ Empresa` es ahora **N:M**
+> (`almacen_empresa`). El almacén NO pertenece a una empresa y NO se relaciona
+> con sucursales (`almacenes.empresa_id` y `almacen_sucursal` eliminados). El
+> `codigo` de almacén es único a nivel plataforma. Alta/edición: campo
+> `empresa_ids[]` (≥ 1). El inventario se mantiene separado por empresa dentro
+> del almacén. Sin "empresa activa": ver `docs/MULTIEMPRESA.md`.
+
 Este bloque construye la nueva base del sistema tras dejar de ser exclusivo de
 uniformes. El **inventario por almacén** ya está implementado (ver
 `docs/INVENTARIO.md`). Siguen pendientes: cascadas de desactivación,

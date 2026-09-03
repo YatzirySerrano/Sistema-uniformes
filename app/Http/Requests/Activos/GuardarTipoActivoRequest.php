@@ -3,19 +3,19 @@
 namespace App\Http\Requests\Activos;
 
 use App\Http\Requests\Concerns\NormalizaEntrada;
+use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\TipoActivo;
-use App\Soporte\ContextoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Alta / edición de un tipo de activo. La empresa la fija el contexto; el
- * frontend nunca la envía. El nombre es único (sin distinguir mayúsculas) por
- * empresa.
+ * Alta / edición de un tipo de activo. En alta la empresa llega en `empresa_id`
+ * y se valida el acceso del usuario; en edición queda fijada por el registro. El
+ * nombre es único (sin distinguir mayúsculas) por empresa.
  */
 class GuardarTipoActivoRequest extends FormRequest
 {
-    use NormalizaEntrada;
+    use NormalizaEntrada, ResuelveEmpresa;
 
     public function authorize(): bool
     {
@@ -34,11 +34,12 @@ class GuardarTipoActivoRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = app(ContextoEmpresa::class)->empresaObligatoria()->getKey();
+        $empresaId = $this->empresaResuelta('tipo')->getKey();
         $tipo = $this->route('tipo');
         $tipoId = $tipo instanceof TipoActivo ? $tipo->getKey() : null;
 
         return [
+            ...($tipoId === null ? ['empresa_id' => ['required', 'integer']] : []),
             'nombre' => [
                 'required', 'string', 'max:120',
                 Rule::unique('tipos_activo', 'nombre')
@@ -55,6 +56,7 @@ class GuardarTipoActivoRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'empresa_id.required' => 'Selecciona la empresa del tipo de activo.',
             'nombre.required' => 'El nombre del tipo de activo es obligatorio.',
             'nombre.unique' => 'Ya existe un tipo de activo con ese nombre en esta empresa.',
         ];

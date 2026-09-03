@@ -4,17 +4,16 @@ use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\RolSistema;
 use App\Models\Activo;
 use App\Models\SaldoInventario;
-use App\Soporte\ContextoEmpresa;
 
 beforeEach(function () {
     $this->datos = escenarioMultiempresa();
     $this->admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
-    $this->sesion = [ContextoEmpresa::SESSION_KEY => $this->datos['empresaA']->id];
 });
 
 function entrada(array $override = []): array
 {
     return array_merge([
+        'empresa_id' => test()->datos['empresaA']->id,
         'almacen_id' => test()->datos['almacenA']->id,
         'motivo' => 'Compra OC-1001',
         'items' => [
@@ -24,7 +23,7 @@ function entrada(array $override = []): array
 }
 
 it('registra una entrada válida y crea el saldo por almacén', function () {
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->post('/inventario/entrada', entrada())
         ->assertRedirect('/inventario')
         ->assertSessionHasNoErrors();
@@ -35,7 +34,7 @@ it('registra una entrada válida y crea el saldo por almacén', function () {
 it('un activo por cantidad SIN variantes no exige talla y usa la comodín', function () {
     $mouse = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Mouse', 'tipo_control' => 'cantidad']);
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->post('/inventario/entrada', entrada([
             'items' => [['activo_id' => $mouse->id, 'talla_id' => null, 'cantidad' => 8]],
         ]))
@@ -49,7 +48,7 @@ it('un activo por cantidad SIN variantes no exige talla y usa la comodín', func
 });
 
 it('exige la variante cuando el activo sí tiene variantes (error por fila)', function () {
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->from('/inventario/entrada')
         ->post('/inventario/entrada', entrada([
             'items' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => null, 'cantidad' => 3]],
@@ -60,7 +59,7 @@ it('exige la variante cuando el activo sí tiene variantes (error por fila)', fu
 it('rechaza enviar variante a un activo que no usa variantes', function () {
     $cable = Activo::factory()->for($this->datos['empresaA'])->create(['tipo_control' => 'cantidad']);
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->from('/inventario/entrada')
         ->post('/inventario/entrada', entrada([
             'items' => [['activo_id' => $cable->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
@@ -71,7 +70,7 @@ it('rechaza enviar variante a un activo que no usa variantes', function () {
 it('no permite activos serializados en esta pantalla', function () {
     $laptop = Activo::factory()->for($this->datos['empresaA'])->serializado()->create();
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->from('/inventario/entrada')
         ->post('/inventario/entrada', entrada([
             'items' => [['activo_id' => $laptop->id, 'talla_id' => null, 'cantidad' => 1]],
@@ -80,7 +79,7 @@ it('no permite activos serializados en esta pantalla', function () {
 });
 
 it('marca la segunda fila cuando se repite activo + variante', function () {
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->from('/inventario/entrada')
         ->post('/inventario/entrada', entrada([
             'items' => [
@@ -92,7 +91,7 @@ it('marca la segunda fila cuando se repite activo + variante', function () {
 });
 
 it('exige cantidad mayor a 0 con error en la fila', function () {
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->from('/inventario/entrada')
         ->post('/inventario/entrada', entrada([
             'items' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 0]],
@@ -101,19 +100,19 @@ it('exige cantidad mayor a 0 con error en la fila', function () {
 });
 
 it('rechaza un almacén de otra empresa o inactivo', function () {
-    $this->actingAs($this->admin)->withSession($this->sesion)->from('/inventario/entrada')
+    $this->actingAs($this->admin)->from('/inventario/entrada')
         ->post('/inventario/entrada', entrada(['almacen_id' => $this->datos['almacenB']->id]))
         ->assertSessionHasErrors('almacen_id');
 
     $this->datos['almacenA']->update(['activo' => false]);
-    $this->actingAs($this->admin)->withSession($this->sesion)->from('/inventario/entrada')
+    $this->actingAs($this->admin)->from('/inventario/entrada')
         ->post('/inventario/entrada', entrada())
         ->assertSessionHasErrors('almacen_id');
 });
 
 it('no explota (500) cuando items llega como cadena', function () {
-    $this->actingAs($this->admin)->withSession($this->sesion)->from('/inventario/entrada')
-        ->post('/inventario/entrada', ['almacen_id' => $this->datos['almacenA']->id, 'motivo' => 'x', 'items' => 'no-es-arreglo'])
+    $this->actingAs($this->admin)->from('/inventario/entrada')
+        ->post('/inventario/entrada', ['empresa_id' => $this->datos['empresaA']->id, 'almacen_id' => $this->datos['almacenA']->id, 'motivo' => 'x', 'items' => 'no-es-arreglo'])
         ->assertSessionHasErrors('items');
 });
 
@@ -123,7 +122,7 @@ it('un supervisor sin permiso no puede registrar entradas', function () {
     $supervisor->revokePermissionTo('inventario.entrada');
     $supervisor->roles->first()->revokePermissionTo('inventario.entrada');
 
-    $this->actingAs($supervisor)->withSession($this->sesion)
+    $this->actingAs($supervisor)
         ->post('/inventario/entrada', entrada())
         ->assertForbidden();
 });

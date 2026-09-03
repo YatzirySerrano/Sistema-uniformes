@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import {
     AlertTriangle,
     ClipboardList,
@@ -7,8 +7,10 @@ import {
     Shirt,
     Users,
 } from '@lucide/vue';
+import { ref, watch } from 'vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Resumen = {
     colaboradores_activos: number;
@@ -37,14 +39,27 @@ type Resumen = {
     stock_bajo_detalle: {
         activo: string;
         talla: string;
-        sucursal: string;
+        almacen: string;
         cantidad: number;
         minimo: number;
     }[];
     distribucion_sucursal: { sucursal: string; total: number }[];
 };
 
-defineProps<{ resumen: Resumen | null; sinEmpresa: boolean }>();
+const props = defineProps<{
+    resumen: Resumen | null;
+    empresaSeleccionadaId: number | null;
+    empresasAutorizadas: EmpresaAutorizada[];
+    sinEmpresa: boolean;
+}>();
+
+const empresaId = ref<number | ''>(props.empresaSeleccionadaId ?? '');
+watch(empresaId, (id) => {
+    router.get('/dashboard', id ? { empresa_id: id } : {}, {
+        preserveScroll: true,
+        preserveState: false,
+    });
+});
 
 defineOptions({
     layout: {
@@ -57,10 +72,30 @@ defineOptions({
     <Head title="Panel" />
 
     <div class="flex h-full flex-1 flex-col gap-4 p-4">
+        <label
+            v-if="empresasAutorizadas.length > 1"
+            class="flex w-fit items-center gap-1.5 text-sm"
+        >
+            <span class="text-muted-foreground">Empresa</span>
+            <select
+                v-model="empresaId"
+                class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
+                aria-label="Empresa del panel"
+            >
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
+                </option>
+            </select>
+        </label>
+
         <EstadoVacio
             v-if="sinEmpresa || !resumen"
-            titulo="Selecciona una empresa"
-            descripcion="Elige una empresa activa en el menú lateral para ver su panel."
+            titulo="No hay ninguna empresa que mostrar"
+            descripcion="No tienes empresas asignadas todavía."
         />
 
         <template v-else>
@@ -188,7 +223,7 @@ defineOptions({
                                         >
                                     </td>
                                     <td class="text-muted-foreground py-1.5">
-                                        {{ s.sucursal }}
+                                        {{ s.almacen }}
                                     </td>
                                     <td class="py-1.5 text-right font-medium">
                                         {{ s.cantidad }} / {{ s.minimo }}

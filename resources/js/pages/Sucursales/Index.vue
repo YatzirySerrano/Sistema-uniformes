@@ -37,20 +37,22 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Paginado } from '@/types/sistema';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type SucursalFila = SucursalEditable & {
     activa: boolean;
+    empresa: { id: number; nombre_comercial: string };
     colaboradores_activos: number;
 };
 
 const props = defineProps<{
     sucursales: Paginado<SucursalFila>;
-    empresa: { id: number; nombre_comercial: string };
+    empresasAutorizadas: EmpresaAutorizada[];
     filtros: {
         buscar: string;
         estado: '' | 'activas' | 'inactivas';
         orden: 'az' | 'za';
+        empresa_id: number | null;
     };
     permisos: { crear: boolean; editar: boolean; desactivar: boolean };
 }>();
@@ -63,13 +65,18 @@ defineOptions({
 const buscar = ref(props.filtros.buscar);
 const estado = ref<'' | 'activas' | 'inactivas'>(props.filtros.estado);
 const orden = ref<'az' | 'za'>(props.filtros.orden);
+const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
 
 const hayFiltrosActivos = computed(
-    () => buscar.value !== '' || estado.value !== '' || orden.value !== 'az',
+    () =>
+        buscar.value !== '' ||
+        estado.value !== '' ||
+        orden.value !== 'az' ||
+        empresaId.value !== '',
 );
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
-watch([buscar, estado, orden], () => {
+watch([buscar, estado, orden, empresaId], () => {
     clearTimeout(temporizador);
     temporizador = setTimeout(() => {
         router.get(
@@ -78,6 +85,7 @@ watch([buscar, estado, orden], () => {
                 buscar: buscar.value || undefined,
                 estado: estado.value || undefined,
                 orden: orden.value === 'az' ? undefined : orden.value,
+                empresa_id: empresaId.value || undefined,
             },
             {
                 preserveState: true,
@@ -93,6 +101,7 @@ function limpiarFiltros(): void {
     buscar.value = '';
     estado.value = '';
     orden.value = 'az';
+    empresaId.value = '';
 }
 
 const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
@@ -123,6 +132,7 @@ function editar(s: SucursalFila): void {
         nombre: s.nombre,
         direccion: s.direccion,
         telefono: s.telefono,
+        empresa_id: s.empresa.id,
     };
     claveFormulario.value++;
     modalAbierto.value = true;
@@ -191,7 +201,7 @@ function alternarEstado(s: SucursalFila): void {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Sucursales"
-            :descripcion="`Ubicaciones de ${empresa.nombre_comercial} (empresa activa).`"
+            descripcion="Ubicaciones de las empresas. Usa el filtro de empresa para acotar el listado."
         >
             <template #acciones>
                 <Button v-if="permisos.crear" @click="nueva">
@@ -214,6 +224,27 @@ function alternarEstado(s: SucursalFila): void {
             </div>
 
             <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <label
+                    v-if="empresasAutorizadas.length > 1"
+                    class="flex items-center gap-1.5 text-sm"
+                >
+                    <span class="text-muted-foreground">Empresa</span>
+                    <select
+                        v-model="empresaId"
+                        :class="claseSelect"
+                        aria-label="Filtrar por empresa"
+                    >
+                        <option value="">Todas</option>
+                        <option
+                            v-for="e in empresasAutorizadas"
+                            :key="e.id"
+                            :value="e.id"
+                        >
+                            {{ e.nombre_comercial }}
+                        </option>
+                    </select>
+                </label>
+
                 <div
                     class="flex gap-1"
                     role="group"
@@ -335,7 +366,7 @@ function alternarEstado(s: SucursalFila): void {
                         class="text-muted-foreground flex items-center gap-1.5 text-xs"
                     >
                         <Building2 class="size-3" />
-                        {{ empresa.nombre_comercial }}
+                        {{ s.empresa.nombre_comercial }}
                     </p>
 
                     <div
@@ -423,13 +454,14 @@ function alternarEstado(s: SucursalFila): void {
                         {{
                             enEdicion
                                 ? 'Actualiza los datos de la sucursal.'
-                                : `La sucursal se registrará en ${empresa.nombre_comercial} (empresa activa).`
+                                : 'Elige la empresa y captura los datos de la sucursal.'
                         }}
                     </DialogDescription>
                 </DialogHeader>
                 <FormularioSucursal
                     :key="claveFormulario"
                     :sucursal="enEdicion"
+                    :empresas-autorizadas="empresasAutorizadas"
                     @guardado="alGuardar"
                     @cancelar="modalAbierto = false"
                 />

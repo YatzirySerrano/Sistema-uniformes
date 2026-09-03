@@ -10,21 +10,24 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 
 /**
- * Consultas de reportes acotadas a una empresa y a un conjunto de sucursales
- * permitidas. Todos los filtros son opcionales.
+ * Consultas de reportes acotadas a un conjunto de empresas autorizadas. El
+ * inventario se reporta por ALMACÉN; las entregas por sucursal (contexto del
+ * colaborador). Todos los filtros son opcionales.
  */
 class ServicioReportes
 {
     /**
      * @param  array<string, mixed>  $filtros
+     * @param  Collection<int, int>|array<int, int>  $empresaIds
      * @param  Collection<int, int>|array<int, int>  $sucursalesPermitidas
      * @return Builder<EntregaUniforme>
      */
-    public function consultaEntregas(int $empresaId, $sucursalesPermitidas, array $filtros): Builder
+    public function consultaEntregas($empresaIds, $sucursalesPermitidas, array $filtros): Builder
     {
         return EntregaUniforme::query()
-            ->where('empresa_id', $empresaId)
+            ->whereIn('empresa_id', $empresaIds)
             ->whereIn('sucursal_id', $sucursalesPermitidas)
+            ->when($filtros['empresa_id'] ?? null, fn ($q, $v) => $q->where('empresa_id', $v))
             ->when($filtros['sucursal_id'] ?? null, fn ($q, $v) => $q->where('sucursal_id', $v))
             ->when($filtros['colaborador_id'] ?? null, fn ($q, $v) => $q->where('colaborador_id', $v))
             ->when($filtros['encargado_id'] ?? null, fn ($q, $v) => $q->where('encargado_id', $v))
@@ -35,30 +38,32 @@ class ServicioReportes
             ->when($filtros['hasta'] ?? null, fn ($q, $v) => $q->whereDate('fecha_entrega', '<=', $v))
             ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('activo_id', $v)))
             ->when($filtros['talla_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('talla_id', $v)))
-            ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'encargado:id,name', 'detalles'])
+            ->with(['empresa:id,nombre_comercial', 'colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'encargado:id,name', 'detalles'])
             ->latest('fecha_entrega');
     }
 
     /**
      * @param  array<string, mixed>  $filtros
+     * @param  Collection<int, int>|array<int, int>  $empresaIds
      * @param  Collection<int, int>|array<int, int>  $sucursalesPermitidas
      * @return LengthAwarePaginator<int, EntregaUniforme>
      */
-    public function entregasPaginadas(int $empresaId, $sucursalesPermitidas, array $filtros, int $porPagina): LengthAwarePaginator
+    public function entregasPaginadas($empresaIds, $sucursalesPermitidas, array $filtros, int $porPagina): LengthAwarePaginator
     {
-        return $this->consultaEntregas($empresaId, $sucursalesPermitidas, $filtros)
+        return $this->consultaEntregas($empresaIds, $sucursalesPermitidas, $filtros)
             ->paginate($porPagina)
             ->withQueryString();
     }
 
     /**
      * @param  array<string, mixed>  $filtros
+     * @param  Collection<int, int>|array<int, int>  $empresaIds
      * @param  Collection<int, int>|array<int, int>  $sucursalesPermitidas
      * @return array{entregas: int, activos: int, pendientes_firma: int}
      */
-    public function totalesEntregas(int $empresaId, $sucursalesPermitidas, array $filtros): array
+    public function totalesEntregas($empresaIds, $sucursalesPermitidas, array $filtros): array
     {
-        $ids = $this->consultaEntregas($empresaId, $sucursalesPermitidas, $filtros)->reorder()->pluck('id');
+        $ids = $this->consultaEntregas($empresaIds, $sucursalesPermitidas, $filtros)->reorder()->pluck('id');
 
         return [
             'entregas' => $ids->count(),
@@ -69,18 +74,20 @@ class ServicioReportes
 
     /**
      * @param  array<string, mixed>  $filtros
-     * @param  Collection<int, int>|array<int, int>  $sucursalesPermitidas
+     * @param  Collection<int, int>|array<int, int>  $empresaIds
+     * @param  Collection<int, int>|array<int, int>  $almacenesPermitidos
      * @return Builder<SaldoInventario>
      */
-    public function consultaInventario(int $empresaId, $sucursalesPermitidas, array $filtros): Builder
+    public function consultaInventario($empresaIds, $almacenesPermitidos, array $filtros): Builder
     {
         return SaldoInventario::query()
-            ->where('empresa_id', $empresaId)
-            ->whereIn('sucursal_id', $sucursalesPermitidas)
-            ->when($filtros['sucursal_id'] ?? null, fn ($q, $v) => $q->where('sucursal_id', $v))
+            ->whereIn('empresa_id', $empresaIds)
+            ->whereIn('almacen_id', $almacenesPermitidos)
+            ->when($filtros['empresa_id'] ?? null, fn ($q, $v) => $q->where('empresa_id', $v))
+            ->when($filtros['almacen_id'] ?? null, fn ($q, $v) => $q->where('almacen_id', $v))
             ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->where('activo_id', $v))
             ->when(($filtros['solo_bajo_minimo'] ?? false), fn ($q) => $q->bajoMinimo())
-            ->with(['sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor'])
-            ->orderBy('sucursal_id');
+            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'activo:id,nombre', 'talla:id,valor'])
+            ->orderBy('almacen_id');
     }
 }

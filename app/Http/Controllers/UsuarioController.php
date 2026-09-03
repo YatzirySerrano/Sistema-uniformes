@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\RolSistema;
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Models\Empresa;
 use App\Models\User;
 use App\Servicios\ServicioAuditoria;
@@ -19,7 +19,7 @@ use Spatie\Permission\Models\Role;
 
 class UsuarioController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -58,7 +58,7 @@ class UsuarioController extends Controller
         return Inertia::render('Usuarios/Formulario', [
             'usuario' => null,
             'roles' => $this->rolesAsignables($request->user()),
-            'empresas' => $this->contexto()->empresasAutorizadas()->map->only(['id', 'nombre_comercial'])->values(),
+            'empresas' => $this->empresasAutorizadas($request)->map->only(['id', 'nombre_comercial'])->values(),
         ]);
     }
 
@@ -105,7 +105,7 @@ class UsuarioController extends Controller
                 'sucursales' => $usuario->sucursales->pluck('id'),
             ],
             'roles' => $this->rolesAsignables($request->user()),
-            'empresas' => $this->contexto()->empresasAutorizadas()->map->only(['id', 'nombre_comercial'])->values(),
+            'empresas' => $this->empresasAutorizadas($request)->map->only(['id', 'nombre_comercial'])->values(),
         ]);
     }
 

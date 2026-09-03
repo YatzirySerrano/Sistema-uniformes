@@ -6,20 +6,39 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
 export type AreaEditable = {
     id: number;
     nombre: string;
     codigo: string | null;
     descripcion: string | null;
+    empresa_id?: number;
 };
 
-const props = defineProps<{ area: AreaEditable | null }>();
+const props = withDefaults(
+    defineProps<{
+        area: AreaEditable | null;
+        // Sólo se necesita en alta (el selector se oculta al editar).
+        empresasAutorizadas?: EmpresaAutorizada[];
+    }>(),
+    { empresasAutorizadas: () => [] },
+);
 const emit = defineEmits<{ (e: 'guardado'): void; (e: 'cancelar'): void }>();
 
 const esEdicion = computed(() => props.area !== null);
 
-const form = useForm({
+const form = useForm<{
+    empresa_id: number | null;
+    nombre: string;
+    codigo: string;
+    descripcion: string;
+}>({
+    empresa_id:
+        props.area?.empresa_id ??
+        (props.empresasAutorizadas.length === 1
+            ? props.empresasAutorizadas[0].id
+            : null),
     nombre: props.area?.nombre ?? '',
     codigo: props.area?.codigo ?? '',
     descripcion: props.area?.descripcion ?? '',
@@ -33,12 +52,14 @@ function marcar(campo: string): void {
 const erroresLocales = computed<Record<string, string>>(() => {
     const e: Record<string, string> = {};
 
+    if (!esEdicion.value && tocado.empresa_id && form.empresa_id === null) {
+        e.empresa_id = 'Selecciona la empresa del área.';
+    }
     if (tocado.nombre && form.nombre.trim() === '') {
         e.nombre = 'El nombre del área es obligatorio.';
     } else if (form.nombre.length > 255) {
         e.nombre = 'Máximo 255 caracteres.';
     }
-
     if (
         tocado.codigo &&
         form.codigo.trim() !== '' &&
@@ -63,9 +84,9 @@ const hayErroresLocales = computed(
 
 function enviar(): void {
     tocado.nombre = true;
-    if (form.nombre.trim() === '') {
-        return;
-    }
+    tocado.empresa_id = true;
+    if (form.nombre.trim() === '') return;
+    if (!esEdicion.value && form.empresa_id === null) return;
 
     const opciones = {
         preserveScroll: true,
@@ -83,6 +104,35 @@ function enviar(): void {
 <template>
     <form class="space-y-4" @submit.prevent="enviar">
         <div class="grid gap-4 sm:grid-cols-2">
+            <div v-if="!esEdicion" class="grid gap-1.5 sm:col-span-2">
+                <Label for="af-empresa" class="flex items-center gap-1.5">
+                    Empresa
+                    <span class="text-destructive">*</span>
+                    <AyudaTooltip
+                        texto="Razón social a la que pertenece el área."
+                        etiqueta="Ayuda sobre la empresa"
+                    />
+                </Label>
+                <select
+                    id="af-empresa"
+                    v-model="form.empresa_id"
+                    class="border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none"
+                    @blur="marcar('empresa_id')"
+                >
+                    <option :value="null" disabled>
+                        Selecciona una empresa
+                    </option>
+                    <option
+                        v-for="e in empresasAutorizadas"
+                        :key="e.id"
+                        :value="e.id"
+                    >
+                        {{ e.nombre_comercial }}
+                    </option>
+                </select>
+                <InputError :message="error('empresa_id')" />
+            </div>
+
             <div class="grid gap-1.5 sm:col-span-2">
                 <Label for="af-nombre" class="flex items-center gap-1.5">
                     Nombre

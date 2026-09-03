@@ -9,15 +9,19 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { ActivoOpcion } from '@/types/sistema';
 
+type ColaboradorOpcion = {
+    id: number;
+    nombre_completo: string;
+    numero_empleado: string;
+    empresa_id: number;
+    empresa: string | null;
+    sucursal_id: number;
+    sucursal: string | null;
+};
+
 const props = defineProps<{
-    sucursales: { id: number; nombre: string }[];
-    colaboradores: {
-        id: number;
-        nombre_completo: string;
-        numero_empleado: string;
-        sucursal_id: number;
-    }[];
-    activos: ActivoOpcion[];
+    colaboradores: ColaboradorOpcion[];
+    activosPorEmpresa: Record<number, ActivoOpcion[]>;
     condiciones: { valor: string; etiqueta: string }[];
 }>();
 
@@ -33,7 +37,6 @@ defineOptions({
 const hoy = new Date().toISOString().slice(0, 10);
 
 const form = useForm<{
-    sucursal_id: number | string;
     colaborador_id: number | string;
     entrega_uniforme_id: string;
     fecha: string;
@@ -46,7 +49,6 @@ const form = useForm<{
         condicion: string;
     }[];
 }>({
-    sucursal_id: '',
     colaborador_id: '',
     entrega_uniforme_id: '',
     fecha: hoy,
@@ -62,12 +64,17 @@ const form = useForm<{
     ],
 });
 
-const colaboradoresFiltrados = computed(() =>
-    form.sucursal_id
-        ? props.colaboradores.filter(
-              (c) => c.sucursal_id === Number(form.sucursal_id),
-          )
-        : props.colaboradores,
+const colaboradorSel = computed<ColaboradorOpcion | null>(
+    () =>
+        props.colaboradores.find((c) => c.id === Number(form.colaborador_id)) ??
+        null,
+);
+
+// La empresa y la sucursal se DERIVAN del colaborador.
+const activos = computed<ActivoOpcion[]>(() =>
+    colaboradorSel.value
+        ? (props.activosPorEmpresa[colaboradorSel.value.empresa_id] ?? [])
+        : [],
 );
 
 function enviar() {
@@ -81,46 +88,27 @@ function enviar() {
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar devolución"
-            descripcion="Indica la condición de cada activo. Reutilizable reingresa al inventario; dañado o baja, no."
+            descripcion="La empresa y la sucursal se toman del colaborador. Reutilizable reingresa al inventario del almacén que la abastece; dañado o baja, no."
         />
 
         <form class="space-y-6" @submit.prevent="enviar">
-            <div class="grid gap-4 sm:grid-cols-3">
-                <div class="grid gap-1.5">
-                    <Label for="sucursal_id">Sucursal</Label>
-                    <select
-                        id="sucursal_id"
-                        v-model="form.sucursal_id"
-                        class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                        required
-                    >
-                        <option value="" disabled>Selecciona</option>
-                        <option
-                            v-for="s in sucursales"
-                            :key="s.id"
-                            :value="s.id"
-                        >
-                            {{ s.nombre }}
-                        </option>
-                    </select>
-                    <InputError :message="form.errors.sucursal_id" />
-                </div>
+            <div class="grid gap-4 sm:grid-cols-2">
                 <div class="grid gap-1.5">
                     <Label for="colaborador_id">Colaborador</Label>
                     <select
                         id="colaborador_id"
                         v-model="form.colaborador_id"
-                        :disabled="!form.sucursal_id"
                         class="border-input bg-background h-9 rounded-md border px-3 text-sm"
                         required
                     >
                         <option value="" disabled>Selecciona</option>
                         <option
-                            v-for="c in colaboradoresFiltrados"
+                            v-for="c in colaboradores"
                             :key="c.id"
                             :value="c.id"
                         >
-                            {{ c.numero_empleado }} — {{ c.nombre_completo }}
+                            {{ c.numero_empleado }} —
+                            {{ c.nombre_completo }} ({{ c.empresa }})
                         </option>
                     </select>
                     <InputError :message="form.errors.colaborador_id" />
@@ -138,8 +126,15 @@ function enviar() {
                 </div>
             </div>
 
+            <p v-if="colaboradorSel" class="bg-muted/40 rounded-lg p-3 text-sm">
+                <span class="text-muted-foreground text-xs">Empresa:</span>
+                {{ colaboradorSel.empresa }} ·
+                <span class="text-muted-foreground text-xs">Sucursal:</span>
+                {{ colaboradorSel.sucursal }}
+            </p>
+
             <div class="grid gap-1.5">
-                <Label>Activos devueltas</Label>
+                <Label>Activos devueltos</Label>
                 <SelectorItemsActivos
                     v-model="form.items"
                     :activos="activos"

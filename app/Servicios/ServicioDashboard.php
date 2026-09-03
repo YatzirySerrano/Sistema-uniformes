@@ -85,13 +85,13 @@ class ServicioDashboard
             'stock_bajo_detalle' => SaldoInventario::query()
                 ->where('empresa_id', $empresa->id)
                 ->bajoMinimo()
-                ->with(['activo:id,nombre', 'talla:id,valor', 'sucursal:id,nombre'])
+                ->with(['activo:id,nombre', 'talla:id,valor', 'almacen:id,nombre'])
                 ->limit(10)
                 ->get()
                 ->map(fn (SaldoInventario $s): array => [
                     'activo' => $s->activo?->nombre,
                     'talla' => $s->talla?->valor,
-                    'sucursal' => $s->sucursal?->nombre,
+                    'almacen' => $s->almacen?->nombre,
                     'cantidad' => $s->cantidad,
                     'minimo' => $s->minimo,
                 ])->all(),

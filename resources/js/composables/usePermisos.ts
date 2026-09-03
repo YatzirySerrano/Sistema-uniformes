@@ -1,9 +1,11 @@
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
-import type { ContextoEmpresa, UsuarioAutenticado } from '@/types/sistema';
+import type { EmpresaAutorizada, UsuarioAutenticado } from '@/types/sistema';
 
 /**
- * Acceso a permisos, roles y contexto de empresa compartidos desde el backend.
+ * Acceso a permisos, roles y a la lista de empresas autorizadas compartidos
+ * desde el backend. El sistema es multiempresa pero NO tiene "empresa activa":
+ * la empresa se elige en cada formulario / filtro.
  */
 export function usePermisos() {
     const page = usePage();
@@ -14,10 +16,11 @@ export function usePermisos() {
                 ?.user ?? null,
     );
 
-    const contexto = computed<ContextoEmpresa | null>(
+    const empresasAutorizadas = computed<EmpresaAutorizada[]>(
         () =>
-            (page.props.contextoEmpresa as unknown as ContextoEmpresa | null) ??
-            null,
+            (page.props.empresasAutorizadas as unknown as
+                | EmpresaAutorizada[]
+                | undefined) ?? [],
     );
 
     const permisos = computed<string[]>(() => usuario.value?.permisos ?? []);
@@ -34,5 +37,5 @@ export function usePermisos() {
         return usuario.value?.roles?.includes(rol) ?? false;
     }
 
-    return { usuario, contexto, permisos, puede, tieneRol };
+    return { usuario, empresasAutorizadas, permisos, puede, tieneRol };
 }

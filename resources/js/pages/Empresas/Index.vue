@@ -2,7 +2,6 @@
 import { Head, router } from '@inertiajs/vue3';
 import {
     Building2,
-    CircleDot,
     Pencil,
     Plus,
     Search,
@@ -35,7 +34,6 @@ import {
 import type { Paginado } from '@/types/sistema';
 
 type EmpresaTarjeta = EmpresaEditable & {
-    es_empresa_activa: boolean;
     sucursales_activas: number;
     colaboradores_activos: number;
     color_principal: string;
@@ -150,25 +148,8 @@ function alGuardar(): void {
 }
 
 // --- Navegación al detalle ---
-const cambiandoEmpresa = ref<number | null>(null);
-
 function verDetalle(empresa: EmpresaTarjeta): void {
     router.visit(`/empresas/${empresa.id}`);
-}
-
-function usarEmpresa(empresa: EmpresaTarjeta): void {
-    if (empresa.es_empresa_activa) {
-        return;
-    }
-    cambiandoEmpresa.value = empresa.id;
-    router.post(
-        '/empresa-activa',
-        { empresa_id: empresa.id },
-        {
-            preserveScroll: true,
-            onFinish: () => (cambiandoEmpresa.value = null),
-        },
-    );
 }
 </script>
 
@@ -300,11 +281,6 @@ function usarEmpresa(empresa: EmpresaTarjeta): void {
                     tabindex="0"
                     :aria-label="`Ver detalles de ${e.nombre_comercial}`"
                     class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                    :class="
-                        e.es_empresa_activa
-                            ? 'border-primary/60 ring-primary/20 ring-1'
-                            : ''
-                    "
                     @click="verDetalle(e)"
                     @keydown.enter="verDetalle(e)"
                     @keydown.space.prevent="verDetalle(e)"
@@ -392,14 +368,6 @@ function usarEmpresa(empresa: EmpresaTarjeta): void {
                         </div>
                     </div>
 
-                    <div
-                        v-if="e.es_empresa_activa"
-                        class="text-primary flex items-center gap-1.5 text-xs font-medium"
-                    >
-                        <CircleDot class="size-3.5" />
-                        Empresa activa en tu sesión
-                    </div>
-
                     <div class="mt-auto flex flex-wrap gap-2 pt-1">
                         <Button
                             variant="outline"
@@ -417,15 +385,6 @@ function usarEmpresa(empresa: EmpresaTarjeta): void {
                         >
                             <Pencil class="size-3.5" />
                             Editar
-                        </Button>
-                        <Button
-                            v-if="!e.es_empresa_activa"
-                            variant="ghost"
-                            size="sm"
-                            :disabled="cambiandoEmpresa === e.id"
-                            @click.stop="usarEmpresa(e)"
-                        >
-                            Usar esta empresa
                         </Button>
                     </div>
                 </div>

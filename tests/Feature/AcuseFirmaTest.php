@@ -10,7 +10,6 @@ use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\User;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioInventario;
-use App\Soporte\ContextoEmpresa;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
@@ -76,7 +75,6 @@ it('otro colaborador no puede descargar el PDF de un acuse ajeno (IDOR)', functi
     $intruso = usuarioCon(RolSistema::Colaborador->value, [$this->datos['empresaA']]);
 
     $this->actingAs($intruso)
-        ->withSession([ContextoEmpresa::SESSION_KEY => $this->datos['empresaA']->id])
         ->get("/acuses/{$acuse->id}/pdf")
         ->assertForbidden();
 });
@@ -87,7 +85,6 @@ it('un supervisor autorizado sí puede descargar el PDF', function () {
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaA']]);
 
     $this->actingAs($supervisor)
-        ->withSession([ContextoEmpresa::SESSION_KEY => $this->datos['empresaA']->id])
         ->get("/acuses/{$acuse->id}/pdf")
         ->assertOk()
         ->assertHeader('content-type', 'application/pdf');
@@ -100,7 +97,6 @@ it('el titular con cuenta puede ver su propio comprobante', function () {
     $this->datos['colaboradorA']->update(['usuario_id' => $titular->id]);
 
     $this->actingAs($titular)
-        ->withSession([ContextoEmpresa::SESSION_KEY => $this->datos['empresaA']->id])
         ->get("/acuses/{$acuse->id}/pdf")
         ->assertOk();
 });
@@ -112,7 +108,6 @@ it('un usuario de rol restringido de otra empresa recibe 403 al intentar ver el 
     $ajeno = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaB']]);
 
     $this->actingAs($ajeno)
-        ->withSession([ContextoEmpresa::SESSION_KEY => $this->datos['empresaB']->id])
         ->get("/acuses/{$acuse->id}/pdf")
         ->assertForbidden();
 });

@@ -8,11 +8,12 @@ import Paginacion from '@/components/sistema/Paginacion.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { Paginado } from '@/types/sistema';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Entrega = {
     id: number;
     folio: string;
+    empresa: string | null;
     colaborador: string;
     numero_empleado: string;
     sucursal: string;
@@ -25,8 +26,8 @@ type Entrega = {
 
 const props = defineProps<{
     entregas: Paginado<Entrega>;
-    filtros: { buscar?: string; sucursal_id?: number; estado?: string };
-    sucursales: { id: number; nombre: string }[];
+    filtros: { buscar?: string; empresa_id?: number | null; estado?: string };
+    empresasAutorizadas: EmpresaAutorizada[];
     estados: { valor: string; etiqueta: string }[];
     puedeCrear: boolean;
 }>();
@@ -36,18 +37,18 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar ?? '');
-const sucursalId = ref(props.filtros.sucursal_id ?? '');
+const empresaId = ref(props.filtros.empresa_id ?? '');
 const estado = ref(props.filtros.estado ?? '');
 
 let t: ReturnType<typeof setTimeout>;
-watch([buscar, sucursalId, estado], () => {
+watch([buscar, empresaId, estado], () => {
     clearTimeout(t);
     t = setTimeout(() => {
         router.get(
             '/entregas',
             {
                 buscar: buscar.value || undefined,
-                sucursal_id: sucursalId.value || undefined,
+                empresa_id: empresaId.value || undefined,
                 estado: estado.value || undefined,
             },
             { preserveState: true, replace: true, preserveScroll: true },
@@ -89,12 +90,18 @@ function variante(estado: string) {
                 />
             </div>
             <select
-                v-model="sucursalId"
+                v-if="empresasAutorizadas.length > 1"
+                v-model="empresaId"
                 class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                aria-label="Filtrar por empresa"
             >
-                <option value="">Todas las sucursales</option>
-                <option v-for="s in sucursales" :key="s.id" :value="s.id">
-                    {{ s.nombre }}
+                <option value="">Todas las empresas</option>
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
                 </option>
             </select>
             <select

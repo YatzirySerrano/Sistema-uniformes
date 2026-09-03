@@ -33,6 +33,17 @@ evidente).
   cantidad / motivo vacíos), pero el error concreto se muestra al
   interactuar / enviar. La validación backend es siempre obligatoria.
 
+## Selector de empresa (regla — Bloque A)
+
+No hay "empresa activa" global. Cada **listado** con datos por empresa lleva un
+filtro `Empresa` (visible sólo si `empresasAutorizadas.length > 1`) que se envía
+como `?empresa_id=`. Cada **formulario de alta** por empresa lleva un campo
+`Empresa` obligatorio (oculto al editar; el registro fija su empresa). Los
+campos dependientes (sucursal, área, almacén, tipo, categoría, variante,
+activo, colaborador) se recargan al cambiar la empresa y se cargan acotados por
+ella (no traer todo y ocultar con Vue). La lista viene de `usePermisos()`
+(`empresasAutorizadas`) o del prop `empresasAutorizadas` de la página.
+
 ## Combobox con buscador (regla)
 
 Si un catálogo puede crecer, no usar un `<select>` plano gigante: usar

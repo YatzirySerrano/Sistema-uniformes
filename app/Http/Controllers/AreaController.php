@@ -2,20 +2,19 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Areas\GuardarAreaRequest;
 use App\Models\Area;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class AreaController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -23,19 +22,22 @@ class AreaController extends Controller
     {
         $this->authorize('viewAny', Area::class);
 
-        $empresa = $this->empresaActiva();
         $usuario = $request->user();
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
 
         $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
-            'estado' => ['nullable', Rule::in(['activas', 'inactivas'])],
-            'orden' => ['nullable', Rule::in(['az', 'za'])],
+            'estado' => ['nullable', 'in:activas,inactivas'],
+            'orden' => ['nullable', 'in:az,za'],
         ]);
 
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
         $areas = Area::query()
-            ->where('empresa_id', $empresa->id)
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
+            ->with('empresa:id,nombre_comercial')
             ->withCount(['colaboradores', 'colaboradoresActivos'])
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
                 $q->where(function (Builder $sub) use ($buscar): void {
@@ -54,17 +56,19 @@ class AreaController extends Controller
                 'codigo' => $a->codigo,
                 'descripcion' => $a->descripcion,
                 'activa' => $a->activa,
+                'empresa' => ['id' => $a->empresa_id, 'nombre_comercial' => $a->empresa?->nombre_comercial],
                 'colaboradores_total' => (int) $a->colaboradores_count,
                 'colaboradores_activos' => (int) $a->colaboradores_activos_count,
             ]);
 
         return Inertia::render('Areas/Index', [
             'areas' => $areas,
-            'empresa' => ['id' => $empresa->id, 'nombre_comercial' => $empresa->nombre_comercial],
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'filtros' => [
                 'buscar' => $filtros['buscar'] ?? '',
                 'estado' => $filtros['estado'] ?? '',
                 'orden' => $filtros['orden'] ?? 'az',
+                'empresa_id' => $empresaFiltro?->id,
             ],
             'permisos' => [
                 'crear' => $usuario->can('create', Area::class),
@@ -77,16 +81,16 @@ class AreaController extends Controller
     public function show(Request $request, Area $area): Response
     {
         $this->authorize('view', $area);
-        abort_unless($area->empresa_id === $this->empresaActiva()->id, 404);
 
         $area->loadCount(['colaboradores', 'colaboradoresActivos']);
+        $area->load('empresa:id,nombre_comercial');
 
         return Inertia::render('Areas/Detalle', [
             'area' => [
                 ...$area->only(['id', 'nombre', 'codigo', 'descripcion', 'activa']),
                 'empresa' => [
-                    'id' => $this->empresaActiva()->id,
-                    'nombre_comercial' => $this->empresaActiva()->nombre_comercial,
+                    'id' => $area->empresa->id,
+                    'nombre_comercial' => $area->empresa->nombre_comercial,
                 ],
                 'colaboradores_total' => (int) $area->colaboradores_count,
                 'colaboradores_activos' => (int) $area->colaboradores_activos_count,
@@ -100,7 +104,7 @@ class AreaController extends Controller
 
     public function store(GuardarAreaRequest $request): RedirectResponse
     {
-        $empresa = $this->empresaActiva();
+        $empresa = $request->empresaResuelta();
 
         $datos = $request->validated();
         $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa->id);
@@ -112,7 +116,7 @@ class AreaController extends Controller
         ]);
 
         $this->auditoria->registrar('areas', 'crear', [
-            'tipo_entidad' => Area::class, 'entidad_id' => $area->id,
+            'tipo_entidad' => Area::class, 'entidad_id' => $area->id, 'empresa_id' => $empresa->id,
             'descripcion' => 'Alta de área '.$area->nombre,
         ]);
 
@@ -121,12 +125,10 @@ class AreaController extends Controller
 
     public function update(GuardarAreaRequest $request, Area $area): RedirectResponse
     {
-        abort_unless($area->empresa_id === $this->empresaActiva()->id, 404);
-
         $area->update($request->validated());
 
         $this->auditoria->registrar('areas', 'editar', [
-            'tipo_entidad' => Area::class, 'entidad_id' => $area->id,
+            'tipo_entidad' => Area::class, 'entidad_id' => $area->id, 'empresa_id' => $area->empresa_id,
             'descripcion' => 'Edición de área '.$area->nombre,
         ]);
 
@@ -136,20 +138,18 @@ class AreaController extends Controller
     public function toggle(Area $area): RedirectResponse
     {
         $this->authorize('desactivar', $area);
-        abort_unless($area->empresa_id === $this->empresaActiva()->id, 404);
 
         $area->update(['activa' => ! $area->activa]);
 
         $this->auditoria->registrar('areas', $area->activa ? 'activar' : 'desactivar', [
-            'tipo_entidad' => Area::class, 'entidad_id' => $area->id,
+            'tipo_entidad' => Area::class, 'entidad_id' => $area->id, 'empresa_id' => $area->empresa_id,
             'descripcion' => ($area->activa ? 'Activación' : 'Desactivación').' de área '.$area->nombre,
         ]);
 
-        $mensaje = $area->activa
-            ? 'Área activada correctamente.'
-            : 'Área desactivada correctamente.';
-
-        return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => $area->activa ? 'Área activada correctamente.' : 'Área desactivada correctamente.',
+        ]);
     }
 
     /**

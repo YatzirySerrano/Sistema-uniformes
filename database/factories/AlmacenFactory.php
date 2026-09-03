@@ -5,6 +5,7 @@ namespace Database\Factories;
 use App\Models\Almacen;
 use App\Models\Empresa;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Collection;
 
 /**
  * @extends Factory<Almacen>
@@ -19,7 +20,6 @@ class AlmacenFactory extends Factory
     public function definition(): array
     {
         return [
-            'empresa_id' => Empresa::factory(),
             'nombre' => 'Almacén '.fake()->unique()->city(),
             'codigo' => 'ALM-'.fake()->unique()->numberBetween(1000, 9999),
             'descripcion' => fake()->boolean(30) ? fake()->sentence() : null,
@@ -29,6 +29,19 @@ class AlmacenFactory extends Factory
             'responsable_colaborador_id' => null,
             'activo' => true,
         ];
+    }
+
+    /**
+     * Vincula el almacén a una o varias empresas abastecidas (pivote
+     * `almacen_empresa`). Sin esto, el almacén nace sin empresas.
+     */
+    public function paraEmpresa(Empresa ...$empresas): static
+    {
+        return $this->afterCreating(function (Almacen $almacen) use ($empresas): void {
+            /** @var Collection<int, Empresa> $coleccion */
+            $coleccion = collect($empresas);
+            $almacen->empresas()->syncWithoutDetaching($coleccion->pluck('id')->all());
+        });
     }
 
     public function inactivo(): static

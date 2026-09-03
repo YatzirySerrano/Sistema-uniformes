@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -18,12 +18,25 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+import type { EmpresaAutorizada } from '@/types/sistema';
+
 type Talla = { id: number; valor: string; activa: boolean };
 
 const props = defineProps<{
     tallas: Talla[];
+    empresasAutorizadas: EmpresaAutorizada[];
+    empresaSeleccionadaId: number;
     puedeAdministrar: boolean;
 }>();
+
+const empresaId = ref<number>(props.empresaSeleccionadaId);
+watch(empresaId, (id) => {
+    router.get(
+        '/tallas',
+        { empresa_id: id },
+        { preserveScroll: true, preserveState: false },
+    );
+});
 
 defineOptions({
     layout: {
@@ -50,7 +63,7 @@ const puedeReordenar = computed(
 
 // --- Alta ---
 const dialogoNueva = ref(false);
-const nueva = useForm({ valor: '' });
+const nueva = useForm({ valor: '', empresa_id: props.empresaSeleccionadaId });
 function crear() {
     nueva.post('/tallas', {
         preserveScroll: true,
@@ -96,7 +109,10 @@ function mover(indice: number, delta: number) {
     lista.value = copia;
     router.post(
         '/tallas/reordenar',
-        { orden: copia.map((t) => t.id) },
+        {
+            orden: copia.map((t) => t.id),
+            empresa_id: props.empresaSeleccionadaId,
+        },
         { preserveScroll: true, preserveState: true },
     );
 }
@@ -123,6 +139,26 @@ function recargar() {
                 </Button>
             </template>
         </EncabezadoPagina>
+
+        <label
+            v-if="empresasAutorizadas.length > 1"
+            class="flex w-fit items-center gap-1.5 text-sm"
+        >
+            <span class="text-muted-foreground">Empresa</span>
+            <select
+                v-model="empresaId"
+                class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
+                aria-label="Empresa de las variantes"
+            >
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
+                </option>
+            </select>
+        </label>
 
         <div v-if="lista.length > 6" class="relative">
             <Input

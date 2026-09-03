@@ -92,6 +92,7 @@ class ConfirmarAcuseRecepcion
             $this->auditoria->registrar('acuses', 'firmar', [
                 'tipo_entidad' => AcuseRecepcion::class,
                 'entidad_id' => $acuse->getKey(),
+                'empresa_id' => $entrega->empresa_id,
                 'sucursal_id' => $entrega->sucursal_id,
                 'descripcion' => 'Acuse '.$acuse->folio.' firmado para la entrega '.$entrega->folio,
             ]);

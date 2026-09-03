@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Models\BitacoraAuditoria;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -10,7 +10,7 @@ use Inertia\Response;
 
 class BitacoraController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function index(Request $request): Response
     {
@@ -20,13 +20,18 @@ class BitacoraController extends Controller
             'modulo' => ['nullable', 'string', 'max:60'],
             'accion' => ['nullable', 'string', 'max:60'],
             'buscar' => ['nullable', 'string', 'max:100'],
+            'empresa_id' => ['nullable', 'integer'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
         ]);
 
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $superadmin = $request->user()->esSuperadministrador();
+
         $registros = BitacoraAuditoria::query()
-            ->when(! $request->user()->esSuperadministrador(), fn ($q) => $q->where('empresa_id', $this->empresaActiva()->id))
-            ->when($request->user()->esSuperadministrador() && $this->contexto()->tieneEmpresa(), fn ($q) => $q->where('empresa_id', $this->contexto()->id()))
+            ->when(! $superadmin, fn ($q) => $q->where(fn ($s) => $s->whereIn('empresa_id', $idsAutorizadas)->orWhereNull('empresa_id')))
+            ->when($empresaFiltro !== null, fn ($q) => $q->where('empresa_id', $empresaFiltro->id))
             ->when($filtros['modulo'] ?? null, fn ($q, $v) => $q->where('modulo', $v))
             ->when($filtros['accion'] ?? null, fn ($q, $v) => $q->where('accion', $v))
             ->when($filtros['buscar'] ?? null, fn ($q, $v) => $q->where(fn ($s) => $s
@@ -53,7 +58,8 @@ class BitacoraController extends Controller
 
         return Inertia::render('Auditoria/Index', [
             'registros' => $registros,
-            'filtros' => $filtros,
+            'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'modulos' => BitacoraAuditoria::query()->distinct()->orderBy('modulo')->pluck('modulo'),
         ]);
     }

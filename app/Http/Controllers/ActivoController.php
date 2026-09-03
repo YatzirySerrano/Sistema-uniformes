@@ -3,10 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Enums\TipoControlActivo;
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Activos\GuardarActivoRequest;
 use App\Models\Activo;
 use App\Models\CategoriaActivo;
+use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
 use App\Models\TipoActivo;
@@ -20,16 +21,23 @@ use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
+/**
+ * Catálogo de activos por empresa. La empresa llega como filtro (listado) o
+ * campo `empresa_id` (alta), y siempre se valida el acceso del usuario.
+ */
 class ActivoController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
     public function index(Request $request): Response
     {
         $this->authorize('viewAny', Activo::class);
-        $empresa = $this->empresaActiva();
+
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $idsScope = $empresaFiltro !== null ? collect([$empresaFiltro->id]) : $idsAutorizadas;
 
         $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
@@ -43,15 +51,15 @@ class ActivoController extends Controller
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
         $existencias = SaldoInventario::query()
-            ->where('empresa_id', $empresa->id)
+            ->whereIn('empresa_id', $idsScope)
             ->selectRaw('activo_id, SUM(cantidad) as total, SUM(CASE WHEN minimo > 0 AND cantidad <= minimo THEN 1 ELSE 0 END) as tallas_bajo_minimo')
             ->groupBy('activo_id')
             ->get()
             ->keyBy('activo_id');
 
         $activos = Activo::query()
-            ->where('empresa_id', $empresa->id)
-            ->with(['tallas:id,valor', 'tipoActivo:id,nombre'])
+            ->whereIn('empresa_id', $idsScope)
+            ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'empresa:id,nombre_comercial'])
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
                 $q->where(function (Builder $sub) use ($buscar): void {
                     $sub->where('nombre', 'like', "%{$buscar}%")
@@ -71,6 +79,7 @@ class ActivoController extends Controller
                 'nombre' => $a->nombre,
                 'categoria' => $a->categoria,
                 'codigo' => $a->codigo,
+                'empresa' => ['id' => $a->empresa_id, 'nombre_comercial' => $a->empresa?->nombre_comercial],
                 'tipo' => $a->tipoActivo?->nombre,
                 'tipo_control' => $a->tipo_control->value,
                 'tipo_control_etiqueta' => $a->tipo_control->etiqueta(),
@@ -83,10 +92,12 @@ class ActivoController extends Controller
 
         return Inertia::render('Activos/Index', [
             'activos' => $activos,
-            'tiposActivo' => $this->tiposActivoEmpresa(),
-            'categorias' => $this->categoriasEmpresa(),
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'tiposActivo' => $this->tiposActivoDe($idsScope->all()),
+            'categorias' => $this->categoriasDe($idsScope->all()),
             'filtros' => [
                 'buscar' => $filtros['buscar'] ?? '',
+                'empresa_id' => $empresaFiltro?->id,
                 'tipo_activo_id' => $filtros['tipo_activo_id'] ?? '',
                 'categoria_id' => $filtros['categoria_id'] ?? '',
                 'control' => $filtros['control'] ?? '',
@@ -103,20 +114,24 @@ class ActivoController extends Controller
     }
 
     /**
-     * Búsqueda con autocompletado para los combobox de activos (entrada de
-     * inventario, entregas…). Devuelve activos de la empresa activa con
-     * contexto (código, tipo, categoría, variantes).
+     * Búsqueda con autocompletado para los combobox de activos. Requiere
+     * `empresa_id`: el activo pertenece a una empresa concreta.
      */
     public function buscar(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Activo::class);
-        $empresaId = $this->empresaActiva()->id;
+
+        $empresa = $this->empresaDelFiltro($request);
+
+        if ($empresa === null) {
+            return response()->json(['activos' => []]);
+        }
 
         $termino = trim((string) $request->query('q', ''));
         $control = $request->query('control');
 
         $activos = Activo::query()
-            ->where('empresa_id', $empresaId)
+            ->where('empresa_id', $empresa->id)
             ->where('activo', true)
             ->when(in_array($control, ['cantidad', 'serializado'], true), fn (Builder $q) => $q->where('tipo_control', $control))
             ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
@@ -145,28 +160,27 @@ class ActivoController extends Controller
         return response()->json(['activos' => $activos]);
     }
 
-    public function create(): Response
+    public function create(Request $request): Response
     {
         $this->authorize('create', Activo::class);
 
         return Inertia::render('Activos/Formulario', [
             'activo' => null,
-            'tallas' => $this->tallasEmpresa(),
-            'tiposActivo' => $this->tiposActivoEmpresa(),
-            'categorias' => $this->categoriasEmpresa(),
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request),
             'tiposControl' => TipoControlActivo::opciones(),
-            'permisos' => $this->permisosCatalogos(),
+            'permisos' => $this->permisosCatalogos($request),
         ]);
     }
 
     public function store(GuardarActivoRequest $request): RedirectResponse
     {
-        $empresa = $this->empresaActiva();
+        $empresa = $request->empresaResuelta();
 
         $activo = Activo::query()->create([
             'empresa_id' => $empresa->id,
             'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
-            ...$this->datosCategoria($request),
+            ...$this->datosCategoria($request, $empresa->id),
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
             'tipo_control' => (string) $request->string('tipo_control'),
@@ -180,42 +194,36 @@ class ActivoController extends Controller
         $activo->tallas()->sync($request->input('tallas', []));
 
         $this->auditoria->registrar('activos', 'crear', [
-            'tipo_entidad' => Activo::class,
-            'entidad_id' => $activo->id,
+            'tipo_entidad' => Activo::class, 'entidad_id' => $activo->id, 'empresa_id' => $empresa->id,
             'descripcion' => 'Alta de activo '.$activo->nombre,
         ]);
 
         return to_route('activos.index')->with('toast', ['type' => 'success', 'message' => 'Activo creado.']);
     }
 
-    public function edit(Activo $activo): Response
+    public function edit(Request $request, Activo $activo): Response
     {
         $this->authorize('update', $activo);
-        $this->verificarEmpresa($activo);
 
         return Inertia::render('Activos/Formulario', [
             'activo' => [
-                ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'tipo_activo_id', 'categoria_id', 'activo']),
+                ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'empresa_id', 'tipo_activo_id', 'categoria_id', 'activo']),
                 'tipo_control' => $activo->tipo_control->value,
                 'imagen_url' => $activo->imagen_ruta ? Storage::disk('public')->url($activo->imagen_ruta) : null,
                 'tallas' => $activo->tallas()->pluck('tallas.id'),
             ],
-            'tallas' => $this->tallasEmpresa(),
-            'tiposActivo' => $this->tiposActivoEmpresa(),
-            'categorias' => $this->categoriasEmpresa(),
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request, [$activo->empresa_id]),
             'tiposControl' => TipoControlActivo::opciones(),
-            'permisos' => $this->permisosCatalogos(),
+            'permisos' => $this->permisosCatalogos($request),
         ]);
     }
 
     public function update(GuardarActivoRequest $request, Activo $activo): RedirectResponse
     {
-        $this->verificarEmpresa($activo);
-        $empresa = $this->empresaActiva();
-
         $activo->fill([
             'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
-            ...$this->datosCategoria($request),
+            ...$this->datosCategoria($request, $activo->empresa_id),
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
             'tipo_control' => (string) $request->string('tipo_control'),
@@ -227,15 +235,14 @@ class ActivoController extends Controller
             if ($activo->imagen_ruta) {
                 Storage::disk('public')->delete($activo->imagen_ruta);
             }
-            $activo->imagen_ruta = $request->file('imagen')->store("activos/{$empresa->id}", 'public') ?: null;
+            $activo->imagen_ruta = $request->file('imagen')->store("activos/{$activo->empresa_id}", 'public') ?: null;
         }
 
         $activo->save();
         $activo->tallas()->sync($request->input('tallas', []));
 
         $this->auditoria->registrar('activos', 'editar', [
-            'tipo_entidad' => Activo::class,
-            'entidad_id' => $activo->id,
+            'tipo_entidad' => Activo::class, 'entidad_id' => $activo->id, 'empresa_id' => $activo->empresa_id,
             'descripcion' => 'Edición de activo '.$activo->nombre,
         ]);
 
@@ -245,13 +252,11 @@ class ActivoController extends Controller
     public function toggle(Activo $activo): RedirectResponse
     {
         $this->authorize('administrar', $activo);
-        $this->verificarEmpresa($activo);
 
         $activo->update(['activo' => ! $activo->activo]);
 
         $this->auditoria->registrar('activos', $activo->activo ? 'activar' : 'desactivar', [
-            'tipo_entidad' => Activo::class,
-            'entidad_id' => $activo->id,
+            'tipo_entidad' => Activo::class, 'entidad_id' => $activo->id, 'empresa_id' => $activo->empresa_id,
             'descripcion' => ($activo->activo ? 'Activación' : 'Desactivación').' de activo '.$activo->nombre,
         ]);
 
@@ -261,17 +266,15 @@ class ActivoController extends Controller
         ]);
     }
 
-    public function show(Activo $activo): Response
+    public function show(Request $request, Activo $activo): Response
     {
         $this->authorize('view', $activo);
-        $this->verificarEmpresa($activo);
 
-        $activo->load('tipoActivo:id,nombre');
+        $activo->load('tipoActivo:id,nombre', 'empresa:id,nombre_comercial');
 
         $saldos = SaldoInventario::query()
             ->where('empresa_id', $activo->empresa_id)
             ->where('activo_id', $activo->id)
-            ->whereNotNull('almacen_id')
             ->with(['almacen:id,nombre', 'talla:id,valor'])
             ->get()
             ->map(fn (SaldoInventario $s): array => [
@@ -285,6 +288,7 @@ class ActivoController extends Controller
         return Inertia::render('Activos/Detalle', [
             'activo' => [
                 ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'categoria', 'activo']),
+                'empresa' => ['id' => $activo->empresa_id, 'nombre_comercial' => $activo->empresa?->nombre_comercial],
                 'tipo' => $activo->tipoActivo?->nombre,
                 'tipo_control' => $activo->tipo_control->value,
                 'tipo_control_etiqueta' => $activo->tipo_control->etiqueta(),
@@ -293,27 +297,39 @@ class ActivoController extends Controller
             ],
             'saldos' => $saldos,
             'permisos' => [
-                'editar' => request()->user()->can('update', $activo),
-                'administrar' => request()->user()->can('administrar', $activo),
+                'editar' => $request->user()->can('update', $activo),
+                'administrar' => $request->user()->can('administrar', $activo),
             ],
         ]);
     }
 
     /**
-     * @return array<int, array{id: int, valor: string}>
+     * Catálogos (variantes, tipos, categorías) de cada empresa autorizada, para
+     * que el formulario los muestre según la empresa elegida.
+     *
+     * @param  array<int, int>  $soloEmpresas  restringe a estos ids (edición)
+     * @return array<int, array{tallas: mixed, tiposActivo: array<int, mixed>, categorias: array<int, mixed>}>
      */
-    private function tallasEmpresa(): array
+    private function catalogosPorEmpresa(Request $request, array $soloEmpresas = []): array
     {
-        return $this->empresaActiva()->tallas()->seleccionables()->ordenadas()->get(['id', 'valor'])->toArray();
+        $empresas = $this->empresasAutorizadas($request)
+            ->when($soloEmpresas !== [], fn ($c) => $c->whereIn('id', $soloEmpresas));
+
+        return $empresas->mapWithKeys(fn (Empresa $e): array => [$e->id => [
+            'tallas' => $e->tallas()->seleccionables()->ordenadas()->get(['id', 'valor']),
+            'tiposActivo' => $this->tiposActivoDe([$e->id]),
+            'categorias' => $this->categoriasDe([$e->id]),
+        ]])->all();
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return array<int, array{id: int, nombre: string}>
      */
-    private function tiposActivoEmpresa(): array
+    private function tiposActivoDe(array $empresaIds): array
     {
         return TipoActivo::query()
-            ->where('empresa_id', $this->empresaActiva()->id)
+            ->whereIn('empresa_id', $empresaIds)
             ->where('activo', true)
             ->orderBy('nombre')
             ->get(['id', 'nombre'])
@@ -322,12 +338,13 @@ class ActivoController extends Controller
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return array<int, array{id: int, nombre: string}>
      */
-    private function categoriasEmpresa(): array
+    private function categoriasDe(array $empresaIds): array
     {
         return CategoriaActivo::query()
-            ->where('empresa_id', $this->empresaActiva()->id)
+            ->whereIn('empresa_id', $empresaIds)
             ->where('activa', true)
             ->orderBy('nombre')
             ->get(['id', 'nombre'])
@@ -336,20 +353,19 @@ class ActivoController extends Controller
     }
 
     /**
-     * Resuelve `categoria_id` y su espejo de texto `categoria` a partir de la
-     * petición. La fuente de verdad es `categoria_id`; `categoria` se conserva
-     * como espejo temporal (importador/exportador/snapshot).
+     * Resuelve `categoria_id` y su espejo de texto `categoria`. Fuente de verdad:
+     * `categoria_id`; `categoria` es espejo temporal.
      *
      * @return array{categoria_id: int|null, categoria: string|null}
      */
-    private function datosCategoria(GuardarActivoRequest $request): array
+    private function datosCategoria(GuardarActivoRequest $request, int $empresaId): array
     {
         $categoriaId = $request->integer('categoria_id') ?: null;
 
         $nombre = $categoriaId === null
             ? null
             : CategoriaActivo::query()
-                ->where('empresa_id', $this->empresaActiva()->id)
+                ->where('empresa_id', $empresaId)
                 ->whereKey($categoriaId)
                 ->value('nombre');
 
@@ -359,20 +375,15 @@ class ActivoController extends Controller
     /**
      * @return array{crear_tipo: bool, crear_categoria: bool, crear_variante: bool}
      */
-    private function permisosCatalogos(): array
+    private function permisosCatalogos(Request $request): array
     {
-        $usuario = request()->user();
+        $usuario = $request->user();
 
         return [
             'crear_tipo' => $usuario?->can('administrar', TipoActivo::class) ?? false,
             'crear_categoria' => $usuario?->can('administrar', CategoriaActivo::class) ?? false,
             'crear_variante' => $usuario?->can('tallas.administrar') ?? false,
         ];
-    }
-
-    private function verificarEmpresa(Activo $activo): void
-    {
-        abort_unless($activo->empresa_id === $this->empresaActiva()->id, 404);
     }
 
     /**

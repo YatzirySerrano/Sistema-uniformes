@@ -67,7 +67,7 @@ class User extends Authenticatable implements MustVerifyEmailContract, PasskeyUs
     /**
      * Sucursales concretas a las que el usuario tiene acceso. Si un usuario no
      * tiene sucursales asignadas dentro de una empresa autorizada, se asume
-     * acceso a todas las sucursales de esa empresa (ver ContextoEmpresa).
+     * acceso a todas las sucursales de esa empresa (ver App\Soporte\AccesoEmpresa).
      *
      * @return BelongsToMany<Sucursal, $this>
      */

@@ -40,8 +40,8 @@ class RegistrarEntradaInventario
         bool $cargaInicial = false,
         ?string $notas = null,
     ): array {
-        $almacen = Almacen::query()->where('empresa_id', $empresaId)
-            ->findOr($almacenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén indicado no pertenece a esta empresa.'));
+        $almacen = Almacen::query()->paraEmpresa($empresaId)
+            ->findOr($almacenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén indicado no abastece a esta empresa.'));
 
         if (! $almacen->activo) {
             throw new ExcepcionDeNegocioSimple('El almacén está desactivado; no admite entradas de inventario.');
@@ -102,6 +102,7 @@ class RegistrarEntradaInventario
             }
 
             $this->auditoria->registrar('inventario', $cargaInicial ? 'carga_inicial' : 'entrada', [
+                'empresa_id' => $empresaId,
                 'descripcion' => count($movimientos).' movimiento(s) de entrada en almacén #'.$almacenId.'. Motivo: '.$motivo,
             ]);
 

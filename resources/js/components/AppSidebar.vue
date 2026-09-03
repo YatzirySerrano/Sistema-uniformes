@@ -9,7 +9,6 @@ import {
     LayoutGrid,
     Network,
     Package,
-    Palette,
     ScrollText,
     ShieldCheck,
     Store,
@@ -21,7 +20,6 @@ import {
 import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavUser from '@/components/NavUser.vue';
-import SelectorEmpresa from '@/components/sistema/SelectorEmpresa.vue';
 import {
     Sidebar,
     SidebarContent,
@@ -104,12 +102,6 @@ const grupos = computed<Grupo[]>(() =>
                     icono: ArrowLeftRight,
                     visible: puede('inventario.ver'),
                 },
-                {
-                    titulo: 'Migración de inventario',
-                    href: '/inventario/migracion',
-                    icono: ArrowLeftRight,
-                    visible: puede('inventario.migrar'),
-                },
             ],
         },
         {
@@ -170,12 +162,6 @@ const grupos = computed<Grupo[]>(() =>
                     icono: ShieldCheck,
                     visible: puede('roles.ver'),
                 },
-                {
-                    titulo: 'Personalización',
-                    href: '/personalizacion',
-                    icono: Palette,
-                    visible: puede('configuracion-empresa.ver'),
-                },
             ],
         },
         {
@@ -213,7 +199,6 @@ const grupos = computed<Grupo[]>(() =>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
             </SidebarMenu>
-            <SelectorEmpresa />
         </SidebarHeader>
 
         <SidebarContent>

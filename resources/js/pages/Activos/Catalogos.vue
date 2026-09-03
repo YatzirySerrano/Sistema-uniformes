@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Tipo = {
     id: number;
@@ -28,11 +29,22 @@ const props = defineProps<{
     tipos: Tipo[];
     categorias: Categoria[];
     tiposSelect: { id: number; nombre: string }[];
+    empresasAutorizadas: EmpresaAutorizada[];
+    empresaSeleccionadaId: number;
     permisos: {
         administrar_tipos: boolean;
         administrar_categorias: boolean;
     };
 }>();
+
+const empresaId = ref<number>(props.empresaSeleccionadaId);
+watch(empresaId, (id) => {
+    router.get(
+        '/activos-catalogos',
+        { empresa_id: id },
+        { preserveScroll: true, preserveState: false },
+    );
+});
 
 // --- Filtros locales (los catálogos pueden crecer) ---
 const fTipo = ref({ buscar: '', estado: '' as '' | 'activos' | 'inactivos' });
@@ -85,10 +97,14 @@ defineOptions({
     },
 });
 
-const tipoForm = useForm({ nombre: '' });
+const tipoForm = useForm({
+    nombre: '',
+    empresa_id: props.empresaSeleccionadaId,
+});
 const categoriaForm = useForm({
     nombre: '',
     tipo_activo_id: '' as number | '',
+    empresa_id: props.empresaSeleccionadaId,
 });
 
 const editandoTipo = ref<number | null>(null);
@@ -155,6 +171,26 @@ function toggleCategoria(id: number) {
     <Head title="Tipos y categorías de activo" />
 
     <div class="flex w-full flex-col gap-6 p-4">
+        <label
+            v-if="empresasAutorizadas.length > 1"
+            class="flex w-fit items-center gap-1.5 text-sm"
+        >
+            <span class="text-muted-foreground">Empresa</span>
+            <select
+                v-model="empresaId"
+                class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
+                aria-label="Empresa de los catálogos"
+            >
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
+                </option>
+            </select>
+        </label>
+
         <EncabezadoPagina
             titulo="Tipos y categorías de activo"
             descripcion="Catálogos por empresa. El tipo es la naturaleza del activo (Prenda, Equipo de cómputo…); la categoría es qué es dentro de su tipo (Camisola, Laptop…)."

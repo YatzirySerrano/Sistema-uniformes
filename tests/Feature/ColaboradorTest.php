@@ -4,7 +4,6 @@ use App\Enums\RolSistema;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
-use App\Soporte\ContextoEmpresa;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -25,7 +24,7 @@ it('filtra el listado de colaboradores por sucursal_id', function () {
 
     $admin = usuarioCon(RolSistema::Administrador->value);
 
-    $this->actingAs($admin)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
+    $this->actingAs($admin)
         ->get("/colaboradores?sucursal_id={$sucursalA->id}")
         ->assertInertia(fn ($page) => $page->where('colaboradores.total', 1));
 });
@@ -41,7 +40,7 @@ it('preselecciona la sucursal en el formulario de alta cuando llega por query', 
     $sucursal = Sucursal::factory()->for($empresa)->create();
     $admin = usuarioCon(RolSistema::Administrador->value);
 
-    $this->actingAs($admin)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
+    $this->actingAs($admin)
         ->get("/colaboradores/crear?sucursal_id={$sucursal->id}")
         ->assertInertia(fn ($page) => $page
             ->component('Colaboradores/Formulario')
@@ -54,19 +53,19 @@ it('no preselecciona ninguna sucursal si no llega sucursal_id', function () {
     Sucursal::factory()->for($empresa)->create();
     $admin = usuarioCon(RolSistema::Administrador->value);
 
-    $this->actingAs($admin)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
+    $this->actingAs($admin)
         ->get('/colaboradores/crear')
         ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', null));
 });
 
-it('ignora un sucursal_id que pertenece a otra empresa', function () {
-    $empresaA = Empresa::factory()->create();
-    $empresaB = Empresa::factory()->create();
-    $sucursalB = Sucursal::factory()->for($empresaB)->create();
-    $admin = usuarioCon(RolSistema::Administrador->value);
+it('ignora un sucursal_id de una empresa fuera del alcance del usuario', function () {
+    $miEmpresa = Empresa::factory()->create();
+    $ajena = Empresa::factory()->create();
+    $sucursalAjena = Sucursal::factory()->for($ajena)->create();
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$miEmpresa]);
 
-    $this->actingAs($admin)->withSession([ContextoEmpresa::SESSION_KEY => $empresaA->id])
-        ->get("/colaboradores/crear?sucursal_id={$sucursalB->id}")
+    $this->actingAs($supervisor)
+        ->get("/colaboradores/crear?sucursal_id={$sucursalAjena->id}")
         ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', null));
 });
 
@@ -78,11 +77,11 @@ it('un supervisor no puede preseleccionar una sucursal fuera de su alcance, pero
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresa]);
     $supervisor->sucursales()->sync([$suSucursal->id]);
 
-    $this->actingAs($supervisor)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
+    $this->actingAs($supervisor)
         ->get("/colaboradores/crear?sucursal_id={$otraSucursal->id}")
         ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', null));
 
-    $this->actingAs($supervisor)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
+    $this->actingAs($supervisor)
         ->get("/colaboradores/crear?sucursal_id={$suSucursal->id}")
         ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', $suSucursal->id));
 });
@@ -99,8 +98,9 @@ it('rechaza registrar un colaborador con una sucursal de otra empresa', function
     $sucursalB = Sucursal::factory()->for($empresaB)->create();
     $admin = usuarioCon(RolSistema::Administrador->value);
 
-    $this->actingAs($admin)->withSession([ContextoEmpresa::SESSION_KEY => $empresaA->id])
+    $this->actingAs($admin)
         ->post('/colaboradores', [
+            'empresa_id' => $empresaA->id,
             'numero_empleado' => 'EMP-100',
             'nombre_completo' => 'Colaborador de prueba',
             'sucursal_id' => $sucursalB->id,

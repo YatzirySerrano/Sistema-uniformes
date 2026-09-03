@@ -14,13 +14,13 @@
     </style>
 </head>
 <body>
-    <h1>{{ $empresa->nombre_comercial }} — Reporte de entregas de uniformes</h1>
+    <h1>Reporte de entregas de activos</h1>
     <div class="muted">Generado el {{ now()->format('d/m/Y H:i') }}</div>
 
     <table>
         <thead>
             <tr>
-                <th>Folio</th><th>Fecha</th><th>Sucursal</th><th>N.º empleado</th>
+                <th>Folio</th><th>Fecha</th><th>Empresa</th><th>Sucursal</th><th>N.º empleado</th>
                 <th>Colaborador</th><th>Responsable</th><th>Estado</th><th>Prenda</th><th>Talla</th><th>Cant.</th>
             </tr>
         </thead>
@@ -30,6 +30,7 @@
                     <tr>
                         <td>{{ $entrega->folio }}</td>
                         <td>{{ $entrega->fecha_entrega->format('d/m/Y') }}</td>
+                        <td>{{ $entrega->empresa?->nombre_comercial }}</td>
                         <td>{{ $entrega->sucursal?->nombre }}</td>
                         <td>{{ $entrega->colaborador?->numero_empleado }}</td>
                         <td>{{ $entrega->colaborador?->nombre_completo }}</td>

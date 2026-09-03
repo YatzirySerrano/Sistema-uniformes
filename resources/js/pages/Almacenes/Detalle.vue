@@ -10,7 +10,6 @@ import {
     Phone,
     Power,
     ScrollText,
-    Store,
     UserRound,
     Warehouse,
 } from '@lucide/vue';
@@ -28,20 +27,12 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
-type SucursalOpcion = {
+type EmpresaAbastecida = {
     id: number;
-    nombre: string;
     codigo: string;
-    activa: boolean;
-};
-
-type SucursalAbastecida = {
-    id: number;
-    nombre: string;
-    codigo: string;
-    direccion: string | null;
-    activa: boolean;
+    nombre_comercial: string;
 };
 
 type AlmacenDetalle = {
@@ -53,14 +44,13 @@ type AlmacenDetalle = {
     telefono: string | null;
     correo: string | null;
     activo: boolean;
-    empresa: { id: number; nombre_comercial: string };
+    empresas: EmpresaAbastecida[];
     responsable: {
         id: number;
         nombre_completo: string;
         numero_empleado: string;
         area: string | null;
     } | null;
-    sucursales: SucursalAbastecida[];
 };
 
 type VarianteStock = {
@@ -80,38 +70,47 @@ type ActivoStock = {
     bajo_minimo: boolean;
     variantes: VarianteStock[];
 };
+type InventarioEmpresa = {
+    empresa: { id: number; nombre_comercial: string | null };
+    total: number;
+    bajo_minimo: boolean;
+    activos: ActivoStock[];
+};
 
 const props = defineProps<{
     almacen: AlmacenDetalle;
-    sucursalesDisponibles: SucursalOpcion[];
+    empresasAutorizadas: EmpresaAutorizada[];
     resumen: {
+        empresas_abastecidas: number;
         tipos_activo: number;
         existencias: number;
         variantes_bajo_minimo: number;
-        sucursales_abastecidas: number;
-        legacy_pendiente: number;
     };
-    inventario: ActivoStock[];
+    inventarioPorEmpresa: InventarioEmpresa[];
     permisos: {
         editar: boolean;
         administrar: boolean;
         inventario_ver: boolean;
         inventario_entrada: boolean;
         inventario_ajustar: boolean;
-        inventario_migrar: boolean;
     };
 }>();
 
 const buscarInv = ref('');
-const inventarioFiltrado = computed(() => {
+const inventarioFiltrado = computed<InventarioEmpresa[]>(() => {
     const q = buscarInv.value.trim().toLowerCase();
-    if (!q) return props.inventario;
-    return props.inventario.filter(
-        (a) =>
-            (a.activo ?? '').toLowerCase().includes(q) ||
-            (a.categoria ?? '').toLowerCase().includes(q) ||
-            (a.tipo ?? '').toLowerCase().includes(q),
-    );
+    if (!q) return props.inventarioPorEmpresa;
+    return props.inventarioPorEmpresa
+        .map((grupo) => ({
+            ...grupo,
+            activos: grupo.activos.filter(
+                (a) =>
+                    (a.activo ?? '').toLowerCase().includes(q) ||
+                    (a.categoria ?? '').toLowerCase().includes(q) ||
+                    (a.tipo ?? '').toLowerCase().includes(q),
+            ),
+        }))
+        .filter((grupo) => grupo.activos.length > 0);
 });
 
 defineOptions({
@@ -143,7 +142,7 @@ const editable = computed<AlmacenEditable>(() => ({
               numero_empleado: props.almacen.responsable.numero_empleado,
           }
         : null,
-    sucursales_ids: props.almacen.sucursales.map((s) => s.id),
+    empresas_ids: props.almacen.empresas.map((e) => e.id),
 }));
 
 const telefonoLegible = computed(() => {
@@ -215,9 +214,14 @@ function confirmarDesactivar(): void {
                     {{ almacen.codigo ?? '—' }}
                 </p>
                 <div class="mt-1.5 flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" class="gap-1">
+                    <Badge
+                        v-for="e in almacen.empresas"
+                        :key="e.id"
+                        variant="outline"
+                        class="gap-1"
+                    >
                         <Building2 class="size-3" />
-                        {{ almacen.empresa.nombre_comercial }}
+                        {{ e.nombre_comercial }}
                     </Badge>
                     <Badge :variant="almacen.activo ? 'default' : 'secondary'">
                         {{ almacen.activo ? 'Activo' : 'Inactivo' }}
@@ -257,23 +261,13 @@ function confirmarDesactivar(): void {
                         <dt class="text-muted-foreground text-xs">Nombre</dt>
                         <dd>{{ almacen.nombre }}</dd>
                     </div>
-                    <div class="flex gap-6">
-                        <div>
-                            <dt
-                                class="text-muted-foreground flex items-center gap-1 text-xs"
-                            >
-                                <Hash class="size-3" /> Código
-                            </dt>
-                            <dd class="font-mono">
-                                {{ almacen.codigo ?? '—' }}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="text-muted-foreground text-xs">
-                                Empresa
-                            </dt>
-                            <dd>{{ almacen.empresa.nombre_comercial }}</dd>
-                        </div>
+                    <div>
+                        <dt
+                            class="text-muted-foreground flex items-center gap-1 text-xs"
+                        >
+                            <Hash class="size-3" /> Código
+                        </dt>
+                        <dd class="font-mono">{{ almacen.codigo ?? '—' }}</dd>
                     </div>
                     <div>
                         <dt class="text-muted-foreground text-xs">Estado</dt>
@@ -367,14 +361,14 @@ function confirmarDesactivar(): void {
         <section class="rounded-xl border p-4">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 class="flex items-center gap-2 text-sm font-semibold">
-                    <Store class="text-muted-foreground size-4" />
-                    Sucursales abastecidas
+                    <Building2 class="text-muted-foreground size-4" />
+                    Empresas abastecidas
                     <AyudaTooltip
-                        texto="Sucursales que reciben suministro desde este almacén. Un almacén puede abastecer varias sucursales y una sucursal recibir de varios almacenes."
-                        etiqueta="Ayuda sobre sucursales abastecidas"
+                        texto="Razones sociales que se surten desde este almacén. El inventario se mantiene separado por empresa."
+                        etiqueta="Ayuda sobre empresas abastecidas"
                     />
                     <Badge variant="secondary">
-                        {{ almacen.sucursales.length }}
+                        {{ almacen.empresas.length }}
                     </Badge>
                 </h2>
                 <Button
@@ -383,54 +377,27 @@ function confirmarDesactivar(): void {
                     size="sm"
                     @click="abrirEditar"
                 >
-                    <Pencil class="size-3.5" />
-                    {{
-                        almacen.sucursales.length
-                            ? 'Gestionar sucursales'
-                            : 'Asignar sucursales'
-                    }}
+                    <Pencil class="size-3.5" /> Gestionar empresas
                 </Button>
             </div>
 
-            <p
-                v-if="!almacen.sucursales.length"
-                class="text-muted-foreground bg-muted/40 rounded-lg p-3 text-sm"
-            >
-                Este almacén todavía no abastece sucursales.
-            </p>
-
-            <div v-else class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 <div
-                    v-for="s in almacen.sucursales"
-                    :key="s.id"
+                    v-for="e in almacen.empresas"
+                    :key="e.id"
                     class="flex items-start justify-between gap-2 rounded-lg border p-3"
                 >
                     <div class="min-w-0">
                         <p class="truncate text-sm font-medium">
-                            {{ s.nombre }}
+                            {{ e.nombre_comercial }}
                         </p>
                         <p class="text-muted-foreground font-mono text-xs">
-                            {{ s.codigo }}
-                        </p>
-                        <p
-                            v-if="s.direccion"
-                            class="text-muted-foreground mt-1 line-clamp-1 text-xs"
-                        >
-                            {{ s.direccion }}
+                            {{ e.codigo }}
                         </p>
                     </div>
-                    <div class="flex shrink-0 flex-col items-end gap-1">
-                        <Badge
-                            v-if="!s.activa"
-                            variant="outline"
-                            class="text-xs"
-                        >
-                            Inactiva
-                        </Badge>
-                        <Button variant="ghost" size="sm" as-child>
-                            <Link :href="`/sucursales/${s.id}`">Ver</Link>
-                        </Button>
-                    </div>
+                    <Button variant="ghost" size="sm" as-child>
+                        <Link :href="`/empresas/${e.id}`">Ver</Link>
+                    </Button>
                 </div>
             </div>
         </section>
@@ -443,10 +410,10 @@ function confirmarDesactivar(): void {
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div class="bg-muted/40 min-w-0 rounded-lg p-3">
                     <p class="text-muted-foreground text-xs">
-                        Sucursales abastecidas
+                        Empresas abastecidas
                     </p>
                     <p class="text-2xl font-semibold">
-                        {{ resumen.sucursales_abastecidas }}
+                        {{ resumen.empresas_abastecidas }}
                     </p>
                 </div>
                 <div class="bg-muted/40 min-w-0 rounded-lg p-3">
@@ -481,28 +448,13 @@ function confirmarDesactivar(): void {
                     </p>
                 </div>
             </div>
-
-            <div
-                v-if="
-                    resumen.legacy_pendiente > 0 && permisos.inventario_migrar
-                "
-                class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/40"
-            >
-                <span class="min-w-0"
-                    >{{ resumen.legacy_pendiente }} saldo(s) de sucursales que
-                    abastece este almacén siguen sin migrar.</span
-                >
-                <Button variant="outline" size="sm" as-child>
-                    <Link href="/inventario/migracion">Migrar existencias</Link>
-                </Button>
-            </div>
         </section>
 
         <section class="rounded-xl border p-4">
             <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h2 class="flex items-center gap-2 text-sm font-semibold">
                     <Warehouse class="text-muted-foreground size-4" />
-                    Inventario del almacén
+                    Inventario del almacén (por empresa)
                 </h2>
                 <div class="flex flex-wrap items-center gap-2">
                     <input
@@ -546,11 +498,11 @@ function confirmarDesactivar(): void {
             </div>
 
             <p
-                v-if="!inventario.length"
+                v-if="!inventarioPorEmpresa.length"
                 class="text-muted-foreground py-6 text-center text-sm"
             >
                 Este almacén todavía no tiene existencias. Registra una entrada
-                o migra las existencias legacy de sus sucursales.
+                indicando la empresa y el almacén.
             </p>
             <p
                 v-else-if="!inventarioFiltrado.length"
@@ -559,43 +511,69 @@ function confirmarDesactivar(): void {
                 Sin resultados para «{{ buscarInv }}».
             </p>
 
-            <div v-else class="grid gap-3 md:grid-cols-2">
-                <article
-                    v-for="a in inventarioFiltrado"
-                    :key="a.activo_id"
-                    class="min-w-0 rounded-lg border p-3"
+            <div v-else class="flex flex-col gap-4">
+                <div
+                    v-for="grupo in inventarioFiltrado"
+                    :key="grupo.empresa.id"
                 >
-                    <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0">
-                            <p class="truncate font-medium">{{ a.activo }}</p>
-                            <p class="text-muted-foreground truncate text-xs">
-                                {{
-                                    [a.tipo, a.categoria]
-                                        .filter(Boolean)
-                                        .join(' · ') || '—'
-                                }}
-                            </p>
-                        </div>
-                        <Badge
-                            :variant="a.bajo_minimo ? 'secondary' : 'outline'"
-                            class="shrink-0 text-xs"
-                            :class="a.bajo_minimo ? 'text-amber-600' : ''"
-                        >
-                            {{ a.total }}
+                    <h3
+                        class="mb-2 flex items-center gap-2 text-xs font-semibold"
+                    >
+                        <Building2 class="text-muted-foreground size-3.5" />
+                        {{ grupo.empresa.nombre_comercial }}
+                        <Badge variant="outline" class="text-xs">
+                            {{ grupo.total }}
                         </Badge>
-                    </div>
-                    <ul class="mt-2 flex flex-wrap gap-1.5 text-xs">
-                        <li
-                            v-for="v in a.variantes"
-                            :key="v.talla_id"
-                            class="bg-muted/50 rounded px-2 py-0.5"
-                            :class="v.bajo_minimo ? 'text-amber-600' : ''"
+                    </h3>
+                    <div class="grid gap-3 md:grid-cols-2">
+                        <article
+                            v-for="a in grupo.activos"
+                            :key="a.activo_id"
+                            class="min-w-0 rounded-lg border p-3"
                         >
-                            {{ v.talla ?? 's/v' }}:
-                            <strong>{{ v.cantidad }}</strong>
-                        </li>
-                    </ul>
-                </article>
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <p class="truncate font-medium">
+                                        {{ a.activo }}
+                                    </p>
+                                    <p
+                                        class="text-muted-foreground truncate text-xs"
+                                    >
+                                        {{
+                                            [a.tipo, a.categoria]
+                                                .filter(Boolean)
+                                                .join(' · ') || '—'
+                                        }}
+                                    </p>
+                                </div>
+                                <Badge
+                                    :variant="
+                                        a.bajo_minimo ? 'secondary' : 'outline'
+                                    "
+                                    class="shrink-0 text-xs"
+                                    :class="
+                                        a.bajo_minimo ? 'text-amber-600' : ''
+                                    "
+                                >
+                                    {{ a.total }}
+                                </Badge>
+                            </div>
+                            <ul class="mt-2 flex flex-wrap gap-1.5 text-xs">
+                                <li
+                                    v-for="v in a.variantes"
+                                    :key="v.talla_id"
+                                    class="bg-muted/50 rounded px-2 py-0.5"
+                                    :class="
+                                        v.bajo_minimo ? 'text-amber-600' : ''
+                                    "
+                                >
+                                    {{ v.talla ?? 's/v' }}:
+                                    <strong>{{ v.cantidad }}</strong>
+                                </li>
+                            </ul>
+                        </article>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -604,14 +582,14 @@ function confirmarDesactivar(): void {
                 <DialogHeader>
                     <DialogTitle>Editar almacén</DialogTitle>
                     <DialogDescription>
-                        Actualiza los datos, el responsable y las sucursales
+                        Actualiza los datos, el responsable y las empresas
                         abastecidas.
                     </DialogDescription>
                 </DialogHeader>
                 <FormularioAlmacen
                     :key="claveFormulario"
                     :almacen="editable"
-                    :sucursales="sucursalesDisponibles"
+                    :empresas-autorizadas="empresasAutorizadas"
                     @guardado="alGuardar"
                     @cancelar="modalEditar = false"
                 />
@@ -623,10 +601,10 @@ function confirmarDesactivar(): void {
                 <DialogHeader>
                     <DialogTitle>¿Desactivar este almacén?</DialogTitle>
                     <DialogDescription>
-                        Este almacén dejará de estar disponible para
-                        operaciones. El catálogo de activos y los registros
-                        históricos no se modifican, y podrás reactivarlo cuando
-                        quieras.
+                        Este almacén dejará de estar disponible para operaciones
+                        (para todas sus empresas). El catálogo de activos y los
+                        registros históricos no se modifican, y podrás
+                        reactivarlo cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>

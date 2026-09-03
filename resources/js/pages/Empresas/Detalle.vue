@@ -3,7 +3,6 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeft,
     Building2,
-    CircleDot,
     Hash,
     Mail,
     MapPin,
@@ -35,7 +34,6 @@ type EmpresaDetalle = EmpresaEditable & {
     color_secundario: string;
     color_acento: string;
     logo_url: string | null;
-    es_empresa_activa: boolean;
     sucursales_total: number;
     sucursales_activas: number;
     colaboradores_total: number;
@@ -62,7 +60,6 @@ const modalEditar = ref(false);
 const claveFormulario = ref(0);
 const modalEstado = ref(false);
 const procesandoEstado = ref(false);
-const cambiandoEmpresa = ref(false);
 
 const empresaEditable = computed<EmpresaEditable>(() => ({
     id: props.empresa.id,
@@ -114,40 +111,12 @@ function confirmarEstado(): void {
     );
 }
 
-function usarEmpresa(): void {
-    if (props.empresa.es_empresa_activa) return;
-    cambiandoEmpresa.value = true;
-    router.post(
-        '/empresa-activa',
-        { empresa_id: props.empresa.id },
-        {
-            preserveScroll: true,
-            onFinish: () => (cambiandoEmpresa.value = false),
-        },
-    );
-}
-
 const navegando = ref(false);
 
-/**
- * Navega a otro módulo asegurando que esta empresa sea la activa. Si no lo es,
- * primero cambia el contexto de forma autorizada (el backend valida el acceso)
- * y después abre la ruta destino con la empresa correcta ya cargada.
- */
+/** Navega a otro módulo prefiltrado por esta empresa. */
 function irA(ruta: string): void {
-    if (props.empresa.es_empresa_activa) {
-        router.visit(ruta);
-        return;
-    }
-    navegando.value = true;
-    router.post(
-        '/empresa-activa',
-        { empresa_id: props.empresa.id },
-        {
-            onSuccess: () => router.visit(ruta),
-            onFinish: () => (navegando.value = false),
-        },
-    );
+    const separador = ruta.includes('?') ? '&' : '?';
+    router.visit(`${ruta}${separador}empresa_id=${props.empresa.id}`);
 }
 </script>
 
@@ -194,31 +163,11 @@ function irA(ruta: string): void {
                         >
                             {{ empresa.activa ? 'Activa' : 'Inactiva' }}
                         </Badge>
-                        <span
-                            v-if="empresa.es_empresa_activa"
-                            class="text-primary inline-flex items-center gap-1 text-xs font-medium"
-                        >
-                            <CircleDot class="size-3.5" />
-                            Empresa activa en tu sesión
-                            <AyudaTooltip
-                                texto="Es la empresa sobre la que estás trabajando ahora. No debe confundirse con el estado operativo 'Activa'."
-                                etiqueta="Ayuda sobre la empresa activa"
-                            />
-                        </span>
                     </div>
                 </div>
             </div>
 
             <div class="flex flex-wrap gap-2">
-                <Button
-                    v-if="!empresa.es_empresa_activa"
-                    variant="outline"
-                    size="sm"
-                    :disabled="cambiandoEmpresa"
-                    @click="usarEmpresa"
-                >
-                    Usar esta empresa
-                </Button>
                 <Button
                     v-if="puedeEditar"
                     variant="outline"
@@ -411,12 +360,9 @@ function irA(ruta: string): void {
                         </template>
                     </div>
                 </div>
-                <p
-                    v-if="!empresa.es_empresa_activa"
-                    class="text-muted-foreground mt-3 text-xs"
-                >
-                    Al continuar, esta empresa se activará automáticamente en tu
-                    sesión.
+                <p class="text-muted-foreground mt-3 text-xs">
+                    Los accesos rápidos abren cada módulo prefiltrado por esta
+                    empresa.
                 </p>
             </section>
 

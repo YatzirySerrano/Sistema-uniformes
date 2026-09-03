@@ -27,6 +27,7 @@ class EntregasExport implements FromCollection, WithHeadings, WithTitle
                 $filas->push([
                     $entrega->folio,
                     $entrega->fecha_entrega->format('d/m/Y'),
+                    $entrega->empresa?->nombre_comercial,
                     $entrega->sucursal?->nombre,
                     $entrega->colaborador?->numero_empleado,
                     $entrega->colaborador?->nombre_completo,
@@ -47,7 +48,7 @@ class EntregasExport implements FromCollection, WithHeadings, WithTitle
      */
     public function headings(): array
     {
-        return ['Folio', 'Fecha de entrega', 'Sucursal', 'N.º empleado', 'Colaborador', 'Responsable', 'Estado', 'Activo', 'Talla', 'Cantidad'];
+        return ['Folio', 'Fecha de entrega', 'Empresa', 'Sucursal', 'N.º empleado', 'Colaborador', 'Responsable', 'Estado', 'Activo', 'Talla', 'Cantidad'];
     }
 
     public function title(): string

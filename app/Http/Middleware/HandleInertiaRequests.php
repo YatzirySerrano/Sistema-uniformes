@@ -2,9 +2,8 @@
 
 namespace App\Http\Middleware;
 
-use App\Soporte\ContextoEmpresa;
+use App\Soporte\AccesoEmpresa;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Middleware;
 
@@ -27,9 +26,14 @@ class HandleInertiaRequests extends Middleware
     {
         $usuario = $request->user();
 
-        /** @var ContextoEmpresa $contexto */
-        $contexto = app(ContextoEmpresa::class);
-        $empresaActiva = $contexto->empresa();
+        $empresasAutorizadas = $usuario === null
+            ? []
+            : app(AccesoEmpresa::class)->empresasAutorizadas($usuario)
+                ->map(fn ($e): array => [
+                    'id' => $e->id,
+                    'codigo' => $e->codigo,
+                    'nombre_comercial' => $e->nombre_comercial,
+                ])->values()->all();
 
         return [
             ...parent::share($request),
@@ -46,22 +50,10 @@ class HandleInertiaRequests extends Middleware
                     'es_superadministrador' => $usuario->esSuperadministrador(),
                 ],
             ],
-            'contextoEmpresa' => $usuario === null ? null : [
-                'empresaActivaId' => $contexto->id(),
-                'empresaActiva' => $empresaActiva === null ? null : [
-                    'id' => $empresaActiva->id,
-                    'codigo' => $empresaActiva->codigo,
-                    'nombre_comercial' => $empresaActiva->nombre_comercial,
-                    'logo_url' => $empresaActiva->logo_ruta ? Storage::disk('public')->url($empresaActiva->logo_ruta) : null,
-                ],
-                'empresasDisponibles' => $contexto->empresasAutorizadas()
-                    ->map(fn ($e): array => ['id' => $e->id, 'codigo' => $e->codigo, 'nombre_comercial' => $e->nombre_comercial])
-                    ->values()->all(),
-                'sucursalesDisponibles' => $contexto->sucursalesDisponibles()
-                    ->map(fn ($s): array => ['id' => $s->id, 'codigo' => $s->codigo, 'nombre' => $s->nombre])
-                    ->values()->all(),
-                'branding' => $empresaActiva?->tokensDeMarca() ?? [],
-            ],
+            // El sistema es multiempresa pero NO tiene "empresa activa": el
+            // contexto de empresa se elige en cada formulario / filtro. Esta
+            // lista alimenta esos combobox en el cliente.
+            'empresasAutorizadas' => $empresasAutorizadas,
             // Inertia::always: sin esto, un partial reload (p. ej. cambiar un
             // filtro con `only`) no incluye 'flash' en la respuesta y el
             // cliente conserva el toast anterior en memoria, reapareciendo en

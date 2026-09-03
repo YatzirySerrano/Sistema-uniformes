@@ -38,8 +38,8 @@ class AjustarInventario
             throw new ExcepcionDeNegocioSimple('La existencia objetivo no puede ser negativa.');
         }
 
-        $almacen = Almacen::query()->where('empresa_id', $empresaId)
-            ->findOr($almacenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén no pertenece a esta empresa.'));
+        $almacen = Almacen::query()->paraEmpresa($empresaId)
+            ->findOr($almacenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén no abastece a esta empresa.'));
 
         if (! $almacen->activo) {
             throw new ExcepcionDeNegocioSimple('El almacén está desactivado; no admite ajustes de inventario.');
@@ -64,6 +64,7 @@ class AjustarInventario
             $this->auditoria->registrar('inventario', 'ajuste', [
                 'tipo_entidad' => MovimientoInventario::class,
                 'entidad_id' => $movimiento?->getKey(),
+                'empresa_id' => $empresaId,
                 'motivo' => $motivo,
                 'descripcion' => "Ajuste de existencia de {$anterior} a {$existenciaObjetivo} en almacén #{$almacenId}.",
                 'valores_anteriores' => ['cantidad' => $anterior],

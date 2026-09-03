@@ -4,16 +4,16 @@ namespace App\Http\Requests\Almacenes;
 
 use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Models\Almacen;
-use App\Soporte\ContextoEmpresa;
+use App\Soporte\AccesoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
- * Validación de alta y edición de almacenes. La empresa nunca llega del
- * frontend: se toma de la empresa activa del contexto y es la autoridad final.
- * Todas las relaciones (responsable, sucursales abastecidas) se validan contra
- * la empresa activa.
+ * Validación de alta y edición de almacenes multiempresa. La empresa no es un
+ * contexto global: el almacén abastece al conjunto `empresa_ids`, cada uno
+ * validado contra las empresas a las que el usuario tiene acceso. El
+ * `responsable` debe pertenecer a alguna de esas empresas.
  */
 class GuardarAlmacenRequest extends FormRequest
 {
@@ -47,32 +47,30 @@ class GuardarAlmacenRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = app(ContextoEmpresa::class)->empresaObligatoria()->getKey();
         $almacen = $this->route('almacen');
         $almacenId = $almacen instanceof Almacen ? $almacen->getKey() : null;
+
+        $empresasAutorizadas = $this->user() === null
+            ? []
+            : app(AccesoEmpresa::class)->idsAutorizados($this->user())->all();
 
         return [
             'nombre' => ['required', 'string', 'max:255'],
             'codigo' => [
                 'nullable', 'string', 'max:60', 'alpha_dash',
-                Rule::unique('almacenes', 'codigo')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($almacenId),
+                Rule::unique('almacenes', 'codigo')->ignore($almacenId),
             ],
             'descripcion' => ['nullable', 'string', 'max:1000'],
             'direccion' => ['nullable', 'string', 'max:255'],
             'telefono' => ['nullable', 'string', 'digits:10'],
             'correo' => ['nullable', 'email', 'max:255'],
+            'empresa_ids' => ['required', 'array', 'min:1'],
+            'empresa_ids.*' => ['integer', Rule::in($empresasAutorizadas)],
             'responsable_colaborador_id' => [
                 'nullable', 'integer',
                 Rule::exists('colaboradores', 'id')->where(fn ($q) => $q
-                    ->where('empresa_id', $empresaId)
+                    ->whereIn('empresa_id', (array) $this->input('empresa_ids', []))
                     ->where('activo', true)),
-            ],
-            'sucursales' => ['nullable', 'array'],
-            'sucursales.*' => [
-                'integer',
-                Rule::exists('sucursales', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
         ];
     }
@@ -86,13 +84,15 @@ class GuardarAlmacenRequest extends FormRequest
             'nombre.required' => 'El nombre del almacén es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
             'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',
-            'codigo.unique' => 'Ese código de almacén ya existe en esta empresa.',
+            'codigo.unique' => 'Ese código de almacén ya existe.',
             'codigo.max' => 'El código no puede superar los 60 caracteres.',
             'direccion.max' => 'La dirección no puede superar los 255 caracteres.',
             'telefono.digits' => 'El teléfono debe contener 10 dígitos.',
             'correo.email' => 'El correo no tiene un formato válido.',
-            'responsable_colaborador_id.exists' => 'El colaborador seleccionado como responsable no es válido para esta empresa.',
-            'sucursales.*.exists' => 'Una de las sucursales seleccionadas no pertenece a esta empresa.',
+            'empresa_ids.required' => 'Selecciona al menos una empresa abastecida.',
+            'empresa_ids.min' => 'Selecciona al menos una empresa abastecida.',
+            'empresa_ids.*.in' => 'Una de las empresas seleccionadas no está dentro de tu alcance.',
+            'responsable_colaborador_id.exists' => 'El colaborador seleccionado como responsable no pertenece a las empresas abastecidas.',
         ];
     }
 }

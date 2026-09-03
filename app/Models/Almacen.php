@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\PerteneceAEmpresa;
 use Database\Factories\AlmacenFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,13 +12,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
- * Almacén físico de una empresa. Abastece a una o varias sucursales (N:M) y
- * será la unidad de administración del inventario en un bloque posterior.
- * Desactivar un almacén NO afecta el catálogo global de activos ni los
- * históricos; sólo lo deja fuera de operaciones.
+ * Almacén físico. Abastece a una o varias EMPRESAS / razones sociales (N:M vía
+ * `almacen_empresa`); el inventario se mantiene separado por empresa dentro del
+ * almacén (`saldos_inventario.empresa_id` + `almacen_id`). El almacén NO
+ * pertenece a una empresa y NO se relaciona con sucursales.
+ *
+ * Desactivar un almacén sólo lo saca de operaciones (para todas sus empresas);
+ * no toca el catálogo de activos ni los históricos.
  *
  * @property int $id
- * @property int $empresa_id
  * @property string $nombre
  * @property string|null $codigo
  * @property string|null $descripcion
@@ -32,12 +33,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Almacen extends Model
 {
     /** @use HasFactory<AlmacenFactory> */
-    use HasFactory, PerteneceAEmpresa, SoftDeletes;
+    use HasFactory, SoftDeletes;
 
     protected $table = 'almacenes';
 
     protected $fillable = [
-        'empresa_id',
         'nombre',
         'codigo',
         'descripcion',
@@ -56,15 +56,15 @@ class Almacen extends Model
     }
 
     /**
-     * Sucursales que este almacén abastece.
+     * Empresas / razones sociales que este almacén abastece.
      *
-     * @return BelongsToMany<Sucursal, $this>
+     * @return BelongsToMany<Empresa, $this>
      */
-    public function sucursales(): BelongsToMany
+    public function empresas(): BelongsToMany
     {
-        return $this->belongsToMany(Sucursal::class, 'almacen_sucursal')
+        return $this->belongsToMany(Empresa::class, 'almacen_empresa')
             ->withTimestamps()
-            ->orderBy('sucursales.nombre');
+            ->orderBy('empresas.nombre_comercial');
     }
 
     /**
@@ -76,8 +76,6 @@ class Almacen extends Model
     }
 
     /**
-     * Saldos de inventario que viven en este almacén.
-     *
      * @return HasMany<SaldoInventario, $this>
      */
     public function saldos(): HasMany
@@ -93,12 +91,20 @@ class Almacen extends Model
         return $this->hasMany(MovimientoInventario::class);
     }
 
-    /**
-     * ¿Este almacén abastece a la sucursal indicada?
-     */
-    public function abasteceSucursal(int $sucursalId): bool
+    public function abasteceEmpresa(int $empresaId): bool
     {
-        return $this->sucursales()->whereKey($sucursalId)->exists();
+        return $this->empresas()->whereKey($empresaId)->exists();
+    }
+
+    /**
+     * Almacenes que abastecen a la empresa indicada.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeParaEmpresa(Builder $query, int $empresaId): Builder
+    {
+        return $query->whereHas('empresas', fn (Builder $q) => $q->whereKey($empresaId));
     }
 
     /**

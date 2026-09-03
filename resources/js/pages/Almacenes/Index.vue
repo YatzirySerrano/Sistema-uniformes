@@ -7,7 +7,6 @@ import {
     Plus,
     Search,
     SquareArrowOutUpRight,
-    Store,
     UserRound,
     Warehouse,
     X,
@@ -36,14 +35,9 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
-import type { Paginado } from '@/types/sistema';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
-type SucursalOpcion = {
-    id: number;
-    nombre: string;
-    codigo: string;
-    activa: boolean;
-};
+type EmpresaChip = { id: number; nombre_comercial: string };
 
 type AlmacenFila = {
     id: number;
@@ -51,7 +45,8 @@ type AlmacenFila = {
     codigo: string | null;
     direccion: string | null;
     activo: boolean;
-    sucursales_count: number;
+    empresas_count: number;
+    empresas: EmpresaChip[];
     responsable: {
         id: number;
         nombre_completo: string;
@@ -61,12 +56,12 @@ type AlmacenFila = {
 
 const props = defineProps<{
     almacenes: Paginado<AlmacenFila>;
-    empresa: { id: number; nombre_comercial: string };
-    sucursales: SucursalOpcion[];
+    empresasAutorizadas: EmpresaAutorizada[];
     filtros: {
         buscar: string;
         estado: '' | 'activos' | 'inactivos';
         orden: 'az' | 'za';
+        empresa_id: number | null;
     };
     permisos: { crear: boolean; editar: boolean; administrar: boolean };
 }>();
@@ -78,13 +73,18 @@ defineOptions({
 const buscar = ref(props.filtros.buscar);
 const estado = ref<'' | 'activos' | 'inactivos'>(props.filtros.estado);
 const orden = ref<'az' | 'za'>(props.filtros.orden);
+const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
 
 const hayFiltrosActivos = computed(
-    () => buscar.value !== '' || estado.value !== '' || orden.value !== 'az',
+    () =>
+        buscar.value !== '' ||
+        estado.value !== '' ||
+        orden.value !== 'az' ||
+        empresaId.value !== '',
 );
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
-watch([buscar, estado, orden], () => {
+watch([buscar, estado, orden, empresaId], () => {
     clearTimeout(temporizador);
     temporizador = setTimeout(() => {
         router.get(
@@ -93,6 +93,7 @@ watch([buscar, estado, orden], () => {
                 buscar: buscar.value || undefined,
                 estado: estado.value || undefined,
                 orden: orden.value === 'az' ? undefined : orden.value,
+                empresa_id: empresaId.value || undefined,
             },
             {
                 preserveState: true,
@@ -108,6 +109,7 @@ function limpiarFiltros(): void {
     buscar.value = '';
     estado.value = '';
     orden.value = 'az';
+    empresaId.value = '';
 }
 
 const filtrosEstado: { valor: '' | 'activos' | 'inactivos'; texto: string }[] =
@@ -131,8 +133,6 @@ function nuevo(): void {
 }
 
 function editar(a: AlmacenFila): void {
-    // El formulario de edición completo (con sucursales y responsable) se abre
-    // desde el detalle; aquí sólo datos base + responsable ya conocido.
     router.visit(`/almacenes/${a.id}`);
 }
 
@@ -178,7 +178,7 @@ function alternarEstado(a: AlmacenFila): void {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Almacenes"
-            :descripcion="`Administra los lugares físicos donde ${empresa.nombre_comercial} resguarda y controla sus existencias, y las sucursales que cada almacén abastece.`"
+            descripcion="Administra los lugares físicos donde se resguardan las existencias. Un almacén puede abastecer a varias empresas / razones sociales; su inventario se mantiene separado por empresa."
         >
             <template #acciones>
                 <Button v-if="permisos.crear" @click="nuevo">
@@ -201,6 +201,27 @@ function alternarEstado(a: AlmacenFila): void {
             </div>
 
             <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <label
+                    v-if="empresasAutorizadas.length > 1"
+                    class="flex items-center gap-1.5 text-sm"
+                >
+                    <span class="text-muted-foreground">Empresa</span>
+                    <select
+                        v-model="empresaId"
+                        :class="claseSelect"
+                        aria-label="Filtrar por empresa abastecida"
+                    >
+                        <option value="">Todas</option>
+                        <option
+                            v-for="e in empresasAutorizadas"
+                            :key="e.id"
+                            :value="e.id"
+                        >
+                            {{ e.nombre_comercial }}
+                        </option>
+                    </select>
+                </label>
+
                 <div
                     class="flex gap-1"
                     role="group"
@@ -248,7 +269,7 @@ function alternarEstado(a: AlmacenFila): void {
             :descripcion="
                 hayFiltrosActivos
                     ? 'Ningún almacén coincide con la búsqueda o los filtros aplicados.'
-                    : 'No hay almacenes registrados para esta empresa.'
+                    : 'No hay almacenes registrados.'
             "
         >
             <template v-if="hayFiltrosActivos" #acciones>
@@ -294,7 +315,7 @@ function alternarEstado(a: AlmacenFila): void {
                                 >
                                     {{ a.codigo ?? '—' }}
                                     <AyudaTooltip
-                                        texto="Identificador interno del almacén dentro de la empresa."
+                                        texto="Identificador interno del almacén (único a nivel plataforma)."
                                         etiqueta="Ayuda sobre el código"
                                     />
                                 </p>
@@ -320,13 +341,6 @@ function alternarEstado(a: AlmacenFila): void {
                         </Tooltip>
                     </div>
 
-                    <p
-                        class="text-muted-foreground flex items-center gap-1.5 text-xs"
-                    >
-                        <Building2 class="size-3" />
-                        {{ empresa.nombre_comercial }}
-                    </p>
-
                     <div
                         class="text-muted-foreground flex flex-col gap-1 text-sm"
                     >
@@ -347,17 +361,28 @@ function alternarEstado(a: AlmacenFila): void {
                     </div>
 
                     <div
-                        class="bg-muted/40 w-fit rounded-lg px-3 py-2"
-                        aria-label="Sucursales abastecidas"
+                        class="bg-muted/40 rounded-lg px-3 py-2"
+                        aria-label="Empresas abastecidas"
                     >
                         <p
                             class="text-muted-foreground flex items-center gap-1 text-xs"
                         >
-                            <Store class="size-3" /> Sucursales abastecidas
+                            <Building2 class="size-3" /> Abastece a
+                            {{ a.empresas_count }}
+                            {{
+                                a.empresas_count === 1 ? 'empresa' : 'empresas'
+                            }}
                         </p>
-                        <p class="text-lg font-semibold">
-                            {{ a.sucursales_count }}
-                        </p>
+                        <div class="mt-1 flex flex-wrap gap-1">
+                            <Badge
+                                v-for="e in a.empresas"
+                                :key="e.id"
+                                variant="outline"
+                                class="text-xs"
+                            >
+                                {{ e.nombre_comercial }}
+                            </Badge>
+                        </div>
                     </div>
 
                     <div class="mt-auto flex flex-wrap gap-2 pt-1">
@@ -399,17 +424,14 @@ function alternarEstado(a: AlmacenFila): void {
                         {{ enEdicion ? 'Editar almacén' : 'Nuevo almacén' }}
                     </DialogTitle>
                     <DialogDescription>
-                        {{
-                            enEdicion
-                                ? 'Actualiza los datos del almacén.'
-                                : `El almacén se registrará en ${empresa.nombre_comercial} (empresa activa).`
-                        }}
+                        Un almacén puede surtir a varias razones sociales; su
+                        inventario se mantiene separado por empresa.
                     </DialogDescription>
                 </DialogHeader>
                 <FormularioAlmacen
                     :key="claveFormulario"
                     :almacen="enEdicion"
-                    :sucursales="sucursales"
+                    :empresas-autorizadas="empresasAutorizadas"
                     @guardado="alGuardar"
                     @cancelar="modalAbierto = false"
                 />
@@ -419,7 +441,7 @@ function alternarEstado(a: AlmacenFila): void {
         <Dialog
             :open="confirmando !== null"
             @update:open="
-                (v) => {
+                (v: boolean) => {
                     if (!v) confirmando = null;
                 }
             "
@@ -431,9 +453,10 @@ function alternarEstado(a: AlmacenFila): void {
                         <span v-if="confirmando" class="font-medium">{{
                             confirmando.nombre
                         }}</span>
-                        dejará de estar disponible para operaciones. El catálogo
-                        de activos y los registros históricos no se modifican, y
-                        podrás reactivarlo cuando quieras.
+                        dejará de estar disponible para operaciones (para todas
+                        sus empresas). El catálogo de activos y los registros
+                        históricos no se modifican, y podrás reactivarlo cuando
+                        quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>

@@ -3,13 +3,12 @@
 use App\Enums\RolSistema;
 use App\Models\Empresa;
 use App\Models\Talla;
-use App\Soporte\ContextoEmpresa;
 
 beforeEach(function () {
     sembrarRolesPermisos();
     $this->empresa = Empresa::factory()->create();
     $this->admin = usuarioCon(RolSistema::Administrador->value, [$this->empresa]);
-    $this->sesion = [ContextoEmpresa::SESSION_KEY => $this->empresa->id];
+    $this->empresaId = ['empresa_id' => $this->empresa->id];
 });
 
 it('cada empresa nace con una talla comodín "sin variante"', function () {
@@ -22,8 +21,8 @@ it('crear una variante no pide orden y la coloca al final', function () {
     Talla::factory()->for($this->empresa)->create(['valor' => 'S', 'orden' => 1]);
     Talla::factory()->for($this->empresa)->create(['valor' => 'M', 'orden' => 2]);
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
-        ->post('/tallas', ['valor' => 'L'])
+    $this->actingAs($this->admin)
+        ->post('/tallas', ['valor' => 'L', ...$this->empresaId])
         ->assertRedirect()
         ->assertSessionHasNoErrors();
 
@@ -34,8 +33,8 @@ it('crear una variante no pide orden y la coloca al final', function () {
 it('el listado de variantes excluye la comodín', function () {
     Talla::factory()->for($this->empresa)->create(['valor' => 'XL']);
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
-        ->get('/tallas')
+    $this->actingAs($this->admin)
+        ->get('/tallas?empresa_id='.$this->empresa->id)
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->component('Activos/Tallas')
@@ -48,8 +47,8 @@ it('reordena las variantes según la lista de IDs', function () {
     $b = Talla::factory()->for($this->empresa)->create(['valor' => 'B', 'orden' => 2]);
     $c = Talla::factory()->for($this->empresa)->create(['valor' => 'C', 'orden' => 3]);
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
-        ->post('/tallas/reordenar', ['orden' => [$c->id, $a->id, $b->id]])
+    $this->actingAs($this->admin)
+        ->post('/tallas/reordenar', ['orden' => [$c->id, $a->id, $b->id], ...$this->empresaId])
         ->assertRedirect();
 
     expect($c->fresh()->orden)->toBe(1)
@@ -60,11 +59,11 @@ it('reordena las variantes según la lista de IDs', function () {
 it('la comodín no se puede editar ni eliminar', function () {
     $comodin = $this->empresa->tallaComodin();
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->put("/tallas/{$comodin->id}", ['valor' => 'Hackeada'])
         ->assertForbidden();
 
-    $this->actingAs($this->admin)->withSession($this->sesion)
+    $this->actingAs($this->admin)
         ->delete("/tallas/{$comodin->id}")
         ->assertForbidden();
 
@@ -72,8 +71,8 @@ it('la comodín no se puede editar ni eliminar', function () {
 });
 
 it('el alta rápida de variante devuelve la variante creada', function () {
-    $this->actingAs($this->admin)->withSession($this->sesion)
-        ->postJson('/tallas/rapido', ['valor' => '36R'])
+    $this->actingAs($this->admin)
+        ->postJson('/tallas/rapido', ['valor' => '36R', ...$this->empresaId])
         ->assertOk()
         ->assertJsonPath('talla.valor', '36R');
 });
@@ -81,7 +80,7 @@ it('el alta rápida de variante devuelve la variante creada', function () {
 it('un supervisor no puede administrar variantes', function () {
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->empresa]);
 
-    $this->actingAs($supervisor)->withSession($this->sesion)
-        ->post('/tallas', ['valor' => 'X'])
+    $this->actingAs($supervisor)
+        ->post('/tallas', ['valor' => 'X', ...$this->empresaId])
         ->assertForbidden();
 });

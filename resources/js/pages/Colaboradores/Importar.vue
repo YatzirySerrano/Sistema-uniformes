@@ -6,6 +6,7 @@ import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Fila = {
     fila: number;
@@ -21,7 +22,12 @@ type Analisis = {
     importados: number;
 };
 
-defineProps<{ columnas: string[]; analisis?: Analisis }>();
+const props = defineProps<{
+    columnas: string[];
+    empresasAutorizadas: EmpresaAutorizada[];
+    empresaSeleccionadaId?: number;
+    analisis?: Analisis;
+}>();
 
 defineOptions({
     layout: {
@@ -32,19 +38,36 @@ defineOptions({
     },
 });
 
+const empresaId = ref<number | ''>(
+    props.empresaSeleccionadaId ??
+        (props.empresasAutorizadas.length === 1
+            ? props.empresasAutorizadas[0].id
+            : ''),
+);
+
 const archivo = ref<File | null>(null);
-const form = useForm<{ archivo: File | null }>({ archivo: null });
+const form = useForm<{ empresa_id: number | ''; archivo: File | null }>({
+    empresa_id: empresaId.value,
+    archivo: null,
+});
 
 function subir() {
+    form.empresa_id = empresaId.value;
     form.archivo = archivo.value;
     form.post('/colaboradores/importar/analizar', { forceFormData: true });
 }
 
-const confirmForm = useForm({ token: '' });
+const confirmForm = useForm({ empresa_id: empresaId.value, token: '' });
 function confirmar(token: string) {
+    confirmForm.empresa_id = empresaId.value;
     confirmForm.token = token;
     confirmForm.post('/colaboradores/importar/confirmar');
 }
+
+const urlPlantilla = () =>
+    empresaId.value
+        ? `/colaboradores/importar/plantilla?empresa_id=${empresaId.value}`
+        : '#';
 </script>
 
 <template>
@@ -53,11 +76,11 @@ function confirmar(token: string) {
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Importar colaboradores desde Excel"
-            descripcion="La empresa siempre es la empresa activa. La columna sucursal_codigo debe existir en esta empresa."
+            descripcion="Elige la empresa destino. La columna sucursal_codigo debe existir en esa empresa."
         >
             <template #acciones>
-                <Button variant="outline" as-child>
-                    <a href="/colaboradores/importar/plantilla">
+                <Button variant="outline" as-child :disabled="!empresaId">
+                    <a :href="urlPlantilla()">
                         <Download class="size-4" /> Descargar plantilla
                     </a>
                 </Button>
@@ -69,6 +92,28 @@ function confirmar(token: string) {
                 <CardTitle class="text-base">1. Cargar archivo</CardTitle>
             </CardHeader>
             <CardContent class="space-y-3">
+                <div class="grid gap-1.5">
+                    <label for="imp-empresa" class="text-sm font-medium"
+                        >Empresa destino</label
+                    >
+                    <select
+                        id="imp-empresa"
+                        v-model="empresaId"
+                        class="border-input bg-background h-9 w-fit rounded-md border px-2.5 text-sm"
+                    >
+                        <option value="" disabled>
+                            Selecciona una empresa
+                        </option>
+                        <option
+                            v-for="e in empresasAutorizadas"
+                            :key="e.id"
+                            :value="e.id"
+                        >
+                            {{ e.nombre_comercial }}
+                        </option>
+                    </select>
+                    <InputError :message="form.errors.empresa_id" />
+                </div>
                 <p class="text-muted-foreground text-sm">
                     Columnas esperadas:
                     <code class="bg-muted rounded px-1">{{
@@ -86,7 +131,10 @@ function confirmar(token: string) {
                     "
                 />
                 <InputError :message="form.errors.archivo" />
-                <Button :disabled="!archivo || form.processing" @click="subir">
+                <Button
+                    :disabled="!archivo || !empresaId || form.processing"
+                    @click="subir"
+                >
                     Analizar archivo
                 </Button>
             </CardContent>

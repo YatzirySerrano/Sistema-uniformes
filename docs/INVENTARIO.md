@@ -1,5 +1,13 @@
 # Inventario (por almacén)
 
+> **BLOQUE A — actualización.** Llave del inventario actual:
+> `EMPRESA + ALMACÉN + ACTIVO + VARIANTE`. `saldos_inventario` **ya no tiene
+> `sucursal_id`** (`movimientos_inventario` sí lo conserva como procedencia
+> histórica). Un mismo almacén abastece a varias empresas y guarda saldos
+> independientes por empresa. No existe el asistente de migración legacy
+> (`MigracionInventarioController`, permiso `inventario.migrar` — eliminados).
+> `InventarioController` recibe `empresa_id` + `almacen_id`.
+
 > **Arquitectura vigente.** El origen físico del stock es el **ALMACÉN**:
 > `ALMACÉN + ACTIVO + VARIANTE = STOCK`. La sucursal es sólo el destino/contexto
 > del colaborador y **dejó de ser fuente de existencias**. La arquitectura

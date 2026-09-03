@@ -14,14 +14,12 @@ use App\Http\Controllers\EmpresaController;
 use App\Http\Controllers\EntregaController;
 use App\Http\Controllers\ImportacionColaboradorController;
 use App\Http\Controllers\InventarioController;
-use App\Http\Controllers\MigracionInventarioController;
 use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
 use App\Http\Controllers\PersonalizacionEmpresaController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\RolController;
-use App\Http\Controllers\SelectorEmpresaController;
 use App\Http\Controllers\SucursalController;
 use App\Http\Controllers\TallaController;
 use App\Http\Controllers\TipoActivoController;
@@ -30,8 +28,6 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): void {
     Route::get('dashboard', [PanelController::class, 'index'])->name('dashboard');
-
-    Route::post('empresa-activa', [SelectorEmpresaController::class, 'update'])->name('empresa-activa.update');
 
     // Portal del colaborador
     Route::get('portal/mis-entregas', [PortalController::class, 'index'])->name('portal.mis-entregas');
@@ -91,8 +87,6 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('inventario/ajuste', [InventarioController::class, 'ajuste'])->name('inventario.ajuste');
     Route::post('inventario/minimos', [InventarioController::class, 'minimos'])->name('inventario.minimos');
     Route::get('inventario/movimientos', [MovimientoInventarioController::class, 'index'])->name('inventario.movimientos');
-    Route::get('inventario/migracion', [MigracionInventarioController::class, 'index'])->name('inventario.migracion');
-    Route::post('inventario/migracion/resolver', [MigracionInventarioController::class, 'resolver'])->name('inventario.migracion.resolver');
 
     // Entregas
     Route::get('entregas', [EntregaController::class, 'index'])->name('entregas.index');
@@ -122,13 +116,14 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     // Administración
     Route::get('empresas', [EmpresaController::class, 'index'])->name('empresas.index');
+    Route::get('empresas/buscar', [EmpresaController::class, 'buscar'])->name('empresas.buscar');
     Route::post('empresas', [EmpresaController::class, 'store'])->name('empresas.store');
     Route::get('empresas/{empresa}', [EmpresaController::class, 'show'])->name('empresas.show');
     Route::put('empresas/{empresa}', [EmpresaController::class, 'update'])->name('empresas.update');
     Route::post('empresas/{empresa}/estado', [EmpresaController::class, 'toggleEstado'])->name('empresas.estado');
 
-    Route::get('personalizacion', [PersonalizacionEmpresaController::class, 'edit'])->name('personalizacion.edit');
-    Route::post('personalizacion', [PersonalizacionEmpresaController::class, 'update'])->name('personalizacion.update');
+    Route::get('empresas/{empresa}/personalizacion', [PersonalizacionEmpresaController::class, 'edit'])->name('personalizacion.edit');
+    Route::post('empresas/{empresa}/personalizacion', [PersonalizacionEmpresaController::class, 'update'])->name('personalizacion.update');
 
     // Almacenes
     Route::get('almacenes', [AlmacenController::class, 'index'])->name('almacenes.index');
@@ -137,7 +132,6 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('almacenes', [AlmacenController::class, 'store'])->name('almacenes.store');
     Route::get('almacenes/{almacen}', [AlmacenController::class, 'show'])->name('almacenes.show');
     Route::put('almacenes/{almacen}', [AlmacenController::class, 'update'])->name('almacenes.update');
-    Route::put('almacenes/{almacen}/sucursales', [AlmacenController::class, 'sucursales'])->name('almacenes.sucursales');
     Route::post('almacenes/{almacen}/estado', [AlmacenController::class, 'toggle'])->name('almacenes.toggle');
 
     Route::get('sucursales', [SucursalController::class, 'index'])->name('sucursales.index');

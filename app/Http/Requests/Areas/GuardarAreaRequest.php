@@ -3,20 +3,21 @@
 namespace App\Http\Requests\Areas;
 
 use App\Http\Requests\Concerns\NormalizaEntrada;
+use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Area;
-use App\Soporte\ContextoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
- * Validación de alta y edición de áreas/departamentos. La empresa nunca llega
- * del frontend: se toma de la empresa activa del contexto y es la autoridad
- * final.
+ * Validación de alta y edición de áreas/departamentos. En alta la empresa llega
+ * en `empresa_id` y se valida el acceso del usuario (ResuelveEmpresa); en
+ * edición la empresa queda fijada por el registro. Nunca se confía en el
+ * `empresa_id` del frontend sin validar.
  */
 class GuardarAreaRequest extends FormRequest
 {
-    use NormalizaEntrada;
+    use NormalizaEntrada, ResuelveEmpresa;
 
     public function authorize(): bool
     {
@@ -44,11 +45,13 @@ class GuardarAreaRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = app(ContextoEmpresa::class)->empresaObligatoria()->getKey();
+        $empresaId = $this->empresaResuelta('area')->getKey();
         $area = $this->route('area');
         $areaId = $area instanceof Area ? $area->getKey() : null;
 
         return [
+            // Sólo en alta: en edición la empresa queda fijada por el registro.
+            ...($areaId === null ? ['empresa_id' => ['required', 'integer']] : []),
             'nombre' => [
                 'required', 'string', 'max:255',
                 Rule::unique('areas', 'nombre')
@@ -71,6 +74,7 @@ class GuardarAreaRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'empresa_id.required' => 'Selecciona la empresa del área.',
             'nombre.required' => 'El nombre del área es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
             'nombre.unique' => 'Ya existe un área con ese nombre en esta empresa.',

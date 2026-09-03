@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
 use App\Models\Empresa;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Http\RedirectResponse;
@@ -11,15 +10,16 @@ use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 
+/**
+ * Personalización (branding y datos) de una empresa concreta, identificada por
+ * la ruta. Sin "empresa activa": se accede desde el módulo Empresas.
+ */
 class PersonalizacionEmpresaController extends Controller
 {
-    use ConEmpresaActiva;
-
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
-    public function edit(): Response
+    public function edit(Empresa $empresa): Response
     {
-        $empresa = $this->empresaActiva();
         $this->authorize('personalizar', $empresa);
 
         return Inertia::render('Empresas/Personalizacion', [
@@ -30,9 +30,8 @@ class PersonalizacionEmpresaController extends Controller
         ]);
     }
 
-    public function update(Request $request): RedirectResponse
+    public function update(Request $request, Empresa $empresa): RedirectResponse
     {
-        $empresa = $this->empresaActiva();
         $this->authorize('personalizar', $empresa);
 
         $datos = $request->validate([

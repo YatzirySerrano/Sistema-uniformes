@@ -7,8 +7,8 @@ use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\CorreccionEntrega;
+use App\Models\Empresa;
 use App\Models\EntregaUniforme;
-use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ResolverAlmacenOperativo;
@@ -46,8 +46,7 @@ class CorregirEntrega
         $empresaId = $entrega->empresa_id;
         $sucursalId = $entrega->sucursal_id;
 
-        $sucursal = Sucursal::query()->findOrFail($sucursalId);
-        $almacenId = $this->resolverAlmacen->paraSucursal($sucursal, $entrega->almacen_id)->getKey();
+        $almacenId = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId), $entrega->almacen_id)->getKey();
 
         $nuevos = $this->consolidar($itemsNuevos);
         if ($nuevos === []) {
@@ -145,6 +144,7 @@ class CorregirEntrega
             $this->auditoria->registrar('entregas', 'corregir', [
                 'tipo_entidad' => EntregaUniforme::class,
                 'entidad_id' => $entrega->getKey(),
+                'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursalId,
                 'motivo' => $motivo,
                 'descripcion' => 'Corrección '.$correccion->getKey().' aplicada a la entrega '.$entrega->folio,

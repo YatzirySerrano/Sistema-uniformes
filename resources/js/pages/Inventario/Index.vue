@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { ArrowRightLeft, PackagePlus, Search } from '@lucide/vue';
+import { PackagePlus, Search } from '@lucide/vue';
 import { computed, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -16,10 +16,12 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { Paginado } from '@/types/sistema';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Saldo = {
     id: number;
+    empresa_id: number;
+    empresa: string | null;
     almacen_id: number;
     activo_id: number;
     talla_id: number;
@@ -44,18 +46,15 @@ type AlmacenOpcion = {
 const props = defineProps<{
     saldos: Paginado<Saldo>;
     filtros: Record<string, string | number | undefined>;
+    empresasAutorizadas: EmpresaAutorizada[];
     almacenes: AlmacenOpcion[];
-    activos: Opcion[];
     tiposActivo: Opcion[];
     categorias: Opcion[];
-    tallas: { id: number; valor: string }[];
     tiposControl: { valor: string; etiqueta: string }[];
-    saldosLegacyPendientes: number;
     permisos: {
         entrada: boolean;
         ajustar: boolean;
         minimos: boolean;
-        migrar: boolean;
     };
 }>();
 
@@ -65,11 +64,10 @@ defineOptions({
 
 const filtros = reactive({
     buscar: props.filtros.buscar ?? '',
+    empresa_id: props.filtros.empresa_id ?? '',
     almacen_id: props.filtros.almacen_id ?? '',
-    activo_id: props.filtros.activo_id ?? '',
     tipo_activo_id: props.filtros.tipo_activo_id ?? '',
     categoria_id: props.filtros.categoria_id ?? '',
-    talla_id: props.filtros.talla_id ?? '',
     control: props.filtros.control ?? '',
     estado_stock: props.filtros.estado_stock ?? '',
 });
@@ -80,10 +78,13 @@ const almacenSel = ref<AlmacenOpcion | null>(
         null,
 );
 async function buscarAlmacenes(q: string): Promise<AlmacenOpcion[]> {
-    const res = await fetch(`/almacenes/buscar?q=${encodeURIComponent(q)}`, {
-        headers: { Accept: 'application/json' },
-        credentials: 'same-origin',
-    });
+    const empresa = filtros.empresa_id
+        ? `&empresa_id=${filtros.empresa_id}`
+        : '';
+    const res = await fetch(
+        `/almacenes/buscar?q=${encodeURIComponent(q)}${empresa}`,
+        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+    );
     if (!res.ok) return props.almacenes;
     return (await res.json()).almacenes ?? [];
 }
@@ -127,19 +128,27 @@ const dialogo = ref<'ajuste' | 'minimo' | null>(null);
 const actual = ref<Saldo | null>(null);
 
 const ajuste = useForm({
+    empresa_id: 0,
     almacen_id: 0,
     activo_id: 0,
     talla_id: 0,
     existencia_objetivo: 0,
     motivo: '',
 });
-const minimo = useForm({ almacen_id: 0, activo_id: 0, talla_id: 0, minimo: 0 });
+const minimo = useForm({
+    empresa_id: 0,
+    almacen_id: 0,
+    activo_id: 0,
+    talla_id: 0,
+    minimo: 0,
+});
 
 function abrir(tipo: 'ajuste' | 'minimo', s: Saldo) {
     actual.value = s;
     dialogo.value = tipo;
     if (tipo === 'ajuste') {
         ajuste.defaults({
+            empresa_id: s.empresa_id,
             almacen_id: s.almacen_id,
             activo_id: s.activo_id,
             talla_id: s.talla_id,
@@ -149,6 +158,7 @@ function abrir(tipo: 'ajuste' | 'minimo', s: Saldo) {
         ajuste.reset();
     } else {
         minimo.defaults({
+            empresa_id: s.empresa_id,
             almacen_id: s.almacen_id,
             activo_id: s.activo_id,
             talla_id: s.talla_id,
@@ -180,8 +190,8 @@ const selectClass =
 
     <div class="flex w-full flex-col gap-4 p-4">
         <EncabezadoPagina
-            titulo="Inventario por almacén"
-            descripcion="Consulta y registra las existencias disponibles en cada almacén, por activo y variante. El origen físico del stock es el almacén; la sucursal es solo el destino del colaborador."
+            titulo="Inventario"
+            descripcion="Existencias por EMPRESA + ALMACÉN + ACTIVO + VARIANTE. Un mismo almacén puede abastecer a varias empresas; su stock se mantiene separado por empresa."
         >
             <template #acciones>
                 <Button v-if="permisos.entrada" as-child>
@@ -191,22 +201,6 @@ const selectClass =
                 </Button>
             </template>
         </EncabezadoPagina>
-
-        <div
-            v-if="saldosLegacyPendientes > 0 && permisos.migrar"
-            class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40"
-        >
-            <p class="min-w-0">
-                Hay <strong>{{ saldosLegacyPendientes }}</strong> saldo(s) de
-                inventario todavía asociados a una sucursal. Asígnalos a un
-                almacén con el asistente de migración.
-            </p>
-            <Button variant="outline" size="sm" as-child>
-                <Link href="/inventario/migracion">
-                    <ArrowRightLeft class="size-4" /> Migrar existencias
-                </Link>
-            </Button>
-        </div>
 
         <div class="relative w-full sm:max-w-sm">
             <Search
@@ -221,6 +215,21 @@ const selectClass =
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
+            <select
+                v-if="empresasAutorizadas.length > 1"
+                v-model="filtros.empresa_id"
+                :class="selectClass"
+                aria-label="Filtrar por empresa"
+            >
+                <option value="">Todas las empresas</option>
+                <option
+                    v-for="e in empresasAutorizadas"
+                    :key="e.id"
+                    :value="e.id"
+                >
+                    {{ e.nombre_comercial }}
+                </option>
+            </select>
             <div class="w-full sm:w-56">
                 <BuscadorAsync
                     :model-value="almacenSel"
@@ -242,12 +251,6 @@ const selectClass =
                     "
                 />
             </div>
-            <select v-model="filtros.activo_id" :class="selectClass">
-                <option value="">Todos los activos</option>
-                <option v-for="p in activos" :key="p.id" :value="p.id">
-                    {{ p.nombre }}
-                </option>
-            </select>
             <select v-model="filtros.tipo_activo_id" :class="selectClass">
                 <option value="">Todos los tipos</option>
                 <option v-for="t in tiposActivo" :key="t.id" :value="t.id">
@@ -258,12 +261,6 @@ const selectClass =
                 <option value="">Todas las categorías</option>
                 <option v-for="c in categorias" :key="c.id" :value="c.id">
                     {{ c.nombre }}
-                </option>
-            </select>
-            <select v-model="filtros.talla_id" :class="selectClass">
-                <option value="">Todas las variantes</option>
-                <option v-for="t in tallas" :key="t.id" :value="t.id">
-                    {{ t.valor }}
                 </option>
             </select>
             <select v-model="filtros.control" :class="selectClass">
@@ -295,13 +292,14 @@ const selectClass =
         <EstadoVacio
             v-if="!saldos.data.length"
             titulo="Sin existencias"
-            descripcion="No hay inventario por almacén con los filtros seleccionados. Registra una entrada o usa el asistente de migración."
+            descripcion="No hay inventario con los filtros seleccionados. Registra una entrada indicando la empresa y el almacén."
         />
 
         <div v-else class="overflow-x-auto rounded-xl border">
             <table class="w-full min-w-[720px] text-sm">
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
+                        <th class="px-3 py-2 font-medium">Empresa</th>
                         <th class="px-3 py-2 font-medium">Almacén</th>
                         <th class="px-3 py-2 font-medium">Activo</th>
                         <th class="px-3 py-2 font-medium">Variante</th>
@@ -314,6 +312,7 @@ const selectClass =
                 </thead>
                 <tbody>
                     <tr v-for="s in saldos.data" :key="s.id" class="border-t">
+                        <td class="px-3 py-2">{{ s.empresa }}</td>
                         <td class="px-3 py-2">{{ s.almacen }}</td>
                         <td class="px-3 py-2">{{ s.activo }}</td>
                         <td class="px-3 py-2">{{ s.talla }}</td>

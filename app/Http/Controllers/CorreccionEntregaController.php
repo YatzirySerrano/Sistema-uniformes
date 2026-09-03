@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Acciones\CorregirEntrega;
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
 use App\Models\EntregaUniforme;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -12,15 +11,11 @@ use Inertia\Response;
 
 class CorreccionEntregaController extends Controller
 {
-    use ConEmpresaActiva;
-
     public function create(EntregaUniforme $entrega): Response
     {
         $this->authorize('corregir', $entrega);
-        abort_unless($entrega->empresa_id === $this->empresaActiva()->id, 404);
 
-        $entrega->load(['detalles', 'colaborador:id,nombre_completo,numero_empleado']);
-        $empresa = $this->empresaActiva();
+        $entrega->load(['detalles', 'colaborador:id,nombre_completo,numero_empleado', 'empresa']);
 
         return Inertia::render('Entregas/Corregir', [
             'entrega' => [
@@ -36,7 +31,7 @@ class CorreccionEntregaController extends Controller
                     'cantidad' => $d->cantidad,
                 ]),
             ],
-            'activos' => $empresa->activos()->where('activo', true)->with('tallas:id,valor')->orderBy('nombre')->get()
+            'activos' => $entrega->empresa->activos()->where('activo', true)->with('tallas:id,valor')->orderBy('nombre')->get()
                 ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'tallas' => $a->tallas->map->only(['id', 'valor'])->values()]),
         ]);
     }
@@ -44,7 +39,6 @@ class CorreccionEntregaController extends Controller
     public function store(Request $request, EntregaUniforme $entrega, CorregirEntrega $accion): RedirectResponse
     {
         $this->authorize('corregir', $entrega);
-        abort_unless($entrega->empresa_id === $this->empresaActiva()->id, 404);
 
         $datos = $request->validate([
             'motivo' => ['required', 'string', 'min:5', 'max:1000'],

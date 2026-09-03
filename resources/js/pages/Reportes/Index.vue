@@ -6,7 +6,7 @@ import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import type { Paginado } from '@/types/sistema';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 const props = defineProps<{
     tab: 'entregas' | 'inventario';
@@ -15,6 +15,7 @@ const props = defineProps<{
     entregas?: Paginado<{
         folio: string;
         fecha_entrega: string;
+        empresa: string | null;
         sucursal: string;
         colaborador: string;
         numero_empleado: string;
@@ -23,7 +24,8 @@ const props = defineProps<{
         activos: number;
     }>;
     inventario?: Paginado<{
-        sucursal: string;
+        empresa: string | null;
+        almacen: string | null;
         activo: string;
         talla: string;
         cantidad: number;
@@ -31,9 +33,7 @@ const props = defineProps<{
         bajo_minimo: boolean;
     }>;
     catalogos: {
-        sucursales: { id: number; nombre: string }[];
-        activos: { id: number; nombre: string }[];
-        tallas: { id: number; valor: string }[];
+        empresas: EmpresaAutorizada[];
         estados: { valor: string; etiqueta: string }[];
     };
     puedeExportar: boolean;
@@ -45,9 +45,7 @@ defineOptions({
 
 const f = reactive({
     tab: props.tab,
-    sucursal_id: props.filtros.sucursal_id ?? '',
-    activo_id: props.filtros.activo_id ?? '',
-    talla_id: props.filtros.talla_id ?? '',
+    empresa_id: props.filtros.empresa_id ?? '',
     estado: props.filtros.estado ?? '',
     firmado: props.filtros.firmado ?? '',
     desde: props.filtros.desde ?? '',
@@ -95,7 +93,7 @@ function urlExport(formato: string) {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Reportes"
-            descripcion="Consulta y exporta información de entregas e inventario de la empresa activa."
+            descripcion="Consulta y exporta información de entregas e inventario. Filtra por empresa cuando lo necesites."
         />
 
         <div class="flex gap-2">
@@ -116,29 +114,18 @@ function urlExport(formato: string) {
         <Card>
             <CardContent class="flex flex-wrap items-end gap-2 pt-6">
                 <select
-                    v-model="f.sucursal_id"
+                    v-if="catalogos.empresas.length > 1"
+                    v-model="f.empresa_id"
                     class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                    aria-label="Filtrar por empresa"
                 >
-                    <option value="">Todas las sucursales</option>
+                    <option value="">Todas las empresas</option>
                     <option
-                        v-for="s in catalogos.sucursales"
-                        :key="s.id"
-                        :value="s.id"
+                        v-for="e in catalogos.empresas"
+                        :key="e.id"
+                        :value="e.id"
                     >
-                        {{ s.nombre }}
-                    </option>
-                </select>
-                <select
-                    v-model="f.activo_id"
-                    class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                >
-                    <option value="">Todos los activos</option>
-                    <option
-                        v-for="p in catalogos.activos"
-                        :key="p.id"
-                        :value="p.id"
-                    >
-                        {{ p.nombre }}
+                        {{ e.nombre_comercial }}
                     </option>
                 </select>
                 <template v-if="f.tab === 'entregas'">
@@ -234,6 +221,7 @@ function urlExport(formato: string) {
                     <tr>
                         <th class="px-3 py-2 font-medium">Folio</th>
                         <th class="px-3 py-2 font-medium">Fecha</th>
+                        <th class="px-3 py-2 font-medium">Empresa</th>
                         <th class="px-3 py-2 font-medium">Sucursal</th>
                         <th class="px-3 py-2 font-medium">Colaborador</th>
                         <th class="px-3 py-2 font-medium">Responsable</th>
@@ -253,6 +241,7 @@ function urlExport(formato: string) {
                         <td class="text-muted-foreground px-3 py-2">
                             {{ e.fecha_entrega }}
                         </td>
+                        <td class="px-3 py-2">{{ e.empresa }}</td>
                         <td class="px-3 py-2">{{ e.sucursal }}</td>
                         <td class="px-3 py-2">
                             {{ e.colaborador }}
@@ -275,7 +264,8 @@ function urlExport(formato: string) {
             <table class="w-full min-w-[560px] text-sm">
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
-                        <th class="px-3 py-2 font-medium">Sucursal</th>
+                        <th class="px-3 py-2 font-medium">Empresa</th>
+                        <th class="px-3 py-2 font-medium">Almacén</th>
                         <th class="px-3 py-2 font-medium">Activo</th>
                         <th class="px-3 py-2 font-medium">Talla</th>
                         <th class="px-3 py-2 text-right font-medium">
@@ -290,7 +280,8 @@ function urlExport(formato: string) {
                         :key="i"
                         class="border-t"
                     >
-                        <td class="px-3 py-2">{{ s.sucursal }}</td>
+                        <td class="px-3 py-2">{{ s.empresa }}</td>
+                        <td class="px-3 py-2">{{ s.almacen }}</td>
                         <td class="px-3 py-2">{{ s.activo }}</td>
                         <td class="px-3 py-2">{{ s.talla }}</td>
                         <td

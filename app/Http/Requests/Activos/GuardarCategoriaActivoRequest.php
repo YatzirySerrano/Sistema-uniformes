@@ -3,18 +3,19 @@
 namespace App\Http\Requests\Activos;
 
 use App\Http\Requests\Concerns\NormalizaEntrada;
+use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\CategoriaActivo;
-use App\Soporte\ContextoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 /**
- * Alta / edición de una categoría de activo. La empresa la fija el contexto. El
- * `tipo_activo_id` es opcional y, si se envía, debe pertenecer a la empresa.
+ * Alta / edición de una categoría de activo. En alta la empresa llega en
+ * `empresa_id` y se valida el acceso; en edición queda fijada por el registro.
+ * El `tipo_activo_id` es opcional y, si se envía, debe pertenecer a la empresa.
  */
 class GuardarCategoriaActivoRequest extends FormRequest
 {
-    use NormalizaEntrada;
+    use NormalizaEntrada, ResuelveEmpresa;
 
     public function authorize(): bool
     {
@@ -33,11 +34,12 @@ class GuardarCategoriaActivoRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = app(ContextoEmpresa::class)->empresaObligatoria()->getKey();
+        $empresaId = $this->empresaResuelta('categoria')->getKey();
         $categoria = $this->route('categoria');
         $categoriaId = $categoria instanceof CategoriaActivo ? $categoria->getKey() : null;
 
         return [
+            ...($categoriaId === null ? ['empresa_id' => ['required', 'integer']] : []),
             'nombre' => [
                 'required', 'string', 'max:120',
                 Rule::unique('categorias_activo', 'nombre')
@@ -58,6 +60,7 @@ class GuardarCategoriaActivoRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'empresa_id.required' => 'Selecciona la empresa de la categoría.',
             'nombre.required' => 'El nombre de la categoría es obligatorio.',
             'nombre.unique' => 'Ya existe una categoría con ese nombre en esta empresa.',
             'tipo_activo_id.exists' => 'El tipo de activo seleccionado no pertenece a esta empresa.',

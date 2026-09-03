@@ -5,10 +5,8 @@ use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Area;
 use App\Models\Empresa;
-use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Models\User;
-use App\Soporte\ContextoEmpresa;
 use App\Soporte\Permisos;
 use Database\Seeders\RolesPermisosSeeder;
 use Spatie\Permission\Models\Role;
@@ -44,7 +42,7 @@ it('un usuario nuevo con sólo el rol administrador hereda todos los permisos de
         'activos.ver', 'activos.crear', 'activos.editar', 'activos.administrar',
         'tallas.administrar',
         'tipos-activo.administrar', 'categorias-activo.administrar',
-        'inventario.entrada', 'inventario.ajustar', 'inventario.minimos', 'inventario.migrar',
+        'inventario.entrada', 'inventario.ajustar', 'inventario.minimos',
     ] as $permiso) {
         expect($usuario->can($permiso))->toBeTrue("El administrador debería poder «{$permiso}»");
     }
@@ -58,7 +56,7 @@ it('un supervisor no gana los permisos administrativos de catálogos ni la migra
 
     foreach ([
         'tipos-activo.administrar', 'categorias-activo.administrar',
-        'inventario.migrar', 'inventario.ajustar', 'activos.administrar',
+        'inventario.ajustar', 'activos.administrar',
     ] as $permiso) {
         expect($usuario->can($permiso))->toBeFalse("El supervisor NO debería poder «{$permiso}»");
     }
@@ -89,32 +87,26 @@ it('el RolesPermisosSeeder es idempotente y seguro de reejecutar', function () {
 |--------------------------------------------------------------------------
 */
 
-it('un administrador puede ver, crear, editar, cambiar estado y gestionar sucursales de un almacén', function () {
+it('un administrador puede ver, crear, editar, cambiar estado y gestionar empresas abastecidas de un almacén', function () {
     $empresa = Empresa::factory()->create();
-    $sucursales = Sucursal::factory()->count(2)->for($empresa)->create();
+    $otra = Empresa::factory()->create();
     $admin = usuarioCon(RolSistema::Administrador->value);
-    $sesion = [ContextoEmpresa::SESSION_KEY => $empresa->id];
+    $this->actingAs($admin)->get('/almacenes')->assertOk();
 
-    $this->actingAs($admin)->withSession($sesion)->get('/almacenes')->assertOk();
-
-    $this->actingAs($admin)->withSession($sesion)
-        ->post('/almacenes', ['nombre' => 'Almacén Admin', 'sucursales' => [$sucursales->first()->id]])
+    $this->actingAs($admin)
+        ->post('/almacenes', ['nombre' => 'Almacén Admin', 'empresa_ids' => [$empresa->id]])
         ->assertRedirect()->assertSessionHasNoErrors();
     $almacen = Almacen::query()->where('nombre', 'Almacén Admin')->firstOrFail();
 
-    $this->actingAs($admin)->withSession($sesion)->get("/almacenes/{$almacen->id}")->assertOk();
+    $this->actingAs($admin)->get("/almacenes/{$almacen->id}")->assertOk();
 
-    $this->actingAs($admin)->withSession($sesion)
-        ->put("/almacenes/{$almacen->id}", ['nombre' => 'Almacén Admin 2'])
+    $this->actingAs($admin)
+        ->put("/almacenes/{$almacen->id}", ['nombre' => 'Almacén Admin 2', 'empresa_ids' => [$empresa->id, $otra->id]])
         ->assertSessionHasNoErrors();
     expect($almacen->fresh()->nombre)->toBe('Almacén Admin 2');
+    expect($almacen->empresas()->count())->toBe(2);
 
-    $this->actingAs($admin)->withSession($sesion)
-        ->put("/almacenes/{$almacen->id}/sucursales", ['sucursales' => $sucursales->pluck('id')->all()])
-        ->assertSessionHasNoErrors();
-    expect($almacen->sucursales()->count())->toBe(2);
-
-    $this->actingAs($admin)->withSession($sesion)
+    $this->actingAs($admin)
         ->post("/almacenes/{$almacen->id}/estado")->assertSessionHas('toast');
     expect($almacen->fresh()->activo)->toBeFalse();
 });
@@ -122,21 +114,19 @@ it('un administrador puede ver, crear, editar, cambiar estado y gestionar sucurs
 it('un administrador puede ver, crear, editar y cambiar estado de un área', function () {
     $empresa = Empresa::factory()->create();
     $admin = usuarioCon(RolSistema::Administrador->value);
-    $sesion = [ContextoEmpresa::SESSION_KEY => $empresa->id];
+    $this->actingAs($admin)->get('/areas')->assertOk();
 
-    $this->actingAs($admin)->withSession($sesion)->get('/areas')->assertOk();
-
-    $this->actingAs($admin)->withSession($sesion)
-        ->post('/areas', ['nombre' => 'Seguridad Patrimonial'])
+    $this->actingAs($admin)
+        ->post('/areas', ['nombre' => 'Seguridad Patrimonial', 'empresa_id' => $empresa->id])
         ->assertRedirect()->assertSessionHasNoErrors();
     $area = Area::query()->where('nombre', 'Seguridad Patrimonial')->firstOrFail();
 
-    $this->actingAs($admin)->withSession($sesion)
+    $this->actingAs($admin)
         ->put("/areas/{$area->id}", ['nombre' => 'Seguridad'])
         ->assertSessionHasNoErrors();
     expect($area->fresh()->nombre)->toBe('Seguridad');
 
-    $this->actingAs($admin)->withSession($sesion)
+    $this->actingAs($admin)
         ->post("/areas/{$area->id}/estado")->assertSessionHas('toast');
     expect($area->fresh()->activa)->toBeFalse();
 });
@@ -145,27 +135,25 @@ it('un administrador puede ver, crear, editar, cambiar estado de un activo y adm
     $empresa = Empresa::factory()->create();
     $talla = Talla::factory()->for($empresa)->create(['valor' => 'M']);
     $admin = usuarioCon(RolSistema::Administrador->value);
-    $sesion = [ContextoEmpresa::SESSION_KEY => $empresa->id];
+    $this->actingAs($admin)->get('/activos')->assertOk();
 
-    $this->actingAs($admin)->withSession($sesion)->get('/activos')->assertOk();
-
-    $this->actingAs($admin)->withSession($sesion)
-        ->post('/activos', ['nombre' => 'Chaleco', 'tipo_control' => 'cantidad', 'tallas' => [$talla->id]])
+    $this->actingAs($admin)
+        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Chaleco', 'tipo_control' => 'cantidad', 'tallas' => [$talla->id]])
         ->assertRedirect('/activos')->assertSessionHasNoErrors();
     $activo = Activo::query()->where('nombre', 'Chaleco')->firstOrFail();
 
-    $this->actingAs($admin)->withSession($sesion)
+    $this->actingAs($admin)
         ->post("/activos/{$activo->id}", ['_method' => 'POST', 'nombre' => 'Chaleco Reflejante', 'tipo_control' => 'cantidad'])
         ->assertSessionHasNoErrors();
     expect($activo->fresh()->nombre)->toBe('Chaleco Reflejante');
 
-    $this->actingAs($admin)->withSession($sesion)
+    $this->actingAs($admin)
         ->post("/activos/{$activo->id}/estado")->assertSessionHas('toast');
     expect($activo->fresh()->activo)->toBeFalse();
 
     // Administración de variantes / tallas (permiso tallas.administrar).
-    $this->actingAs($admin)->withSession($sesion)
-        ->post('/tallas', ['valor' => 'XL', 'orden' => 9])
+    $this->actingAs($admin)
+        ->post('/tallas', ['valor' => 'XL', 'empresa_id' => $empresa->id])
         ->assertSessionHasNoErrors();
     expect(Talla::query()->where('empresa_id', $empresa->id)->where('valor', 'XL')->exists())->toBeTrue();
 });
@@ -182,7 +170,7 @@ it('un supervisor sin permiso de crear almacén recibe 403', function () {
 
     expect($supervisor->can('almacenes.crear'))->toBeFalse();
 
-    $this->actingAs($supervisor)->withSession([ContextoEmpresa::SESSION_KEY => $empresa->id])
+    $this->actingAs($supervisor)
         ->post('/almacenes', ['nombre' => 'Intento supervisor'])
         ->assertForbidden();
 
@@ -193,16 +181,14 @@ it('un encargado sin permiso de editar activo ni crear área recibe 403', functi
     $empresa = Empresa::factory()->create();
     $activo = Activo::factory()->for($empresa)->create();
     $encargado = usuarioCon(RolSistema::Encargado->value, [$empresa]);
-    $sesion = [ContextoEmpresa::SESSION_KEY => $empresa->id];
-
     expect($encargado->can('activos.editar'))->toBeFalse();
     expect($encargado->can('areas.crear'))->toBeFalse();
 
-    $this->actingAs($encargado)->withSession($sesion)
+    $this->actingAs($encargado)
         ->post("/activos/{$activo->id}", ['_method' => 'POST', 'nombre' => 'Editado', 'tipo_control' => 'cantidad'])
         ->assertForbidden();
 
-    $this->actingAs($encargado)->withSession($sesion)
+    $this->actingAs($encargado)
         ->post('/areas', ['nombre' => 'Intento encargado'])
         ->assertForbidden();
 });
@@ -210,12 +196,11 @@ it('un encargado sin permiso de editar activo ni crear área recibe 403', functi
 it('un usuario restringido de otra empresa no puede acceder a un almacén ajeno (IDOR)', function () {
     $empresaA = Empresa::factory()->create();
     $empresaB = Empresa::factory()->create();
-    $almacenB = Almacen::factory()->for($empresaB)->create();
+    $almacenB = Almacen::factory()->paraEmpresa($empresaB)->create();
 
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresaA]);
 
     $respuesta = $this->actingAs($supervisor)
-        ->withSession([ContextoEmpresa::SESSION_KEY => $empresaA->id])
         ->get("/almacenes/{$almacenB->id}");
 
     expect($respuesta->status())->toBeIn([403, 404]);

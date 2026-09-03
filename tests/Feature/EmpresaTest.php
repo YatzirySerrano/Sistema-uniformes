@@ -4,7 +4,6 @@ use App\Enums\RolSistema;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
-use App\Soporte\ContextoEmpresa;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -148,47 +147,34 @@ it('cambiar el estado de una empresa como administrador alterna el valor y audit
 
 /*
 |--------------------------------------------------------------------------
-| Empresa activa (contexto de sesión)
+| Sin "empresa activa": el selector global y su ruta ya no existen
 |--------------------------------------------------------------------------
 */
 
-it('un administrador puede activar cualquier empresa como empresa activa', function () {
-    $a = Empresa::factory()->create();
-    $b = Empresa::factory()->create();
+it('ya no existe la ruta para fijar una empresa activa', function () {
     $admin = usuarioCon(RolSistema::Administrador->value);
+    $a = Empresa::factory()->create();
 
-    $this->actingAs($admin)->post('/empresa-activa', ['empresa_id' => $a->id])->assertSessionHasNoErrors();
-    expect(session(ContextoEmpresa::SESSION_KEY))->toBe($a->id);
-
-    $this->actingAs($admin)->post('/empresa-activa', ['empresa_id' => $b->id])->assertSessionHasNoErrors();
-    expect(session(ContextoEmpresa::SESSION_KEY))->toBe($b->id);
+    $this->actingAs($admin)->post('/empresa-activa', ['empresa_id' => $a->id])->assertNotFound();
 });
 
-it('un supervisor con dos empresas puede activar cualquiera de las asignadas, pero no una tercera', function () {
+it('el detalle de empresa ya no expone es_empresa_activa', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value);
+    $a = Empresa::factory()->create();
+
+    $this->actingAs($admin)
+        ->get("/empresas/{$a->id}")
+        ->assertInertia(fn ($page) => $page->missing('empresa.es_empresa_activa'));
+});
+
+it('las empresas autorizadas se comparten a todas las vistas para los combobox', function () {
     $a = Empresa::factory()->create();
     $b = Empresa::factory()->create();
-    $c = Empresa::factory()->create();
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$a, $b]);
 
-    $this->actingAs($supervisor)->post('/empresa-activa', ['empresa_id' => $a->id])->assertSessionHasNoErrors();
-    $this->actingAs($supervisor)->post('/empresa-activa', ['empresa_id' => $b->id])->assertSessionHasNoErrors();
-    $this->actingAs($supervisor)->post('/empresa-activa', ['empresa_id' => $c->id])->assertSessionHasErrors('empresa_id');
-});
-
-it('el detalle marca es_empresa_activa según la empresa activa en sesión', function () {
-    $a = Empresa::factory()->create();
-    $b = Empresa::factory()->create();
-    $admin = usuarioCon(RolSistema::Administrador->value);
-
-    $this->actingAs($admin)
-        ->withSession([ContextoEmpresa::SESSION_KEY => $a->id])
-        ->get("/empresas/{$a->id}")
-        ->assertInertia(fn ($page) => $page->where('empresa.es_empresa_activa', true));
-
-    $this->actingAs($admin)
-        ->withSession([ContextoEmpresa::SESSION_KEY => $a->id])
-        ->get("/empresas/{$b->id}")
-        ->assertInertia(fn ($page) => $page->where('empresa.es_empresa_activa', false));
+    $this->actingAs($supervisor)
+        ->get('/empresas')
+        ->assertInertia(fn ($page) => $page->has('empresasAutorizadas', 2));
 });
 
 /*

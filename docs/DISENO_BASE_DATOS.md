@@ -1,5 +1,12 @@
 # Diseño de la base de datos
 
+> **BLOQUE A — actualización.** Cambios de esquema forward-only
+> (`..._000016/17/18`): nueva pivote **`almacen_empresa`** (N:M); eliminadas la
+> columna `almacenes.empresa_id`, la tabla `almacen_sucursal` y la columna
+> `saldos_inventario.sucursal_id`; `saldos_inventario.almacen_id` pasa a NOT
+> NULL; `almacenes.codigo` unique global. `movimientos_inventario.sucursal_id`
+> se conserva (procedencia histórica).
+
 Motor de desarrollo: SQLite. Producción recomendada: MySQL/MariaDB InnoDB
 utf8mb4. Las migraciones usan el constructor de esquema de Laravel (agnóstico) y
 enums se modelan como columnas `string` + cast a PHP enum.

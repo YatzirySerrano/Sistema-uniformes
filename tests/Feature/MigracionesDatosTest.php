@@ -1,18 +1,14 @@
 <?php
 
 use App\Models\Activo;
-use App\Models\Almacen;
 use App\Models\Empresa;
-use App\Models\SaldoInventario;
-use App\Models\Sucursal;
-use App\Models\Talla;
 use App\Models\TipoActivo;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
- * Prueba directa de las migraciones de datos del bloque de fundación,
- * ejecutando su `up()` sobre un estado legacy construido a mano (con
- * RefreshDatabase las migraciones corren antes de existir empresas).
+ * Prueba de las migraciones de datos, ejecutando su `up()` sobre un estado
+ * construido a mano (con RefreshDatabase las migraciones corren antes de existir
+ * empresas).
  */
 function correrMigracion(string $archivo): void
 {
@@ -44,61 +40,26 @@ it('si ya existe "Prenda", reasigna los activos del tipo mixto y lo elimina', fu
         ->and($activo->fresh()->tipo_activo_id)->toBe($prenda->id);
 });
 
-it('migra automáticamente los saldos de una sucursal con un único almacén abastecedor', function () {
-    $empresa = Empresa::factory()->create();
-    $sucursal = Sucursal::factory()->for($empresa)->create();
-    $almacen = Almacen::factory()->for($empresa)->create();
-    $almacen->sucursales()->attach($sucursal);
-    $talla = Talla::factory()->for($empresa)->create();
-    $activo = Activo::factory()->for($empresa)->create();
+/*
+|--------------------------------------------------------------------------
+| Estado definitivo del esquema tras el Bloque A (forward-only)
+|--------------------------------------------------------------------------
+| Las migraciones ya corrieron (RefreshDatabase). El esquema resultante debe
+| reflejar la arquitectura Almacén↔Empresa N:M y el inventario por almacén.
+*/
 
-    $saldo = SaldoInventario::factory()->legacy($sucursal)->create([
-        'empresa_id' => $empresa->id, 'activo_id' => $activo->id, 'talla_id' => $talla->id, 'cantidad' => 30,
-    ]);
-
-    correrMigracion('2026_09_02_000014_migrar_saldos_legacy_a_almacen.php');
-
-    expect($saldo->fresh()->almacen_id)->toBe($almacen->id)
-        ->and($saldo->fresh()->sucursal_id)->toBeNull();
-    $this->assertDatabaseHas('movimientos_inventario', ['tipo' => 'migracion_legacy', 'almacen_id' => $almacen->id]);
+it('la tabla legacy almacen_sucursal ya no existe', function () {
+    expect(Schema::hasTable('almacen_sucursal'))->toBeFalse();
 });
 
-it('NO adivina cuando la sucursal tiene varios almacenes o ninguno', function () {
-    $empresa = Empresa::factory()->create();
-    $talla = Talla::factory()->for($empresa)->create();
-    $activo = Activo::factory()->for($empresa)->create();
-
-    $ambigua = Sucursal::factory()->for($empresa)->create();
-    Almacen::factory()->count(2)->for($empresa)->create()->each(fn (Almacen $a) => $a->sucursales()->attach($ambigua));
-
-    $huerfana = Sucursal::factory()->for($empresa)->create();
-
-    $s1 = SaldoInventario::factory()->legacy($ambigua)->create(['empresa_id' => $empresa->id, 'activo_id' => $activo->id, 'talla_id' => $talla->id, 'cantidad' => 10]);
-    $s2 = SaldoInventario::factory()->legacy($huerfana)->create(['empresa_id' => $empresa->id, 'activo_id' => $activo->id, 'talla_id' => $talla->id, 'cantidad' => 10]);
-
-    correrMigracion('2026_09_02_000014_migrar_saldos_legacy_a_almacen.php');
-
-    expect($s1->fresh()->almacen_id)->toBeNull()
-        ->and($s1->fresh()->sucursal_id)->toBe($ambigua->id)
-        ->and($s2->fresh()->almacen_id)->toBeNull()
-        ->and($s2->fresh()->sucursal_id)->toBe($huerfana->id);
+it('almacenes ya no tiene la columna empresa_id y existe la pivote almacen_empresa', function () {
+    expect(Schema::hasColumn('almacenes', 'empresa_id'))->toBeFalse()
+        ->and(Schema::hasTable('almacen_empresa'))->toBeTrue()
+        ->and(Schema::hasColumns('almacen_empresa', ['almacen_id', 'empresa_id']))->toBeTrue();
 });
 
-it('la migración de saldos legacy es idempotente', function () {
-    $empresa = Empresa::factory()->create();
-    $sucursal = Sucursal::factory()->for($empresa)->create();
-    $almacen = Almacen::factory()->for($empresa)->create();
-    $almacen->sucursales()->attach($sucursal);
-    $talla = Talla::factory()->for($empresa)->create();
-    $activo = Activo::factory()->for($empresa)->create();
-
-    SaldoInventario::factory()->legacy($sucursal)->create([
-        'empresa_id' => $empresa->id, 'activo_id' => $activo->id, 'talla_id' => $talla->id, 'cantidad' => 30,
-    ]);
-
-    correrMigracion('2026_09_02_000014_migrar_saldos_legacy_a_almacen.php');
-    correrMigracion('2026_09_02_000014_migrar_saldos_legacy_a_almacen.php');
-
-    expect(DB::table('movimientos_inventario')->where('tipo', 'migracion_legacy')->count())->toBe(1)
-        ->and((int) SaldoInventario::query()->where('empresa_id', $empresa->id)->sum('cantidad'))->toBe(30);
+it('saldos_inventario ya no tiene sucursal_id pero movimientos_inventario sí (procedencia)', function () {
+    expect(Schema::hasColumn('saldos_inventario', 'sucursal_id'))->toBeFalse()
+        ->and(Schema::hasColumn('saldos_inventario', 'almacen_id'))->toBeTrue()
+        ->and(Schema::hasColumn('movimientos_inventario', 'sucursal_id'))->toBeTrue();
 });

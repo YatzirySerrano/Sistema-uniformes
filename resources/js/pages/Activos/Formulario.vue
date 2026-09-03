@@ -8,11 +8,13 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Opcion = { id: number; nombre: string };
 
 type Activo = {
     id: number;
+    empresa_id: number;
     nombre: string;
     descripcion: string | null;
     codigo: string | null;
@@ -25,12 +27,16 @@ type Activo = {
 };
 
 type Variante = { id: number; valor: string };
-
-const props = defineProps<{
-    activo: Activo | null;
+type Catalogo = {
     tallas: Variante[];
     tiposActivo: Opcion[];
     categorias: Opcion[];
+};
+
+const props = defineProps<{
+    activo: Activo | null;
+    empresasAutorizadas: EmpresaAutorizada[];
+    catalogosPorEmpresa: Record<number, Catalogo>;
     tiposControl: { valor: string; etiqueta: string }[];
     permisos: {
         crear_tipo: boolean;
@@ -51,10 +57,42 @@ defineOptions({
 const esEdicion = !!props.activo;
 const PESO_MAXIMO_MB = 4;
 
-// Listas locales para poder añadir tipos / categorías / variantes creados en línea.
-const tiposLocal = ref<Opcion[]>([...props.tiposActivo]);
-const categoriasLocal = ref<Opcion[]>([...props.categorias]);
-const tallasLocal = ref<Variante[]>([...props.tallas]);
+const empresaId = ref<number | ''>(
+    props.activo?.empresa_id ??
+        (props.empresasAutorizadas.length === 1
+            ? props.empresasAutorizadas[0].id
+            : ''),
+);
+
+function catalogoDe(id: number | ''): Catalogo {
+    return (
+        (id !== '' && props.catalogosPorEmpresa[id]) || {
+            tallas: [],
+            tiposActivo: [],
+            categorias: [],
+        }
+    );
+}
+
+// Listas locales (para añadir tipos / categorías / variantes creados en línea).
+const tiposLocal = ref<Opcion[]>([...catalogoDe(empresaId.value).tiposActivo]);
+const categoriasLocal = ref<Opcion[]>([
+    ...catalogoDe(empresaId.value).categorias,
+]);
+const tallasLocal = ref<Variante[]>([...catalogoDe(empresaId.value).tallas]);
+
+// Al cambiar de empresa se recargan los catálogos y se limpia la selección.
+watch(empresaId, (id) => {
+    const cat = catalogoDe(id);
+    tiposLocal.value = [...cat.tiposActivo];
+    categoriasLocal.value = [...cat.categorias];
+    tallasLocal.value = [...cat.tallas];
+    form.empresa_id = id === '' ? null : id;
+    form.tipo_activo_id = '';
+    form.categoria_id = '';
+    form.tallas = [];
+});
+
 const buscarTalla = ref('');
 const tallasFiltradas = computed(() => {
     const q = buscarTalla.value.trim().toLowerCase();
@@ -64,6 +102,7 @@ const tallasFiltradas = computed(() => {
 });
 
 const form = useForm<{
+    empresa_id: number | null;
     nombre: string;
     descripcion: string;
     categoria_id: number | '';
@@ -75,6 +114,7 @@ const form = useForm<{
     imagen: File | null;
     _method?: string;
 }>({
+    empresa_id: empresaId.value === '' ? null : empresaId.value,
     nombre: props.activo?.nombre ?? '',
     descripcion: props.activo?.descripcion ?? '',
     categoria_id: props.activo?.categoria_id ?? '',
@@ -121,7 +161,7 @@ async function crearRapido(
             'X-XSRF-TOKEN': xsrf(),
         },
         credentials: 'same-origin',
-        body: JSON.stringify({ nombre }),
+        body: JSON.stringify({ nombre, empresa_id: empresaId.value }),
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -139,7 +179,10 @@ async function agregarVariante() {
             'X-XSRF-TOKEN': xsrf(),
         },
         credentials: 'same-origin',
-        body: JSON.stringify({ valor: nuevaVariante.value.trim() }),
+        body: JSON.stringify({
+            valor: nuevaVariante.value.trim(),
+            empresa_id: empresaId.value,
+        }),
     });
     creandoVariante.value = false;
     if (!res.ok) return;
@@ -207,13 +250,37 @@ const selectClass =
     <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             :titulo="esEdicion ? 'Editar activo' : 'Nuevo activo'"
-            descripcion="Los datos pertenecen a la empresa activa. Una PRENDA es un activo individual; un UNIFORME es un conjunto de prendas (módulo Uniformes / Conjuntos)."
+            descripcion="El activo pertenece a una empresa / razón social. Una PRENDA es un activo individual; un UNIFORME es un conjunto de prendas (módulo Uniformes / Conjuntos)."
         />
 
         <form class="grid gap-6 lg:grid-cols-2" @submit.prevent="enviar">
             <section class="min-w-0 space-y-4 rounded-xl border p-4">
                 <h2 class="text-sm font-semibold">Información</h2>
                 <div class="grid gap-4 sm:grid-cols-2">
+                    <div v-if="!esEdicion" class="grid gap-1.5 sm:col-span-2">
+                        <Label for="empresa_id">Empresa / razón social</Label>
+                        <select
+                            id="empresa_id"
+                            v-model="empresaId"
+                            :class="selectClass"
+                        >
+                            <option value="" disabled>
+                                Selecciona una empresa
+                            </option>
+                            <option
+                                v-for="e in empresasAutorizadas"
+                                :key="e.id"
+                                :value="e.id"
+                            >
+                                {{ e.nombre_comercial }}
+                            </option>
+                        </select>
+                        <p class="text-muted-foreground text-xs">
+                            Los tipos, categorías y variantes disponibles
+                            dependen de la empresa.
+                        </p>
+                        <InputError :message="form.errors.empresa_id" />
+                    </div>
                     <div class="grid gap-1.5">
                         <Label for="nombre">Nombre</Label>
                         <Input id="nombre" v-model="form.nombre" required />

@@ -6,10 +6,12 @@ use App\Acciones\ConfirmarAcuseRecepcion;
 use App\Acciones\CorregirEntrega;
 use App\Acciones\CrearEntregaUniforme;
 use App\Acciones\RegistrarDevolucion;
+use App\Models\Almacen;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Models\User;
+use App\Servicios\ResolverAlmacenOperativo;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Auth;
 
@@ -32,9 +34,18 @@ class EntregasDemoSeeder extends Seeder
         $corregir = app(CorregirEntrega::class);
 
         $sucursal = $empresa->sucursales->first();
-        $almacen = $sucursal?->almacenAbastecedorUnico();
 
-        if ($almacen === null) {
+        if ($sucursal === null) {
+            return;
+        }
+
+        // La empresa puede tener varios almacenes (uno propio + el compartido);
+        // para el demo se opera contra su almacén propio (el más antiguo).
+        $almacenPropio = Almacen::query()->paraEmpresa($empresa->id)->where('activo', true)->orderBy('id')->first();
+
+        try {
+            $almacen = app(ResolverAlmacenOperativo::class)->paraEmpresa($empresa, $almacenPropio?->id);
+        } catch (\Throwable) {
             return;
         }
 

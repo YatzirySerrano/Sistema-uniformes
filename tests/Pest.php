@@ -69,9 +69,10 @@ function sembrarRolesPermisos(): void
  * Crea un escenario mínimo multiempresa: dos empresas con una sucursal cada
  * una, tallas y un activo por empresa, y devuelve las referencias.
  *
- * Cada empresa recibe un almacén activo que abastece a su sucursal, de modo que
- * las operaciones (entradas, entregas, devoluciones) puedan resolver el almacén
- * de origen del stock de forma inequívoca.
+ * Cada empresa recibe un almacén activo vinculado a ella (pivote
+ * `almacen_empresa`), de modo que las operaciones (entradas, entregas,
+ * devoluciones) puedan resolver el almacén de origen del stock de forma
+ * inequívoca.
  *
  * @return array{
  *     empresaA: Empresa,
@@ -95,10 +96,8 @@ function escenarioMultiempresa(): array
     $sucursalA = Sucursal::factory()->for($empresaA)->create();
     $sucursalB = Sucursal::factory()->for($empresaB)->create();
 
-    $almacenA = Almacen::factory()->for($empresaA)->create(['nombre' => 'Almacén A']);
-    $almacenA->sucursales()->attach($sucursalA);
-    $almacenB = Almacen::factory()->for($empresaB)->create(['nombre' => 'Almacén B']);
-    $almacenB->sucursales()->attach($sucursalB);
+    $almacenA = Almacen::factory()->paraEmpresa($empresaA)->create(['nombre' => 'Almacén A']);
+    $almacenB = Almacen::factory()->paraEmpresa($empresaB)->create(['nombre' => 'Almacén B']);
 
     $tallaA = Talla::factory()->for($empresaA)->create(['valor' => 'M']);
     Talla::factory()->for($empresaB)->create(['valor' => 'M']);
@@ -112,12 +111,13 @@ function escenarioMultiempresa(): array
 }
 
 /**
- * Crea un usuario con el rol indicado, asociado a las empresas dadas, y con la
- * empresa activa fijada en sesión.
+ * Crea un usuario con el rol indicado, asociado a las empresas dadas. Ya no
+ * existe "empresa activa": el contexto de empresa se determina en cada
+ * petición (formulario / filtro / recurso).
  *
  * @param  array<int, Empresa>  $empresas
  */
-function usuarioCon(string $rol, array $empresas = [], ?Empresa $empresaActiva = null): User
+function usuarioCon(string $rol, array $empresas = []): User
 {
     $usuario = User::factory()->create();
     $usuario->assignRole($rol);

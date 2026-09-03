@@ -7,6 +7,7 @@ use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Colaborador;
+use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\Sucursal;
 use App\Models\Talla;
@@ -65,10 +66,9 @@ class CrearEntregaUniforme
             throw new ExcepcionDeNegocioSimple('Agrega al menos un activo a la entrega.');
         }
 
-        // Puente hacia el inventario por almacén: mientras la UI de entregas
-        // siga preguntando la sucursal, el stock sale del almacén que la
-        // abastece de forma inequívoca.
-        $almacen = $this->resolverAlmacen->paraSucursal($sucursal);
+        // Puente hacia el inventario por almacén (Bloque E reharás esta UI): el
+        // stock sale del almacén que abastece a la empresa de forma inequívoca.
+        $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId));
 
         $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->get()->keyBy('id');
         $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'talla_id'))->get()->keyBy('id');
@@ -122,6 +122,7 @@ class CrearEntregaUniforme
             $this->auditoria->registrar('entregas', 'crear', [
                 'tipo_entidad' => EntregaUniforme::class,
                 'entidad_id' => $entrega->getKey(),
+                'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursal->getKey(),
                 'descripcion' => 'Entrega '.$entrega->folio.' registrada para '.$colaborador->nombre_completo,
                 'valores_nuevos' => $entrega->load('detalles')->toArray(),

@@ -5,12 +5,10 @@ namespace App\Http\Controllers;
 use App\Acciones\AjustarInventario;
 use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\TipoControlActivo;
-use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Activos\RegistrarEntradaInventarioRequest;
-use App\Models\Activo;
 use App\Models\CategoriaActivo;
 use App\Models\SaldoInventario;
-use App\Models\Talla;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioInventario;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,18 +19,22 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Inventario por ALMACÉN. El origen físico del stock es el almacén; la sucursal
- * dejó de ser fuente de existencias (ver "Asistente de migración de
- * existencias" para los saldos legacy).
+ * Inventario por EMPRESA + ALMACÉN. Un mismo almacén puede abastecer a varias
+ * empresas y su stock se mantiene separado por empresa. La empresa y el almacén
+ * llegan como filtro / campo y siempre se valida el acceso del usuario.
  */
 class InventarioController extends Controller
 {
-    use ConEmpresaActiva;
+    use ConEmpresa;
 
     public function index(Request $request): Response
     {
         abort_unless($request->user()->can('inventario.ver'), 403);
-        $empresa = $this->empresaActiva();
+
+        $usuario = $request->user();
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $idsScope = $empresaFiltro !== null ? collect([$empresaFiltro->id]) : $idsAutorizadas;
 
         $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
@@ -45,12 +47,13 @@ class InventarioController extends Controller
             'estado_stock' => ['nullable', Rule::in(['bajo_minimo', 'sin_stock', 'con_stock'])],
         ]);
 
-        $almacenesIds = $this->contexto()->almacenesDisponibles()->pluck('id');
+        $almacenesVisibles = $idsScope
+            ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($usuario, $id)->pluck('id')->all())
+            ->unique()->values();
 
         $saldos = SaldoInventario::query()
-            ->where('empresa_id', $empresa->id)
-            ->whereNotNull('almacen_id')
-            ->whereIn('almacen_id', $almacenesIds)
+            ->whereIn('empresa_id', $idsScope)
+            ->whereIn('almacen_id', $almacenesVisibles)
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $texto): void {
                 $q->where(function (Builder $sub) use ($texto): void {
                     $sub->whereHas('activo', function (Builder $a) use ($texto): void {
@@ -72,12 +75,15 @@ class InventarioController extends Controller
             ->when(($filtros['estado_stock'] ?? null) === 'bajo_minimo', fn (Builder $q) => $q->bajoMinimo())
             ->when(($filtros['estado_stock'] ?? null) === 'sin_stock', fn (Builder $q) => $q->where('cantidad', '<=', 0))
             ->when(($filtros['estado_stock'] ?? null) === 'con_stock', fn (Builder $q) => $q->where('cantidad', '>', 0))
-            ->with(['almacen:id,nombre', 'activo:id,nombre,tipo_control', 'talla:id,valor'])
+            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'activo:id,nombre,tipo_control', 'talla:id,valor'])
+            ->orderBy('empresa_id')
             ->orderBy('almacen_id')
             ->paginate($this->porPagina())
             ->withQueryString()
             ->through(fn (SaldoInventario $s): array => [
                 'id' => $s->id,
+                'empresa_id' => $s->empresa_id,
+                'empresa' => $s->empresa?->nombre_comercial,
                 'almacen_id' => $s->almacen_id,
                 'activo_id' => $s->activo_id,
                 'talla_id' => $s->talla_id,
@@ -92,21 +98,20 @@ class InventarioController extends Controller
 
         return Inertia::render('Inventario/Index', [
             'saldos' => $saldos,
-            'filtros' => $filtros,
-            'almacenes' => $this->contexto()->almacenesDisponibles()
-                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo, 'direccion' => $a->direccion])
+            'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'almacenes' => $idsScope
+                ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($usuario, $id)->all())
+                ->unique('id')
+                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo])
                 ->values(),
-            'activos' => $empresa->activos()->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
-            'tiposActivo' => TipoActivo::query()->where('empresa_id', $empresa->id)->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
-            'categorias' => CategoriaActivo::query()->where('empresa_id', $empresa->id)->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
-            'tallas' => $empresa->tallas()->ordenadas()->get(['id', 'valor']),
+            'tiposActivo' => TipoActivo::query()->whereIn('empresa_id', $idsScope)->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
+            'categorias' => CategoriaActivo::query()->whereIn('empresa_id', $idsScope)->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
             'tiposControl' => TipoControlActivo::opciones(),
-            'saldosLegacyPendientes' => SaldoInventario::query()->where('empresa_id', $empresa->id)->pendienteMigracion()->count(),
             'permisos' => [
                 'entrada' => $request->user()->can('inventario.entrada'),
                 'ajustar' => $request->user()->can('inventario.ajustar'),
                 'minimos' => $request->user()->can('inventario.minimos'),
-                'migrar' => $request->user()->can('inventario.migrar'),
             ],
         ]);
     }
@@ -114,38 +119,16 @@ class InventarioController extends Controller
     public function formularioEntrada(Request $request): Response
     {
         abort_unless($request->user()->can('inventario.entrada'), 403);
-        $empresa = $this->empresaActiva();
 
         return Inertia::render('Inventario/Entrada', [
-            'almacenes' => $this->contexto()->almacenesDisponibles()
-                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo, 'direccion' => $a->direccion])
-                ->values(),
-            // Sólo activos por cantidad: los serializados se registran unidad por
-            // unidad en una fase posterior.
-            'activos' => $empresa->activos()
-                ->where('activo', true)
-                ->where('tipo_control', 'cantidad')
-                ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
-                ->orderBy('nombre')
-                ->get()
-                ->map(fn (Activo $a): array => [
-                    'id' => $a->id,
-                    'nombre' => $a->nombre,
-                    'codigo' => $a->codigo,
-                    'tipo' => $a->tipoActivo?->nombre,
-                    'categoria' => $a->categoriaActivo?->nombre,
-                    'control' => $a->tipo_control->value,
-                    'tallas' => $a->tallas->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->values(),
-                ]),
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
         ]);
     }
 
     public function entrada(RegistrarEntradaInventarioRequest $request, RegistrarEntradaInventario $accion): RedirectResponse
     {
-        $empresa = $this->empresaActiva();
+        $empresa = $request->empresaResuelta();
         $datos = $request->validated();
-
-        abort_unless($this->contexto()->puedeVerAlmacen((int) $datos['almacen_id']), 403, 'No tienes acceso a ese almacén.');
 
         $accion->ejecutar(
             $empresa->id,
@@ -163,17 +146,12 @@ class InventarioController extends Controller
     public function ajuste(Request $request, AjustarInventario $accion): RedirectResponse
     {
         abort_unless($request->user()->can('inventario.ajustar'), 403);
-        $empresa = $this->empresaActiva();
+        $empresa = $this->resolverEmpresa($request);
 
-        $datos = $request->validate([
-            'almacen_id' => ['required', 'integer'],
-            'activo_id' => ['required', 'integer'],
-            'talla_id' => ['required', 'integer'],
+        $datos = $this->validarOperacion($request, $empresa->id, [
             'existencia_objetivo' => ['required', 'integer', 'min:0', 'max:1000000'],
             'motivo' => ['required', 'string', 'max:255'],
         ]);
-
-        abort_unless($this->contexto()->puedeVerAlmacen((int) $datos['almacen_id']), 403);
 
         $accion->ejecutar(
             $empresa->id,
@@ -191,16 +169,11 @@ class InventarioController extends Controller
     public function minimos(Request $request, ServicioInventario $inventario): RedirectResponse
     {
         abort_unless($request->user()->can('inventario.minimos'), 403);
-        $empresa = $this->empresaActiva();
+        $empresa = $this->resolverEmpresa($request);
 
-        $datos = $request->validate([
-            'almacen_id' => ['required', 'integer'],
-            'activo_id' => ['required', 'integer'],
-            'talla_id' => ['required', 'integer'],
+        $datos = $this->validarOperacion($request, $empresa->id, [
             'minimo' => ['required', 'integer', 'min:0', 'max:1000000'],
         ]);
-
-        abort_unless($this->contexto()->puedeVerAlmacen((int) $datos['almacen_id']), 403);
 
         $inventario->ajustarMinimo(
             $empresa->id,
@@ -211,5 +184,37 @@ class InventarioController extends Controller
         );
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Mínimo actualizado.']);
+    }
+
+    /**
+     * Reglas comunes de una operación de inventario: el almacén debe abastecer a
+     * la empresa y estar activo; activo y talla deben pertenecer a la empresa.
+     *
+     * @param  array<string, mixed>  $extra
+     * @return array<string, mixed>
+     */
+    private function validarOperacion(Request $request, int $empresaId, array $extra): array
+    {
+        return $request->validate([
+            'empresa_id' => ['required', 'integer'],
+            'almacen_id' => [
+                'required', 'integer',
+                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('almacenes', 'id')->where(fn ($q) => $q->where('activo', true)),
+            ],
+            'activo_id' => [
+                'required', 'integer',
+                Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+            ],
+            'talla_id' => [
+                'required', 'integer',
+                Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+            ],
+            ...$extra,
+        ], [
+            'almacen_id.exists' => 'El almacén no abastece a esta empresa o está desactivado.',
+            'activo_id.exists' => 'El activo no pertenece a esta empresa.',
+            'talla_id.exists' => 'La variante no pertenece a esta empresa.',
+        ]);
     }
 }
