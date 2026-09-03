@@ -1,7 +1,9 @@
 ---
 paths:
-    - 'app/Http/Controllers/{Almacen,Area,Activo}Controller.php'
+    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Inventario,MovimientoInventario,MigracionInventario}Controller.php'
     - 'app/Http/Requests/{Almacenes,Areas,Activos}/**'
+    - 'app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php'
+    - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario,MigrarSaldosLegacyAAlmacen}.php'
 ---
 
 # Módulos Almacenes / Áreas / Activos
@@ -28,8 +30,38 @@ Patrón calcado de `SucursalController` / `EmpresaController` (módulos aprobado
 - El listado se sirve como cards (ver `.ai/rules/pages.md`) y su query debe ser
   reutilizable para la futura exportación PDF/Excel.
 
+## Inventario por almacén (implementado)
+
+El inventario vive en el **almacén**: `saldos_inventario` / `movimientos_inventario`
+se llavean por `almacen_id` (índice único `saldos_inv_almacen_unico`);
+`sucursal_id` es nullable (sólo filas legacy y procedencia del historial).
+`ServicioInventario` opera sobre almacén. `InventarioController`,
+`RegistrarEntradaInventario` y `AjustarInventario` reciben `almacen_id`. Un
+almacén desactivado no admite entradas/ajustes.
+
+Entregas / Devoluciones / Correcciones todavía preguntan la sucursal en la UI;
+`ResolverAlmacenOperativo::paraSucursal()` obtiene el almacén de origen
+(abastecedor **único** de la sucursal; cero o varios → `ExcepcionDeNegocioSimple`,
+nunca 500). No reintroducir stock por sucursal como fuente de verdad.
+
+Saldos legacy: migración automática `..._000014` sólo para sucursales con un
+abastecedor único; el resto lo resuelve el asistente
+(`MigracionInventarioController`, `MigrarSaldosLegacyAAlmacen`) — idempotente y
+sin duplicar saldos.
+
+## Tipos y categorías de activo
+
+- `tipos_activo`: CRUD en `TipoActivoController` (permiso `tipos-activo.administrar`),
+  pantalla `Activos/Catalogos.vue`. Tipos base sembrados por migración. **No**
+  existe "Uniforme" como tipo. Alta rápida: `tipos-activo/rapido` (JSON).
+- `categorias_activo`: catálogo real (`CategoriaActivoController`, permiso
+  `categorias-activo.administrar`). `activos.categoria_id` es la fuente de
+  verdad; `activos.categoria` (texto) es espejo temporal que sincroniza
+  `ActivoController` (mismo patrón que `colaboradores.area`).
+
 ## Serializados y variantes
 
-`Activo::tipo_control` distingue `cantidad` de `serializado`. En este bloque
-sólo se contempla en el catálogo: NO implementar el flujo de unidades
-serializadas (número de serie / IMEI) ni el inventario por almacén todavía.
+`Activo::tipo_control` distingue `cantidad` de `serializado`. El formulario de
+Activo oculta variantes/tallas cuando es serializado. El flujo de unidades
+serializadas (entidad `UnidadActivo`, serie / IMEI) sigue **pendiente**: no
+implementarlo aquí.

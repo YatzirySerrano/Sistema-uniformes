@@ -17,7 +17,8 @@ use Illuminate\Support\Carbon;
  *
  * @property int $id
  * @property int $empresa_id
- * @property int $sucursal_id
+ * @property int|null $almacen_id
+ * @property int|null $sucursal_id Procedencia/contexto; en operación nueva se conserva sólo como referencia
  * @property int $activo_id
  * @property int $talla_id
  * @property TipoMovimiento $tipo
@@ -36,6 +37,7 @@ class MovimientoInventario extends Model
 
     protected $fillable = [
         'empresa_id',
+        'almacen_id',
         'sucursal_id',
         'activo_id',
         'talla_id',
@@ -62,6 +64,14 @@ class MovimientoInventario extends Model
             'existencia_resultante' => 'integer',
             'ocurrido_en' => 'datetime',
         ];
+    }
+
+    /**
+     * @return BelongsTo<Almacen, $this>
+     */
+    public function almacen(): BelongsTo
+    {
+        return $this->belongsTo(Almacen::class);
     }
 
     /**

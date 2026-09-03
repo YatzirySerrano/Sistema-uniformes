@@ -104,6 +104,12 @@ const grupos = computed<Grupo[]>(() =>
                     icono: ArrowLeftRight,
                     visible: puede('inventario.ver'),
                 },
+                {
+                    titulo: 'Migración de inventario',
+                    href: '/inventario/migracion',
+                    icono: ArrowLeftRight,
+                    visible: puede('inventario.migrar'),
+                },
             ],
         },
         {

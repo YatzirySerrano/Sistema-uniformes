@@ -26,9 +26,10 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $id
  * @property int $empresa_id
  * @property int|null $tipo_activo_id
+ * @property int|null $categoria_id
  * @property string $nombre
  * @property string|null $descripcion
- * @property string|null $categoria
+ * @property string|null $categoria Espejo temporal del nombre de la categoría (fuente de verdad: categoria_id)
  * @property TipoControlActivo $tipo_control
  * @property string|null $codigo
  * @property string|null $imagen_ruta
@@ -44,6 +45,7 @@ class Activo extends Model
     protected $fillable = [
         'empresa_id',
         'tipo_activo_id',
+        'categoria_id',
         'nombre',
         'descripcion',
         'categoria',
@@ -67,6 +69,17 @@ class Activo extends Model
     public function tipoActivo(): BelongsTo
     {
         return $this->belongsTo(TipoActivo::class);
+    }
+
+    /**
+     * Categoría del catálogo. Se llama `categoriaActivo` (no `categoria`) para
+     * no colisionar con la columna espejo `activos.categoria`.
+     *
+     * @return BelongsTo<CategoriaActivo, $this>
+     */
+    public function categoriaActivo(): BelongsTo
+    {
+        return $this->belongsTo(CategoriaActivo::class, 'categoria_id');
     }
 
     /**

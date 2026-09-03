@@ -43,8 +43,24 @@ it('un usuario nuevo con sólo el rol administrador hereda todos los permisos de
         'areas.ver', 'areas.crear', 'areas.editar', 'areas.desactivar',
         'activos.ver', 'activos.crear', 'activos.editar', 'activos.administrar',
         'tallas.administrar',
+        'tipos-activo.administrar', 'categorias-activo.administrar',
+        'inventario.entrada', 'inventario.ajustar', 'inventario.minimos', 'inventario.migrar',
     ] as $permiso) {
         expect($usuario->can($permiso))->toBeTrue("El administrador debería poder «{$permiso}»");
+    }
+});
+
+it('un supervisor no gana los permisos administrativos de catálogos ni la migración de inventario', function () {
+    $empresa = Empresa::factory()->create();
+    $usuario = usuarioCon(RolSistema::Supervisor->value, [$empresa]);
+
+    expect($usuario->getDirectPermissions())->toHaveCount(0);
+
+    foreach ([
+        'tipos-activo.administrar', 'categorias-activo.administrar',
+        'inventario.migrar', 'inventario.ajustar', 'activos.administrar',
+    ] as $permiso) {
+        expect($usuario->can($permiso))->toBeFalse("El supervisor NO debería poder «{$permiso}»");
     }
 });
 

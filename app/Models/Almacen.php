@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -72,6 +73,32 @@ class Almacen extends Model
     public function responsable(): BelongsTo
     {
         return $this->belongsTo(Colaborador::class, 'responsable_colaborador_id');
+    }
+
+    /**
+     * Saldos de inventario que viven en este almacén.
+     *
+     * @return HasMany<SaldoInventario, $this>
+     */
+    public function saldos(): HasMany
+    {
+        return $this->hasMany(SaldoInventario::class);
+    }
+
+    /**
+     * @return HasMany<MovimientoInventario, $this>
+     */
+    public function movimientos(): HasMany
+    {
+        return $this->hasMany(MovimientoInventario::class);
+    }
+
+    /**
+     * ¿Este almacén abastece a la sucursal indicada?
+     */
+    public function abasteceSucursal(int $sucursalId): bool
+    {
+        return $this->sucursales()->whereKey($sucursalId)->exists();
     }
 
     /**

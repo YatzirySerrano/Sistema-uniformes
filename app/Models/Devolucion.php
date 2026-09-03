@@ -32,6 +32,7 @@ class Devolucion extends Model
         'folio',
         'empresa_id',
         'sucursal_id',
+        'almacen_id',
         'colaborador_id',
         'entrega_uniforme_id',
         'registrada_por',

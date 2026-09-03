@@ -5,8 +5,8 @@ namespace App\Acciones;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\MovimientoInventario;
-use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioAuditoria;
@@ -14,8 +14,9 @@ use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Registra una o varias entradas de inventario (compras, recepción de almacén,
- * carga inicial). Valida que activo/talla/sucursal pertenezcan a la empresa.
+ * Registra una o varias entradas de inventario (compras, recepción, carga
+ * inicial) en un ALMACÉN. Valida que almacén/activo/talla pertenezcan a la
+ * empresa y que el almacén esté activo.
  */
 class RegistrarEntradaInventario
 {
@@ -30,14 +31,19 @@ class RegistrarEntradaInventario
      */
     public function ejecutar(
         int $empresaId,
-        int $sucursalId,
+        int $almacenId,
         array $items,
         string $motivo,
         ?int $realizadoPor,
         bool $cargaInicial = false,
         ?string $notas = null,
     ): array {
-        Sucursal::query()->where('empresa_id', $empresaId)->findOr($sucursalId, fn () => throw new ExcepcionDeNegocioSimple('La sucursal indicada no pertenece a esta empresa.'));
+        $almacen = Almacen::query()->where('empresa_id', $empresaId)
+            ->findOr($almacenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén indicado no pertenece a esta empresa.'));
+
+        if (! $almacen->activo) {
+            throw new ExcepcionDeNegocioSimple('El almacén está desactivado; no admite entradas de inventario.');
+        }
 
         $activoIds = array_column($items, 'activo_id');
         $tallaIds = array_column($items, 'talla_id');
@@ -45,7 +51,7 @@ class RegistrarEntradaInventario
         $activosValidos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', $activoIds)->pluck('id')->all();
         $tallasValidas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', $tallaIds)->pluck('id')->all();
 
-        return DB::transaction(function () use ($items, $empresaId, $sucursalId, $motivo, $realizadoPor, $cargaInicial, $notas, $activosValidos, $tallasValidas): array {
+        return DB::transaction(function () use ($items, $empresaId, $almacenId, $motivo, $realizadoPor, $cargaInicial, $notas, $activosValidos, $tallasValidas): array {
             $movimientos = [];
 
             foreach ($items as $item) {
@@ -58,7 +64,7 @@ class RegistrarEntradaInventario
 
                 $movimientos[] = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                     empresaId: $empresaId,
-                    sucursalId: $sucursalId,
+                    almacenId: $almacenId,
                     activoId: (int) $item['activo_id'],
                     tallaId: (int) $item['talla_id'],
                     tipo: $cargaInicial ? TipoMovimiento::Inicial : TipoMovimiento::Entrada,
@@ -75,8 +81,7 @@ class RegistrarEntradaInventario
             }
 
             $this->auditoria->registrar('inventario', $cargaInicial ? 'carga_inicial' : 'entrada', [
-                'sucursal_id' => $sucursalId,
-                'descripcion' => count($movimientos).' movimiento(s) de entrada registrados. Motivo: '.$motivo,
+                'descripcion' => count($movimientos).' movimiento(s) de entrada en almacén #'.$almacenId.'. Motivo: '.$motivo,
             ]);
 
             return $movimientos;

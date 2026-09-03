@@ -9,6 +9,14 @@ Se usa `spatie/laravel-permission` (guard `web`).
 > `almacenes.ver`, `areas.ver/crear/editar`, `activos.ver`; Encargado recibe
 > `almacenes.ver`, `areas.ver`, `activos.ver`. Administrador y Superadministrador
 > mantienen alcance global.
+>
+> **Inventario por almacén.** Al grupo `activos.*` se sumaron
+> `tipos-activo.administrar` y `categorias-activo.administrar` (CRUD de catálogos,
+> alta rápida "Otro/Otra"). Al grupo `inventario.*` se sumó `inventario.migrar`
+> (asistente de migración de existencias legacy). Sólo el Administrador (vía
+> alcance global) y el Superadministrador los reciben; Supervisor/Encargado
+> **no**. Ningún permiso se asigna directo al usuario. Actualizar la BD local con
+> `php artisan db:seed --class=RolesPermisosSeeder`.
 
 ## Roles base (seeder `RolesPermisosSeeder`)
 

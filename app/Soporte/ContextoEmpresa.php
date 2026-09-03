@@ -3,6 +3,7 @@
 namespace App\Soporte;
 
 use App\Excepciones\AccesoEmpresaNoAutorizadoException;
+use App\Models\Almacen;
 use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Models\User;
@@ -140,6 +141,40 @@ class ContextoEmpresa
     public function puedeVerSucursal(int $sucursalId): bool
     {
         return $this->sucursalesDisponibles()->contains('id', $sucursalId);
+    }
+
+    /**
+     * Almacenes activos de la empresa activa a los que el usuario tiene acceso.
+     * Alcance global: todos los de la empresa. Roles restringidos: los que
+     * abastecen al menos una de sus sucursales disponibles.
+     *
+     * @return Collection<int, Almacen>
+     */
+    public function almacenesDisponibles(): Collection
+    {
+        if (! $this->tieneEmpresa() || $this->usuario === null) {
+            return collect();
+        }
+
+        $consulta = Almacen::query()
+            ->where('empresa_id', $this->empresa->getKey())
+            ->where('activo', true)
+            ->orderBy('nombre');
+
+        if ($this->usuario->tieneAlcanceGlobal()) {
+            return $consulta->get();
+        }
+
+        $sucursalesIds = $this->sucursalesDisponibles()->pluck('id');
+
+        return $consulta
+            ->whereHas('sucursales', fn ($q) => $q->whereIn('sucursales.id', $sucursalesIds))
+            ->get();
+    }
+
+    public function puedeVerAlmacen(int $almacenId): bool
+    {
+        return $this->almacenesDisponibles()->contains('id', $almacenId);
     }
 
     public function usuario(): ?User

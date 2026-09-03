@@ -6,6 +6,7 @@ use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresaActiva;
 use App\Http\Requests\Activos\GuardarActivoRequest;
 use App\Models\Activo;
+use App\Models\CategoriaActivo;
 use App\Models\SaldoInventario;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioAuditoria;
@@ -31,6 +32,7 @@ class ActivoController extends Controller
         $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
             'tipo_activo_id' => ['nullable', 'integer'],
+            'categoria_id' => ['nullable', 'integer'],
             'control' => ['nullable', Rule::in(['cantidad', 'serializado'])],
             'estado' => ['nullable', Rule::in(['activos', 'inactivos'])],
             'orden' => ['nullable', Rule::in(['az', 'za'])],
@@ -56,6 +58,7 @@ class ActivoController extends Controller
                 });
             })
             ->when($filtros['tipo_activo_id'] ?? null, fn (Builder $q, $v) => $q->where('tipo_activo_id', $v))
+            ->when($filtros['categoria_id'] ?? null, fn (Builder $q, $v) => $q->where('categoria_id', $v))
             ->when($filtros['control'] ?? null, fn (Builder $q, $v) => $q->where('tipo_control', $v))
             ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
             ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
@@ -79,9 +82,11 @@ class ActivoController extends Controller
         return Inertia::render('Activos/Index', [
             'activos' => $activos,
             'tiposActivo' => $this->tiposActivoEmpresa(),
+            'categorias' => $this->categoriasEmpresa(),
             'filtros' => [
                 'buscar' => $filtros['buscar'] ?? '',
                 'tipo_activo_id' => $filtros['tipo_activo_id'] ?? '',
+                'categoria_id' => $filtros['categoria_id'] ?? '',
                 'control' => $filtros['control'] ?? '',
                 'estado' => $filtros['estado'] ?? '',
                 'orden' => $filtros['orden'] ?? 'az',
@@ -90,6 +95,7 @@ class ActivoController extends Controller
                 'crear' => $request->user()->can('create', Activo::class),
                 'editar' => $request->user()->can('activos.editar'),
                 'administrar' => $request->user()->can('activos.administrar'),
+                'administrar_catalogos' => $request->user()->can('administrar', TipoActivo::class),
             ],
         ]);
     }
@@ -102,7 +108,9 @@ class ActivoController extends Controller
             'activo' => null,
             'tallas' => $this->tallasEmpresa(),
             'tiposActivo' => $this->tiposActivoEmpresa(),
+            'categorias' => $this->categoriasEmpresa(),
             'tiposControl' => TipoControlActivo::opciones(),
+            'permisos' => $this->permisosCatalogos(),
         ]);
     }
 
@@ -113,9 +121,9 @@ class ActivoController extends Controller
         $activo = Activo::query()->create([
             'empresa_id' => $empresa->id,
             'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
+            ...$this->datosCategoria($request),
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
-            'categoria' => $request->input('categoria'),
             'tipo_control' => (string) $request->string('tipo_control'),
             'codigo' => ($request->input('codigo') ?: null) ?: $this->generarCodigo($empresa->id),
             'activo' => $request->boolean('activo', true),
@@ -142,14 +150,16 @@ class ActivoController extends Controller
 
         return Inertia::render('Activos/Formulario', [
             'activo' => [
-                ...$activo->only(['id', 'nombre', 'descripcion', 'categoria', 'codigo', 'tipo_activo_id', 'activo']),
+                ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'tipo_activo_id', 'categoria_id', 'activo']),
                 'tipo_control' => $activo->tipo_control->value,
                 'imagen_url' => $activo->imagen_ruta ? Storage::disk('public')->url($activo->imagen_ruta) : null,
                 'tallas' => $activo->tallas()->pluck('tallas.id'),
             ],
             'tallas' => $this->tallasEmpresa(),
             'tiposActivo' => $this->tiposActivoEmpresa(),
+            'categorias' => $this->categoriasEmpresa(),
             'tiposControl' => TipoControlActivo::opciones(),
+            'permisos' => $this->permisosCatalogos(),
         ]);
     }
 
@@ -160,9 +170,9 @@ class ActivoController extends Controller
 
         $activo->fill([
             'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
+            ...$this->datosCategoria($request),
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
-            'categoria' => $request->input('categoria'),
             'tipo_control' => (string) $request->string('tipo_control'),
             'codigo' => $request->input('codigo') ?: $activo->codigo,
             'activo' => $request->boolean('activo', $activo->activo),
@@ -216,10 +226,11 @@ class ActivoController extends Controller
         $saldos = SaldoInventario::query()
             ->where('empresa_id', $activo->empresa_id)
             ->where('activo_id', $activo->id)
-            ->with(['sucursal:id,nombre', 'talla:id,valor'])
+            ->whereNotNull('almacen_id')
+            ->with(['almacen:id,nombre', 'talla:id,valor'])
             ->get()
             ->map(fn (SaldoInventario $s): array => [
-                'sucursal' => $s->sucursal?->nombre,
+                'almacen' => $s->almacen?->nombre,
                 'talla' => $s->talla?->valor,
                 'cantidad' => $s->cantidad,
                 'minimo' => $s->minimo,
@@ -228,7 +239,7 @@ class ActivoController extends Controller
 
         return Inertia::render('Activos/Detalle', [
             'activo' => [
-                ...$activo->only(['id', 'nombre', 'descripcion', 'categoria', 'codigo', 'activo']),
+                ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'categoria', 'activo']),
                 'tipo' => $activo->tipoActivo?->nombre,
                 'tipo_control' => $activo->tipo_control->value,
                 'tipo_control_etiqueta' => $activo->tipo_control->etiqueta(),
@@ -263,6 +274,54 @@ class ActivoController extends Controller
             ->get(['id', 'nombre'])
             ->map(fn (TipoActivo $t): array => ['id' => $t->id, 'nombre' => $t->nombre])
             ->all();
+    }
+
+    /**
+     * @return array<int, array{id: int, nombre: string}>
+     */
+    private function categoriasEmpresa(): array
+    {
+        return CategoriaActivo::query()
+            ->where('empresa_id', $this->empresaActiva()->id)
+            ->where('activa', true)
+            ->orderBy('nombre')
+            ->get(['id', 'nombre'])
+            ->map(fn (CategoriaActivo $c): array => ['id' => $c->id, 'nombre' => $c->nombre])
+            ->all();
+    }
+
+    /**
+     * Resuelve `categoria_id` y su espejo de texto `categoria` a partir de la
+     * petición. La fuente de verdad es `categoria_id`; `categoria` se conserva
+     * como espejo temporal (importador/exportador/snapshot).
+     *
+     * @return array{categoria_id: int|null, categoria: string|null}
+     */
+    private function datosCategoria(GuardarActivoRequest $request): array
+    {
+        $categoriaId = $request->integer('categoria_id') ?: null;
+
+        $nombre = $categoriaId === null
+            ? null
+            : CategoriaActivo::query()
+                ->where('empresa_id', $this->empresaActiva()->id)
+                ->whereKey($categoriaId)
+                ->value('nombre');
+
+        return ['categoria_id' => $categoriaId, 'categoria' => $nombre];
+    }
+
+    /**
+     * @return array{crear_tipo: bool, crear_categoria: bool}
+     */
+    private function permisosCatalogos(): array
+    {
+        $usuario = request()->user();
+
+        return [
+            'crear_tipo' => $usuario?->can('administrar', TipoActivo::class) ?? false,
+            'crear_categoria' => $usuario?->can('administrar', CategoriaActivo::class) ?? false,
+        ];
     }
 
     private function verificarEmpresa(Activo $activo): void

@@ -5,6 +5,8 @@ use App\Http\Controllers\AcuseController;
 use App\Http\Controllers\AlmacenController;
 use App\Http\Controllers\AreaController;
 use App\Http\Controllers\BitacoraController;
+use App\Http\Controllers\CatalogoActivoController;
+use App\Http\Controllers\CategoriaActivoController;
 use App\Http\Controllers\ColaboradorController;
 use App\Http\Controllers\CorreccionEntregaController;
 use App\Http\Controllers\DevolucionController;
@@ -12,6 +14,7 @@ use App\Http\Controllers\EmpresaController;
 use App\Http\Controllers\EntregaController;
 use App\Http\Controllers\ImportacionColaboradorController;
 use App\Http\Controllers\InventarioController;
+use App\Http\Controllers\MigracionInventarioController;
 use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
 use App\Http\Controllers\PersonalizacionEmpresaController;
@@ -21,6 +24,7 @@ use App\Http\Controllers\RolController;
 use App\Http\Controllers\SelectorEmpresaController;
 use App\Http\Controllers\SucursalController;
 use App\Http\Controllers\TallaController;
+use App\Http\Controllers\TipoActivoController;
 use App\Http\Controllers\UsuarioController;
 use Illuminate\Support\Facades\Route;
 
@@ -66,13 +70,26 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::put('tallas/{talla}', [TallaController::class, 'update'])->name('tallas.update');
     Route::delete('tallas/{talla}', [TallaController::class, 'destroy'])->name('tallas.destroy');
 
-    // Inventario
+    // Catálogos de activos: tipos y categorías (dentro del área de Activos)
+    Route::get('activos-catalogos', [CatalogoActivoController::class, 'index'])->name('activos.catalogos');
+    Route::post('tipos-activo', [TipoActivoController::class, 'store'])->name('tipos-activo.store');
+    Route::post('tipos-activo/rapido', [TipoActivoController::class, 'rapido'])->name('tipos-activo.rapido');
+    Route::put('tipos-activo/{tipo}', [TipoActivoController::class, 'update'])->name('tipos-activo.update');
+    Route::post('tipos-activo/{tipo}/estado', [TipoActivoController::class, 'toggle'])->name('tipos-activo.toggle');
+    Route::post('categorias-activo', [CategoriaActivoController::class, 'store'])->name('categorias-activo.store');
+    Route::post('categorias-activo/rapido', [CategoriaActivoController::class, 'rapido'])->name('categorias-activo.rapido');
+    Route::put('categorias-activo/{categoria}', [CategoriaActivoController::class, 'update'])->name('categorias-activo.update');
+    Route::post('categorias-activo/{categoria}/estado', [CategoriaActivoController::class, 'toggle'])->name('categorias-activo.toggle');
+
+    // Inventario por almacén
     Route::get('inventario', [InventarioController::class, 'index'])->name('inventario.index');
     Route::get('inventario/entrada', [InventarioController::class, 'formularioEntrada'])->name('inventario.entrada-formulario');
     Route::post('inventario/entrada', [InventarioController::class, 'entrada'])->name('inventario.entrada');
     Route::post('inventario/ajuste', [InventarioController::class, 'ajuste'])->name('inventario.ajuste');
     Route::post('inventario/minimos', [InventarioController::class, 'minimos'])->name('inventario.minimos');
     Route::get('inventario/movimientos', [MovimientoInventarioController::class, 'index'])->name('inventario.movimientos');
+    Route::get('inventario/migracion', [MigracionInventarioController::class, 'index'])->name('inventario.migracion');
+    Route::post('inventario/migracion/resolver', [MigracionInventarioController::class, 'resolver'])->name('inventario.migracion.resolver');
 
     // Entregas
     Route::get('entregas', [EntregaController::class, 'index'])->name('entregas.index');

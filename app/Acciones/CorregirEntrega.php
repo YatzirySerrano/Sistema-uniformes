@@ -8,8 +8,10 @@ use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\CorreccionEntrega;
 use App\Models\EntregaUniforme;
+use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
+use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +26,7 @@ class CorregirEntrega
     public function __construct(
         private readonly ServicioInventario $inventario,
         private readonly ServicioAuditoria $auditoria,
+        private readonly ResolverAlmacenOperativo $resolverAlmacen,
     ) {}
 
     /**
@@ -43,6 +46,9 @@ class CorregirEntrega
         $empresaId = $entrega->empresa_id;
         $sucursalId = $entrega->sucursal_id;
 
+        $sucursal = Sucursal::query()->findOrFail($sucursalId);
+        $almacenId = $this->resolverAlmacen->paraSucursal($sucursal, $entrega->almacen_id)->getKey();
+
         $nuevos = $this->consolidar($itemsNuevos);
         if ($nuevos === []) {
             throw new ExcepcionDeNegocioSimple('La entrega corregida debe conservar al menos un activo.');
@@ -60,7 +66,7 @@ class CorregirEntrega
             'activo_id' => $d->activo_id, 'talla_id' => $d->talla_id, 'cantidad' => (int) $d->cantidad,
         ])->all();
 
-        return DB::transaction(function () use ($entrega, $nuevos, $anteriores, $valoresAnteriores, $motivo, $corregidaPor, $empresaId, $sucursalId, $activos, $tallas): EntregaUniforme {
+        return DB::transaction(function () use ($entrega, $nuevos, $anteriores, $valoresAnteriores, $motivo, $corregidaPor, $empresaId, $sucursalId, $almacenId, $activos, $tallas): EntregaUniforme {
             $clavesNuevas = [];
 
             foreach ($nuevos as $item) {
@@ -76,7 +82,7 @@ class CorregirEntrega
                 if ($delta > 0) {
                     // Se entregó de más: descontar del inventario.
                     $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-                        empresaId: $empresaId, sucursalId: $sucursalId,
+                        empresaId: $empresaId, almacenId: $almacenId, sucursalId: $sucursalId,
                         activoId: $item['activo_id'], tallaId: $item['talla_id'],
                         tipo: TipoMovimiento::AjusteSalida, cantidad: $delta,
                         realizadoPor: $corregidaPor,
@@ -86,7 +92,7 @@ class CorregirEntrega
                 } elseif ($delta < 0) {
                     // Se entregó de menos: reintegrar al inventario.
                     $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-                        empresaId: $empresaId, sucursalId: $sucursalId,
+                        empresaId: $empresaId, almacenId: $almacenId, sucursalId: $sucursalId,
                         activoId: $item['activo_id'], tallaId: $item['talla_id'],
                         tipo: TipoMovimiento::Correccion, cantidad: abs($delta),
                         realizadoPor: $corregidaPor,
@@ -113,7 +119,7 @@ class CorregirEntrega
                 }
 
                 $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-                    empresaId: $empresaId, sucursalId: $sucursalId,
+                    empresaId: $empresaId, almacenId: $almacenId, sucursalId: $sucursalId,
                     activoId: $detalle->activo_id, tallaId: $detalle->talla_id,
                     tipo: TipoMovimiento::Correccion, cantidad: (int) $detalle->cantidad,
                     realizadoPor: $corregidaPor,

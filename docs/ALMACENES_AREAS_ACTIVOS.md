@@ -1,9 +1,9 @@
 # Almacenes, Áreas / Departamentos y Activos
 
 Este bloque construye la nueva base del sistema tras dejar de ser exclusivo de
-uniformes. **No** implementa todavía inventario por almacén, cascadas de
-desactivación, conjuntos/uniformes ni el flujo de activos serializados: sólo las
-estructuras y CRUD necesarios para esos bloques posteriores.
+uniformes. El **inventario por almacén** ya está implementado (ver
+`docs/INVENTARIO.md`). Siguen pendientes: cascadas de desactivación,
+conjuntos/uniformes y el flujo de activos serializados (`UnidadActivo`).
 
 ## 1. Nueva jerarquía funcional
 
@@ -17,8 +17,8 @@ SISTEMA
     └── ACTIVOS
 ```
 
-El inventario sigue asociado a la **sucursal**. Su migración a **almacén**
-(`ALMACÉN + ACTIVO + VARIANTE = STOCK`) es el bloque siguiente.
+El inventario vive en el **almacén** (`ALMACÉN + ACTIVO + VARIANTE = STOCK`). La
+sucursal es sólo el destino/contexto del colaborador.
 
 ## 2. Almacenes
 
@@ -96,22 +96,29 @@ nuevos guardan `activo` y la plantilla `acuses/comprobante.blade.php` lee ambas
 
 ### 4.2 Clasificación
 
-- `tipo_activo_id` → catálogo `tipos_activo` por empresa (sembrado: "Uniforme /
-  Prenda", "Equipo de cómputo", "Dispositivo móvil", "Accesorio", "Otro"). El
-  CRUD de administración de tipos es un bloque posterior; por ahora se
-  selecciona en el formulario del activo.
+- **PRENDA vs UNIFORME**: una prenda es un activo individual; un uniforme es un
+  **conjunto** de prendas (módulo pendiente). El tipo `tipos_activo` **no**
+  incluye "Uniforme".
+- `tipo_activo_id` → `tipos_activo` por empresa con **CRUD completo**
+  (`TipoActivoController`, pantalla `Activos/Catalogos.vue`, permiso
+  `tipos-activo.administrar`). Tipos base sembrados: Prenda, Equipo de cómputo,
+  Dispositivo móvil, Electrónico, Accesorio, Herramienta / Equipo, Otro. Alta
+  rápida "Otro" desde el formulario del activo (`tipos-activo/rapido`, JSON).
+- `categoria_id` → `categorias_activo` (catálogo real por empresa, `tipo_activo_id`
+  opcional). Fuente de verdad; `activos.categoria` (texto) es espejo temporal.
+  Alta rápida "Otra" (`categorias-activo/rapido`).
 - `tipo_control` (`App\Enums\TipoControlActivo`):
     - `cantidad`: existencias agregadas (uniformes, accesorios).
-    - `serializado`: cada unidad se identifica por serie / IMEI (laptops,
-      teléfonos). El flujo de unidades individuales **no** está implementado.
+    - `serializado`: cada unidad se identifica por serie / IMEI. El formulario
+      oculta variantes/tallas; el flujo de `UnidadActivo` **no** está
+      implementado.
 - Variantes / tallas (`Activo::tallas()`, pivote `activo_talla`) son
-  **opcionales**: un uniforme las usa; una laptop no.
+  **opcionales**.
 
 ### 4.3 Relación Almacén ↔ Activo
 
-Se **difiere** al bloque de inventario por almacén. No se crea tabla pivote de
-disponibilidad todavía para no dejar una tabla sin uso. Desactivar un almacén
-nunca desactiva un activo del catálogo.
+El stock vive en `saldos_inventario.almacen_id` (ver `docs/INVENTARIO.md`).
+Desactivar un almacén nunca desactiva un activo del catálogo.
 
 ## 5. Requerimiento global de exportación
 
@@ -123,9 +130,10 @@ bloque.
 
 ## 6. Pendientes ligados a este bloque
 
-- Migración de inventario a almacenes.
 - Cascada de desactivación (Empresa/Sucursal/Almacén → dependientes) con
   reactivación selectiva; los históricos nunca se tocan.
 - Uniformes / Conjuntos (conjunto ↔ muchos activos + cantidad requerida).
-- Flujo de activos serializados.
-- CRUD de `tipos_activo`.
+- Flujo de activos serializados (`UnidadActivo`).
+- Reingeniería de UI de Entregas / Devoluciones sobre almacén (hoy vía puente
+  `ResolverAlmacenOperativo`).
+- Redesign de Variantes / Tallas y activo "sin variante" (Unitalla).

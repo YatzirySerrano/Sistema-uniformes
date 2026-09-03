@@ -1,6 +1,6 @@
 ---
 paths:
-    - 'app/Models/{Empresa,Sucursal,Almacen,Area,Activo}.php'
+    - 'app/Models/{Empresa,Sucursal,Almacen,Area,Activo,TipoActivo,CategoriaActivo,SaldoInventario,MovimientoInventario}.php'
 ---
 
 # Models
@@ -31,11 +31,29 @@ puede recibir de varios almacenes.
   El snapshot inmutable del acuse guarda la clave `activo` (los acuses previos
   guardaron `prenda`; la plantilla lee ambas).
 - `tipo_control` (`App\Enums\TipoControlActivo`: `cantidad` | `serializado`).
-  El flujo de unidades serializadas NO está implementado.
+  El flujo de unidades serializadas (`UnidadActivo`) NO está implementado.
 - `tallas()` es **opcional** según el activo (un uniforme las usa; una laptop
   no).
-- `tipo_activo_id` → catálogo `tipos_activo` por empresa. Desactivar un almacén
-  NO afecta el catálogo de activos.
+- `tipo_activo_id` → `tipos_activo` (CRUD completo). **No** existe "Uniforme"
+  como tipo: un uniforme es un conjunto de activos (módulo pendiente).
+- `categoria_id` → `categorias_activo` (catálogo real, fuente de verdad).
+  `activos.categoria` (texto) es espejo temporal sincronizado por
+  `ActivoController`, igual que `colaboradores.area`. Relación:
+  `Activo::categoriaActivo()` (no `categoria`, para no chocar con la columna).
+- Desactivar un almacén NO afecta el catálogo de activos.
+
+## Inventario por almacén (SaldoInventario / MovimientoInventario)
+
+- La dimensión del saldo es `empresa + almacen_id + activo + talla` (único:
+  `saldos_inv_almacen_unico`). `sucursal_id` es **nullable**: sólo filas legacy
+  pendientes de migración y procedencia en el historial. Nunca reintroducir
+  stock por sucursal como fuente de verdad.
+- Toda escritura pasa por `ServicioInventario` (transacción + `lockForUpdate`,
+  sin stock negativo). `MovimientoInventarioDatos` exige `almacenId`;
+  `sucursalId` es opcional (procedencia).
+- `TipoMovimiento::MigracionLegacy` marca los traslados sucursal → almacén.
+- Scope `SaldoInventario::scopePendienteMigracion()` = `almacen_id IS NULL AND
+sucursal_id IS NOT NULL`.
 
 ## Colaborador → Área
 

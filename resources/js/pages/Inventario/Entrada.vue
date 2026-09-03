@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import type { ActivoOpcion } from '@/types/sistema';
 
 defineProps<{
-    sucursales: { id: number; nombre: string }[];
+    almacenes: { id: number; nombre: string }[];
     activos: ActivoOpcion[];
 }>();
 
@@ -23,7 +23,7 @@ defineOptions({
 });
 
 const form = useForm<{
-    sucursal_id: number | string;
+    almacen_id: number | string;
     motivo: string;
     notas: string;
     carga_inicial: boolean;
@@ -33,7 +33,7 @@ const form = useForm<{
         cantidad: number;
     }[];
 }>({
-    sucursal_id: '',
+    almacen_id: '',
     motivo: '',
     notas: '',
     carga_inicial: false,
@@ -57,25 +57,23 @@ function enviar() {
         <form class="space-y-5" @submit.prevent="enviar">
             <div class="grid gap-4 sm:grid-cols-2">
                 <div class="grid gap-1.5">
-                    <Label for="sucursal_id">Sucursal</Label>
+                    <Label for="almacen_id">Almacén</Label>
                     <select
-                        id="sucursal_id"
-                        v-model="form.sucursal_id"
+                        id="almacen_id"
+                        v-model="form.almacen_id"
                         class="border-input bg-background h-9 rounded-md border px-3 text-sm"
                         required
                     >
-                        <option value="" disabled>
-                            Selecciona una sucursal
-                        </option>
+                        <option value="" disabled>Selecciona un almacén</option>
                         <option
-                            v-for="s in sucursales"
-                            :key="s.id"
-                            :value="s.id"
+                            v-for="a in almacenes"
+                            :key="a.id"
+                            :value="a.id"
                         >
-                            {{ s.nombre }}
+                            {{ a.nombre }}
                         </option>
                     </select>
-                    <InputError :message="form.errors.sucursal_id" />
+                    <InputError :message="form.errors.almacen_id" />
                 </div>
                 <div class="grid gap-1.5">
                     <Label for="motivo">Motivo / referencia</Label>

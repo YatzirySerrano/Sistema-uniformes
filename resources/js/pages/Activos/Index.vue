@@ -37,14 +37,21 @@ type Activo = {
 const props = defineProps<{
     activos: Activo[];
     tiposActivo: { id: number; nombre: string }[];
+    categorias: { id: number; nombre: string }[];
     filtros: {
         buscar: string;
         tipo_activo_id: number | '';
+        categoria_id: number | '';
         control: '' | 'cantidad' | 'serializado';
         estado: '' | 'activos' | 'inactivos';
         orden: 'az' | 'za';
     };
-    permisos: { crear: boolean; editar: boolean; administrar: boolean };
+    permisos: {
+        crear: boolean;
+        editar: boolean;
+        administrar: boolean;
+        administrar_catalogos: boolean;
+    };
 }>();
 
 defineOptions({
@@ -53,6 +60,7 @@ defineOptions({
 
 const buscar = ref(props.filtros.buscar);
 const tipoActivoId = ref<number | ''>(props.filtros.tipo_activo_id);
+const categoriaId = ref<number | ''>(props.filtros.categoria_id);
 const control = ref<'' | 'cantidad' | 'serializado'>(props.filtros.control);
 const estado = ref<'' | 'activos' | 'inactivos'>(props.filtros.estado);
 const orden = ref<'az' | 'za'>(props.filtros.orden);
@@ -61,13 +69,14 @@ const hayFiltrosActivos = computed(
     () =>
         buscar.value !== '' ||
         tipoActivoId.value !== '' ||
+        categoriaId.value !== '' ||
         control.value !== '' ||
         estado.value !== '' ||
         orden.value !== 'az',
 );
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
-watch([buscar, tipoActivoId, control, estado, orden], () => {
+watch([buscar, tipoActivoId, categoriaId, control, estado, orden], () => {
     clearTimeout(temporizador);
     temporizador = setTimeout(() => {
         router.get(
@@ -75,6 +84,7 @@ watch([buscar, tipoActivoId, control, estado, orden], () => {
             {
                 buscar: buscar.value || undefined,
                 tipo_activo_id: tipoActivoId.value || undefined,
+                categoria_id: categoriaId.value || undefined,
                 control: control.value || undefined,
                 estado: estado.value || undefined,
                 orden: orden.value === 'az' ? undefined : orden.value,
@@ -92,6 +102,7 @@ watch([buscar, tipoActivoId, control, estado, orden], () => {
 function limpiarFiltros(): void {
     buscar.value = '';
     tipoActivoId.value = '';
+    categoriaId.value = '';
     control.value = '';
     estado.value = '';
     orden.value = 'az';
@@ -117,6 +128,15 @@ function alternarEstado(a: Activo): void {
                 <Button variant="outline" as-child>
                     <Link href="/tallas"
                         ><Ruler class="size-4" /> Variantes / tallas</Link
+                    >
+                </Button>
+                <Button
+                    v-if="permisos.administrar_catalogos"
+                    variant="outline"
+                    as-child
+                >
+                    <Link href="/activos-catalogos"
+                        ><Layers class="size-4" /> Tipos y categorías</Link
                     >
                 </Button>
                 <Button v-if="permisos.crear" as-child>
@@ -155,6 +175,24 @@ function alternarEstado(a: Activo): void {
                             :value="t.id"
                         >
                             {{ t.nombre }}
+                        </option>
+                    </select>
+                </label>
+
+                <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Categoría</span>
+                    <select
+                        v-model="categoriaId"
+                        :class="claseSelect"
+                        aria-label="Filtrar por categoría"
+                    >
+                        <option value="">Todas</option>
+                        <option
+                            v-for="c in categorias"
+                            :key="c.id"
+                            :value="c.id"
+                        >
+                            {{ c.nombre }}
                         </option>
                     </select>
                 </label>

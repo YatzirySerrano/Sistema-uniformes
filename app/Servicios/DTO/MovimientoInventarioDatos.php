@@ -6,13 +6,15 @@ use App\Enums\TipoMovimiento;
 
 /**
  * Datos de entrada para registrar un movimiento de inventario a través de
- * ServicioInventario. La dirección se deriva del tipo.
+ * ServicioInventario. La dimensión del saldo es el ALMACÉN; `sucursalId` sólo
+ * se guarda como procedencia/contexto en el movimiento (p. ej. la sucursal del
+ * colaborador que recibió una entrega). La dirección se deriva del tipo.
  */
 final readonly class MovimientoInventarioDatos
 {
     public function __construct(
         public int $empresaId,
-        public int $sucursalId,
+        public int $almacenId,
         public int $activoId,
         public int $tallaId,
         public TipoMovimiento $tipo,
@@ -23,5 +25,6 @@ final readonly class MovimientoInventarioDatos
         public ?string $motivo = null,
         public ?string $notas = null,
         public bool $permitirNegativo = false,
+        public ?int $sucursalId = null,
     ) {}
 }

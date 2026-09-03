@@ -16,7 +16,7 @@ function movimiento(array $datos, TipoMovimiento $tipo, int $cantidad): Movimien
 {
     return new MovimientoInventarioDatos(
         empresaId: $datos['empresaA']->id,
-        sucursalId: $datos['sucursalA']->id,
+        almacenId: $datos['almacenA']->id,
         activoId: $datos['activoA']->id,
         tallaId: $datos['tallaA']->id,
         tipo: $tipo,
@@ -61,7 +61,7 @@ it('un ajuste absoluto genera el movimiento con la diferencia y exige motivo', f
 
     $mov = $this->inventario->fijarExistencia(
         $this->datos['empresaA']->id,
-        $this->datos['sucursalA']->id,
+        $this->datos['almacenA']->id,
         $this->datos['activoA']->id,
         $this->datos['tallaA']->id,
         4,

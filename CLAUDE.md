@@ -214,8 +214,11 @@ accesorios, etc.): inventario, entregas con firma de recepción, comprobantes
 PDF, devoluciones, correcciones, reportes y auditoría.
 
 > El sistema dejó de ser exclusivo de uniformes. "Prendas" evolucionó a
-> **Activos** (ver más abajo). El inventario sigue asociado a la **sucursal**; su
-> migración a **inventario por almacén** es un bloque posterior.
+> **Activos**. Una **PRENDA** es un activo individual; un **UNIFORME** es un
+> conjunto de prendas (módulo Uniformes / Conjuntos — pendiente). El inventario
+> vive **por ALMACÉN** (`ALMACÉN + ACTIVO + VARIANTE = STOCK`); la sucursal es
+> sólo el destino/contexto del colaborador. Los saldos legacy por sucursal se
+> migran con el **Asistente de migración de existencias**.
 
 ## Reglas permanentes de este proyecto
 
@@ -231,25 +234,25 @@ PDF, devoluciones, correcciones, reportes y auditoría.
 - Backend: PHP 8.4, Laravel 13, Fortify (login, verificación de correo, 2FA, confirmación de contraseña), Spatie Laravel Permission, Wayfinder.
 - Frontend: Vue 3 `<script setup lang="ts">`, Inertia 3, Tailwind 4, shadcn-vue/reka-ui, Lucide, Vite.
 - Documentos: `maatwebsite/excel` (import/export), `barryvdh/laravel-dompdf` (PDF).
-- BD de desarrollo: SQLite (`database/database.sqlite`). Producción recomendada: MySQL/MariaDB InnoDB utf8mb4 (ver `docs/DESPLIEGUE.md`). Las migraciones son agnósticas al motor.
+- BD de desarrollo: MariaDB/MySQL (config actual del equipo, p. ej. MAMP en `127.0.0.1:8889`, base `uniformes`). SQLite también soportado. Producción recomendada: MySQL/MariaDB InnoDB utf8mb4 (ver `docs/DESPLIEGUE.md`). Las migraciones son forward-only y agnósticas al motor; nunca usar `migrate:fresh`.
 - Calidad: Pint, Larastan/PHPStan (nivel 7, sin errores), ESLint + Prettier (`npm run check`), `vue-tsc`, Pest.
 
 ## Arquitectura
 
 `Ruta → Controller (delgado) → Form Request → Acción/Servicio → Modelo → BD`
 
-- `app/Acciones/` — casos de uso transaccionales: `CrearEntregaUniforme`, `ConfirmarAcuseRecepcion`, `RegistrarEntradaInventario`, `AjustarInventario`, `RegistrarDevolucion`, `CorregirEntrega`.
-- `app/Servicios/` — lógica reutilizable: `ServicioInventario` (única puerta del inventario), `ServicioAuditoria` (única puerta de la bitácora), `ServicioFolios`, `ServicioAcusePdf`, `ServicioImportacionColaboradores`, `ServicioDashboard`, `ServicioReportes`.
+- `app/Acciones/` — casos de uso transaccionales: `CrearEntregaUniforme`, `ConfirmarAcuseRecepcion`, `RegistrarEntradaInventario`, `AjustarInventario`, `RegistrarDevolucion`, `CorregirEntrega`, `MigrarSaldosLegacyAAlmacen`.
+- `app/Servicios/` — lógica reutilizable: `ServicioInventario` (única puerta del inventario, **por almacén**), `ResolverAlmacenOperativo` (resuelve el almacén de origen para operaciones que aún preguntan la sucursal), `ServicioAuditoria` (única puerta de la bitácora), `ServicioFolios`, `ServicioAcusePdf`, `ServicioImportacionColaboradores`, `ServicioDashboard`, `ServicioReportes`.
 - `app/Soporte/` — `ContextoEmpresa` (empresa activa por petición), `Permisos` (catálogo), `ValidadorFirma`.
 - `app/Excepciones/` — reglas de negocio (`ExcepcionDeNegocio` → respuesta controlada en español, nunca 500).
-- `app/Enums/` — `RolSistema`, `EstadoEntrega`, `TipoMovimiento`, `DireccionMovimiento`, `CondicionDevolucion`, `TipoControlActivo`.
-- Módulos de catálogo/organización: `AreaController`, `AlmacenController`, `ActivoController` (+ `Area`, `Almacen`, `Activo`, `TipoActivo`, sus Policies y Form Requests en `Http/Requests/{Areas,Almacenes,Activos}`). Patrón calcado de Sucursales/Empresas.
+- `app/Enums/` — `RolSistema`, `EstadoEntrega`, `TipoMovimiento` (incluye `MigracionLegacy`), `DireccionMovimiento`, `CondicionDevolucion`, `TipoControlActivo`.
+- Módulos de catálogo/organización: `AreaController`, `AlmacenController`, `ActivoController`, `TipoActivoController`, `CategoriaActivoController`, `CatalogoActivoController`, `MigracionInventarioController` (+ `Area`, `Almacen`, `Activo`, `TipoActivo`, `CategoriaActivo`, sus Policies y Form Requests en `Http/Requests/{Areas,Almacenes,Activos}`). Patrón calcado de Sucursales/Empresas.
 
 ## Multiempresa
 
 - Jerarquía funcional: PLATAFORMA → EMPRESA → { SUCURSALES · ALMACENES · ÁREAS · COLABORADORES · ACTIVOS } → OPERACIÓN.
     - ALMACÉN ↔ SUCURSALES: **N:M** (`almacen_sucursal`); un almacén abastece varias sucursales.
-    - ALMACÉN → INVENTARIO: futuro (hoy el inventario es por sucursal).
+    - ALMACÉN → INVENTARIO: el inventario **vive en el almacén** (`saldos_inventario.almacen_id`). La sucursal ya no es fuente de stock.
 - Las **empresas son entidades globales** de la plataforma, no se particionan por usuario.
 - Relación N:M `empresa_usuario` y `sucursal_usuario` (columna `usuario_id`): acota a los **roles restringidos** (Supervisor, Encargado, roles personalizados). **No** limita a Superadministrador ni Administrador.
 - La **empresa activa** vive en sesión (`empresa_activa_id`) y se resuelve en el middleware `ResolverEmpresaActiva` hacia el singleton `ContextoEmpresa`, validando siempre el acceso. Un contexto vacío NO concede acceso a nada.
@@ -262,19 +265,24 @@ PDF, devoluciones, correcciones, reportes y auditoría.
 ## Roles y permisos
 
 - Spatie. Roles base (seeder): `superadministrador`, `administrador`, `supervisor`, `encargado`, `colaborador`.
-- Permisos granulares `recurso.accion` (catálogo en `App\Soporte\Permisos`). Grupos: empresas, sucursales, **almacenes** (`almacenes.ver/crear/editar/administrar`), usuarios, roles, colaboradores, **areas** (`areas.ver/crear/editar/desactivar`), **activos** (`activos.ver/crear/editar/administrar` + `tallas.administrar`), inventario, entregas, acuses, devoluciones, reportes, auditoría, configuración. El Administrador puede crear roles personalizados y asignar permisos. No se hardcodea autorización por nombre de rol (salvo el bypass del Superadministrador).
+- Permisos granulares `recurso.accion` (catálogo en `App\Soporte\Permisos`). Grupos: empresas, sucursales, **almacenes** (`almacenes.ver/crear/editar/administrar`), usuarios, roles, colaboradores, **areas** (`areas.ver/crear/editar/desactivar`), **activos** (`activos.ver/crear/editar/administrar` + `tallas.administrar` + `tipos-activo.administrar` + `categorias-activo.administrar`), **inventario** (`inventario.ver/entrada/ajustar/minimos/transferir/migrar`), entregas, acuses, devoluciones, reportes, auditoría, configuración. El Administrador puede crear roles personalizados y asignar permisos. No se hardcodea autorización por nombre de rol (salvo el bypass del Superadministrador).
 
 ## Almacenes / Áreas / Activos
 
 - **Almacén** (`almacenes`): pertenece a la empresa; `codigo` autogenerado `ALM-0001`; `responsable_colaborador_id` nullable (combobox con búsqueda: `almacenes/colaboradores-buscar`); N:M con sucursales abastecidas (`almacen_sucursal`). Desactivar un almacén sólo lo saca de operaciones: **no** toca el catálogo de activos ni los históricos.
 - **Área / Departamento** (`areas`): pertenece a la empresa; `codigo` `ARE-0001`. `colaboradores.area_id` es la **fuente de verdad**; la columna de texto `colaboradores.area` se conserva como espejo temporal hasta la reingeniería de Colaboradores (`ColaboradorController` sincroniza el nombre). Relación en el modelo: `Colaborador::departamento()`.
-- **Activo** (`activos`, antes `prendas`; pivote `activo_talla`, FK `activo_id` en inventario y detalles): `codigo` `ACT-0001`; `tipo_activo_id` → catálogo `tipos_activo` por empresa (sembrado, CRUD de administración pendiente); `tipo_control` (`App\Enums\TipoControlActivo`: `cantidad` | `serializado`). Las variantes/tallas son **opcionales** según el activo. El flujo de unidades serializadas (serie/IMEI) está contemplado en el catálogo pero **no implementado**.
+- **Tipo de activo** (`tipos_activo`): catálogo por empresa con **CRUD completo** (`TipoActivoController`, pantalla `Activos/Catalogos.vue`, permiso `tipos-activo.administrar`). Tipos base sembrados: Prenda, Equipo de cómputo, Dispositivo móvil, Electrónico, Accesorio, Herramienta / Equipo, Otro. **No existe "Uniforme"** como tipo (un uniforme es un conjunto de activos). Alta rápida "Otro" desde el formulario de Activo: `POST tipos-activo/rapido` (JSON).
+- **Categoría de activo** (`categorias_activo`): catálogo real por empresa (`CategoriaActivoController`, permiso `categorias-activo.administrar`), sustituye al texto libre. `tipo_activo_id` nullable (relación opcional). `activos.categoria_id` es la fuente de verdad; `activos.categoria` (texto) se conserva como **espejo temporal** sincronizado por `ActivoController`. Alta rápida "Otra": `POST categorias-activo/rapido`.
+- **Activo** (`activos`, antes `prendas`; pivote `activo_talla`, FK `activo_id` en inventario y detalles): `codigo` `ACT-0001`; `tipo_activo_id` → `tipos_activo`; `categoria_id` → `categorias_activo`; `tipo_control` (`App\Enums\TipoControlActivo`: `cantidad` | `serializado`). Serializado oculta variantes/tallas en el formulario. El flujo de **unidades serializadas** (serie/IMEI, entidad `UnidadActivo`) sigue **pendiente**.
 
-## Inventario
+## Inventario (por almacén)
 
-- `saldos_inventario` (saldo actual, único por empresa+sucursal+**activo**+talla) + `movimientos_inventario` (historia append-only con `existencia_anterior`/`existencia_resultante`).
-- Toda modificación pasa por `ServicioInventario::registrarMovimiento()` dentro de `DB::transaction()` con `lockForUpdate()` sobre la fila de saldo. **No se permite stock negativo** (mensaje en español). Mínimos configurables por saldo.
-- **Pendiente**: migración a inventario por **almacén** (`ALMACÉN + ACTIVO + VARIANTE = STOCK`). No duplicar saldos ni crear una segunda fuente de inventario mientras tanto.
+- `saldos_inventario` (saldo actual, único por `empresa + almacen_id + activo + talla` — índice `saldos_inv_almacen_unico`) + `movimientos_inventario` (historia append-only con `existencia_anterior`/`existencia_resultante`, guarda `almacen_id` y opcionalmente `sucursal_id` de procedencia).
+- `sucursal_id` en ambas tablas es **nullable**: sólo aparece en filas legacy pendientes de migración y como procedencia en el historial. Nunca en operación nueva.
+- Toda modificación pasa por `ServicioInventario::registrarMovimiento()` (dimensión = **almacén**) dentro de `DB::transaction()` con `lockForUpdate()` sobre la fila de saldo. **No se permite stock negativo**. Mínimos por `almacén + activo + talla`.
+- El módulo Inventario, las entradas, los ajustes y los movimientos operan **por almacén**. Un almacén desactivado no admite entradas/ajustes.
+- **Entregas / Devoluciones / Correcciones** todavía preguntan la sucursal en la UI; el almacén de origen se resuelve con `ResolverAlmacenOperativo` (abastecedor **único** de la sucursal; si hay cero o varios → error en español, nunca 500). `entregas_uniformes.almacen_id` y `devoluciones.almacen_id` guardan la procedencia. La reingeniería de esas UIs (selector de almacén, uniformes, serializados) es fase siguiente.
+- **Migración legacy** (`sucursal → almacén`): la migración `..._000014` traslada automáticamente los saldos de sucursales con **un único** abastecedor activo; el resto queda pendiente y se resuelve con el **Asistente de migración de existencias** (`MigracionInventarioController`, `/inventario/migracion`, permiso `inventario.migrar`, acción `MigrarSaldosLegacyAAlmacen`). Nunca duplica saldos; idempotente.
 
 ## Entregas, firmas y acuses
 
@@ -287,30 +295,32 @@ PDF, devoluciones, correcciones, reportes y auditoría.
 
 ## Auditoría
 
-- `bitacora_auditoria` append-only (sin `updated_at`). Única escritura desde `ServicioAuditoria::registrar()`. Auditan crear/editar/activar/desactivar de Almacén, Área y Activo, y los cambios de relación `Almacén ↔ Sucursal`.
+- `bitacora_auditoria` append-only (sin `updated_at`). Única escritura desde `ServicioAuditoria::registrar()`. Auditan crear/editar/activar/desactivar de Almacén, Área, Activo, **Tipo de activo** y **Categoría de activo**; los cambios de relación `Almacén ↔ Sucursal`; entradas/ajustes/mínimos de inventario; y la **migración legacy** (`modulo=inventario`, `accion=migracion_legacy`).
 
 ## Frontend
 
 - Páginas por dominio en `resources/js/pages/{Colaboradores,Areas,Activos,Almacenes,Inventario,Entregas,Acuses,Devoluciones,Reportes,Empresas,Sucursales,Usuarios,Roles,Auditoria,Portal}`.
 - Listados en **cards** (no tabla): Empresas, Sucursales, Áreas, Almacenes, Activos — con filtros búsqueda/estado/orden y "Limpiar filtros". Vistas de detalle a **ancho completo**.
 - Componentes compartidos en `resources/js/components/sistema/` (incluye `BuscadorAsync.vue` = combobox con búsqueda remota, y `SelectorItemsActivos.vue`) y `resources/js/components/{entregas,areas,almacenes}/`.
-- `usePermisos()` expone `puede()` / `contexto` desde los props compartidos por `HandleInertiaRequests`. El menú lateral (`AppSidebar.vue`) oculta opciones según permisos e incluye el selector de empresa. Orden: Panel · Personal (Colaboradores, Áreas) · Catálogo e inventario (Activos, Almacenes, Inventario, Movimientos) · Operación · Reportes · Administración · Auditoría.
+- `usePermisos()` expone `puede()` / `contexto` desde los props compartidos por `HandleInertiaRequests`. El menú lateral (`AppSidebar.vue`) oculta opciones según permisos e incluye el selector de empresa. Orden: Panel · Personal (Colaboradores, Áreas) · Catálogo e inventario (Activos, Almacenes, Inventario, Movimientos, Migración de inventario) · Operación · Reportes · Administración · Auditoría. "Tipos y categorías" se abre desde el índice de Activos (`/activos-catalogos`), no ocupa entrada propia.
 - Branding por empresa: tokens CSS (`--marca-principal`, …) calculados en `Empresa::tokensDeMarca()` con contraste automático.
 - Requisito global (no implementado): cada listado tendrá `[Exportar Excel]` / `[Exportar PDF]` respetando filtros; el query del `index` debe ser reutilizable por pantalla/PDF/Excel.
 
 ## Datos de prueba
 
-`php artisan db:seed` prepara empresas A/B/C con branding distinto, sucursales, tallas, tipos de activo, activos (uniformes + un serializado de ejemplo), áreas, almacenes con sucursales abastecidas, ~165 colaboradores (con `area_id`), inventario (normal/bajo/cero), y entregas de ejemplo (pendiente, firmada con PDF, devuelta, corregida). Contraseña de todos los usuarios ficticios: `password`. Superadministrador: `superadmin@example.test`.
+`php artisan db:seed` prepara empresas A/B/C con branding distinto, sucursales, tallas, **tipos base y categorías** de activo, activos (uniformes + un serializado de ejemplo), áreas, almacenes con sucursales abastecidas (cada sucursal con **un** abastecedor), ~165 colaboradores (con `area_id`), **inventario por almacén** (normal/bajo/cero, sólo activos por cantidad), y entregas de ejemplo (pendiente, firmada con PDF, devuelta, corregida) que salen del almacén abastecedor. Contraseña de todos los usuarios ficticios: `password`. Superadministrador: `superadmin@example.test`.
 
 ## Pendientes (bloques futuros)
 
-- **Migración de inventario a almacenes** (bloque siguiente).
 - Cascada de desactivación (Empresa/Sucursal/Almacén → dependientes) con reactivación selectiva; nunca alterar históricos.
-- Módulo Uniformes/Conjuntos (un conjunto ↔ muchos activos + cantidad requerida).
-- Flujo de activos serializados (unidades con serie/IMEI).
-- Reingeniería de Colaboradores (importador Excel, expediente, INE, aviso de privacidad, doble firma), Entregas, Devoluciones y Reportes nuevos.
-- CRUD de administración de `tipos_activo`.
-- Bug responsive/hover del sidebar; pasada global de ancho completo en detalles restantes.
+- Módulo **Uniformes/Conjuntos** (un conjunto ↔ muchos activos + cantidad requerida; disponibilidad calculada desde los componentes).
+- Flujo de **activos serializados**: entidad `UnidadActivo` (serie/IMEI/etiqueta patrimonial), entrada de inventario unidad por unidad, entrega/devolución por unidad.
+- Reingeniería de UI de **Entregas / Devoluciones** sobre almacén (selector de almacén, entrega de uniformes, serializados, PDF nuevo). Hoy funcionan vía puente `ResolverAlmacenOperativo`.
+- Redesign de **Variantes / Tallas** (modal de alta sin campo "Orden", reordenar con ↑/↓ o drag&drop); soporte de activo **sin variante** ("Unitalla") en inventario.
+- Componente compartido de **subida de archivos** (drag & drop) y su despliegue global.
+- Reingeniería de Colaboradores (importador Excel, expediente, INE, aviso de privacidad, doble firma) y Reportes nuevos.
+- CRUD de `categorias_activo` con relación fuerte a tipo si se decide; hoy la relación es opcional.
+- Pasada global de **responsive** en los módulos nuevos (6 breakpoints); bug responsive/hover del sidebar; pasada de ancho completo en detalles restantes.
 
 ## Documentación
 

@@ -4,16 +4,16 @@ namespace App\Acciones;
 
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\MovimientoInventario;
-use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Ajuste de existencias a un valor objetivo. Exige motivo y queda auditado.
- * No sustituye el saldo directamente: genera el movimiento de ajuste.
+ * Ajuste de existencias de un ALMACÉN a un valor objetivo. Exige motivo y queda
+ * auditado. No sustituye el saldo directamente: genera el movimiento de ajuste.
  */
 class AjustarInventario
 {
@@ -24,7 +24,7 @@ class AjustarInventario
 
     public function ejecutar(
         int $empresaId,
-        int $sucursalId,
+        int $almacenId,
         int $activoId,
         int $tallaId,
         int $existenciaObjetivo,
@@ -38,16 +38,22 @@ class AjustarInventario
             throw new ExcepcionDeNegocioSimple('La existencia objetivo no puede ser negativa.');
         }
 
-        Sucursal::query()->where('empresa_id', $empresaId)->findOr($sucursalId, fn () => throw new ExcepcionDeNegocioSimple('La sucursal no pertenece a esta empresa.'));
+        $almacen = Almacen::query()->where('empresa_id', $empresaId)
+            ->findOr($almacenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén no pertenece a esta empresa.'));
+
+        if (! $almacen->activo) {
+            throw new ExcepcionDeNegocioSimple('El almacén está desactivado; no admite ajustes de inventario.');
+        }
+
         Activo::query()->where('empresa_id', $empresaId)->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('El activo no pertenece a esta empresa.'));
         Talla::query()->where('empresa_id', $empresaId)->findOr($tallaId, fn () => throw new ExcepcionDeNegocioSimple('La talla no pertenece a esta empresa.'));
 
-        return DB::transaction(function () use ($empresaId, $sucursalId, $activoId, $tallaId, $existenciaObjetivo, $motivo, $realizadoPor): ?MovimientoInventario {
-            $anterior = $this->inventario->saldoActual($empresaId, $sucursalId, $activoId, $tallaId);
+        return DB::transaction(function () use ($empresaId, $almacenId, $activoId, $tallaId, $existenciaObjetivo, $motivo, $realizadoPor): ?MovimientoInventario {
+            $anterior = $this->inventario->saldoActual($empresaId, $almacenId, $activoId, $tallaId);
 
             $movimiento = $this->inventario->fijarExistencia(
                 $empresaId,
-                $sucursalId,
+                $almacenId,
                 $activoId,
                 $tallaId,
                 $existenciaObjetivo,
@@ -56,11 +62,10 @@ class AjustarInventario
             );
 
             $this->auditoria->registrar('inventario', 'ajuste', [
-                'sucursal_id' => $sucursalId,
                 'tipo_entidad' => MovimientoInventario::class,
                 'entidad_id' => $movimiento?->getKey(),
                 'motivo' => $motivo,
-                'descripcion' => "Ajuste de existencia de {$anterior} a {$existenciaObjetivo}.",
+                'descripcion' => "Ajuste de existencia de {$anterior} a {$existenciaObjetivo} en almacén #{$almacenId}.",
                 'valores_anteriores' => ['cantidad' => $anterior],
                 'valores_nuevos' => ['cantidad' => $existenciaObjetivo],
             ]);

@@ -5,9 +5,9 @@ namespace Database\Factories;
 use App\Enums\DireccionMovimiento;
 use App\Enums\TipoMovimiento;
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\Empresa;
 use App\Models\MovimientoInventario;
-use App\Models\Sucursal;
 use App\Models\Talla;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -25,7 +25,8 @@ class MovimientoInventarioFactory extends Factory
     {
         return [
             'empresa_id' => Empresa::factory(),
-            'sucursal_id' => Sucursal::factory(),
+            'almacen_id' => Almacen::factory(),
+            'sucursal_id' => null,
             'activo_id' => Activo::factory(),
             'talla_id' => Talla::factory(),
             'tipo' => TipoMovimiento::Entrada,

@@ -63,11 +63,56 @@ type AlmacenDetalle = {
     sucursales: SucursalAbastecida[];
 };
 
+type VarianteStock = {
+    talla_id: number;
+    talla: string | null;
+    cantidad: number;
+    minimo: number;
+    bajo_minimo: boolean;
+};
+type ActivoStock = {
+    activo_id: number;
+    activo: string | null;
+    tipo: string | null;
+    categoria: string | null;
+    control: string;
+    total: number;
+    bajo_minimo: boolean;
+    variantes: VarianteStock[];
+};
+
 const props = defineProps<{
     almacen: AlmacenDetalle;
     sucursalesDisponibles: SucursalOpcion[];
-    permisos: { editar: boolean; administrar: boolean };
+    resumen: {
+        tipos_activo: number;
+        existencias: number;
+        variantes_bajo_minimo: number;
+        sucursales_abastecidas: number;
+        legacy_pendiente: number;
+    };
+    inventario: ActivoStock[];
+    permisos: {
+        editar: boolean;
+        administrar: boolean;
+        inventario_ver: boolean;
+        inventario_entrada: boolean;
+        inventario_ajustar: boolean;
+        inventario_migrar: boolean;
+    };
 }>();
+
+const buscarInv = ref('');
+const inventarioFiltrado = computed(() => {
+    const q = buscarInv.value.trim().toLowerCase();
+    if (!q) return props.inventario;
+    return props.inventario.filter(
+        (a) =>
+            (a.activo ?? '').toLowerCase().includes(q) ||
+            (a.categoria ?? '').toLowerCase().includes(q) ||
+            (a.tipo ?? '').toLowerCase().includes(q),
+    );
+});
 
 defineOptions({
     layout: {
@@ -395,29 +440,162 @@ function confirmarDesactivar(): void {
                 <ScrollText class="text-muted-foreground size-4" />
                 Resumen operativo
             </h2>
-            <div class="grid gap-3 sm:grid-cols-2">
-                <div class="bg-muted/40 rounded-lg p-3">
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="bg-muted/40 min-w-0 rounded-lg p-3">
                     <p class="text-muted-foreground text-xs">
                         Sucursales abastecidas
                     </p>
                     <p class="text-2xl font-semibold">
-                        {{ almacen.sucursales.length }}
+                        {{ resumen.sucursales_abastecidas }}
                     </p>
                 </div>
-                <div class="bg-muted/40 rounded-lg p-3">
+                <div class="bg-muted/40 min-w-0 rounded-lg p-3">
+                    <p class="text-muted-foreground text-xs">
+                        Tipos de activo con stock
+                    </p>
+                    <p class="text-2xl font-semibold">
+                        {{ resumen.tipos_activo }}
+                    </p>
+                </div>
+                <div class="bg-muted/40 min-w-0 rounded-lg p-3">
+                    <p class="text-muted-foreground text-xs">
+                        Existencias totales
+                    </p>
+                    <p class="text-2xl font-semibold">
+                        {{ resumen.existencias }}
+                    </p>
+                </div>
+                <div class="bg-muted/40 min-w-0 rounded-lg p-3">
+                    <p class="text-muted-foreground text-xs">
+                        Variantes bajo mínimo
+                    </p>
                     <p
-                        class="text-muted-foreground flex items-center gap-1 text-xs"
+                        class="text-2xl font-semibold"
+                        :class="
+                            resumen.variantes_bajo_minimo > 0
+                                ? 'text-amber-600'
+                                : ''
+                        "
                     >
-                        Inventario del almacén
-                        <AyudaTooltip
-                            texto="La administración de inventario por almacén se habilitará en un bloque posterior. Hoy el inventario sigue asociado a la sucursal."
-                            etiqueta="Ayuda sobre el inventario del almacén"
-                        />
-                    </p>
-                    <p class="text-muted-foreground text-sm">
-                        Disponible próximamente
+                        {{ resumen.variantes_bajo_minimo }}
                     </p>
                 </div>
+            </div>
+
+            <div
+                v-if="
+                    resumen.legacy_pendiente > 0 && permisos.inventario_migrar
+                "
+                class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950/40"
+            >
+                <span class="min-w-0"
+                    >{{ resumen.legacy_pendiente }} saldo(s) de sucursales que
+                    abastece este almacén siguen sin migrar.</span
+                >
+                <Button variant="outline" size="sm" as-child>
+                    <Link href="/inventario/migracion">Migrar existencias</Link>
+                </Button>
+            </div>
+        </section>
+
+        <section class="rounded-xl border p-4">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 class="flex items-center gap-2 text-sm font-semibold">
+                    <Warehouse class="text-muted-foreground size-4" />
+                    Inventario del almacén
+                </h2>
+                <div class="flex flex-wrap items-center gap-2">
+                    <input
+                        v-model="buscarInv"
+                        type="search"
+                        placeholder="Buscar activo, tipo o categoría"
+                        class="border-input bg-background h-9 min-w-0 rounded-md border px-3 text-sm"
+                    />
+                    <Button
+                        v-if="permisos.inventario_entrada"
+                        size="sm"
+                        as-child
+                    >
+                        <Link href="/inventario/entrada"
+                            >Registrar entrada</Link
+                        >
+                    </Button>
+                    <Button
+                        v-if="permisos.inventario_ver"
+                        size="sm"
+                        variant="outline"
+                        as-child
+                    >
+                        <Link :href="`/inventario?almacen_id=${almacen.id}`">
+                            Ver inventario
+                        </Link>
+                    </Button>
+                    <Button
+                        v-if="permisos.inventario_ver"
+                        size="sm"
+                        variant="ghost"
+                        as-child
+                    >
+                        <Link
+                            :href="`/inventario/movimientos?almacen_id=${almacen.id}`"
+                        >
+                            Movimientos
+                        </Link>
+                    </Button>
+                </div>
+            </div>
+
+            <p
+                v-if="!inventario.length"
+                class="text-muted-foreground py-6 text-center text-sm"
+            >
+                Este almacén todavía no tiene existencias. Registra una entrada
+                o migra las existencias legacy de sus sucursales.
+            </p>
+            <p
+                v-else-if="!inventarioFiltrado.length"
+                class="text-muted-foreground py-6 text-center text-sm"
+            >
+                Sin resultados para «{{ buscarInv }}».
+            </p>
+
+            <div v-else class="grid gap-3 md:grid-cols-2">
+                <article
+                    v-for="a in inventarioFiltrado"
+                    :key="a.activo_id"
+                    class="min-w-0 rounded-lg border p-3"
+                >
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <p class="truncate font-medium">{{ a.activo }}</p>
+                            <p class="text-muted-foreground truncate text-xs">
+                                {{
+                                    [a.tipo, a.categoria]
+                                        .filter(Boolean)
+                                        .join(' · ') || '—'
+                                }}
+                            </p>
+                        </div>
+                        <Badge
+                            :variant="a.bajo_minimo ? 'secondary' : 'outline'"
+                            class="shrink-0 text-xs"
+                            :class="a.bajo_minimo ? 'text-amber-600' : ''"
+                        >
+                            {{ a.total }}
+                        </Badge>
+                    </div>
+                    <ul class="mt-2 flex flex-wrap gap-1.5 text-xs">
+                        <li
+                            v-for="v in a.variantes"
+                            :key="v.talla_id"
+                            class="bg-muted/50 rounded px-2 py-0.5"
+                            :class="v.bajo_minimo ? 'text-amber-600' : ''"
+                        >
+                            {{ v.talla ?? 's/v' }}:
+                            <strong>{{ v.cantidad }}</strong>
+                        </li>
+                    </ul>
+                </article>
             </div>
         </section>
 

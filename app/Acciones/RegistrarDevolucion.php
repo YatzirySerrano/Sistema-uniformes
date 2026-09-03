@@ -12,6 +12,7 @@ use App\Models\EntregaUniforme;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
+use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
@@ -28,6 +29,7 @@ class RegistrarDevolucion
         private readonly ServicioInventario $inventario,
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
+        private readonly ResolverAlmacenOperativo $resolverAlmacen,
     ) {}
 
     /**
@@ -47,10 +49,16 @@ class RegistrarDevolucion
         $sucursal = Sucursal::query()->where('empresa_id', $empresaId)->findOr($sucursalId, fn () => throw new ExcepcionDeNegocioSimple('La sucursal no pertenece a esta empresa.'));
         $colaborador = Colaborador::query()->where('empresa_id', $empresaId)->findOr($colaboradorId, fn () => throw new ExcepcionDeNegocioSimple('El colaborador no pertenece a esta empresa.'));
 
+        $entregaOrigen = null;
         if ($entregaId !== null) {
-            EntregaUniforme::query()->where('empresa_id', $empresaId)->where('colaborador_id', $colaboradorId)
+            $entregaOrigen = EntregaUniforme::query()->where('empresa_id', $empresaId)->where('colaborador_id', $colaboradorId)
                 ->findOr($entregaId, fn () => throw new ExcepcionDeNegocioSimple('La entrega indicada no corresponde a este colaborador.'));
         }
+
+        // Destino de la devolución: por defecto el almacén de origen de la
+        // entrega si sigue disponible; si no, el abastecedor inequívoco de la
+        // sucursal.
+        $almacen = $this->resolverAlmacen->paraSucursal($sucursal, $entregaOrigen?->almacen_id);
 
         $items = array_values(array_filter($items, fn ($i): bool => (int) $i['cantidad'] > 0));
 
@@ -61,11 +69,12 @@ class RegistrarDevolucion
         $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->pluck('id')->all();
         $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'talla_id'))->pluck('id')->all();
 
-        return DB::transaction(function () use ($empresaId, $sucursal, $colaborador, $entregaId, $fecha, $items, $registradaPor, $motivo, $notas, $activos, $tallas): Devolucion {
+        return DB::transaction(function () use ($empresaId, $sucursal, $almacen, $colaborador, $entregaId, $fecha, $items, $registradaPor, $motivo, $notas, $activos, $tallas): Devolucion {
             $devolucion = Devolucion::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION, $empresaId),
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursal->getKey(),
+                'almacen_id' => $almacen->getKey(),
                 'colaborador_id' => $colaborador->getKey(),
                 'entrega_uniforme_id' => $entregaId,
                 'registrada_por' => $registradaPor,
@@ -93,7 +102,7 @@ class RegistrarDevolucion
                 if ($reingresa) {
                     $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                         empresaId: $empresaId,
-                        sucursalId: $sucursal->getKey(),
+                        almacenId: $almacen->getKey(),
                         activoId: (int) $item['activo_id'],
                         tallaId: (int) $item['talla_id'],
                         tipo: TipoMovimiento::Devolucion,
@@ -102,6 +111,7 @@ class RegistrarDevolucion
                         referenciaTipo: Devolucion::class,
                         referenciaId: $devolucion->getKey(),
                         motivo: 'Devolución '.$devolucion->folio,
+                        sucursalId: $sucursal->getKey(),
                     ));
                 }
             }

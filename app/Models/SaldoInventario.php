@@ -10,15 +10,17 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * Saldo actual de inventario por empresa + sucursal + activo + talla.
+ * Saldo actual de inventario por empresa + ALMACÉN + activo + talla.
  * Se actualiza únicamente a través de App\Servicios\ServicioInventario.
  *
- * Nota: el inventario sigue asociado a la SUCURSAL. La migración a inventario
- * por ALMACÉN es un bloque posterior.
+ * El origen físico del stock es el ALMACÉN. `sucursal_id` sólo aparece en filas
+ * legacy aún no migradas (ver "Asistente de migración de existencias") y en el
+ * historial; nunca en operación nueva.
  *
  * @property int $id
  * @property int $empresa_id
- * @property int $sucursal_id
+ * @property int|null $almacen_id
+ * @property int|null $sucursal_id Sólo filas legacy pendientes de migración
  * @property int $activo_id
  * @property int $talla_id
  * @property int $cantidad
@@ -33,6 +35,7 @@ class SaldoInventario extends Model
 
     protected $fillable = [
         'empresa_id',
+        'almacen_id',
         'sucursal_id',
         'activo_id',
         'talla_id',
@@ -49,6 +52,16 @@ class SaldoInventario extends Model
     }
 
     /**
+     * @return BelongsTo<Almacen, $this>
+     */
+    public function almacen(): BelongsTo
+    {
+        return $this->belongsTo(Almacen::class);
+    }
+
+    /**
+     * Sólo poblado en filas legacy pendientes de migración a almacén.
+     *
      * @return BelongsTo<Sucursal, $this>
      */
     public function sucursal(): BelongsTo
@@ -84,5 +97,16 @@ class SaldoInventario extends Model
     public function scopeBajoMinimo(Builder $query): Builder
     {
         return $query->where('minimo', '>', 0)->whereColumn('cantidad', '<=', 'minimo');
+    }
+
+    /**
+     * Filas legacy pendientes de trasladar a un almacén.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopePendienteMigracion(Builder $query): Builder
+    {
+        return $query->whereNull('almacen_id')->whereNotNull('sucursal_id');
     }
 }

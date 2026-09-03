@@ -6,11 +6,13 @@ use App\Http\Controllers\Concerns\ConEmpresaActiva;
 use App\Http\Requests\Almacenes\GuardarAlmacenRequest;
 use App\Models\Almacen;
 use App\Models\Colaborador;
+use App\Models\SaldoInventario;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -94,7 +96,29 @@ class AlmacenController extends Controller
             'sucursales:id,nombre,codigo,direccion,activa',
         ]);
 
+        $saldos = SaldoInventario::query()
+            ->where('empresa_id', $almacen->empresa_id)
+            ->where('almacen_id', $almacen->id)
+            ->with(['activo:id,nombre,tipo_control,categoria_id,tipo_activo_id', 'activo.categoriaActivo:id,nombre', 'activo.tipoActivo:id,nombre', 'talla:id,valor'])
+            ->get();
+
+        $inventario = $this->resumirInventario($saldos);
+
+        $legacyPendiente = SaldoInventario::query()
+            ->where('empresa_id', $almacen->empresa_id)
+            ->pendienteMigracion()
+            ->whereHas('sucursal', fn (Builder $q) => $q->whereHas('almacenes', fn (Builder $a) => $a->whereKey($almacen->id)))
+            ->count();
+
         return Inertia::render('Almacenes/Detalle', [
+            'resumen' => [
+                'tipos_activo' => count($inventario),
+                'existencias' => (int) $saldos->sum('cantidad'),
+                'variantes_bajo_minimo' => $saldos->filter(fn (SaldoInventario $s): bool => $s->estaBajoMinimo())->count(),
+                'sucursales_abastecidas' => $almacen->sucursales->count(),
+                'legacy_pendiente' => $legacyPendiente,
+            ],
+            'inventario' => $inventario,
             'almacen' => [
                 ...$almacen->only(['id', 'nombre', 'codigo', 'descripcion', 'direccion', 'telefono', 'correo', 'activo']),
                 'empresa' => [
@@ -119,6 +143,10 @@ class AlmacenController extends Controller
             'permisos' => [
                 'editar' => $request->user()->can('update', $almacen),
                 'administrar' => $request->user()->can('administrar', $almacen),
+                'inventario_ver' => $request->user()->can('inventario.ver'),
+                'inventario_entrada' => $request->user()->can('inventario.entrada'),
+                'inventario_ajustar' => $request->user()->can('inventario.ajustar'),
+                'inventario_migrar' => $request->user()->can('inventario.migrar'),
             ],
         ]);
     }
@@ -258,6 +286,49 @@ class AlmacenController extends Controller
             ]);
 
         return response()->json(['colaboradores' => $colaboradores]);
+    }
+
+    /**
+     * Agrupa los saldos del almacén por activo para el detalle.
+     *
+     * @param  Collection<int, SaldoInventario>  $saldos
+     * @return array<int, array<string, mixed>>
+     */
+    private function resumirInventario(Collection $saldos): array
+    {
+        return $saldos
+            ->groupBy('activo_id')
+            ->map(function (Collection $filas): array {
+                /** @var SaldoInventario|null $primero */
+                $primero = $filas->first();
+                $activo = $primero?->activo;
+
+                $variantes = $filas
+                    ->map(fn (SaldoInventario $s): array => [
+                        'talla_id' => (int) $s->talla_id,
+                        'talla' => $s->talla?->valor,
+                        'cantidad' => (int) $s->cantidad,
+                        'minimo' => (int) $s->minimo,
+                        'bajo_minimo' => $s->estaBajoMinimo(),
+                    ])
+                    ->sortBy('talla')
+                    ->values()
+                    ->all();
+
+                return [
+                    'activo_id' => $activo?->id,
+                    'activo' => $activo?->nombre,
+                    'tipo' => $activo?->tipoActivo?->nombre,
+                    'categoria' => $activo?->categoriaActivo?->nombre,
+                    'control' => $activo?->tipo_control->value,
+                    'total' => (int) $filas->sum('cantidad'),
+                    'bajo_minimo' => $filas->contains(fn (SaldoInventario $s): bool => $s->estaBajoMinimo()),
+                    'variantes' => $variantes,
+                ];
+            })
+            ->sortBy('activo')
+            ->values()
+            ->all();
     }
 
     /**

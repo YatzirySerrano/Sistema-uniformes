@@ -5,9 +5,9 @@ namespace App\Servicios;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
-use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use Illuminate\Support\Facades\DB;
@@ -17,14 +17,16 @@ use Illuminate\Support\Facades\DB;
  * (entradas, entregas, devoluciones, ajustes, correcciones y traspasos) debe
  * pasar por aquí para garantizar coherencia entre saldo y movimientos, control
  * de concurrencia y prohibición de stock negativo.
+ *
+ * La dimensión del saldo es: empresa + ALMACÉN + activo + talla.
  */
 class ServicioInventario
 {
-    public function saldoActual(int $empresaId, int $sucursalId, int $activoId, int $tallaId): int
+    public function saldoActual(int $empresaId, int $almacenId, int $activoId, int $tallaId): int
     {
         return (int) SaldoInventario::query()
             ->where('empresa_id', $empresaId)
-            ->where('sucursal_id', $sucursalId)
+            ->where('almacen_id', $almacenId)
             ->where('activo_id', $activoId)
             ->where('talla_id', $tallaId)
             ->value('cantidad');
@@ -43,7 +45,7 @@ class ServicioInventario
         return DB::transaction(function () use ($datos): MovimientoInventario {
             $saldo = SaldoInventario::query()
                 ->where('empresa_id', $datos->empresaId)
-                ->where('sucursal_id', $datos->sucursalId)
+                ->where('almacen_id', $datos->almacenId)
                 ->where('activo_id', $datos->activoId)
                 ->where('talla_id', $datos->tallaId)
                 ->lockForUpdate()
@@ -52,7 +54,8 @@ class ServicioInventario
             if ($saldo === null) {
                 $saldo = new SaldoInventario([
                     'empresa_id' => $datos->empresaId,
-                    'sucursal_id' => $datos->sucursalId,
+                    'almacen_id' => $datos->almacenId,
+                    'sucursal_id' => null,
                     'activo_id' => $datos->activoId,
                     'talla_id' => $datos->tallaId,
                     'cantidad' => 0,
@@ -70,8 +73,8 @@ class ServicioInventario
             if ($resultante < 0 && ! $datos->permitirNegativo) {
                 throw ExistenciasInsuficientesException::para(
                     Activo::query()->whereKey($datos->activoId)->value('nombre') ?? 'el activo',
-                    Talla::query()->whereKey($datos->tallaId)->value('valor') ?? 's/t',
-                    Sucursal::query()->whereKey($datos->sucursalId)->value('nombre') ?? 's/s',
+                    Talla::query()->whereKey($datos->tallaId)->value('valor') ?? 's/v',
+                    Almacen::query()->whereKey($datos->almacenId)->value('nombre') ?? 's/a',
                     $anterior,
                     $datos->cantidad,
                 );
@@ -82,6 +85,7 @@ class ServicioInventario
 
             return MovimientoInventario::query()->create([
                 'empresa_id' => $datos->empresaId,
+                'almacen_id' => $datos->almacenId,
                 'sucursal_id' => $datos->sucursalId,
                 'activo_id' => $datos->activoId,
                 'talla_id' => $datos->tallaId,
@@ -100,18 +104,18 @@ class ServicioInventario
         });
     }
 
-    public function ajustarMinimo(int $empresaId, int $sucursalId, int $activoId, int $tallaId, int $minimo): SaldoInventario
+    public function ajustarMinimo(int $empresaId, int $almacenId, int $activoId, int $tallaId, int $minimo): SaldoInventario
     {
-        return DB::transaction(function () use ($empresaId, $sucursalId, $activoId, $tallaId, $minimo): SaldoInventario {
+        return DB::transaction(function () use ($empresaId, $almacenId, $activoId, $tallaId, $minimo): SaldoInventario {
             /** @var SaldoInventario $saldo */
             $saldo = SaldoInventario::query()->firstOrCreate(
                 [
                     'empresa_id' => $empresaId,
-                    'sucursal_id' => $sucursalId,
+                    'almacen_id' => $almacenId,
                     'activo_id' => $activoId,
                     'talla_id' => $tallaId,
                 ],
-                ['cantidad' => 0, 'minimo' => 0],
+                ['sucursal_id' => null, 'cantidad' => 0, 'minimo' => 0],
             );
 
             $saldo->update(['minimo' => max(0, $minimo)]);
@@ -126,14 +130,15 @@ class ServicioInventario
      */
     public function fijarExistencia(
         int $empresaId,
-        int $sucursalId,
+        int $almacenId,
         int $activoId,
         int $tallaId,
         int $objetivo,
         string $motivo,
         ?int $realizadoPor,
+        ?int $sucursalId = null,
     ): ?MovimientoInventario {
-        $actual = $this->saldoActual($empresaId, $sucursalId, $activoId, $tallaId);
+        $actual = $this->saldoActual($empresaId, $almacenId, $activoId, $tallaId);
         $delta = $objetivo - $actual;
 
         if ($delta === 0) {
@@ -142,13 +147,14 @@ class ServicioInventario
 
         return $this->registrarMovimiento(new MovimientoInventarioDatos(
             empresaId: $empresaId,
-            sucursalId: $sucursalId,
+            almacenId: $almacenId,
             activoId: $activoId,
             tallaId: $tallaId,
             tipo: $delta > 0 ? TipoMovimiento::AjusteEntrada : TipoMovimiento::AjusteSalida,
             cantidad: abs($delta),
             realizadoPor: $realizadoPor,
             motivo: $motivo,
+            sucursalId: $sucursalId,
         ));
     }
 }

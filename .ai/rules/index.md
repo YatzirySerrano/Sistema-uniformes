@@ -2,8 +2,8 @@
 
 Before planning or editing, find the row whose globs match the file's path and read that rule file.
 
-| Applies to                                               | Rule file                   |
-| -------------------------------------------------------- | --------------------------- |
-| app/Models/{Empresa,Sucursal,Almacen,Area,Activo}.php    | .ai/rules/models.md         |
-| resources/js/pages/\*\*/Detalle.vue                      | .ai/rules/pages.md          |
-| app/Http/Controllers/{Almacen,Area,Activo}Controller.php | .ai/rules/modulos-nuevos.md |
+| Applies to                                                                                                                                                                                                                                                                                                            | Rule file                   |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| app/Models/{Empresa,Sucursal,Almacen,Area,Activo,TipoActivo,CategoriaActivo,SaldoInventario,MovimientoInventario}.php                                                                                                                                                                                                 | .ai/rules/models.md         |
+| resources/js/pages/\*\*/Detalle.vue                                                                                                                                                                                                                                                                                   | .ai/rules/pages.md          |
+| app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Inventario,MovimientoInventario,MigracionInventario}Controller.php · app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php · app/Acciones/{RegistrarEntradaInventario,AjustarInventario,MigrarSaldosLegacyAAlmacen}.php | .ai/rules/modulos-nuevos.md |

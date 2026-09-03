@@ -90,6 +90,18 @@ class Sucursal extends Model
     }
 
     /**
+     * Almacén activo que abastece a esta sucursal cuando es inequívoco (exactamente
+     * uno). Devuelve null si hay cero o varios: en ese caso la operación debe
+     * pedir el almacén de forma explícita o resolverse con el asistente.
+     */
+    public function almacenAbastecedorUnico(): ?Almacen
+    {
+        $almacenes = $this->almacenes()->where('almacenes.activo', true)->get();
+
+        return $almacenes->count() === 1 ? $almacenes->first() : null;
+    }
+
+    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

@@ -80,23 +80,26 @@ final class Permisos
             ],
         ],
         'activos' => [
-            'etiqueta' => 'Activos y variantes',
+            'etiqueta' => 'Activos, tipos y categorías',
             'permisos' => [
                 'activos.ver' => 'Ver activos',
                 'activos.crear' => 'Crear activos',
                 'activos.editar' => 'Editar activos',
                 'activos.administrar' => 'Administrar activos (estado y tipos)',
                 'tallas.administrar' => 'Administrar variantes / tallas',
+                'tipos-activo.administrar' => 'Administrar el catálogo de tipos de activo',
+                'categorias-activo.administrar' => 'Administrar el catálogo de categorías de activo',
             ],
         ],
         'inventario' => [
-            'etiqueta' => 'Inventario',
+            'etiqueta' => 'Inventario por almacén',
             'permisos' => [
                 'inventario.ver' => 'Ver inventario y movimientos',
-                'inventario.entrada' => 'Registrar entradas',
-                'inventario.ajustar' => 'Ajustar existencias',
-                'inventario.minimos' => 'Configurar mínimos',
-                'inventario.transferir' => 'Transferir entre sucursales',
+                'inventario.entrada' => 'Registrar entradas de almacén',
+                'inventario.ajustar' => 'Ajustar existencias de almacén',
+                'inventario.minimos' => 'Configurar mínimos por almacén',
+                'inventario.transferir' => 'Transferir entre almacenes',
+                'inventario.migrar' => 'Resolver la migración de existencias legacy (sucursal → almacén)',
             ],
         ],
         'entregas' => [

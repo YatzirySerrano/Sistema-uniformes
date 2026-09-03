@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { PackagePlus } from '@lucide/vue';
-import { ref, watch } from 'vue';
+import { ArrowRightLeft, PackagePlus } from '@lucide/vue';
+import { computed, reactive, ref, watch } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -19,72 +19,96 @@ import type { Paginado } from '@/types/sistema';
 
 type Saldo = {
     id: number;
-    sucursal_id: number;
+    almacen_id: number;
     activo_id: number;
     talla_id: number;
-    sucursal: string;
+    almacen: string;
     activo: string;
     talla: string;
+    control: string;
     cantidad: number;
     minimo: number;
     bajo_minimo: boolean;
 };
 
+type Opcion = { id: number; nombre: string };
+
 const props = defineProps<{
     saldos: Paginado<Saldo>;
-    filtros: {
-        sucursal_id?: number;
-        activo_id?: number;
-        solo_bajo_minimo?: boolean;
+    filtros: Record<string, string | number | undefined>;
+    almacenes: Opcion[];
+    activos: Opcion[];
+    tiposActivo: Opcion[];
+    categorias: Opcion[];
+    tallas: { id: number; valor: string }[];
+    tiposControl: { valor: string; etiqueta: string }[];
+    saldosLegacyPendientes: number;
+    permisos: {
+        entrada: boolean;
+        ajustar: boolean;
+        minimos: boolean;
+        migrar: boolean;
     };
-    sucursales: { id: number; nombre: string }[];
-    activos: { id: number; nombre: string }[];
-    permisos: { entrada: boolean; ajustar: boolean; minimos: boolean };
 }>();
 
 defineOptions({
     layout: { breadcrumbs: [{ title: 'Inventario', href: '/inventario' }] },
 });
 
-const sucursalId = ref(props.filtros.sucursal_id ?? '');
-const activoId = ref(props.filtros.activo_id ?? '');
-const soloBajo = ref(!!props.filtros.solo_bajo_minimo);
-
-watch([sucursalId, activoId, soloBajo], () => {
-    router.get(
-        '/inventario',
-        {
-            sucursal_id: sucursalId.value || undefined,
-            activo_id: activoId.value || undefined,
-            solo_bajo_minimo: soloBajo.value ? 1 : undefined,
-        },
-        { preserveState: true, replace: true, preserveScroll: true },
-    );
+const filtros = reactive({
+    almacen_id: props.filtros.almacen_id ?? '',
+    activo_id: props.filtros.activo_id ?? '',
+    tipo_activo_id: props.filtros.tipo_activo_id ?? '',
+    categoria_id: props.filtros.categoria_id ?? '',
+    talla_id: props.filtros.talla_id ?? '',
+    control: props.filtros.control ?? '',
+    estado_stock: props.filtros.estado_stock ?? '',
 });
+
+const hayFiltros = computed(() =>
+    Object.values(filtros).some((v) => v !== '' && v !== undefined),
+);
+
+watch(
+    filtros,
+    () => {
+        router.get(
+            '/inventario',
+            Object.fromEntries(
+                Object.entries(filtros).filter(
+                    ([, v]) => v !== '' && v !== undefined,
+                ),
+            ),
+            { preserveState: true, replace: true, preserveScroll: true },
+        );
+    },
+    { deep: true },
+);
+
+function limpiarFiltros() {
+    Object.keys(filtros).forEach(
+        (k) => (filtros[k as keyof typeof filtros] = ''),
+    );
+}
 
 const dialogo = ref<'ajuste' | 'minimo' | null>(null);
 const actual = ref<Saldo | null>(null);
 
 const ajuste = useForm({
-    sucursal_id: 0,
+    almacen_id: 0,
     activo_id: 0,
     talla_id: 0,
     existencia_objetivo: 0,
     motivo: '',
 });
-const minimo = useForm({
-    sucursal_id: 0,
-    activo_id: 0,
-    talla_id: 0,
-    minimo: 0,
-});
+const minimo = useForm({ almacen_id: 0, activo_id: 0, talla_id: 0, minimo: 0 });
 
 function abrir(tipo: 'ajuste' | 'minimo', s: Saldo) {
     actual.value = s;
     dialogo.value = tipo;
     if (tipo === 'ajuste') {
         ajuste.defaults({
-            sucursal_id: s.sucursal_id,
+            almacen_id: s.almacen_id,
             activo_id: s.activo_id,
             talla_id: s.talla_id,
             existencia_objetivo: s.cantidad,
@@ -93,7 +117,7 @@ function abrir(tipo: 'ajuste' | 'minimo', s: Saldo) {
         ajuste.reset();
     } else {
         minimo.defaults({
-            sucursal_id: s.sucursal_id,
+            almacen_id: s.almacen_id,
             activo_id: s.activo_id,
             talla_id: s.talla_id,
             minimo: s.minimo,
@@ -114,63 +138,114 @@ function guardarMinimo() {
         onSuccess: () => (dialogo.value = null),
     });
 }
+
+const selectClass =
+    'border-input bg-background h-9 min-w-0 rounded-md border px-3 text-sm';
 </script>
 
 <template>
     <Head title="Inventario" />
 
-    <div class="flex flex-col gap-4 p-4">
+    <div class="flex w-full flex-col gap-4 p-4">
         <EncabezadoPagina
-            titulo="Inventario"
-            descripcion="Existencias por sucursal, activo y talla."
+            titulo="Inventario por almacén"
+            descripcion="Existencias por almacén, activo y variante. El origen físico del stock es el almacén."
         >
             <template #acciones>
                 <Button v-if="permisos.entrada" as-child>
-                    <Link href="/inventario/entrada"
-                        ><PackagePlus class="size-4" /> Registrar entrada</Link
-                    >
+                    <Link href="/inventario/entrada">
+                        <PackagePlus class="size-4" /> Registrar entrada
+                    </Link>
                 </Button>
             </template>
         </EncabezadoPagina>
 
+        <div
+            v-if="saldosLegacyPendientes > 0 && permisos.migrar"
+            class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40"
+        >
+            <p class="min-w-0">
+                Hay <strong>{{ saldosLegacyPendientes }}</strong> saldo(s) de
+                inventario todavía asociados a una sucursal. Asígnalos a un
+                almacén con el asistente de migración.
+            </p>
+            <Button variant="outline" size="sm" as-child>
+                <Link href="/inventario/migracion">
+                    <ArrowRightLeft class="size-4" /> Migrar existencias
+                </Link>
+            </Button>
+        </div>
+
         <div class="flex flex-wrap items-center gap-2">
-            <select
-                v-model="sucursalId"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="">Todas las sucursales</option>
-                <option v-for="s in sucursales" :key="s.id" :value="s.id">
-                    {{ s.nombre }}
+            <select v-model="filtros.almacen_id" :class="selectClass">
+                <option value="">Todos los almacenes</option>
+                <option v-for="a in almacenes" :key="a.id" :value="a.id">
+                    {{ a.nombre }}
                 </option>
             </select>
-            <select
-                v-model="activoId"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
+            <select v-model="filtros.activo_id" :class="selectClass">
                 <option value="">Todos los activos</option>
                 <option v-for="p in activos" :key="p.id" :value="p.id">
                     {{ p.nombre }}
                 </option>
             </select>
-            <label class="flex items-center gap-2 text-sm">
-                <input v-model="soloBajo" type="checkbox" class="size-4" />
-                Solo bajo mínimo
-            </label>
+            <select v-model="filtros.tipo_activo_id" :class="selectClass">
+                <option value="">Todos los tipos</option>
+                <option v-for="t in tiposActivo" :key="t.id" :value="t.id">
+                    {{ t.nombre }}
+                </option>
+            </select>
+            <select v-model="filtros.categoria_id" :class="selectClass">
+                <option value="">Todas las categorías</option>
+                <option v-for="c in categorias" :key="c.id" :value="c.id">
+                    {{ c.nombre }}
+                </option>
+            </select>
+            <select v-model="filtros.talla_id" :class="selectClass">
+                <option value="">Todas las variantes</option>
+                <option v-for="t in tallas" :key="t.id" :value="t.id">
+                    {{ t.valor }}
+                </option>
+            </select>
+            <select v-model="filtros.control" :class="selectClass">
+                <option value="">Cualquier control</option>
+                <option
+                    v-for="c in tiposControl"
+                    :key="c.valor"
+                    :value="c.valor"
+                >
+                    {{ c.etiqueta }}
+                </option>
+            </select>
+            <select v-model="filtros.estado_stock" :class="selectClass">
+                <option value="">Cualquier estado</option>
+                <option value="bajo_minimo">Bajo mínimo</option>
+                <option value="sin_stock">Sin stock</option>
+                <option value="con_stock">Con stock</option>
+            </select>
+            <Button
+                v-if="hayFiltros"
+                variant="ghost"
+                size="sm"
+                @click="limpiarFiltros"
+            >
+                Limpiar filtros
+            </Button>
         </div>
 
         <EstadoVacio
             v-if="!saldos.data.length"
             titulo="Sin existencias"
-            descripcion="No hay registros de inventario con los filtros seleccionados."
+            descripcion="No hay inventario por almacén con los filtros seleccionados. Registra una entrada o usa el asistente de migración."
         />
 
         <div v-else class="overflow-x-auto rounded-xl border">
-            <table class="w-full min-w-[640px] text-sm">
+            <table class="w-full min-w-[720px] text-sm">
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
-                        <th class="px-3 py-2 font-medium">Sucursal</th>
+                        <th class="px-3 py-2 font-medium">Almacén</th>
                         <th class="px-3 py-2 font-medium">Activo</th>
-                        <th class="px-3 py-2 font-medium">Talla</th>
+                        <th class="px-3 py-2 font-medium">Variante</th>
                         <th class="px-3 py-2 text-right font-medium">
                             Existencia
                         </th>
@@ -180,7 +255,7 @@ function guardarMinimo() {
                 </thead>
                 <tbody>
                     <tr v-for="s in saldos.data" :key="s.id" class="border-t">
-                        <td class="px-3 py-2">{{ s.sucursal }}</td>
+                        <td class="px-3 py-2">{{ s.almacen }}</td>
                         <td class="px-3 py-2">{{ s.activo }}</td>
                         <td class="px-3 py-2">{{ s.talla }}</td>
                         <td class="px-3 py-2 text-right font-medium">
@@ -228,7 +303,7 @@ function guardarMinimo() {
                 </DialogHeader>
                 <p v-if="actual" class="text-muted-foreground text-sm">
                     {{ actual.activo }} · {{ actual.talla }} ·
-                    {{ actual.sucursal }} — existencia actual
+                    {{ actual.almacen }} — existencia actual
                     {{ actual.cantidad }}
                 </p>
                 <div class="grid gap-3">
@@ -270,7 +345,7 @@ function guardarMinimo() {
                 </DialogHeader>
                 <p v-if="actual" class="text-muted-foreground text-sm">
                     {{ actual.activo }} · {{ actual.talla }} ·
-                    {{ actual.sucursal }}
+                    {{ actual.almacen }}
                 </p>
                 <div class="grid gap-3">
                     <div class="grid gap-1.5">

@@ -21,8 +21,8 @@ class TipoActivoFactory extends Factory
         return [
             'empresa_id' => Empresa::factory(),
             'nombre' => fake()->unique()->randomElement([
-                'Uniforme / Prenda', 'Equipo de cómputo', 'Dispositivo móvil',
-                'Electrónico', 'Accesorio', 'Otro',
+                'Prenda', 'Equipo de cómputo', 'Dispositivo móvil',
+                'Electrónico', 'Accesorio', 'Herramienta / Equipo', 'Otro',
             ]),
             'codigo' => 'TAC-'.fake()->unique()->numberBetween(1000, 9999),
             'activo' => true,

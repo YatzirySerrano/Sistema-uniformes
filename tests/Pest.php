@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
@@ -68,11 +69,17 @@ function sembrarRolesPermisos(): void
  * Crea un escenario mínimo multiempresa: dos empresas con una sucursal cada
  * una, tallas y un activo por empresa, y devuelve las referencias.
  *
+ * Cada empresa recibe un almacén activo que abastece a su sucursal, de modo que
+ * las operaciones (entradas, entregas, devoluciones) puedan resolver el almacén
+ * de origen del stock de forma inequívoca.
+ *
  * @return array{
  *     empresaA: Empresa,
  *     empresaB: Empresa,
  *     sucursalA: Sucursal,
  *     sucursalB: Sucursal,
+ *     almacenA: Almacen,
+ *     almacenB: Almacen,
  *     activoA: Activo,
  *     tallaA: Talla,
  *     colaboradorA: Colaborador
@@ -88,6 +95,11 @@ function escenarioMultiempresa(): array
     $sucursalA = Sucursal::factory()->for($empresaA)->create();
     $sucursalB = Sucursal::factory()->for($empresaB)->create();
 
+    $almacenA = Almacen::factory()->for($empresaA)->create(['nombre' => 'Almacén A']);
+    $almacenA->sucursales()->attach($sucursalA);
+    $almacenB = Almacen::factory()->for($empresaB)->create(['nombre' => 'Almacén B']);
+    $almacenB->sucursales()->attach($sucursalB);
+
     $tallaA = Talla::factory()->for($empresaA)->create(['valor' => 'M']);
     Talla::factory()->for($empresaB)->create(['valor' => 'M']);
 
@@ -96,7 +108,7 @@ function escenarioMultiempresa(): array
 
     $colaboradorA = Colaborador::factory()->for($empresaA)->for($sucursalA)->create();
 
-    return compact('empresaA', 'empresaB', 'sucursalA', 'sucursalB', 'activoA', 'tallaA', 'colaboradorA');
+    return compact('empresaA', 'empresaB', 'sucursalA', 'sucursalB', 'almacenA', 'almacenB', 'activoA', 'tallaA', 'colaboradorA');
 }
 
 /**

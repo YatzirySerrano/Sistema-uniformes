@@ -11,6 +11,7 @@ use App\Models\EntregaUniforme;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
+use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
@@ -29,6 +30,7 @@ class CrearEntregaUniforme
         private readonly ServicioInventario $inventario,
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
+        private readonly ResolverAlmacenOperativo $resolverAlmacen,
     ) {}
 
     /**
@@ -63,6 +65,11 @@ class CrearEntregaUniforme
             throw new ExcepcionDeNegocioSimple('Agrega al menos un activo a la entrega.');
         }
 
+        // Puente hacia el inventario por almacén: mientras la UI de entregas
+        // siga preguntando la sucursal, el stock sale del almacén que la
+        // abastece de forma inequívoca.
+        $almacen = $this->resolverAlmacen->paraSucursal($sucursal);
+
         $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->get()->keyBy('id');
         $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'talla_id'))->get()->keyBy('id');
 
@@ -75,11 +82,12 @@ class CrearEntregaUniforme
             }
         }
 
-        return DB::transaction(function () use ($empresaId, $sucursal, $colaborador, $encargadoId, $fechaEntrega, $items, $notas, $activos, $tallas): EntregaUniforme {
+        return DB::transaction(function () use ($empresaId, $sucursal, $almacen, $colaborador, $encargadoId, $fechaEntrega, $items, $notas, $activos, $tallas): EntregaUniforme {
             $entrega = EntregaUniforme::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA, $empresaId),
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursal->getKey(),
+                'almacen_id' => $almacen->getKey(),
                 'colaborador_id' => $colaborador->getKey(),
                 'encargado_id' => $encargadoId,
                 'estado' => EstadoEntrega::PendienteFirma,
@@ -98,7 +106,7 @@ class CrearEntregaUniforme
 
                 $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                     empresaId: $empresaId,
-                    sucursalId: $sucursal->getKey(),
+                    almacenId: $almacen->getKey(),
                     activoId: $item['activo_id'],
                     tallaId: $item['talla_id'],
                     tipo: TipoMovimiento::Entrega,
@@ -107,6 +115,7 @@ class CrearEntregaUniforme
                     referenciaTipo: EntregaUniforme::class,
                     referenciaId: $entrega->getKey(),
                     motivo: 'Entrega '.$entrega->folio,
+                    sucursalId: $sucursal->getKey(),
                 ));
             }
 

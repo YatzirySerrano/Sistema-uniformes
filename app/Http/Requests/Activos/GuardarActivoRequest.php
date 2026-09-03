@@ -37,7 +37,6 @@ class GuardarActivoRequest extends FormRequest
             'nombre' => $this->limpiar($this->input('nombre')),
             'codigo' => $codigo === null ? null : Str::upper($codigo),
             'descripcion' => $this->limpiar($this->input('descripcion')),
-            'categoria' => $this->limpiar($this->input('categoria')),
         ]);
     }
 
@@ -53,7 +52,10 @@ class GuardarActivoRequest extends FormRequest
         return [
             'nombre' => ['required', 'string', 'max:255'],
             'descripcion' => ['nullable', 'string', 'max:2000'],
-            'categoria' => ['nullable', 'string', 'max:255'],
+            'categoria_id' => [
+                'nullable', 'integer',
+                Rule::exists('categorias_activo', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+            ],
             'codigo' => [
                 'nullable', 'string', 'max:60', 'alpha_dash',
                 Rule::unique('activos', 'codigo')
@@ -86,6 +88,7 @@ class GuardarActivoRequest extends FormRequest
             'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',
             'codigo.unique' => 'Ese código de activo ya existe en esta empresa.',
             'tipo_activo_id.exists' => 'El tipo de activo seleccionado no pertenece a esta empresa.',
+            'categoria_id.exists' => 'La categoría seleccionada no pertenece a esta empresa.',
             'tipo_control.enum' => 'El tipo de control debe ser "por cantidad" o "serializado".',
             'tipo_control.required' => 'Indica cómo se controla el activo.',
             'tallas.*.exists' => 'Una de las variantes / tallas seleccionadas no pertenece a esta empresa.',

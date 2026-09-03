@@ -19,24 +19,27 @@ class MovimientoInventarioController extends Controller
         $empresa = $this->empresaActiva();
 
         $filtros = $request->validate([
-            'sucursal_id' => ['nullable', 'integer'],
+            'almacen_id' => ['nullable', 'integer'],
             'activo_id' => ['nullable', 'integer'],
             'tipo' => ['nullable', 'string'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
         ]);
 
-        $sucursalesIds = $this->contexto()->sucursalesDisponibles()->pluck('id');
+        $almacenesIds = $this->contexto()->almacenesDisponibles()->pluck('id');
 
         $movimientos = MovimientoInventario::query()
             ->where('empresa_id', $empresa->id)
-            ->whereIn('sucursal_id', $sucursalesIds)
-            ->when($filtros['sucursal_id'] ?? null, fn ($q, $s) => $q->where('sucursal_id', $s))
-            ->when($filtros['activo_id'] ?? null, fn ($q, $p) => $q->where('activo_id', $p))
+            ->where(function ($q) use ($almacenesIds): void {
+                // Movimientos del almacén + movimientos legacy sin almacén asignado.
+                $q->whereIn('almacen_id', $almacenesIds)->orWhereNull('almacen_id');
+            })
+            ->when($filtros['almacen_id'] ?? null, fn ($q, $v) => $q->where('almacen_id', $v))
+            ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->where('activo_id', $v))
             ->when($filtros['tipo'] ?? null, fn ($q, $t) => $q->where('tipo', $t))
             ->when($filtros['desde'] ?? null, fn ($q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
             ->when($filtros['hasta'] ?? null, fn ($q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
-            ->with(['sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'realizadoPor:id,name'])
+            ->with(['almacen:id,nombre', 'sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'realizadoPor:id,name'])
             ->latest('ocurrido_en')
             ->paginate($this->porPagina())
             ->withQueryString()
@@ -48,6 +51,7 @@ class MovimientoInventarioController extends Controller
                 'cantidad' => $m->cantidad,
                 'existencia_anterior' => $m->existencia_anterior,
                 'existencia_resultante' => $m->existencia_resultante,
+                'almacen' => $m->almacen?->nombre,
                 'sucursal' => $m->sucursal?->nombre,
                 'activo' => $m->activo?->nombre,
                 'talla' => $m->talla?->valor,
@@ -59,7 +63,7 @@ class MovimientoInventarioController extends Controller
         return Inertia::render('Inventario/Movimientos', [
             'movimientos' => $movimientos,
             'filtros' => $filtros,
-            'sucursales' => $this->contexto()->sucursalesDisponibles()->map->only(['id', 'nombre'])->values(),
+            'almacenes' => $this->contexto()->almacenesDisponibles()->map->only(['id', 'nombre'])->values(),
             'activos' => $empresa->activos()->orderBy('nombre')->get(['id', 'nombre']),
             'tipos' => collect(TipoMovimiento::cases())->map(fn ($t): array => ['valor' => $t->value, 'etiqueta' => $t->etiqueta()]),
         ]);

@@ -36,6 +36,7 @@ class EntregaUniforme extends Model
         'folio',
         'empresa_id',
         'sucursal_id',
+        'almacen_id',
         'colaborador_id',
         'encargado_id',
         'estado',

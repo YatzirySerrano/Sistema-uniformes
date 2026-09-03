@@ -13,11 +13,12 @@ enum TipoMovimiento: string
     case Correccion = 'correccion';
     case TraspasoEntrada = 'traspaso_entrada';
     case TraspasoSalida = 'traspaso_salida';
+    case MigracionLegacy = 'migracion_legacy';
 
     public function direccion(): DireccionMovimiento
     {
         return match ($this) {
-            self::Inicial, self::Entrada, self::Devolucion, self::AjusteEntrada, self::TraspasoEntrada => DireccionMovimiento::Entrada,
+            self::Inicial, self::Entrada, self::Devolucion, self::AjusteEntrada, self::TraspasoEntrada, self::MigracionLegacy => DireccionMovimiento::Entrada,
             self::Entrega, self::AjusteSalida, self::TraspasoSalida => DireccionMovimiento::Salida,
             self::Correccion => DireccionMovimiento::Entrada,
         };
@@ -35,6 +36,7 @@ enum TipoMovimiento: string
             self::Correccion => 'Corrección de entrega',
             self::TraspasoEntrada => 'Traspaso (entrada)',
             self::TraspasoSalida => 'Traspaso (salida)',
+            self::MigracionLegacy => 'Migración a almacén',
         };
     }
 }

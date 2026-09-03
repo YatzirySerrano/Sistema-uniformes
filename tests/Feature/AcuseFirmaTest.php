@@ -20,7 +20,7 @@ beforeEach(function () {
 
     app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
         empresaId: $this->datos['empresaA']->id,
-        sucursalId: $this->datos['sucursalA']->id,
+        almacenId: $this->datos['almacenA']->id,
         activoId: $this->datos['activoA']->id,
         tallaId: $this->datos['tallaA']->id,
         tipo: TipoMovimiento::Inicial,

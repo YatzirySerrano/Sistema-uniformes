@@ -3,9 +3,9 @@
 use App\Enums\RolSistema;
 use App\Enums\TipoControlActivo;
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\Empresa;
 use App\Models\SaldoInventario;
-use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Models\TipoActivo;
 use App\Soporte\ContextoEmpresa;
@@ -137,15 +137,16 @@ it('no permite ver ni editar un activo de otra empresa (IDOR)', function () {
         ->get("/activos/{$activoB->id}/editar")->assertNotFound();
 });
 
-it('el detalle muestra las existencias por sucursal y talla del activo', function () {
+it('el detalle muestra las existencias por almacén y talla del activo', function () {
     $empresa = Empresa::factory()->create();
-    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $almacen = Almacen::factory()->for($empresa)->create();
     $talla = Talla::factory()->for($empresa)->create(['valor' => 'M']);
     $activo = Activo::factory()->for($empresa)->create();
 
     SaldoInventario::factory()->create([
         'empresa_id' => $empresa->id,
-        'sucursal_id' => $sucursal->id,
+        'almacen_id' => $almacen->id,
+        'sucursal_id' => null,
         'activo_id' => $activo->id,
         'talla_id' => $talla->id,
         'cantidad' => 12,

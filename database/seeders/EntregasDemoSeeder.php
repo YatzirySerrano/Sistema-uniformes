@@ -32,6 +32,11 @@ class EntregasDemoSeeder extends Seeder
         $corregir = app(CorregirEntrega::class);
 
         $sucursal = $empresa->sucursales->first();
+        $almacen = $sucursal?->almacenAbastecedorUnico();
+
+        if ($almacen === null) {
+            return;
+        }
 
         $colaboradores = Colaborador::query()
             ->where('empresa_id', $empresa->id)
@@ -46,7 +51,7 @@ class EntregasDemoSeeder extends Seeder
 
         $itemsDisponibles = fn () => SaldoInventario::query()
             ->where('empresa_id', $empresa->id)
-            ->where('sucursal_id', $sucursal->id)
+            ->where('almacen_id', $almacen->id)
             ->where('cantidad', '>=', 3)
             ->inRandomOrder()
             ->limit(2)
