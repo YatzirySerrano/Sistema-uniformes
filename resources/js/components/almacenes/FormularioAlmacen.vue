@@ -260,6 +260,7 @@ function enviar(): void {
                     id="alm-responsable"
                     :model-value="responsable"
                     :buscar="buscarColaboradores"
+                    :dependencia="empresaResponsableId ?? ''"
                     :etiqueta="(c) => (c as Colaborador).nombre_completo"
                     :descripcion="
                         (c) => `N.º ${(c as Colaborador).numero_empleado}`

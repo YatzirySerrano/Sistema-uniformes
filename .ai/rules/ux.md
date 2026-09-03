@@ -56,6 +56,14 @@ Si un catálogo puede crecer, no usar un `<select>` plano gigante: usar
 - `modelValue` es el **objeto** seleccionado (no un id): el consumidor mantiene
   el id en su `form`/`filtros` y el objeto en un `ref` paralelo.
 - Props útiles: `placeholderBusqueda`, `sinResultados`, `disabled`, `invalido`.
+- **`dependencia`**: valor del que dependen los resultados (p. ej. `empresa_id`).
+  Al cambiar, el componente limpia de inmediato resultados y término, descarta la
+  respuesta en vuelo (token incremental + `AbortController`) y vuelve a consultar
+  en la siguiente apertura. Úsalo siempre que la lista dependa de otro campo
+  (empresa → almacén / activo / colaborador; activo → variante). El consumidor
+  además debe poner a `null` el id seleccionado en su `form`/`filtros` al cambiar
+  esa dependencia. `buscar` recibe un 2.º argumento `AbortSignal` opcional que
+  conviene pasar al `fetch`.
 
 Aplica a: almacenes, activos, categorías, tipos, colaboradores, responsables,
 sucursales, áreas, variantes numerosas, unidades serializadas, uniformes.

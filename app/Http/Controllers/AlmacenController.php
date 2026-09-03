@@ -220,8 +220,20 @@ class AlmacenController extends Controller
 
     /**
      * Búsqueda con autocompletado de almacenes para los combobox (entrada de
-     * inventario, entregas, filtros). Sólo almacenes activos autorizados; si se
-     * envía `empresa_id`, se acota a los que abastecen esa empresa.
+     * inventario, entregas, filtros). Devuelve SIEMPRE sólo almacenes activos a
+     * los que el usuario tiene acceso vía `almacen_empresa`.
+     *
+     * Regla de negocio: un almacén sólo puede usarse para una empresa si existe
+     * la fila `almacen_empresa (almacen_id, empresa_id)`. Por eso, cuando llega
+     * `empresa_id`:
+     * - si es válido y autorizado → se acota ESTRICTAMENTE a los almacenes que
+     *   abastecen esa empresa (`scopeParaEmpresa`);
+     * - si viene pero es inválido o fuera de alcance → se devuelve lista vacía
+     *   (nunca se cae de vuelta a "todas mis empresas": eso mostraría almacenes
+     *   de otras empresas).
+     *
+     * Sin `empresa_id` (filtros genéricos) → todos los almacenes activos
+     * autorizados.
      */
     public function buscar(Request $request): JsonResponse
     {
@@ -229,12 +241,22 @@ class AlmacenController extends Controller
 
         $termino = trim((string) $request->query('q', ''));
         $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
-        $empresaFiltro = $this->empresaDelFiltro($request);
 
-        $almacenes = Almacen::query()
+        $consulta = Almacen::query()
             ->where('activo', true)
-            ->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsAutorizadas))
-            ->when($empresaFiltro !== null, fn (Builder $q) => $q->paraEmpresa($empresaFiltro->id))
+            ->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsAutorizadas));
+
+        if ($request->filled('empresa_id')) {
+            $empresa = $this->empresaDelFiltro($request);
+
+            if ($empresa === null) {
+                return response()->json(['almacenes' => []]);
+            }
+
+            $consulta->paraEmpresa($empresa->id);
+        }
+
+        $almacenes = $consulta
             ->when($termino !== '', function (Builder $q) use ($termino): void {
                 $q->where(function (Builder $sub) use ($termino): void {
                     $sub->where('nombre', 'like', "%{$termino}%")

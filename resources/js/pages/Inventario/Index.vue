@@ -93,6 +93,16 @@ function alElegirAlmacen(a: AlmacenOpcion | null) {
     filtros.almacen_id = a?.id ?? '';
 }
 
+// Al cambiar la empresa, el almacén elegido puede pertenecer a otra empresa:
+// se limpia para no filtrar por un almacén ajeno.
+watch(
+    () => filtros.empresa_id,
+    () => {
+        almacenSel.value = null;
+        filtros.almacen_id = '';
+    },
+);
+
 const hayFiltros = computed(() =>
     Object.values(filtros).some((v) => v !== '' && v !== undefined),
 );
@@ -234,6 +244,7 @@ const selectClass =
                 <BuscadorAsync
                     :model-value="almacenSel"
                     :buscar="buscarAlmacenes"
+                    :dependencia="filtros.empresa_id"
                     :etiqueta="(a) => (a as AlmacenOpcion).nombre"
                     :descripcion="
                         (a) =>

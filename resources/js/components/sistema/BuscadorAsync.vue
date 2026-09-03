@@ -5,15 +5,30 @@ import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 /**
  * Combobox de selección única con búsqueda remota (debounced). Pensado para
  * catálogos grandes donde un <select> completo no es viable (p. ej. responsable
- * de un almacén). La búsqueda la resuelve el consumidor mediante `buscar`.
+ * de un almacén, almacén acotado por empresa). La búsqueda la resuelve el
+ * consumidor mediante `buscar`.
+ *
+ * Reutilizable para: empresas, almacenes, activos, colaboradores, categorías,
+ * tipos, uniformes, unidades serializadas. Soporta de forma robusta el cambio
+ * de una dependencia (p. ej. la empresa seleccionada):
+ *
+ * - `dependencia`: al cambiar su valor se limpian de inmediato los resultados y
+ *   el término, se descarta cualquier respuesta en vuelo y la próxima apertura
+ *   vuelve a consultar. Nunca se muestran datos de la dependencia anterior.
+ * - Respuestas fuera de orden: cada consulta lleva un token incremental; sólo se
+ *   aplica la respuesta del token vigente (evita que una respuesta lenta pise a
+ *   una posterior).
+ * - `AbortController`: la petición en curso se cancela al lanzar otra o al
+ *   cambiar la dependencia. Se pasa el `AbortSignal` como 2.º argumento de
+ *   `buscar` (opcional; los consumidores que no lo usen siguen funcionando).
  */
 type Opcion = { id: number; [clave: string]: unknown };
 
 const props = defineProps<{
     /** Elemento seleccionado (o null). */
     modelValue: Opcion | null;
-    /** Resuelve resultados para el término dado. */
-    buscar: (termino: string) => Promise<Opcion[]>;
+    /** Resuelve resultados para el término dado. Recibe además un AbortSignal. */
+    buscar: (termino: string, signal?: AbortSignal) => Promise<Opcion[]>;
     /** Texto de cada opción. */
     etiqueta: (item: Opcion) => string;
     /** Texto secundario opcional de cada opción. */
@@ -29,6 +44,12 @@ const props = defineProps<{
     /** Marca el control como inválido (para validación). */
     invalido?: boolean;
     id?: string;
+    /**
+     * Valor del que dependen los resultados (p. ej. `empresa_id`). Al cambiar se
+     * limpian resultados/término, se descarta la consulta en vuelo y la próxima
+     * apertura vuelve a consultar.
+     */
+    dependencia?: string | number | boolean | null;
 }>();
 
 const emit = defineEmits<{
@@ -42,14 +63,44 @@ const cargando = ref(false);
 const contenedor = ref<HTMLElement | null>(null);
 let temporizador: ReturnType<typeof setTimeout> | undefined;
 
+/** Token incremental de la consulta vigente: descarta respuestas obsoletas. */
+let secuencia = 0;
+/** Controla la petición HTTP en curso para poder cancelarla. */
+let controlador: AbortController | undefined;
+/** Marca de la dependencia con la que se cargaron los resultados actuales. */
+const SIN_CARGAR = Symbol('sin-cargar');
+let dependenciaCargada: unknown = SIN_CARGAR;
+
+function cancelarEnVuelo(): void {
+    clearTimeout(temporizador);
+    controlador?.abort();
+    controlador = undefined;
+}
+
 async function ejecutarBusqueda(): Promise<void> {
+    cancelarEnVuelo();
+    const token = ++secuencia;
+    controlador = new AbortController();
+    const signal = controlador.signal;
     cargando.value = true;
+
     try {
-        resultados.value = await props.buscar(termino.value.trim());
+        const datos = await props.buscar(termino.value.trim(), signal);
+        if (token !== secuencia) {
+            return; // respuesta obsoleta: llegó otra consulta después
+        }
+        resultados.value = datos;
+        dependenciaCargada = props.dependencia;
     } catch {
+        if (token !== secuencia) {
+            return;
+        }
         resultados.value = [];
     } finally {
-        cargando.value = false;
+        if (token === secuencia) {
+            cargando.value = false;
+            controlador = undefined;
+        }
     }
 }
 
@@ -58,9 +109,29 @@ watch(termino, () => {
     temporizador = setTimeout(ejecutarBusqueda, 250);
 });
 
+// Cambio de dependencia (p. ej. la empresa): limpiar de inmediato y re-consultar
+// sólo si el desplegable está abierto. La lista anterior desaparece al instante.
+watch(
+    () => props.dependencia,
+    () => {
+        cancelarEnVuelo();
+        secuencia++; // invalida cualquier respuesta en vuelo
+        resultados.value = [];
+        termino.value = '';
+        cargando.value = false;
+        dependenciaCargada = SIN_CARGAR;
+        if (abierto.value) {
+            void ejecutarBusqueda();
+        }
+    },
+);
+
 function abrir(): void {
     abierto.value = true;
-    if (resultados.value.length === 0) {
+    if (
+        resultados.value.length === 0 ||
+        dependenciaCargada !== props.dependencia
+    ) {
         void ejecutarBusqueda();
     }
     nextTick(() => {
@@ -95,7 +166,7 @@ function alClicFuera(evento: MouseEvent): void {
 document.addEventListener('click', alClicFuera);
 onBeforeUnmount(() => {
     document.removeEventListener('click', alClicFuera);
-    clearTimeout(temporizador);
+    cancelarEnVuelo();
 });
 </script>
 

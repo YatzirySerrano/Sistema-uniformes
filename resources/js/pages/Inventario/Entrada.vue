@@ -7,6 +7,14 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { EmpresaAutorizada } from '@/types/sistema';
@@ -62,8 +70,30 @@ const form = useForm<{
     items: [{ activo_id: null, talla_id: null, cantidad: 1 }],
 });
 
-/** Al cambiar la empresa se reinicia la selección dependiente. */
-function alCambiarEmpresa(): void {
+// Estado de UI paralelo a form.items (por índice): objeto de almacén/activo
+// seleccionados para poder mostrar su etiqueta en el combobox.
+const almacenSel = ref<AlmacenOpcion | null>(null);
+const activosSel = reactive<Record<number, ActivoBuscado | null>>({ 0: null });
+
+const enviado = ref(false);
+
+// Empresa efectiva ya aplicada (para poder revertir el <select> si el usuario
+// cancela un cambio que borraría lo capturado).
+const empresaAplicada = ref<number | null>(form.empresa_id);
+const confirmarCambio = ref(false);
+const empresaPendiente = ref<number | null>(null);
+
+/** ¿El usuario ya capturó algo que se perdería al cambiar de empresa? */
+const hayTrabajoCapturado = computed(
+    () =>
+        !!form.almacen_id ||
+        form.items.some((it) => it.activo_id !== null) ||
+        form.motivo.trim() !== '' ||
+        form.notas.trim() !== '',
+);
+
+/** Limpia de forma determinista todo lo que depende de la empresa. */
+function limpiarDependientes(): void {
     almacenSel.value = null;
     form.almacen_id = null;
     form.items = [{ activo_id: null, talla_id: null, cantidad: 1 }];
@@ -72,12 +102,42 @@ function alCambiarEmpresa(): void {
     form.clearErrors();
 }
 
-// Estado de UI paralelo a form.items (por índice): objeto de almacén/activo
-// seleccionados para poder mostrar su etiqueta en el combobox.
-const almacenSel = ref<AlmacenOpcion | null>(null);
-const activosSel = reactive<Record<number, ActivoBuscado | null>>({ 0: null });
+/**
+ * Intercepta el cambio del <select> de empresa. Si hay datos capturados, pide
+ * confirmación ANTES de borrar nada: mientras tanto el <select> vuelve a la
+ * empresa vigente. Si no hay nada que perder, cambia directo.
+ */
+function alCambiarEmpresa(): void {
+    const objetivo = form.empresa_id;
 
-const enviado = ref(false);
+    if (objetivo === empresaAplicada.value) {
+        return;
+    }
+
+    if (hayTrabajoCapturado.value) {
+        empresaPendiente.value = objetivo;
+        form.empresa_id = empresaAplicada.value; // revierte hasta confirmar
+        confirmarCambio.value = true;
+
+        return;
+    }
+
+    empresaAplicada.value = objetivo;
+    limpiarDependientes();
+}
+
+function confirmarCambioEmpresa(): void {
+    form.empresa_id = empresaPendiente.value;
+    empresaAplicada.value = empresaPendiente.value;
+    empresaPendiente.value = null;
+    confirmarCambio.value = false;
+    limpiarDependientes();
+}
+
+function cancelarCambioEmpresa(): void {
+    empresaPendiente.value = null;
+    confirmarCambio.value = false;
+}
 
 /** Acceso laxo a errores anidados (`items.0.cantidad`). */
 const errores = computed(
@@ -87,21 +147,35 @@ function errFila(i: number, campo: string): string | undefined {
     return errores.value[`items.${i}.${campo}`];
 }
 
-async function buscarAlmacenes(q: string): Promise<AlmacenOpcion[]> {
+async function buscarAlmacenes(
+    q: string,
+    signal?: AbortSignal,
+): Promise<AlmacenOpcion[]> {
     if (!form.empresa_id) return [];
     const res = await fetch(
         `/almacenes/buscar?empresa_id=${form.empresa_id}&q=${encodeURIComponent(q)}`,
-        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
     );
     if (!res.ok) return [];
     return (await res.json()).almacenes ?? [];
 }
 
-async function buscarActivos(q: string): Promise<ActivoBuscado[]> {
+async function buscarActivos(
+    q: string,
+    signal?: AbortSignal,
+): Promise<ActivoBuscado[]> {
     if (!form.empresa_id) return [];
     const res = await fetch(
         `/activos/buscar?empresa_id=${form.empresa_id}&control=cantidad&q=${encodeURIComponent(q)}`,
-        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
     );
     if (!res.ok) return [];
     return (await res.json()).activos ?? [];
@@ -235,6 +309,7 @@ function enviar() {
                         id="almacen"
                         :model-value="almacenSel"
                         :buscar="buscarAlmacenes"
+                        :dependencia="form.empresa_id ?? ''"
                         :etiqueta="(a) => (a as AlmacenOpcion).nombre"
                         :descripcion="
                             (a) =>
@@ -245,8 +320,13 @@ function enviar() {
                                     .filter(Boolean)
                                     .join(' · ')
                         "
-                        placeholder="Selecciona un almacén"
+                        :placeholder="
+                            form.empresa_id
+                                ? 'Selecciona un almacén'
+                                : 'Selecciona primero una empresa'
+                        "
                         placeholder-busqueda="Buscar por nombre, código o dirección"
+                        sin-resultados="No hay almacenes activos que abastezcan esta empresa."
                         :disabled="!form.empresa_id"
                         :invalido="!!form.errors.almacen_id"
                         @update:model-value="
@@ -301,6 +381,8 @@ function enviar() {
                             :id="`activo-${i}`"
                             :model-value="activosSel[i] ?? null"
                             :buscar="buscarActivos"
+                            :dependencia="form.empresa_id ?? ''"
+                            :disabled="!form.empresa_id"
                             :etiqueta="(a) => (a as ActivoBuscado).nombre"
                             :descripcion="
                                 (a) =>
@@ -453,5 +535,31 @@ function enviar() {
                 </p>
             </div>
         </form>
+
+        <Dialog
+            :open="confirmarCambio"
+            @update:open="(v: boolean) => !v && cancelarCambioEmpresa()"
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Cambiar de empresa</DialogTitle>
+                    <DialogDescription>
+                        Cambiar de empresa limpiará el almacén y los activos
+                        seleccionados en esta entrada. ¿Deseas continuar?
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button variant="ghost" @click="cancelarCambioEmpresa">
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        @click="confirmarCambioEmpresa"
+                    >
+                        Sí, cambiar empresa
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>
