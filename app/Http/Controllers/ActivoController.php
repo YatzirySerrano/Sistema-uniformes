@@ -8,9 +8,11 @@ use App\Http\Requests\Activos\GuardarActivoRequest;
 use App\Models\Activo;
 use App\Models\CategoriaActivo;
 use App\Models\SaldoInventario;
+use App\Models\Talla;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -98,6 +100,49 @@ class ActivoController extends Controller
                 'administrar_catalogos' => $request->user()->can('administrar', TipoActivo::class),
             ],
         ]);
+    }
+
+    /**
+     * Búsqueda con autocompletado para los combobox de activos (entrada de
+     * inventario, entregas…). Devuelve activos de la empresa activa con
+     * contexto (código, tipo, categoría, variantes).
+     */
+    public function buscar(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Activo::class);
+        $empresaId = $this->empresaActiva()->id;
+
+        $termino = trim((string) $request->query('q', ''));
+        $control = $request->query('control');
+
+        $activos = Activo::query()
+            ->where('empresa_id', $empresaId)
+            ->where('activo', true)
+            ->when(in_array($control, ['cantidad', 'serializado'], true), fn (Builder $q) => $q->where('tipo_control', $control))
+            ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
+            ->when($termino !== '', function (Builder $q) use ($termino): void {
+                $q->where(function (Builder $sub) use ($termino): void {
+                    $sub->where('nombre', 'like', "%{$termino}%")
+                        ->orWhere('codigo', 'like', "%{$termino}%")
+                        ->orWhere('categoria', 'like', "%{$termino}%")
+                        ->orWhereHas('tipoActivo', fn (Builder $t) => $t->where('nombre', 'like', "%{$termino}%"))
+                        ->orWhereHas('categoriaActivo', fn (Builder $c) => $c->where('nombre', 'like', "%{$termino}%"));
+                });
+            })
+            ->orderBy('nombre')
+            ->limit(20)
+            ->get()
+            ->map(fn (Activo $a): array => [
+                'id' => $a->id,
+                'nombre' => $a->nombre,
+                'codigo' => $a->codigo,
+                'tipo' => $a->tipoActivo?->nombre,
+                'categoria' => $a->categoriaActivo?->nombre,
+                'control' => $a->tipo_control->value,
+                'tallas' => $a->tallas->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->values(),
+            ]);
+
+        return response()->json(['activos' => $activos]);
     }
 
     public function create(): Response
@@ -259,7 +304,7 @@ class ActivoController extends Controller
      */
     private function tallasEmpresa(): array
     {
-        return $this->empresaActiva()->tallas()->ordenadas()->get(['id', 'valor'])->toArray();
+        return $this->empresaActiva()->tallas()->seleccionables()->ordenadas()->get(['id', 'valor'])->toArray();
     }
 
     /**
@@ -312,7 +357,7 @@ class ActivoController extends Controller
     }
 
     /**
-     * @return array{crear_tipo: bool, crear_categoria: bool}
+     * @return array{crear_tipo: bool, crear_categoria: bool, crear_variante: bool}
      */
     private function permisosCatalogos(): array
     {
@@ -321,6 +366,7 @@ class ActivoController extends Controller
         return [
             'crear_tipo' => $usuario?->can('administrar', TipoActivo::class) ?? false,
             'crear_categoria' => $usuario?->can('administrar', CategoriaActivo::class) ?? false,
+            'crear_variante' => $usuario?->can('tallas.administrar') ?? false,
         ];
     }
 

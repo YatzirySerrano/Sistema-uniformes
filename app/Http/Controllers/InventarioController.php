@@ -6,8 +6,11 @@ use App\Acciones\AjustarInventario;
 use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresaActiva;
+use App\Http\Requests\Activos\RegistrarEntradaInventarioRequest;
+use App\Models\Activo;
 use App\Models\CategoriaActivo;
 use App\Models\SaldoInventario;
+use App\Models\Talla;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioInventario;
 use Illuminate\Database\Eloquent\Builder;
@@ -32,6 +35,7 @@ class InventarioController extends Controller
         $empresa = $this->empresaActiva();
 
         $filtros = $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
             'almacen_id' => ['nullable', 'integer'],
             'activo_id' => ['nullable', 'integer'],
             'tipo_activo_id' => ['nullable', 'integer'],
@@ -47,6 +51,18 @@ class InventarioController extends Controller
             ->where('empresa_id', $empresa->id)
             ->whereNotNull('almacen_id')
             ->whereIn('almacen_id', $almacenesIds)
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $texto): void {
+                $q->where(function (Builder $sub) use ($texto): void {
+                    $sub->whereHas('activo', function (Builder $a) use ($texto): void {
+                        $a->where('nombre', 'like', "%{$texto}%")
+                            ->orWhere('codigo', 'like', "%{$texto}%")
+                            ->orWhere('categoria', 'like', "%{$texto}%")
+                            ->orWhereHas('tipoActivo', fn (Builder $t) => $t->where('nombre', 'like', "%{$texto}%"))
+                            ->orWhereHas('categoriaActivo', fn (Builder $c) => $c->where('nombre', 'like', "%{$texto}%"));
+                    })->orWhereHas('talla', fn (Builder $t) => $t->where('valor', 'like', "%{$texto}%"))
+                        ->orWhereHas('almacen', fn (Builder $al) => $al->where('nombre', 'like', "%{$texto}%")->orWhere('codigo', 'like', "%{$texto}%"));
+                });
+            })
             ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $v) => $q->where('almacen_id', $v))
             ->when($filtros['activo_id'] ?? null, fn (Builder $q, $v) => $q->where('activo_id', $v))
             ->when($filtros['talla_id'] ?? null, fn (Builder $q, $v) => $q->where('talla_id', $v))
@@ -77,7 +93,9 @@ class InventarioController extends Controller
         return Inertia::render('Inventario/Index', [
             'saldos' => $saldos,
             'filtros' => $filtros,
-            'almacenes' => $this->contexto()->almacenesDisponibles()->map->only(['id', 'nombre'])->values(),
+            'almacenes' => $this->contexto()->almacenesDisponibles()
+                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo, 'direccion' => $a->direccion])
+                ->values(),
             'activos' => $empresa->activos()->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
             'tiposActivo' => TipoActivo::query()->where('empresa_id', $empresa->id)->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
             'categorias' => CategoriaActivo::query()->where('empresa_id', $empresa->id)->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
@@ -99,32 +117,33 @@ class InventarioController extends Controller
         $empresa = $this->empresaActiva();
 
         return Inertia::render('Inventario/Entrada', [
-            'almacenes' => $this->contexto()->almacenesDisponibles()->map->only(['id', 'nombre'])->values(),
-            'activos' => $empresa->activos()->where('activo', true)->with('tallas:id,valor')->orderBy('nombre')->get()
-                ->map(fn ($a): array => [
+            'almacenes' => $this->contexto()->almacenesDisponibles()
+                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo, 'direccion' => $a->direccion])
+                ->values(),
+            // Sólo activos por cantidad: los serializados se registran unidad por
+            // unidad en una fase posterior.
+            'activos' => $empresa->activos()
+                ->where('activo', true)
+                ->where('tipo_control', 'cantidad')
+                ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
+                ->orderBy('nombre')
+                ->get()
+                ->map(fn (Activo $a): array => [
                     'id' => $a->id,
                     'nombre' => $a->nombre,
+                    'codigo' => $a->codigo,
+                    'tipo' => $a->tipoActivo?->nombre,
+                    'categoria' => $a->categoriaActivo?->nombre,
                     'control' => $a->tipo_control->value,
-                    'tallas' => $a->tallas->map->only(['id', 'valor'])->values(),
+                    'tallas' => $a->tallas->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->values(),
                 ]),
         ]);
     }
 
-    public function entrada(Request $request, RegistrarEntradaInventario $accion): RedirectResponse
+    public function entrada(RegistrarEntradaInventarioRequest $request, RegistrarEntradaInventario $accion): RedirectResponse
     {
-        abort_unless($request->user()->can('inventario.entrada'), 403);
         $empresa = $this->empresaActiva();
-
-        $datos = $request->validate([
-            'almacen_id' => ['required', 'integer'],
-            'motivo' => ['required', 'string', 'max:255'],
-            'notas' => ['nullable', 'string', 'max:1000'],
-            'carga_inicial' => ['boolean'],
-            'items' => ['required', 'array', 'min:1'],
-            'items.*.activo_id' => ['required', 'integer'],
-            'items.*.talla_id' => ['required', 'integer'],
-            'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:100000'],
-        ]);
+        $datos = $request->validated();
 
         abort_unless($this->contexto()->puedeVerAlmacen((int) $datos['almacen_id']), 403, 'No tienes acceso a ese almacén.');
 

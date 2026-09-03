@@ -122,7 +122,7 @@ function alternarEstado(a: Activo): void {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Activos"
-            descripcion="Catálogo de activos de la empresa activa: uniformes, equipo, dispositivos y accesorios."
+            descripcion="Administra los bienes y prendas que la empresa entrega o mantiene en inventario: uniformes, equipo de cómputo, dispositivos y accesorios."
         >
             <template #acciones>
                 <Button variant="outline" as-child>

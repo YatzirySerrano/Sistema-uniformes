@@ -66,7 +66,7 @@ function variante(estado: string) {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Entregas de uniformes"
-            descripcion="Registro de dotaciones entregadas a colaboradores."
+            descripcion="Registra la entrega de uniformes y activos a los colaboradores, con firma de recepción y comprobante."
         >
             <template #acciones>
                 <Button v-if="puedeCrear" as-child>

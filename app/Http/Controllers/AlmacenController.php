@@ -258,6 +258,41 @@ class AlmacenController extends Controller
     }
 
     /**
+     * Búsqueda con autocompletado de almacenes para los combobox (entrada de
+     * inventario, entregas, filtros). Sólo almacenes activos y autorizados de la
+     * empresa activa.
+     */
+    public function buscar(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Almacen::class);
+
+        $termino = trim((string) $request->query('q', ''));
+        $autorizados = $this->contexto()->almacenesDisponibles()->pluck('id');
+
+        $almacenes = Almacen::query()
+            ->where('empresa_id', $this->empresaActiva()->id)
+            ->whereIn('id', $autorizados)
+            ->when($termino !== '', function (Builder $q) use ($termino): void {
+                $q->where(function (Builder $sub) use ($termino): void {
+                    $sub->where('nombre', 'like', "%{$termino}%")
+                        ->orWhere('codigo', 'like', "%{$termino}%")
+                        ->orWhere('direccion', 'like', "%{$termino}%");
+                });
+            })
+            ->orderBy('nombre')
+            ->limit(20)
+            ->get(['id', 'nombre', 'codigo', 'direccion'])
+            ->map(fn (Almacen $a): array => [
+                'id' => $a->id,
+                'nombre' => $a->nombre,
+                'codigo' => $a->codigo,
+                'direccion' => $a->direccion,
+            ]);
+
+        return response()->json(['almacenes' => $almacenes]);
+    }
+
+    /**
      * Búsqueda con autocompletado para el selector de responsable del almacén.
      * Sólo colaboradores activos de la empresa activa.
      */

@@ -50,6 +50,18 @@ class Empresa extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        // Cada empresa nace con su talla comodín ("sin variante"), que da soporte
+        // a los activos por cantidad que no usan variantes.
+        static::created(function (Empresa $empresa): void {
+            $empresa->tallas()->firstOrCreate(
+                ['es_comodin' => true],
+                ['valor' => 'Sin variante', 'orden' => 0, 'activa' => true],
+            );
+        });
+    }
+
     /**
      * @return BelongsToMany<User, $this>
      */
@@ -119,6 +131,18 @@ class Empresa extends Model
     public function tallas(): HasMany
     {
         return $this->hasMany(Talla::class);
+    }
+
+    /**
+     * Talla comodín ("sin variante") de la empresa. Se crea por migración; si
+     * faltara (empresa nueva) se crea al vuelo.
+     */
+    public function tallaComodin(): Talla
+    {
+        return $this->tallas()->firstOrCreate(
+            ['es_comodin' => true],
+            ['valor' => 'Sin variante', 'orden' => 0, 'activa' => true],
+        );
     }
 
     /**

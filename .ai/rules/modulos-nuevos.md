@@ -1,6 +1,6 @@
 ---
 paths:
-    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Inventario,MovimientoInventario,MigracionInventario}Controller.php'
+    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,MigracionInventario}Controller.php'
     - 'app/Http/Requests/{Almacenes,Areas,Activos}/**'
     - 'app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php'
     - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario,MigrarSaldosLegacyAAlmacen}.php'
@@ -48,6 +48,19 @@ Saldos legacy: migración automática `..._000014` sólo para sucursales con un
 abastecedor único; el resto lo resuelve el asistente
 (`MigracionInventarioController`, `MigrarSaldosLegacyAAlmacen`) — idempotente y
 sin duplicar saldos.
+
+### Registrar entrada de inventario
+
+`RegistrarEntradaInventarioRequest` + `Inventario/Entrada.vue`:
+
+- `items.*.talla_id` es **nullable**. Si el activo tiene variantes propias →
+  `talla_id` obligatorio y debe ser una de ellas (error `items.N.talla_id`); si
+  no tiene → no se debe enviar `talla_id` y la acción resuelve la talla comodín.
+- Activos serializados: rechazados aquí (error `items.N.activo_id`); el
+  formulario sólo lista `tipo_control = cantidad`.
+- Fila duplicada (mismo `activo_id` + `talla_id`) → error en la segunda fila.
+- Errores por fila con clave `items.N.<campo>`; combobox `BuscadorAsync` para
+  almacén (`/almacenes/buscar`) y activo (`/activos/buscar?control=cantidad`).
 
 ## Tipos y categorías de activo
 

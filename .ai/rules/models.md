@@ -34,6 +34,14 @@ puede recibir de varios almacenes.
   El flujo de unidades serializadas (`UnidadActivo`) NO está implementado.
 - `tallas()` es **opcional** según el activo (un uniforme las usa; una laptop
   no).
+- **Talla comodín**: cada empresa tiene una fila `tallas` con
+  `es_comodin = true` (`valor = 'Sin variante'`, `orden = 0`), creada por la
+  migración `..._000015` y por `Empresa::booted()` (`static::created`). Es la
+  talla que usa en inventario un activo por cantidad **sin** variantes propias.
+  `Talla::scopeSeleccionables()` la excluye; úsalo en toda lista de
+  administración / selección de tallas. `Empresa::tallaComodin()` la resuelve
+  (con `firstOrCreate`). El usuario **no** captura `orden`: se asigna
+  `max(orden)+1` al crear y se cambia con `TallaController@reordenar`.
 - `tipo_activo_id` → `tipos_activo` (CRUD completo). **No** existe "Uniforme"
   como tipo: un uniforme es un conjunto de activos (módulo pendiente).
 - `categoria_id` → `categorias_activo` (catálogo real, fuente de verdad).

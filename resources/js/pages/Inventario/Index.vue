@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { ArrowRightLeft, PackagePlus } from '@lucide/vue';
+import { ArrowRightLeft, PackagePlus, Search } from '@lucide/vue';
 import { computed, reactive, ref, watch } from 'vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -33,10 +34,17 @@ type Saldo = {
 
 type Opcion = { id: number; nombre: string };
 
+type AlmacenOpcion = {
+    id: number;
+    nombre: string;
+    codigo: string | null;
+    direccion: string | null;
+};
+
 const props = defineProps<{
     saldos: Paginado<Saldo>;
     filtros: Record<string, string | number | undefined>;
-    almacenes: Opcion[];
+    almacenes: AlmacenOpcion[];
     activos: Opcion[];
     tiposActivo: Opcion[];
     categorias: Opcion[];
@@ -56,6 +64,7 @@ defineOptions({
 });
 
 const filtros = reactive({
+    buscar: props.filtros.buscar ?? '',
     almacen_id: props.filtros.almacen_id ?? '',
     activo_id: props.filtros.activo_id ?? '',
     tipo_activo_id: props.filtros.tipo_activo_id ?? '',
@@ -65,22 +74,44 @@ const filtros = reactive({
     estado_stock: props.filtros.estado_stock ?? '',
 });
 
+// Almacén seleccionado para el combobox (el filtro guarda sólo el id).
+const almacenSel = ref<AlmacenOpcion | null>(
+    props.almacenes.find((a) => a.id === Number(props.filtros.almacen_id)) ??
+        null,
+);
+async function buscarAlmacenes(q: string): Promise<AlmacenOpcion[]> {
+    const res = await fetch(`/almacenes/buscar?q=${encodeURIComponent(q)}`, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+    });
+    if (!res.ok) return props.almacenes;
+    return (await res.json()).almacenes ?? [];
+}
+function alElegirAlmacen(a: AlmacenOpcion | null) {
+    almacenSel.value = a;
+    filtros.almacen_id = a?.id ?? '';
+}
+
 const hayFiltros = computed(() =>
     Object.values(filtros).some((v) => v !== '' && v !== undefined),
 );
 
+let temporizador: ReturnType<typeof setTimeout> | undefined;
 watch(
     filtros,
     () => {
-        router.get(
-            '/inventario',
-            Object.fromEntries(
-                Object.entries(filtros).filter(
-                    ([, v]) => v !== '' && v !== undefined,
+        clearTimeout(temporizador);
+        temporizador = setTimeout(() => {
+            router.get(
+                '/inventario',
+                Object.fromEntries(
+                    Object.entries(filtros).filter(
+                        ([, v]) => v !== '' && v !== undefined,
+                    ),
                 ),
-            ),
-            { preserveState: true, replace: true, preserveScroll: true },
-        );
+                { preserveState: true, replace: true, preserveScroll: true },
+            );
+        }, 300);
     },
     { deep: true },
 );
@@ -89,6 +120,7 @@ function limpiarFiltros() {
     Object.keys(filtros).forEach(
         (k) => (filtros[k as keyof typeof filtros] = ''),
     );
+    almacenSel.value = null;
 }
 
 const dialogo = ref<'ajuste' | 'minimo' | null>(null);
@@ -149,7 +181,7 @@ const selectClass =
     <div class="flex w-full flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Inventario por almacén"
-            descripcion="Existencias por almacén, activo y variante. El origen físico del stock es el almacén."
+            descripcion="Consulta y registra las existencias disponibles en cada almacén, por activo y variante. El origen físico del stock es el almacén; la sucursal es solo el destino del colaborador."
         >
             <template #acciones>
                 <Button v-if="permisos.entrada" as-child>
@@ -176,13 +208,40 @@ const selectClass =
             </Button>
         </div>
 
+        <div class="relative w-full sm:max-w-sm">
+            <Search
+                class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+            />
+            <Input
+                v-model="filtros.buscar"
+                class="pl-8"
+                placeholder="Buscar en inventario: activo, código, categoría, tipo, variante…"
+                aria-label="Buscar en el inventario"
+            />
+        </div>
+
         <div class="flex flex-wrap items-center gap-2">
-            <select v-model="filtros.almacen_id" :class="selectClass">
-                <option value="">Todos los almacenes</option>
-                <option v-for="a in almacenes" :key="a.id" :value="a.id">
-                    {{ a.nombre }}
-                </option>
-            </select>
+            <div class="w-full sm:w-56">
+                <BuscadorAsync
+                    :model-value="almacenSel"
+                    :buscar="buscarAlmacenes"
+                    :etiqueta="(a) => (a as AlmacenOpcion).nombre"
+                    :descripcion="
+                        (a) =>
+                            [
+                                (a as AlmacenOpcion).codigo,
+                                (a as AlmacenOpcion).direccion,
+                            ]
+                                .filter(Boolean)
+                                .join(' · ')
+                    "
+                    placeholder="Todos los almacenes"
+                    placeholder-busqueda="Buscar almacén por nombre o código"
+                    @update:model-value="
+                        (v) => alElegirAlmacen(v as AlmacenOpcion | null)
+                    "
+                />
+            </div>
             <select v-model="filtros.activo_id" :class="selectClass">
                 <option value="">Todos los activos</option>
                 <option v-for="p in activos" :key="p.id" :value="p.id">

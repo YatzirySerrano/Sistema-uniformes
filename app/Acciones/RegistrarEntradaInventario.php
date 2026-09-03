@@ -2,12 +2,13 @@
 
 namespace App\Acciones;
 
+use App\Enums\TipoControlActivo;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\Empresa;
 use App\Models\MovimientoInventario;
-use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
@@ -15,8 +16,9 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Registra una o varias entradas de inventario (compras, recepción, carga
- * inicial) en un ALMACÉN. Valida que almacén/activo/talla pertenezcan a la
- * empresa y que el almacén esté activo.
+ * inicial) en un ALMACÉN. Valida que almacén / activo / talla pertenezcan a la
+ * empresa y que el almacén esté activo. Un activo por cantidad sin variantes
+ * usa la talla comodín ("sin variante").
  */
 class RegistrarEntradaInventario
 {
@@ -26,7 +28,7 @@ class RegistrarEntradaInventario
     ) {}
 
     /**
-     * @param  array<int, array{activo_id: int, talla_id: int, cantidad: int}>  $items
+     * @param  array<int, array{activo_id: int, talla_id?: int|null, cantidad: int}>  $items
      * @return array<int, MovimientoInventario>
      */
     public function ejecutar(
@@ -45,28 +47,47 @@ class RegistrarEntradaInventario
             throw new ExcepcionDeNegocioSimple('El almacén está desactivado; no admite entradas de inventario.');
         }
 
-        $activoIds = array_column($items, 'activo_id');
-        $tallaIds = array_column($items, 'talla_id');
+        $activos = Activo::query()
+            ->where('empresa_id', $empresaId)
+            ->with('tallas:id')
+            ->whereIn('id', array_column($items, 'activo_id'))
+            ->get()
+            ->keyBy('id');
 
-        $activosValidos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', $activoIds)->pluck('id')->all();
-        $tallasValidas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', $tallaIds)->pluck('id')->all();
+        $comodinId = Empresa::query()->findOrFail($empresaId)->tallaComodin()->id;
 
-        return DB::transaction(function () use ($items, $empresaId, $almacenId, $motivo, $realizadoPor, $cargaInicial, $notas, $activosValidos, $tallasValidas): array {
+        return DB::transaction(function () use ($items, $empresaId, $almacenId, $motivo, $realizadoPor, $cargaInicial, $notas, $activos, $comodinId): array {
             $movimientos = [];
 
             foreach ($items as $item) {
                 if ((int) $item['cantidad'] <= 0) {
                     continue;
                 }
-                if (! in_array((int) $item['activo_id'], $activosValidos, true) || ! in_array((int) $item['talla_id'], $tallasValidas, true)) {
-                    throw new ExcepcionDeNegocioSimple('Un activo o talla seleccionado no pertenece a esta empresa.');
+
+                /** @var Activo|null $activo */
+                $activo = $activos->get((int) $item['activo_id']);
+
+                if ($activo === null) {
+                    throw new ExcepcionDeNegocioSimple('Un activo seleccionado no pertenece a esta empresa.');
+                }
+                if ($activo->tipo_control === TipoControlActivo::Serializado) {
+                    throw new ExcepcionDeNegocioSimple('Los activos serializados no se registran por esta pantalla.');
+                }
+
+                $tallasActivo = $activo->tallas->pluck('id')->all();
+                $tallaId = ($item['talla_id'] ?? null) ?: null;
+
+                if ($tallasActivo === []) {
+                    $tallaId = $comodinId; // activo por cantidad sin variantes
+                } elseif ($tallaId === null || ! in_array((int) $tallaId, $tallasActivo, true)) {
+                    throw new ExcepcionDeNegocioSimple('La variante indicada no corresponde al activo seleccionado.');
                 }
 
                 $movimientos[] = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                     empresaId: $empresaId,
                     almacenId: $almacenId,
                     activoId: (int) $item['activo_id'],
-                    tallaId: (int) $item['talla_id'],
+                    tallaId: (int) $tallaId,
                     tipo: $cargaInicial ? TipoMovimiento::Inicial : TipoMovimiento::Entrada,
                     cantidad: (int) $item['cantidad'],
                     realizadoPor: $realizadoPor,

@@ -58,6 +58,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Activos y variantes / tallas
     Route::redirect('prendas', 'activos');
     Route::get('activos', [ActivoController::class, 'index'])->name('activos.index');
+    Route::get('activos/buscar', [ActivoController::class, 'buscar'])->name('activos.buscar');
     Route::get('activos/crear', [ActivoController::class, 'create'])->name('activos.create');
     Route::post('activos', [ActivoController::class, 'store'])->name('activos.store');
     Route::get('activos/{activo}', [ActivoController::class, 'show'])->name('activos.show');
@@ -67,6 +68,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     Route::get('tallas', [TallaController::class, 'index'])->name('tallas.index');
     Route::post('tallas', [TallaController::class, 'store'])->name('tallas.store');
+    Route::post('tallas/rapido', [TallaController::class, 'rapido'])->name('tallas.rapido');
+    Route::post('tallas/reordenar', [TallaController::class, 'reordenar'])->name('tallas.reordenar');
     Route::put('tallas/{talla}', [TallaController::class, 'update'])->name('tallas.update');
     Route::delete('tallas/{talla}', [TallaController::class, 'destroy'])->name('tallas.destroy');
 
@@ -129,6 +132,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     // Almacenes
     Route::get('almacenes', [AlmacenController::class, 'index'])->name('almacenes.index');
+    Route::get('almacenes/buscar', [AlmacenController::class, 'buscar'])->name('almacenes.buscar');
     Route::get('almacenes/colaboradores-buscar', [AlmacenController::class, 'colaboradoresBuscar'])->name('almacenes.colaboradores-buscar');
     Route::post('almacenes', [AlmacenController::class, 'store'])->name('almacenes.store');
     Route::get('almacenes/{almacen}', [AlmacenController::class, 'show'])->name('almacenes.show');

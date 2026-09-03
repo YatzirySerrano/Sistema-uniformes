@@ -178,7 +178,7 @@ function alternarEstado(a: AlmacenFila): void {
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Almacenes"
-            :descripcion="`Almacenes de ${empresa.nombre_comercial} (empresa activa) y las sucursales que abastecen.`"
+            :descripcion="`Administra los lugares físicos donde ${empresa.nombre_comercial} resguarda y controla sus existencias, y las sucursales que cada almacén abastece.`"
         >
             <template #acciones>
                 <Button v-if="permisos.crear" @click="nuevo">

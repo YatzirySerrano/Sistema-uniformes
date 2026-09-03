@@ -30,7 +30,7 @@ defineOptions({
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Devoluciones"
-            descripcion="Activos devueltas por los colaboradores. Solo las reutilizables reingresan al inventario."
+            descripcion="Registra los activos o prendas que un colaborador regresa a un almacén y su condición. Solo los reutilizables reingresan al inventario."
         >
             <template #acciones>
                 <Button v-if="puedeCrear" as-child>

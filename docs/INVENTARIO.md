@@ -77,15 +77,26 @@ la última unidad no puedan completarse ambas. Probado en
 
 ## Stock negativo
 
-Prohibido por defecto (`config('uniformes.permitir_stock_negativo')`). Mensaje:
-«No hay existencias suficientes de {prenda} talla {talla} en la sucursal
-{sucursal}…». En una entrega multi-renglón, si falta stock de cualquier renglón
+Prohibido por defecto. Mensaje:
+«No hay existencias suficientes de {activo} (variante {talla}) en el almacén
+{almacén}…». En una entrega multi-renglón, si falta stock de cualquier renglón
 no se registra nada (transacción atómica).
 
 ## Entradas y ajustes
 
-- Entradas (`RegistrarEntradaInventario`): compras/recepción o carga inicial;
-  motivo obligatorio; auditadas.
+- Entradas (`RegistrarEntradaInventario` + `RegistrarEntradaInventarioRequest` +
+  `Inventario/Entrada.vue`): compras/recepción o carga inicial; motivo
+  obligatorio; auditadas.
+    - Combobox con buscador para almacén y activo (endpoints JSON
+      `/almacenes/buscar`, `/activos/buscar?control=cantidad`). Sólo activos por
+      cantidad; los serializados se registrarán unidad por unidad en otra fase.
+    - **Variante opcional**: si el activo tiene variantes propias, `talla_id` es
+      obligatorio y debe ser una de ellas; si no las tiene, no se envía `talla_id`
+      y el backend usa la **talla comodín** de la empresa (`tallas.es_comodin`,
+      "Sin variante"). Así un mouse, un cable o una gorra unitalla se registran sin
+      forzar una talla ficticia.
+    - Errores por fila con la clave `items.N.<campo>` (visibles junto a la fila);
+      fila duplicada (mismo activo + variante) bloqueada.
 - Ajustes (`AjustarInventario`): se fija una existencia objetivo; **no** se
   sustituye el saldo directamente, se genera el movimiento de ajuste con la
   diferencia; motivo obligatorio; auditado.

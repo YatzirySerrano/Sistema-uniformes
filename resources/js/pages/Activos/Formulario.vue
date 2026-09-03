@@ -24,13 +24,19 @@ type Activo = {
     tallas: number[];
 };
 
+type Variante = { id: number; valor: string };
+
 const props = defineProps<{
     activo: Activo | null;
-    tallas: { id: number; valor: string }[];
+    tallas: Variante[];
     tiposActivo: Opcion[];
     categorias: Opcion[];
     tiposControl: { valor: string; etiqueta: string }[];
-    permisos: { crear_tipo: boolean; crear_categoria: boolean };
+    permisos: {
+        crear_tipo: boolean;
+        crear_categoria: boolean;
+        crear_variante: boolean;
+    };
 }>();
 
 defineOptions({
@@ -45,9 +51,17 @@ defineOptions({
 const esEdicion = !!props.activo;
 const PESO_MAXIMO_MB = 4;
 
-// Listas locales para poder añadir tipos / categorías creados en línea.
+// Listas locales para poder añadir tipos / categorías / variantes creados en línea.
 const tiposLocal = ref<Opcion[]>([...props.tiposActivo]);
 const categoriasLocal = ref<Opcion[]>([...props.categorias]);
+const tallasLocal = ref<Variante[]>([...props.tallas]);
+const buscarTalla = ref('');
+const tallasFiltradas = computed(() => {
+    const q = buscarTalla.value.trim().toLowerCase();
+    return q
+        ? tallasLocal.value.filter((t) => t.valor.toLowerCase().includes(q))
+        : tallasLocal.value;
+});
 
 const form = useForm<{
     nombre: string;
@@ -87,10 +101,13 @@ function xsrf(): string {
 
 const nuevoTipo = ref('');
 const nuevaCategoria = ref('');
+const nuevaVariante = ref('');
 const creandoTipo = ref(false);
 const creandoCategoria = ref(false);
+const creandoVariante = ref(false);
 const mostrarNuevoTipo = ref(false);
 const mostrarNuevaCategoria = ref(false);
+const mostrarNuevaVariante = ref(false);
 
 async function crearRapido(
     url: string,
@@ -109,6 +126,28 @@ async function crearRapido(
     if (!res.ok) return null;
     const json = await res.json();
     return (json.tipo ?? json.categoria) as Opcion;
+}
+
+async function agregarVariante() {
+    if (!nuevaVariante.value.trim()) return;
+    creandoVariante.value = true;
+    const res = await fetch('/tallas/rapido', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            'X-XSRF-TOKEN': xsrf(),
+        },
+        credentials: 'same-origin',
+        body: JSON.stringify({ valor: nuevaVariante.value.trim() }),
+    });
+    creandoVariante.value = false;
+    if (!res.ok) return;
+    const creada = (await res.json()).talla as Variante;
+    tallasLocal.value = [...tallasLocal.value, creada];
+    if (!form.tallas.includes(creada.id)) form.tallas.push(creada.id);
+    nuevaVariante.value = '';
+    mostrarNuevaVariante.value = false;
 }
 
 async function agregarTipo() {
@@ -256,6 +295,10 @@ const selectClass =
                                 Agregar
                             </Button>
                         </div>
+                        <p class="text-muted-foreground text-xs">
+                            Clasificación específica dentro del tipo. Ejemplo:
+                            Camisola, Laptop o Teléfono celular.
+                        </p>
                         <InputError :message="form.errors.categoria_id" />
                     </div>
                 </div>
@@ -328,6 +371,10 @@ const selectClass =
                             Agregar
                         </Button>
                     </div>
+                    <p class="text-muted-foreground text-xs">
+                        Clasificación general del activo. Ejemplo: Prenda,
+                        Equipo de cómputo o Dispositivo móvil.
+                    </p>
                     <InputError :message="form.errors.tipo_activo_id" />
                 </div>
 
@@ -381,13 +428,27 @@ const selectClass =
                     <Label class="flex items-center gap-1.5">
                         Variantes / tallas
                         <AyudaTooltip
-                            texto="Opcional. No todos los activos usan tallas tradicionales: XS/S/M/L/XL, 28/30/32, 36R/38R, Unitalla… Marca las variantes que aplican a este activo."
+                            texto="Opcional. No todos los activos usan tallas: XS/S/M/L/XL, 28/30/32, 36R/38R, Unitalla… Si dejas esto vacío, el activo se controla «sin variante»."
                             etiqueta="Ayuda sobre variantes / tallas"
                         />
                     </Label>
+                    <p class="text-muted-foreground text-xs">
+                        Marca las variantes que aplican a este activo. Un mouse
+                        o un cable no necesitan ninguna.
+                    </p>
+
+                    <Input
+                        v-if="tallasLocal.length > 8"
+                        v-model="buscarTalla"
+                        type="search"
+                        placeholder="Buscar variante / talla…"
+                        aria-label="Buscar variante o talla"
+                        class="h-8"
+                    />
+
                     <div class="flex flex-wrap gap-2">
                         <label
-                            v-for="t in tallas"
+                            v-for="t in tallasFiltradas"
                             :key="t.id"
                             class="flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm"
                             :class="
@@ -405,14 +466,56 @@ const selectClass =
                             {{ t.valor }}
                         </label>
                         <p
-                            v-if="!tallas.length"
+                            v-if="!tallasLocal.length"
                             class="text-muted-foreground text-sm"
                         >
-                            No hay variantes / tallas.
-                            <Link href="/tallas" class="text-primary underline"
-                                >Crea variantes primero</Link
-                            >.
+                            Aún no hay variantes en la empresa.
                         </p>
+                        <p
+                            v-else-if="!tallasFiltradas.length"
+                            class="text-muted-foreground text-sm"
+                        >
+                            Sin coincidencias para «{{ buscarTalla }}».
+                        </p>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2 pt-1">
+                        <Button
+                            v-if="permisos.crear_variante"
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            @click="
+                                mostrarNuevaVariante = !mostrarNuevaVariante
+                            "
+                        >
+                            <Plus class="size-4" /> Crear nueva variante / talla
+                        </Button>
+                        <Link
+                            href="/tallas"
+                            class="text-primary text-xs underline"
+                        >
+                            Administrar variantes
+                        </Link>
+                    </div>
+                    <div
+                        v-if="mostrarNuevaVariante"
+                        class="flex flex-wrap items-center gap-2"
+                    >
+                        <Input
+                            v-model="nuevaVariante"
+                            placeholder="p. ej. XL, 34, Unitalla"
+                            class="flex-1"
+                            @keydown.enter.prevent="agregarVariante"
+                        />
+                        <Button
+                            type="button"
+                            size="sm"
+                            :disabled="creandoVariante || !nuevaVariante.trim()"
+                            @click="agregarVariante"
+                        >
+                            Agregar
+                        </Button>
                     </div>
                     <InputError :message="form.errors.tallas" />
                 </div>

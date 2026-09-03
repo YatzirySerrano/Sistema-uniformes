@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,7 @@ type Categoria = {
     activos_count: number;
 };
 
-defineProps<{
+const props = defineProps<{
     tipos: Tipo[];
     categorias: Categoria[];
     tiposSelect: { id: number; nombre: string }[];
@@ -33,6 +33,48 @@ defineProps<{
         administrar_categorias: boolean;
     };
 }>();
+
+// --- Filtros locales (los catálogos pueden crecer) ---
+const fTipo = ref({ buscar: '', estado: '' as '' | 'activos' | 'inactivos' });
+const fCat = ref({
+    buscar: '',
+    tipo_id: '' as number | '',
+    estado: '' as '' | 'activas' | 'inactivas',
+});
+
+const tiposFiltrados = computed(() => {
+    const q = fTipo.value.buscar.trim().toLowerCase();
+    return props.tipos.filter(
+        (t) =>
+            (!q ||
+                t.nombre.toLowerCase().includes(q) ||
+                (t.codigo ?? '').toLowerCase().includes(q)) &&
+            (fTipo.value.estado === '' ||
+                (fTipo.value.estado === 'activos') === t.activo),
+    );
+});
+const categoriasFiltradas = computed(() => {
+    const q = fCat.value.buscar.trim().toLowerCase();
+    return props.categorias.filter(
+        (c) =>
+            (!q ||
+                c.nombre.toLowerCase().includes(q) ||
+                (c.tipo ?? '').toLowerCase().includes(q)) &&
+            (fCat.value.tipo_id === '' ||
+                c.tipo_activo_id === fCat.value.tipo_id) &&
+            (fCat.value.estado === '' ||
+                (fCat.value.estado === 'activas') === c.activa),
+    );
+});
+const hayFiltroTipo = computed(
+    () => !!fTipo.value.buscar || fTipo.value.estado !== '',
+);
+const hayFiltroCat = computed(
+    () =>
+        !!fCat.value.buscar ||
+        fCat.value.tipo_id !== '' ||
+        fCat.value.estado !== '',
+);
 
 defineOptions({
     layout: {
@@ -127,7 +169,13 @@ function toggleCategoria(id: number) {
         <div class="grid gap-6 lg:grid-cols-2">
             <!-- Tipos de activo -->
             <section class="min-w-0 space-y-3 rounded-xl border p-4">
-                <h2 class="text-sm font-semibold">Tipos de activo</h2>
+                <div>
+                    <h2 class="text-sm font-semibold">Tipos de activo</h2>
+                    <p class="text-muted-foreground text-xs">
+                        Clasificación general o naturaleza del activo: Prenda,
+                        Equipo de cómputo, Dispositivo móvil, Accesorio…
+                    </p>
+                </div>
 
                 <form
                     v-if="permisos.administrar_tipos"
@@ -153,6 +201,33 @@ function toggleCategoria(id: number) {
                     {{ tipoForm.errors.nombre }}
                 </p>
 
+                <div class="flex flex-wrap items-center gap-2">
+                    <Input
+                        v-model="fTipo.buscar"
+                        type="search"
+                        placeholder="Buscar tipo…"
+                        aria-label="Buscar tipo de activo"
+                        class="h-8 w-40"
+                    />
+                    <select
+                        v-model="fTipo.estado"
+                        class="border-input bg-background h-8 rounded-md border px-2 text-sm"
+                        aria-label="Filtrar por estado"
+                    >
+                        <option value="">Todos</option>
+                        <option value="activos">Activos</option>
+                        <option value="inactivos">Inactivos</option>
+                    </select>
+                    <Button
+                        v-if="hayFiltroTipo"
+                        variant="ghost"
+                        size="sm"
+                        @click="fTipo = { buscar: '', estado: '' }"
+                    >
+                        Limpiar filtros
+                    </Button>
+                </div>
+
                 <div class="overflow-x-auto rounded-lg border">
                     <table class="w-full min-w-[420px] text-sm">
                         <thead
@@ -166,7 +241,7 @@ function toggleCategoria(id: number) {
                             </tr>
                         </thead>
                         <tbody>
-                            <template v-for="t in tipos" :key="t.id">
+                            <template v-for="t in tiposFiltrados" :key="t.id">
                                 <tr class="border-t">
                                     <td class="px-3 py-2">
                                         {{ t.nombre }}
@@ -272,7 +347,13 @@ function toggleCategoria(id: number) {
 
             <!-- Categorías de activo -->
             <section class="min-w-0 space-y-3 rounded-xl border p-4">
-                <h2 class="text-sm font-semibold">Categorías de activo</h2>
+                <div>
+                    <h2 class="text-sm font-semibold">Categorías de activo</h2>
+                    <p class="text-muted-foreground text-xs">
+                        Clasificación específica dentro de un tipo: Camisola,
+                        Pantalón, Laptop, Teléfono celular…
+                    </p>
+                </div>
 
                 <form
                     v-if="permisos.administrar_categorias"
@@ -315,6 +396,47 @@ function toggleCategoria(id: number) {
                     {{ categoriaForm.errors.nombre }}
                 </p>
 
+                <div class="flex flex-wrap items-center gap-2">
+                    <Input
+                        v-model="fCat.buscar"
+                        type="search"
+                        placeholder="Buscar categoría…"
+                        aria-label="Buscar categoría"
+                        class="h-8 w-40"
+                    />
+                    <select
+                        v-model="fCat.tipo_id"
+                        class="border-input bg-background h-8 rounded-md border px-2 text-sm"
+                        aria-label="Filtrar por tipo"
+                    >
+                        <option value="">Todos los tipos</option>
+                        <option
+                            v-for="t in tiposSelect"
+                            :key="t.id"
+                            :value="t.id"
+                        >
+                            {{ t.nombre }}
+                        </option>
+                    </select>
+                    <select
+                        v-model="fCat.estado"
+                        class="border-input bg-background h-8 rounded-md border px-2 text-sm"
+                        aria-label="Filtrar por estado"
+                    >
+                        <option value="">Todas</option>
+                        <option value="activas">Activas</option>
+                        <option value="inactivas">Inactivas</option>
+                    </select>
+                    <Button
+                        v-if="hayFiltroCat"
+                        variant="ghost"
+                        size="sm"
+                        @click="fCat = { buscar: '', tipo_id: '', estado: '' }"
+                    >
+                        Limpiar filtros
+                    </Button>
+                </div>
+
                 <div class="overflow-x-auto rounded-lg border">
                     <table class="w-full min-w-[480px] text-sm">
                         <thead
@@ -329,7 +451,10 @@ function toggleCategoria(id: number) {
                             </tr>
                         </thead>
                         <tbody>
-                            <template v-for="c in categorias" :key="c.id">
+                            <template
+                                v-for="c in categoriasFiltradas"
+                                :key="c.id"
+                            >
                                 <tr class="border-t">
                                     <td class="px-3 py-2">{{ c.nombre }}</td>
                                     <td class="text-muted-foreground px-3 py-2">
