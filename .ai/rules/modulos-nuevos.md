@@ -88,7 +88,8 @@ como procedencia histórica.
   formulario se acotan a esa empresa (`/almacenes/buscar?empresa_id=`,
   `/activos/buscar?empresa_id=&control=cantidad`).
 - `items.*.talla_id` **nullable**: si el activo tiene variantes propias es
-  obligatorio; si no, la acción resuelve la talla comodín.
+  obligatorio (validado contra `talla_empresa`); si no, `talla_id = NULL` ("sin
+  variante", ya no hay talla comodín).
 - Serializados rechazados aquí (`items.N.activo_id`).
 - Fila duplicada (`activo_id` + `talla_id`) → error en la segunda fila.
 
@@ -101,43 +102,81 @@ obtiene el almacén de origen (activo **único** que abastece a la empresa; cero
 varios → `ExcepcionDeNegocioSimple`, nunca 500). `EntregaController` /
 `DevolucionController` reciben `colaborador_id` y derivan todo.
 
-## Tipos, categorías y variantes de activo (Bloque B)
+## Catálogos COMPARTIDOS: tipos, categorías y variantes (Bloque C · Etapa 1)
 
-- `tipos_activo`, `categorias_activo`, `tallas`: catálogos **por empresa**. La
-  pantalla de administración (`Activos/Catalogos.vue`) lleva un selector de
-  empresa que recarga con `?empresa_id=`. `store` / `rapido` / `reordenar` envían
-  `empresa_id`.
-- **Tipo y categoría son OPCIONALES** (nullable, `Rule::exists` sólo si vienen) e
-  independientes entre sí. En el formulario de Activo son **combobox con
-  búsqueda** (`BuscadorAsync`, `dependencia = empresa_id`):
-    - `GET tipos-activo/buscar?empresa_id=&q=` → `{ tipos: [{id, nombre}] }`.
-    - `GET categorias-activo/buscar?empresa_id=&q=&tipo_activo_id=` →
-      `{ categorias: [{id, nombre, tipo_activo_id, tipo}] }`. Con `tipo_activo_id`
-      **prioriza y acota** a ese tipo + las categorías sin tipo (una categoría de
-      otro tipo no se ofrece; las sin tipo siempre sí).
-    - Ambos: `empresa_id` presente e inválido/sin acceso → lista vacía (nunca cae
-      a "todas mis empresas"); `empresa_id` ausente → todas las autorizadas.
-      Sólo registros `activo`/`activa`. `authorize('viewAny', ...)`.
-- **Alta inline**: el combobox emite `crear` (opción "+ Crear nuevo…" al final,
-  sólo con `tipos-activo.administrar` / `categorias-activo.administrar`) → diálogo
-  → `POST tipos-activo/rapido` / `categorias-activo/rapido` (JSON, devuelven el
-  registro creado). No hay botones "Otro/Otra" ni `<select>` plano.
-- **Coherencia tipo ↔ categoría** (validada en `GuardarActivoRequest` +
-  `withValidator`): si el activo lleva tipo y categoría, y la categoría tiene
-  `tipo_activo_id` no nulo, deben coincidir. Sin tipo, o categoría sin tipo → sin
-  restricción.
-- **Unicidad normalizada**: `tipos_activo` / `categorias_activo` tienen
-  `nombre_normalizado` (índice único `(empresa_id, nombre_normalizado)`).
-  `NombreNormalizado` (trait) lo sincroniza en `saving` y expone
-  `existeNombreEnEmpresa()`, usado por los Form Requests y por `rapido`.
-  `App\Soporte\NormalizadorNombre::catalogo()` es la única definición de "mismo
-  nombre" (minúsculas + `preg_replace('/\s+/u', ' ', trim())`).
-- **Desactivar** tipo/categoría (diálogo de confirmación en `Catalogos.vue`) sólo
-  lo saca de nuevas selecciones; nunca borra ni pone la FK a null. `edit` de
-  Activo manda `seleccion.{tipo,categoria}` para mostrar el nombre asignado
-  aunque esté inactivo.
+- `tipos_activo`, `categorias_activo`, `tallas` son catálogos **de plataforma**:
+  **sin `empresa_id`**. Se **habilitan por empresa** con pivotes N:M
+  (`tipo_activo_empresa`, `categoria_activo_empresa`, `talla_empresa`). Catálogo
+  compartido ≠ inventario compartido: el activo pertenece a una empresa y el
+  stock se llavea por `empresa + almacén + activo + talla`.
+- Modelos: `empresas()` (BelongsToMany), `scopeParaEmpresa($q, int $empresaId)`
+  (`whereHas('empresas', whereKey)`), `habilitado/aPara(int)`. Los tres usan el
+  trait `NombreNormalizado` (columna configurable: `Talla` normaliza `valor`).
+  `existeNombre($nombre, $ignorar)` — **unicidad de plataforma**, sin `empresa_id`.
+- **Tipo y categoría siguen siendo OPCIONALES** e independientes. En el formulario
+  de Activo son `BuscadorAsync` (`dependencia = empresa_id`):
+    - `GET tipos-activo/buscar?empresa_id=&q=` — filtra por pivote
+      (`scopeParaEmpresa`). Sin `empresa_id` → habilitados para alguna empresa
+      autorizada. `empresa_id` inválido/sin acceso → `[]`. Sólo `activo = true`.
+    - `GET categorias-activo/buscar?empresa_id=&q=&tipo_activo_id=` — con
+      `tipo_activo_id` prioriza y acota a ese tipo + las sin tipo.
+    - `GET tallas/buscar?empresa_id=&q=` — mismo patrón.
+- **Alta inline** (`crear` del combobox): `POST tipos-activo/rapido` /
+  `categorias-activo/rapido` / `tallas/rapido` (JSON) crean el registro y lo
+  **habilitan SÓLO para la empresa del formulario** (`resolverEmpresa`).
+- **Habilitación por empresa** — dos vías, todas con mensaje que **nombra la
+  empresa afectada** (`«X» habilitado/deshabilitado para «Empresa»`):
+    - Toggle de una empresa: `POST tipos-activo/{tipo}/empresa` /
+      `POST categorias-activo/{categoria}/empresa` / `POST tallas/{talla}/empresa`
+      (`{empresa_id}`). Attach/detach; valida `puedeAccederEmpresa`.
+    - Bulk (diálogo "Empresas"): `PUT tipos-activo/{tipo}/empresas` /
+      `PUT categorias-activo/{categoria}/empresas` (`empresa_ids[]`,
+      `Rule::in(idsAutorizados)`; conserva las empresas fuera del alcance del
+      usuario).
+- **Alta desde `Activos/Catalogos.vue`**: `POST tipos-activo` / `categorias-activo`
+  con `empresa_ids[]` (`Rule::in(idsAutorizados)`). `POST tallas` con
+  `empresa_ids[]`.
+- **Reglas cross-company en `GuardarActivoRequest`**:
+  `Rule::exists('tipo_activo_empresa', 'tipo_activo_id')->where('empresa_id', $e)`,
+  `categoria_activo_empresa`, `talla_empresa`. Igual en `GuardarEntregaRequest` y
+  `DevolucionController`.
+- **Variante elegible de un activo en una empresa** = asociada al activo
+  (`activo_talla`) **Y** habilitada para esa empresa (`talla_empresa`) **Y**
+  `tallas.activa`. Fuente de verdad única: `Activo::tallasHabilitadas(int
+$empresaId)`. La usan:
+    - `GET activos/buscar` → `tallas` = sólo elegibles; `usa_variantes` = el
+      activo tiene alguna variante asociada (crudo). `usa_variantes && tallas ===
+[]` ⇒ el activo tiene variantes pero ninguna habilitada para esa empresa
+      (mal configurado): el frontend lo marca y bloquea, el backend lo rechaza.
+    - `RegistrarEntradaInventarioRequest::withValidator` + `RegistrarEntrada`
+      acción: exigen que `talla_id` esté en `tallasHabilitadas`; si el activo usa
+      variantes pero no hay ninguna elegible → error en `items.N.activo_id`.
+    - **Ajuste / mínimos** (`InventarioController::validarOperacion`,
+      `AjustarInventario`) — corrigen filas de saldo que YA existen: `talla_id`
+      sólo debe ser nula **o** estar asociada al activo (`activo_talla`). **No**
+      se exige que siga habilitada para la empresa: hay que poder corregir/poner
+      a cero existencias históricas de variantes luego deshabilitadas.
+- **Coherencia tipo ↔ categoría**: sin cambios (backend
+  `GuardarActivoRequest::withValidator`; la categoría ya no se acota por empresa
+  ahí porque las reglas `exists` sobre pivotes ya lo hacen).
+- **Estado global vs habilitación por empresa**: `activo`/`activa` = estado
+  global (retira de nuevas selecciones en todas); quitar una empresa del pivote
+  = deja de ofrecerse sólo ahí. `Activos/Catalogos.vue` y `Activos/Tallas.vue`
+  son **listas de cards responsive** (sin tablas): selector de empresa searchable
+  ("Administrar disponibilidad para …"), checkbox **"Disponible en «Empresa»"**
+  por fila, botón/contador **"N empresas"** que abre el diálogo con la lista
+  completa de empresas (habilitadas marcadas) + buscador para ver/gestionar, y
+  diálogo de confirmación para el estado global. `TipoActivoPolicy` /
+  `CategoriaActivoPolicy`: `administrar` exige el permiso y (rol restringido) que
+  el catálogo esté habilitado para alguna empresa del usuario.
+- **Sin talla comodín**: "sin variante" = `talla_id = NULL` en `saldos_inventario`
+  / `movimientos_inventario` / `detalles_entrega` / `detalles_devolucion` (todos
+  nullable + `nullOnDelete`). `ServicioInventario::acotarTalla()` usa `whereNull`
+  cuando `tallaId === null`. Unicidad real vía columna generada
+  `saldos_inventario.talla_ref = COALESCE(talla_id, 0)` en el índice
+  `saldos_inv_almacen_unico`. `MovimientoInventarioDatos::$tallaId` es `?int`.
+- **Históricos**: deshabilitar/desactivar un catálogo NO toca los activos que ya
+  lo usan (FK no se pone a null). `edit` de Activo manda `seleccion.{tipo,
+categoria}` para mostrar el nombre asignado aunque esté inactivo/deshabilitado.
 - `activos.categoria_id` es la fuente de verdad; `activos.categoria` (texto) es
   espejo temporal que sincroniza `ActivoController`.
-- `Activo::tipo_control` distingue `cantidad` de `serializado`. El flujo de
-  unidades serializadas (`UnidadActivo`, serie / IMEI) sigue **pendiente**
-  (Bloque C).

@@ -40,7 +40,7 @@ class GuardarEntregaRequest extends FormRequest
             'notas' => ['nullable', 'string', 'max:1000'],
             'items' => ['required', 'array', 'min:1'],
             'items.*.activo_id' => ['required', 'integer', Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId))],
-            'items.*.talla_id' => ['required', 'integer', Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId))],
+            'items.*.talla_id' => ['required', 'integer', Rule::exists('talla_empresa', 'talla_id')->where(fn ($q) => $q->where('empresa_id', $empresaId))],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
         ];
     }

@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\PerteneceAEmpresa;
+use App\Models\Concerns\NombreNormalizado;
 use Database\Factories\TallaFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -10,34 +10,32 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
- * Variante / talla de una empresa. Puede ser tradicional (S, M, 32, 36R…) o
- * "sin variante" (`es_comodin = true`): una fila por empresa que representa a los
- * activos por cantidad que no usan tallas. La comodín NO se muestra en la
- * administración ni en el selector del formulario de activo.
+ * Variante / talla del **catálogo compartido de plataforma** (S, M, 32, 36R,
+ * Unitalla…). Ya no pertenece a una empresa: se **habilita por empresa** vía el
+ * pivote `talla_empresa`. Un mismo valor ("M") es una sola fila reutilizada por
+ * todas las empresas que lo habiliten; su stock sigue separado por
+ * `empresa + almacen + activo + talla`.
+ *
+ * El "sin variante" ya no es una fila comodín: es `talla_id = NULL` en el
+ * inventario.
  *
  * @property int $id
- * @property int $empresa_id
  * @property string $valor
+ * @property string $valor_normalizado
  * @property int $orden
  * @property bool $activa
- * @property bool $es_comodin
- *
- * Compatibilidad: la relación con el catálogo se llama ahora `activos()`
- * (antes `prendas()`), sobre el pivote `activo_talla`.
  */
 class Talla extends Model
 {
     /** @use HasFactory<TallaFactory> */
-    use HasFactory, PerteneceAEmpresa;
+    use HasFactory, NombreNormalizado;
 
     protected $table = 'tallas';
 
     protected $fillable = [
-        'empresa_id',
         'valor',
         'orden',
         'activa',
-        'es_comodin',
     ];
 
     protected function casts(): array
@@ -45,8 +43,17 @@ class Talla extends Model
         return [
             'orden' => 'integer',
             'activa' => 'boolean',
-            'es_comodin' => 'boolean',
         ];
+    }
+
+    public static function columnaNombre(): string
+    {
+        return 'valor';
+    }
+
+    public static function columnaNombreNormalizado(): string
+    {
+        return 'valor_normalizado';
     }
 
     /**
@@ -55,6 +62,21 @@ class Talla extends Model
     public function activos(): BelongsToMany
     {
         return $this->belongsToMany(Activo::class, 'activo_talla')->withTimestamps();
+    }
+
+    /**
+     * Empresas que tienen habilitada esta variante.
+     *
+     * @return BelongsToMany<Empresa, $this>
+     */
+    public function empresas(): BelongsToMany
+    {
+        return $this->belongsToMany(Empresa::class, 'talla_empresa')->withTimestamps();
+    }
+
+    public function habilitadaPara(int $empresaId): bool
+    {
+        return $this->empresas()->whereKey($empresaId)->exists();
     }
 
     /**
@@ -76,14 +98,13 @@ class Talla extends Model
     }
 
     /**
-     * Variantes que el usuario administra y elige (excluye la comodín "sin
-     * variante", que se resuelve automáticamente en el backend).
+     * Variantes habilitadas para la empresa indicada.
      *
      * @param  Builder<static>  $query
      * @return Builder<static>
      */
-    public function scopeSeleccionables(Builder $query): Builder
+    public function scopeParaEmpresa(Builder $query, int $empresaId): Builder
     {
-        return $query->where('es_comodin', false);
+        return $query->whereHas('empresas', fn (Builder $q) => $q->whereKey($empresaId));
     }
 }

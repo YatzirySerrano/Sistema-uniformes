@@ -15,9 +15,10 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 /**
- * CRUD del catálogo de categorías de activo (Camisola, Pantalón, Laptop…).
- * Puede relacionarse con un tipo de activo. Sin borrado físico. La empresa llega
- * en `empresa_id` y se valida el acceso del usuario.
+ * CRUD del catálogo COMPARTIDO de categorías de activo. No pertenece a una
+ * empresa: `activa` es su estado global y `categoria_activo_empresa` la habilita
+ * por empresa. Puede relacionarse (opcionalmente) con un tipo del catálogo
+ * compartido. Sin borrado físico.
  */
 class CategoriaActivoController extends Controller
 {
@@ -27,11 +28,13 @@ class CategoriaActivoController extends Controller
 
     public function store(GuardarCategoriaActivoRequest $request): RedirectResponse
     {
+        $empresaIds = $request->collect('empresa_ids')->map(fn ($id): int => (int) $id)->all();
+
         $this->crear(
-            $request->empresaResuelta(),
             $request->validated('nombre'),
             $request->integer('tipo_activo_id') ?: null,
             $request->boolean('activa', true),
+            $empresaIds,
         );
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Categoría creada.']);
@@ -45,10 +48,7 @@ class CategoriaActivoController extends Controller
             'activa' => $request->boolean('activa', $categoria->activa),
         ]);
 
-        $this->auditoria->registrar('activos', 'categoria_editar', [
-            'tipo_entidad' => CategoriaActivo::class, 'entidad_id' => $categoria->id, 'empresa_id' => $categoria->empresa_id,
-            'descripcion' => 'Edición de categoría '.$categoria->nombre,
-        ]);
+        $this->auditar('categoria_editar', $categoria, 'Edición de categoría '.$categoria->nombre);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Categoría actualizada.']);
     }
@@ -59,10 +59,11 @@ class CategoriaActivoController extends Controller
 
         $categoria->update(['activa' => ! $categoria->activa]);
 
-        $this->auditoria->registrar('activos', $categoria->activa ? 'categoria_activar' : 'categoria_desactivar', [
-            'tipo_entidad' => CategoriaActivo::class, 'entidad_id' => $categoria->id, 'empresa_id' => $categoria->empresa_id,
-            'descripcion' => ($categoria->activa ? 'Activación' : 'Desactivación').' de categoría '.$categoria->nombre,
-        ]);
+        $this->auditar(
+            $categoria->activa ? 'categoria_activar' : 'categoria_desactivar',
+            $categoria,
+            ($categoria->activa ? 'Activación' : 'Desactivación').' global de categoría '.$categoria->nombre,
+        );
 
         return back()->with('toast', [
             'type' => 'success',
@@ -71,15 +72,68 @@ class CategoriaActivoController extends Controller
     }
 
     /**
+     * Sincroniza (bulk) las empresas para las que la categoría está habilitada —
+     * diálogo "Empresas".
+     */
+    public function empresas(Request $request, CategoriaActivo $categoria): RedirectResponse
+    {
+        $this->authorize('administrar', $categoria);
+
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+
+        $datos = $request->validate([
+            'empresa_ids' => ['present', 'array'],
+            'empresa_ids.*' => ['integer', Rule::in($idsAutorizadas->all())],
+        ]);
+
+        $fuera = $categoria->empresas()->whereNotIn('empresas.id', $idsAutorizadas)->pluck('empresas.id');
+        $categoria->empresas()->sync($fuera->merge($datos['empresa_ids'])->unique()->all());
+
+        $this->auditar('categoria_empresas', $categoria, 'Actualización de empresas habilitadas para la categoría '.$categoria->nombre);
+
+        $n = count($datos['empresa_ids']);
+
+        return back()->with('toast', ['type' => 'success', 'message' => "Categoría «{$categoria->nombre}»: {$n} ".($n === 1 ? 'empresa habilitada.' : 'empresas habilitadas.')]);
+    }
+
+    /**
+     * Habilita / deshabilita la categoría para UNA empresa (toggle desde el
+     * listado). El mensaje nombra la empresa afectada.
+     */
+    public function empresa(Request $request, CategoriaActivo $categoria): RedirectResponse
+    {
+        $this->authorize('administrar', $categoria);
+
+        $datos = $request->validate(['empresa_id' => ['required', 'integer']]);
+        $empresa = Empresa::query()->findOrFail((int) $datos['empresa_id']);
+        abort_unless($request->user()->puedeAccederEmpresa($empresa), 403);
+
+        $estaba = $categoria->empresas()->whereKey($empresa->id)->exists();
+        $estaba ? $categoria->empresas()->detach($empresa->id) : $categoria->empresas()->attach($empresa->id);
+
+        $this->auditar(
+            'categoria_empresas',
+            $categoria,
+            ($estaba ? 'Deshabilitación' : 'Habilitación')." de la categoría {$categoria->nombre} para {$empresa->nombre_comercial}",
+        );
+
+        $mensaje = $estaba
+            ? "Categoría «{$categoria->nombre}» deshabilitada para «{$empresa->nombre_comercial}». Sigue disponible globalmente y en las demás empresas donde esté habilitada."
+            : "Categoría «{$categoria->nombre}» habilitada para «{$empresa->nombre_comercial}».";
+
+        return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
+    }
+
+    /**
      * Búsqueda con autocompletado para el combobox de categoría (formulario de
-     * Activo y filtro del listado). Sólo categorías activas y autorizadas; si se
-     * envía `empresa_id` se acota a esa empresa (inválida / sin acceso → lista
-     * vacía), si no, a todas las empresas autorizadas.
+     * Activo y filtro del listado). Sólo categorías con estado global activo; si
+     * llega `empresa_id` se acota a las habilitadas para esa empresa (inválida /
+     * sin acceso → lista vacía), si no, a las habilitadas para alguna empresa
+     * autorizada.
      *
-     * Si llega `tipo_activo_id`, se priorizan (y acotan) las categorías de ese
-     * tipo más las que no tienen tipo: una categoría ligada a OTRO tipo no se
-     * ofrece en ese contexto, pero las categorías sin tipo siempre se pueden
-     * elegir (tipo y categoría son opcionales e independientes).
+     * Si llega `tipo_activo_id`, se priorizan y acotan las categorías de ese
+     * tipo más las que no tienen tipo (una categoría de OTRO tipo no se ofrece;
+     * las sin tipo siempre sí).
      */
     public function buscar(Request $request): JsonResponse
     {
@@ -99,9 +153,9 @@ class CategoriaActivoController extends Controller
                 return response()->json(['categorias' => []]);
             }
 
-            $consulta->where('empresa_id', $empresa->id);
+            $consulta->paraEmpresa($empresa->id);
         } else {
-            $consulta->whereIn('empresa_id', $this->idsEmpresasAutorizadas($request));
+            $consulta->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $this->idsEmpresasAutorizadas($request)));
         }
 
         if ($tipoActivoId > 0) {
@@ -126,8 +180,8 @@ class CategoriaActivoController extends Controller
     }
 
     /**
-     * Alta rápida desde el combobox del formulario de Activo. Devuelve la
-     * categoría creada para seleccionarla en el acto.
+     * Alta rápida desde el combobox del formulario de Activo: crea la categoría
+     * y la habilita SÓLO para la empresa del formulario.
      */
     public function rapido(Request $request): JsonResponse
     {
@@ -136,24 +190,21 @@ class CategoriaActivoController extends Controller
 
         $datos = $request->validate([
             'nombre' => ['required', 'string', 'max:120'],
-            'tipo_activo_id' => [
-                'nullable', 'integer',
-                Rule::exists('tipos_activo', 'id')->where(fn ($q) => $q->where('empresa_id', $empresa->id)),
-            ],
+            'tipo_activo_id' => ['nullable', 'integer', Rule::exists('tipos_activo', 'id')],
         ], [
             'nombre.required' => 'Escribe el nombre de la nueva categoría.',
-            'tipo_activo_id.exists' => 'El tipo de activo seleccionado no pertenece a esta empresa.',
+            'tipo_activo_id.exists' => 'El tipo de activo seleccionado no existe.',
         ]);
 
         $nombre = trim($datos['nombre']);
 
-        if (CategoriaActivo::existeNombreEnEmpresa($empresa->id, $nombre)) {
+        if (CategoriaActivo::existeNombre($nombre)) {
             throw ValidationException::withMessages([
-                'nombre' => 'Ya existe una categoría con ese nombre en esta empresa.',
+                'nombre' => 'Ya existe una categoría con ese nombre.',
             ]);
         }
 
-        $categoria = $this->crear($empresa, $nombre, $datos['tipo_activo_id'] ?? null, true);
+        $categoria = $this->crear($nombre, $datos['tipo_activo_id'] ?? null, true, [$empresa->id]);
 
         return response()->json(['categoria' => [
             'id' => $categoria->id,
@@ -162,20 +213,31 @@ class CategoriaActivoController extends Controller
         ]]);
     }
 
-    private function crear(Empresa $empresa, string $nombre, ?int $tipoActivoId, bool $activa): CategoriaActivo
+    /**
+     * @param  array<int, int>  $empresaIds
+     */
+    private function crear(string $nombre, ?int $tipoActivoId, bool $activa, array $empresaIds): CategoriaActivo
     {
         $categoria = CategoriaActivo::query()->create([
-            'empresa_id' => $empresa->id,
             'tipo_activo_id' => $tipoActivoId,
             'nombre' => $nombre,
             'activa' => $activa,
         ]);
 
-        $this->auditoria->registrar('activos', 'categoria_crear', [
-            'tipo_entidad' => CategoriaActivo::class, 'entidad_id' => $categoria->id, 'empresa_id' => $empresa->id,
-            'descripcion' => 'Alta de categoría '.$categoria->nombre,
-        ]);
+        $categoria->empresas()->sync(array_values(array_unique($empresaIds)));
+
+        $this->auditar('categoria_crear', $categoria, 'Alta de categoría '.$categoria->nombre);
 
         return $categoria;
+    }
+
+    private function auditar(string $accion, CategoriaActivo $categoria, string $descripcion): void
+    {
+        foreach ($categoria->empresas()->pluck('empresas.id') as $empresaId) {
+            $this->auditoria->registrar('activos', $accion, [
+                'tipo_entidad' => CategoriaActivo::class, 'entidad_id' => $categoria->id, 'empresa_id' => (int) $empresaId,
+                'descripcion' => $descripcion,
+            ]);
+        }
     }
 }

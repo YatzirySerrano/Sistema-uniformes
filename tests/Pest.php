@@ -99,8 +99,8 @@ function escenarioMultiempresa(): array
     $almacenA = Almacen::factory()->paraEmpresa($empresaA)->create(['nombre' => 'Almacén A']);
     $almacenB = Almacen::factory()->paraEmpresa($empresaB)->create(['nombre' => 'Almacén B']);
 
-    $tallaA = Talla::factory()->for($empresaA)->create(['valor' => 'M']);
-    Talla::factory()->for($empresaB)->create(['valor' => 'M']);
+    // Variante del catálogo COMPARTIDO habilitada para ambas empresas.
+    $tallaA = Talla::factory()->paraEmpresa($empresaA, $empresaB)->create(['valor' => 'M']);
 
     $activoA = Activo::factory()->for($empresaA)->create(['nombre' => 'Camisa']);
     $activoA->tallas()->attach($tallaA);

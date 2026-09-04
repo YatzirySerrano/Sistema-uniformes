@@ -42,7 +42,29 @@ como `?empresa_id=`. Cada **formulario de alta** por empresa lleva un campo
 campos dependientes (sucursal, área, almacén, tipo, categoría, variante,
 activo, colaborador) se recargan al cambiar la empresa y se cargan acotados por
 ella (no traer todo y ocultar con Vue). La lista viene de `usePermisos()`
-(`empresasAutorizadas`) o del prop `empresasAutorizadas` de la página.
+(`empresasAutorizadas`) o del prop `empresasAutorizadas` de la página. Cuando la
+lista puede crecer, el selector de empresa es `BuscadorAsync` (filtro local),
+no un `<select>` plano.
+
+## Catálogos compartidos habilitados por empresa (regla)
+
+`Activos/Catalogos.vue` y `Activos/Tallas.vue` administran catálogos de
+plataforma. Reglas de redacción y UX:
+
+- El selector de empresa de la parte superior se rotula **"Administrar
+  disponibilidad para …"** (no sólo "Empresa"): deja claro que fija el contexto
+  de los toggles por empresa.
+- El toggle por fila se rotula **"Disponible en «{empresa seleccionada}»"** (no
+  "Habilitada aquí"). Tooltip: deshabilitar aquí no borra el elemento ni afecta
+  a otras empresas ni a los activos que ya lo usan.
+- Todo mensaje de éxito de habilitar/deshabilitar **nombra la empresa**:
+  "«L» deshabilitada para «Empresa X»".
+- El contador "N empresas" es un botón que abre un diálogo con la **lista
+  completa** de empresas autorizadas (las habilitadas marcadas) + buscador, para
+  ver y gestionar. Nunca dejar sólo el número.
+- Presentación en **cards / filas apiladas**, nunca tabla con scroll horizontal.
+- "Estado global" (activo/activa) y "Disponible aquí" (por empresa) son cosas
+  distintas y deben verse como tales.
 
 ## Combobox con buscador (regla)
 

@@ -71,7 +71,7 @@ class CrearEntregaUniforme
         $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId));
 
         $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->get()->keyBy('id');
-        $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'talla_id'))->get()->keyBy('id');
+        $tallas = Talla::query()->paraEmpresa($empresaId)->whereIn('id', array_column($items, 'talla_id'))->get()->keyBy('id');
 
         foreach ($items as $item) {
             if (! $activos->has($item['activo_id'])) {

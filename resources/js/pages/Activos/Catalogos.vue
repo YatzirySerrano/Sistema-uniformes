@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
+import { Building2, Pencil, Plus, X } from '@lucide/vue';
+import { computed, ref } from 'vue';
+import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,12 +19,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
+type EmpChip = { id: number; nombre_comercial: string };
 type Tipo = {
     id: number;
     nombre: string;
     codigo: string | null;
     activo: boolean;
     activos_count: number;
+    habilitado: boolean;
+    empresas: EmpChip[];
 };
 type Categoria = {
     id: number;
@@ -31,12 +36,15 @@ type Categoria = {
     tipo: string | null;
     activa: boolean;
     activos_count: number;
+    habilitada: boolean;
+    empresas: EmpChip[];
 };
+type OpcionTipo = { id: number; nombre: string };
 
 const props = defineProps<{
     tipos: Tipo[];
     categorias: Categoria[];
-    tiposSelect: { id: number; nombre: string }[];
+    tiposSelect: OpcionTipo[];
     empresasAutorizadas: EmpresaAutorizada[];
     empresaSeleccionadaId: number;
     permisos: {
@@ -45,22 +53,67 @@ const props = defineProps<{
     };
 }>();
 
-const empresaId = ref<number>(props.empresaSeleccionadaId);
-watch(empresaId, (id) => {
-    router.get(
-        '/activos-catalogos',
-        { empresa_id: id },
-        { preserveScroll: true, preserveState: false },
-    );
+defineOptions({
+    layout: {
+        breadcrumbs: [
+            { title: 'Activos', href: '/activos' },
+            { title: 'Tipos y categorías', href: '/activos-catalogos' },
+        ],
+    },
 });
 
-// --- Filtros locales (los catálogos pueden crecer) ---
+const empresaActual = computed(
+    () =>
+        props.empresasAutorizadas.find(
+            (e) => e.id === props.empresaSeleccionadaId,
+        )?.nombre_comercial ?? 'la empresa seleccionada',
+);
+
+// --- Selector de empresa (contexto de "Disponible aquí") ---
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find(
+        (e) => e.id === props.empresaSeleccionadaId,
+    ) ?? null,
+);
+function buscarEmpresasLocal(q: string): Promise<EmpresaAutorizada[]> {
+    const t = q.trim().toLowerCase();
+    return Promise.resolve(
+        t
+            ? props.empresasAutorizadas.filter(
+                  (e) =>
+                      e.nombre_comercial.toLowerCase().includes(t) ||
+                      e.codigo.toLowerCase().includes(t),
+              )
+            : props.empresasAutorizadas,
+    );
+}
+function cambiarEmpresa(e: EmpresaAutorizada | null) {
+    if (!e || e.id === props.empresaSeleccionadaId) return;
+    router.get(
+        '/activos-catalogos',
+        { empresa_id: e.id },
+        { preserveScroll: true, preserveState: false },
+    );
+}
+
+// --- Filtros locales ---
 const fTipo = ref({ buscar: '', estado: '' as '' | 'activos' | 'inactivos' });
 const fCat = ref({
     buscar: '',
     tipo_id: '' as number | '',
     estado: '' as '' | 'activas' | 'inactivas',
 });
+const tipoFiltroSel = ref<OpcionTipo | null>(null);
+function buscarTiposLocal(q: string): Promise<OpcionTipo[]> {
+    const t = q.trim().toLowerCase();
+    return Promise.resolve(
+        t
+            ? props.tiposSelect.filter((x) =>
+                  x.nombre.toLowerCase().includes(t),
+              )
+            : props.tiposSelect,
+    );
+}
 
 const tiposFiltrados = computed(() => {
     const q = fTipo.value.buscar.trim().toLowerCase();
@@ -95,41 +148,114 @@ const hayFiltroCat = computed(
         fCat.value.tipo_id !== '' ||
         fCat.value.estado !== '',
 );
+function limpiarFiltroCat() {
+    fCat.value = { buscar: '', tipo_id: '', estado: '' };
+    tipoFiltroSel.value = null;
+}
 
-defineOptions({
-    layout: {
-        breadcrumbs: [
-            { title: 'Activos', href: '/activos' },
-            { title: 'Tipos y categorías', href: '/activos-catalogos' },
-        ],
-    },
-});
-
-const tipoForm = useForm({
+// --- Alta ---
+const tipoForm = useForm<{ nombre: string; empresa_ids: number[] }>({
     nombre: '',
-    empresa_id: props.empresaSeleccionadaId,
+    empresa_ids: [props.empresaSeleccionadaId],
 });
-const categoriaForm = useForm({
+const categoriaForm = useForm<{
+    nombre: string;
+    tipo_activo_id: number | '';
+    empresa_ids: number[];
+}>({
     nombre: '',
-    tipo_activo_id: '' as number | '',
-    empresa_id: props.empresaSeleccionadaId,
+    tipo_activo_id: '',
+    empresa_ids: [props.empresaSeleccionadaId],
 });
-
-const editandoTipo = ref<number | null>(null);
-const tipoEdit = useForm({ nombre: '', activo: true });
-const editandoCategoria = ref<number | null>(null);
-const categoriaEdit = useForm({
-    nombre: '',
-    tipo_activo_id: '' as number | '',
-    activa: true,
-});
+const categoriaFormTipoSel = ref<OpcionTipo | null>(null);
 
 function crearTipo() {
     tipoForm.post('/tipos-activo', {
         preserveScroll: true,
-        onSuccess: () => tipoForm.reset(),
+        onSuccess: () => {
+            tipoForm.reset();
+            tipoForm.empresa_ids = [props.empresaSeleccionadaId];
+        },
     });
 }
+function crearCategoria() {
+    categoriaForm.post('/categorias-activo', {
+        preserveScroll: true,
+        onSuccess: () => {
+            categoriaForm.reset();
+            categoriaForm.empresa_ids = [props.empresaSeleccionadaId];
+            categoriaFormTipoSel.value = null;
+        },
+    });
+}
+
+// --- Habilitación por empresa (toggle rápido de la empresa seleccionada) ---
+function alternarEmpresaTipo(t: Tipo) {
+    router.post(
+        `/tipos-activo/${t.id}/empresa`,
+        { empresa_id: props.empresaSeleccionadaId },
+        { preserveScroll: true },
+    );
+}
+function alternarEmpresaCategoria(c: Categoria) {
+    router.post(
+        `/categorias-activo/${c.id}/empresa`,
+        { empresa_id: props.empresaSeleccionadaId },
+        { preserveScroll: true },
+    );
+}
+
+// --- Diálogo "Empresas que lo usan" (ver + gestionar) ---
+const gestion = ref<{
+    recurso: 'tipo' | 'categoria';
+    id: number;
+    nombre: string;
+    empresa_ids: number[];
+} | null>(null);
+const buscarEmpGestion = ref('');
+const empresasGestion = computed(() => {
+    if (!gestion.value) return [];
+    const set = new Set(gestion.value.empresa_ids);
+    const q = buscarEmpGestion.value.trim().toLowerCase();
+    return props.empresasAutorizadas
+        .filter(
+            (e) =>
+                !q ||
+                e.nombre_comercial.toLowerCase().includes(q) ||
+                e.codigo.toLowerCase().includes(q),
+        )
+        .map((e) => ({ ...e, habilitada: set.has(e.id) }));
+});
+function abrirGestion(recurso: 'tipo' | 'categoria', fila: Tipo | Categoria) {
+    gestion.value = {
+        recurso,
+        id: fila.id,
+        nombre: fila.nombre,
+        empresa_ids: fila.empresas.map((e) => e.id),
+    };
+    buscarEmpGestion.value = '';
+}
+function alternarGestion(id: number) {
+    if (!gestion.value) return;
+    const i = gestion.value.empresa_ids.indexOf(id);
+    if (i === -1) gestion.value.empresa_ids.push(id);
+    else gestion.value.empresa_ids.splice(i, 1);
+}
+function guardarGestion() {
+    const g = gestion.value;
+    if (!g) return;
+    router.put(
+        g.recurso === 'tipo'
+            ? `/tipos-activo/${g.id}/empresas`
+            : `/categorias-activo/${g.id}/empresas`,
+        { empresa_ids: g.empresa_ids },
+        { preserveScroll: true, onSuccess: () => (gestion.value = null) },
+    );
+}
+
+// --- Edición inline ---
+const editandoTipo = ref<number | null>(null);
+const tipoEdit = useForm({ nombre: '', activo: true });
 function abrirEdicionTipo(t: Tipo) {
     editandoTipo.value = t.id;
     tipoEdit.defaults({ nombre: t.nombre, activo: t.activo });
@@ -141,38 +267,14 @@ function guardarTipo(id: number) {
         onSuccess: () => (editandoTipo.value = null),
     });
 }
-// --- Confirmación de activar / desactivar ---
-type Confirmacion = {
-    recurso: 'tipo' | 'categoria';
-    id: number;
-    nombre: string;
-    activar: boolean;
-};
-const confirmacion = ref<Confirmacion | null>(null);
 
-function pedirConfirmacion(c: Confirmacion) {
-    confirmacion.value = c;
-}
-function confirmarEstado() {
-    const c = confirmacion.value;
-    if (!c) return;
-    const url =
-        c.recurso === 'tipo'
-            ? `/tipos-activo/${c.id}/estado`
-            : `/categorias-activo/${c.id}/estado`;
-    router.post(
-        url,
-        {},
-        { preserveScroll: true, onFinish: () => (confirmacion.value = null) },
-    );
-}
-
-function crearCategoria() {
-    categoriaForm.post('/categorias-activo', {
-        preserveScroll: true,
-        onSuccess: () => categoriaForm.reset(),
-    });
-}
+const editandoCategoria = ref<number | null>(null);
+const categoriaEdit = useForm({
+    nombre: '',
+    tipo_activo_id: '' as number | '',
+    activa: true,
+});
+const categoriaEditTipoSel = ref<OpcionTipo | null>(null);
 function abrirEdicionCategoria(c: Categoria) {
     editandoCategoria.value = c.id;
     categoriaEdit.defaults({
@@ -181,6 +283,9 @@ function abrirEdicionCategoria(c: Categoria) {
         activa: c.activa,
     });
     categoriaEdit.reset();
+    categoriaEditTipoSel.value = c.tipo_activo_id
+        ? { id: c.tipo_activo_id, nombre: c.tipo ?? '' }
+        : null;
 }
 function guardarCategoria(id: number) {
     categoriaEdit.put(`/categorias-activo/${id}`, {
@@ -188,35 +293,34 @@ function guardarCategoria(id: number) {
         onSuccess: () => (editandoCategoria.value = null),
     });
 }
+
+// --- Confirmación de activar / desactivar GLOBAL ---
+const confirmacion = ref<{
+    recurso: 'tipo' | 'categoria';
+    id: number;
+    nombre: string;
+    activar: boolean;
+} | null>(null);
+function confirmarEstado() {
+    const c = confirmacion.value;
+    if (!c) return;
+    router.post(
+        c.recurso === 'tipo'
+            ? `/tipos-activo/${c.id}/estado`
+            : `/categorias-activo/${c.id}/estado`,
+        {},
+        { preserveScroll: true, onFinish: () => (confirmacion.value = null) },
+    );
+}
 </script>
 
 <template>
     <Head title="Tipos y categorías de activo" />
 
-    <div class="flex w-full flex-col gap-6 p-4">
-        <label
-            v-if="empresasAutorizadas.length > 1"
-            class="flex w-fit items-center gap-1.5 text-sm"
-        >
-            <span class="text-muted-foreground">Empresa</span>
-            <select
-                v-model="empresaId"
-                class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
-                aria-label="Empresa de los catálogos"
-            >
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
-        </label>
-
+    <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Tipos y categorías de activo"
-            descripcion="Catálogos por empresa. El tipo es la naturaleza del activo (Prenda, Equipo de cómputo…); la categoría es qué es dentro de su tipo (Camisola, Laptop…)."
+            descripcion="Catálogos COMPARTIDOS: el mismo tipo o categoría se reutiliza en varias empresas y cada una habilita los que usa. «Estado global» retira un elemento de nuevas selecciones en todas las empresas; «Disponible aquí» sólo lo activa o desactiva para la empresa seleccionada. Deshabilitar aquí no borra nada ni afecta a los activos que ya lo usan."
         >
             <template #acciones>
                 <Button variant="ghost" as-child>
@@ -225,20 +329,42 @@ function guardarCategoria(id: number) {
             </template>
         </EncabezadoPagina>
 
+        <div
+            v-if="empresasAutorizadas.length > 1"
+            class="flex flex-wrap items-center gap-2 text-sm"
+        >
+            <span class="text-muted-foreground"
+                >Administrar disponibilidad para</span
+            >
+            <div class="w-64">
+                <BuscadorAsync
+                    :model-value="empresaSel"
+                    :buscar="buscarEmpresasLocal"
+                    :etiqueta="(e) => (e as EmpresaAutorizada).nombre_comercial"
+                    :descripcion="(e) => (e as EmpresaAutorizada).codigo"
+                    placeholder="Empresa"
+                    placeholder-busqueda="Buscar empresa"
+                    @update:model-value="
+                        (v) => cambiarEmpresa(v as EmpresaAutorizada | null)
+                    "
+                />
+            </div>
+        </div>
+
         <div class="grid gap-6 lg:grid-cols-2">
-            <!-- Tipos de activo -->
-            <section class="min-w-0 space-y-3 rounded-xl border p-4">
+            <!-- ===== Tipos ===== -->
+            <section class="min-w-0 space-y-3">
                 <div>
                     <h2 class="text-sm font-semibold">Tipos de activo</h2>
                     <p class="text-muted-foreground text-xs">
-                        Clasificación general o naturaleza del activo: Prenda,
-                        Equipo de cómputo, Dispositivo móvil, Accesorio…
+                        Naturaleza del activo: Prenda, Equipo de cómputo,
+                        Dispositivo móvil, Accesorio…
                     </p>
                 </div>
 
                 <form
                     v-if="permisos.administrar_tipos"
-                    class="flex flex-wrap items-end gap-2"
+                    class="flex flex-wrap items-end gap-2 rounded-lg border p-3"
                     @submit.prevent="crearTipo"
                 >
                     <div class="grid min-w-0 flex-1 gap-1.5">
@@ -248,17 +374,22 @@ function guardarCategoria(id: number) {
                             v-model="tipoForm.nombre"
                             placeholder="p. ej. Equipo de protección"
                         />
+                        <p
+                            v-if="tipoForm.errors.nombre"
+                            class="text-destructive text-xs"
+                        >
+                            {{ tipoForm.errors.nombre }}
+                        </p>
+                        <p class="text-muted-foreground text-xs">
+                            Se crea y se habilita para
+                            <span class="font-medium">{{ empresaActual }}</span
+                            >. Con «Empresas» lo habilitas para más.
+                        </p>
                     </div>
                     <Button type="submit" :disabled="tipoForm.processing">
                         <Plus class="size-4" /> Agregar
                     </Button>
                 </form>
-                <p
-                    v-if="tipoForm.errors.nombre"
-                    class="text-destructive text-xs"
-                >
-                    {{ tipoForm.errors.nombre }}
-                </p>
 
                 <div class="flex flex-wrap items-center gap-2">
                     <Input
@@ -271,9 +402,9 @@ function guardarCategoria(id: number) {
                     <select
                         v-model="fTipo.estado"
                         class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-                        aria-label="Filtrar por estado"
+                        aria-label="Filtrar por estado global"
                     >
-                        <option value="">Todos</option>
+                        <option value="">Estado: todos</option>
                         <option value="activos">Activos</option>
                         <option value="inactivos">Inactivos</option>
                     </select>
@@ -283,36 +414,71 @@ function guardarCategoria(id: number) {
                         size="sm"
                         @click="fTipo = { buscar: '', estado: '' }"
                     >
-                        Limpiar filtros
+                        <X class="size-3.5" /> Limpiar
                     </Button>
                 </div>
 
-                <div class="overflow-x-auto rounded-lg border">
-                    <table class="w-full min-w-[420px] text-sm">
-                        <thead
-                            class="bg-muted/50 text-muted-foreground text-left"
-                        >
-                            <tr>
-                                <th class="px-3 py-2 font-medium">Nombre</th>
-                                <th class="px-3 py-2 font-medium">Activos</th>
-                                <th class="px-3 py-2 font-medium">Estado</th>
-                                <th class="px-3 py-2"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template v-for="t in tiposFiltrados" :key="t.id">
-                                <tr class="border-t">
-                                    <td class="px-3 py-2">
+                <p
+                    v-if="!tiposFiltrados.length"
+                    class="text-muted-foreground rounded-lg border border-dashed p-4 text-center text-sm"
+                >
+                    No hay tipos que coincidan.
+                </p>
+
+                <ul class="flex flex-col gap-2">
+                    <li
+                        v-for="t in tiposFiltrados"
+                        :key="t.id"
+                        class="rounded-xl border p-3"
+                    >
+                        <template v-if="editandoTipo === t.id">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <Input
+                                    v-model="tipoEdit.nombre"
+                                    class="h-8 w-44"
+                                    aria-label="Nombre del tipo"
+                                />
+                                <label
+                                    class="flex items-center gap-1.5 text-xs"
+                                >
+                                    <input
+                                        v-model="tipoEdit.activo"
+                                        type="checkbox"
+                                        class="size-4"
+                                    />
+                                    Activo globalmente
+                                </label>
+                                <Button size="sm" @click="guardarTipo(t.id)"
+                                    >Guardar</Button
+                                >
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    @click="editandoTipo = null"
+                                    >Cancelar</Button
+                                >
+                            </div>
+                            <p
+                                v-if="tipoEdit.errors.nombre"
+                                class="text-destructive mt-1 text-xs"
+                            >
+                                {{ tipoEdit.errors.nombre }}
+                            </p>
+                        </template>
+
+                        <template v-else>
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <p class="font-medium">
                                         {{ t.nombre }}
                                         <span
-                                            class="text-muted-foreground text-xs"
-                                            >· {{ t.codigo }}</span
+                                            class="text-muted-foreground font-mono text-xs"
+                                            >{{ t.codigo }}</span
                                         >
-                                    </td>
-                                    <td class="text-muted-foreground px-3 py-2">
-                                        {{ t.activos_count }}
-                                    </td>
-                                    <td class="px-3 py-2">
+                                    </p>
+                                    <div
+                                        class="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+                                    >
                                         <Badge
                                             :variant="
                                                 t.activo
@@ -322,145 +488,149 @@ function guardarCategoria(id: number) {
                                             class="text-xs"
                                         >
                                             {{
-                                                t.activo ? 'Activo' : 'Inactivo'
+                                                t.activo
+                                                    ? 'Activo global'
+                                                    : 'Inactivo global'
                                             }}
                                         </Badge>
-                                    </td>
-                                    <td
-                                        class="px-3 py-2 text-right whitespace-nowrap"
-                                    >
-                                        <button
-                                            v-if="permisos.administrar_tipos"
-                                            class="text-primary text-xs hover:underline"
-                                            @click="abrirEdicionTipo(t)"
+                                        <span
+                                            >Se usa en
+                                            {{ t.activos_count }} activos</span
                                         >
-                                            Editar
-                                        </button>
                                         <button
-                                            v-if="permisos.administrar_tipos"
-                                            class="text-primary ml-3 text-xs hover:underline"
-                                            @click="
-                                                pedirConfirmacion({
-                                                    recurso: 'tipo',
-                                                    id: t.id,
-                                                    nombre: t.nombre,
-                                                    activar: !t.activo,
-                                                })
-                                            "
+                                            type="button"
+                                            class="hover:text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
+                                            @click="abrirGestion('tipo', t)"
                                         >
+                                            <Building2 class="size-3" />
+                                            {{ t.empresas.length }}
                                             {{
-                                                t.activo
-                                                    ? 'Desactivar'
-                                                    : 'Activar'
+                                                t.empresas.length === 1
+                                                    ? 'empresa'
+                                                    : 'empresas'
                                             }}
                                         </button>
-                                    </td>
-                                </tr>
-                                <tr
-                                    v-if="editandoTipo === t.id"
-                                    class="bg-muted/30 border-t"
+                                    </div>
+                                </div>
+                                <div
+                                    v-if="permisos.administrar_tipos"
+                                    class="flex shrink-0 items-center gap-1"
                                 >
-                                    <td colspan="4" class="px-3 py-3">
-                                        <div
-                                            class="flex flex-wrap items-end gap-2"
-                                        >
-                                            <div
-                                                class="grid min-w-0 flex-1 gap-1.5"
-                                            >
-                                                <Label>Nombre</Label>
-                                                <Input
-                                                    v-model="tipoEdit.nombre"
-                                                />
-                                            </div>
-                                            <label
-                                                class="flex items-center gap-1.5 text-sm"
-                                            >
-                                                <input
-                                                    v-model="tipoEdit.activo"
-                                                    type="checkbox"
-                                                    class="size-4"
-                                                />
-                                                Activo
-                                            </label>
-                                            <Button
-                                                size="sm"
-                                                :disabled="tipoEdit.processing"
-                                                @click="guardarTipo(t.id)"
-                                            >
-                                                Guardar
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                @click="editandoTipo = null"
-                                            >
-                                                Cancelar
-                                            </Button>
-                                        </div>
-                                        <p
-                                            v-if="tipoEdit.errors.nombre"
-                                            class="text-destructive mt-1 text-xs"
-                                        >
-                                            {{ tipoEdit.errors.nombre }}
-                                        </p>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        :aria-label="`Editar ${t.nombre}`"
+                                        @click="abrirEdicionTipo(t)"
+                                    >
+                                        <Pencil class="size-4" />
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        @click="
+                                            confirmacion = {
+                                                recurso: 'tipo',
+                                                id: t.id,
+                                                nombre: t.nombre,
+                                                activar: !t.activo,
+                                            }
+                                        "
+                                    >
+                                        {{
+                                            t.activo
+                                                ? 'Desactivar global'
+                                                : 'Activar global'
+                                        }}
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <label
+                                v-if="permisos.administrar_tipos"
+                                class="mt-2 flex items-center gap-1.5 text-xs"
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="size-4"
+                                    :checked="t.habilitado"
+                                    :aria-label="`Disponible en ${empresaActual}`"
+                                    @change="alternarEmpresaTipo(t)"
+                                />
+                                Disponible en
+                                <span class="font-medium">{{
+                                    empresaActual
+                                }}</span>
+                                <AyudaTooltip
+                                    texto="Marca el tipo como disponible para la empresa seleccionada arriba. Deshabilitarlo aquí no lo elimina ni afecta a otras empresas ni a los activos que ya lo usan."
+                                    etiqueta="Ayuda sobre disponibilidad por empresa"
+                                />
+                            </label>
+                        </template>
+                    </li>
+                </ul>
             </section>
 
-            <!-- Categorías de activo -->
-            <section class="min-w-0 space-y-3 rounded-xl border p-4">
+            <!-- ===== Categorías ===== -->
+            <section class="min-w-0 space-y-3">
                 <div>
                     <h2 class="text-sm font-semibold">Categorías de activo</h2>
                     <p class="text-muted-foreground text-xs">
-                        Clasificación específica dentro de un tipo: Camisola,
-                        Pantalón, Laptop, Teléfono celular…
+                        Qué es dentro del tipo: Camisola, Pantalón, Laptop,
+                        Teléfono celular…
                     </p>
                 </div>
 
                 <form
                     v-if="permisos.administrar_categorias"
-                    class="flex flex-wrap items-end gap-2"
+                    class="grid gap-2 rounded-lg border p-3"
                     @submit.prevent="crearCategoria"
                 >
-                    <div class="grid min-w-0 flex-1 gap-1.5">
+                    <div class="grid gap-1.5">
                         <Label for="nueva-cat">Nueva categoría</Label>
                         <Input
                             id="nueva-cat"
                             v-model="categoriaForm.nombre"
                             placeholder="p. ej. Camisola"
                         />
+                        <p
+                            v-if="categoriaForm.errors.nombre"
+                            class="text-destructive text-xs"
+                        >
+                            {{ categoriaForm.errors.nombre }}
+                        </p>
                     </div>
                     <div class="grid gap-1.5">
-                        <Label for="cat-tipo">Tipo (opcional)</Label>
-                        <select
-                            id="cat-tipo"
-                            v-model="categoriaForm.tipo_activo_id"
-                            class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                        >
-                            <option value="">Sin tipo</option>
-                            <option
-                                v-for="t in tiposSelect"
-                                :key="t.id"
-                                :value="t.id"
-                            >
-                                {{ t.nombre }}
-                            </option>
-                        </select>
+                        <Label>Tipo relacionado (opcional)</Label>
+                        <BuscadorAsync
+                            :model-value="categoriaFormTipoSel"
+                            :buscar="buscarTiposLocal"
+                            :etiqueta="(x) => (x as OpcionTipo).nombre"
+                            placeholder="Sin tipo"
+                            placeholder-busqueda="Buscar tipo"
+                            @update:model-value="
+                                (v) => {
+                                    categoriaFormTipoSel =
+                                        v as OpcionTipo | null;
+                                    categoriaForm.tipo_activo_id =
+                                        (v as OpcionTipo | null)?.id ?? '';
+                                }
+                            "
+                        />
                     </div>
-                    <Button type="submit" :disabled="categoriaForm.processing">
-                        <Plus class="size-4" /> Agregar
-                    </Button>
+                    <div class="flex items-center justify-between gap-2">
+                        <p class="text-muted-foreground text-xs">
+                            Se habilita para
+                            <span class="font-medium">{{ empresaActual }}</span
+                            >.
+                        </p>
+                        <Button
+                            type="submit"
+                            :disabled="categoriaForm.processing"
+                        >
+                            <Plus class="size-4" /> Agregar
+                        </Button>
+                    </div>
                 </form>
-                <p
-                    v-if="categoriaForm.errors.nombre"
-                    class="text-destructive text-xs"
-                >
-                    {{ categoriaForm.errors.nombre }}
-                </p>
 
                 <div class="flex flex-wrap items-center gap-2">
                     <Input
@@ -470,26 +640,28 @@ function guardarCategoria(id: number) {
                         aria-label="Buscar categoría"
                         class="h-8 w-40"
                     />
-                    <select
-                        v-model="fCat.tipo_id"
-                        class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-                        aria-label="Filtrar por tipo"
-                    >
-                        <option value="">Todos los tipos</option>
-                        <option
-                            v-for="t in tiposSelect"
-                            :key="t.id"
-                            :value="t.id"
-                        >
-                            {{ t.nombre }}
-                        </option>
-                    </select>
+                    <div class="w-40">
+                        <BuscadorAsync
+                            :model-value="tipoFiltroSel"
+                            :buscar="buscarTiposLocal"
+                            :etiqueta="(x) => (x as OpcionTipo).nombre"
+                            placeholder="Tipo: todos"
+                            placeholder-busqueda="Buscar tipo"
+                            @update:model-value="
+                                (v) => {
+                                    tipoFiltroSel = v as OpcionTipo | null;
+                                    fCat.tipo_id =
+                                        (v as OpcionTipo | null)?.id ?? '';
+                                }
+                            "
+                        />
+                    </div>
                     <select
                         v-model="fCat.estado"
                         class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-                        aria-label="Filtrar por estado"
+                        aria-label="Filtrar por estado global"
                     >
-                        <option value="">Todas</option>
+                        <option value="">Estado: todas</option>
                         <option value="activas">Activas</option>
                         <option value="inactivas">Inactivas</option>
                     </select>
@@ -497,39 +669,81 @@ function guardarCategoria(id: number) {
                         v-if="hayFiltroCat"
                         variant="ghost"
                         size="sm"
-                        @click="fCat = { buscar: '', tipo_id: '', estado: '' }"
+                        @click="limpiarFiltroCat"
                     >
-                        Limpiar filtros
+                        <X class="size-3.5" /> Limpiar
                     </Button>
                 </div>
 
-                <div class="overflow-x-auto rounded-lg border">
-                    <table class="w-full min-w-[480px] text-sm">
-                        <thead
-                            class="bg-muted/50 text-muted-foreground text-left"
-                        >
-                            <tr>
-                                <th class="px-3 py-2 font-medium">Nombre</th>
-                                <th class="px-3 py-2 font-medium">Tipo</th>
-                                <th class="px-3 py-2 font-medium">Activos</th>
-                                <th class="px-3 py-2 font-medium">Estado</th>
-                                <th class="px-3 py-2"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <template
-                                v-for="c in categoriasFiltradas"
-                                :key="c.id"
-                            >
-                                <tr class="border-t">
-                                    <td class="px-3 py-2">{{ c.nombre }}</td>
-                                    <td class="text-muted-foreground px-3 py-2">
-                                        {{ c.tipo ?? '—' }}
-                                    </td>
-                                    <td class="text-muted-foreground px-3 py-2">
-                                        {{ c.activos_count }}
-                                    </td>
-                                    <td class="px-3 py-2">
+                <p
+                    v-if="!categoriasFiltradas.length"
+                    class="text-muted-foreground rounded-lg border border-dashed p-4 text-center text-sm"
+                >
+                    No hay categorías que coincidan.
+                </p>
+
+                <ul class="flex flex-col gap-2">
+                    <li
+                        v-for="c in categoriasFiltradas"
+                        :key="c.id"
+                        class="rounded-xl border p-3"
+                    >
+                        <template v-if="editandoCategoria === c.id">
+                            <div class="grid gap-2">
+                                <Input
+                                    v-model="categoriaEdit.nombre"
+                                    class="h-8"
+                                    aria-label="Nombre de la categoría"
+                                />
+                                <BuscadorAsync
+                                    :model-value="categoriaEditTipoSel"
+                                    :buscar="buscarTiposLocal"
+                                    :etiqueta="(x) => (x as OpcionTipo).nombre"
+                                    placeholder="Sin tipo"
+                                    placeholder-busqueda="Buscar tipo"
+                                    @update:model-value="
+                                        (v) => {
+                                            categoriaEditTipoSel =
+                                                v as OpcionTipo | null;
+                                            categoriaEdit.tipo_activo_id =
+                                                (v as OpcionTipo | null)?.id ??
+                                                '';
+                                        }
+                                    "
+                                />
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <label
+                                        class="flex items-center gap-1.5 text-xs"
+                                    >
+                                        <input
+                                            v-model="categoriaEdit.activa"
+                                            type="checkbox"
+                                            class="size-4"
+                                        />
+                                        Activa globalmente
+                                    </label>
+                                    <Button
+                                        size="sm"
+                                        @click="guardarCategoria(c.id)"
+                                        >Guardar</Button
+                                    >
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        @click="editandoCategoria = null"
+                                        >Cancelar</Button
+                                    >
+                                </div>
+                            </div>
+                        </template>
+
+                        <template v-else>
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <p class="font-medium">{{ c.nombre }}</p>
+                                    <div
+                                        class="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs"
+                                    >
                                         <Badge
                                             :variant="
                                                 c.activa
@@ -539,122 +753,93 @@ function guardarCategoria(id: number) {
                                             class="text-xs"
                                         >
                                             {{
-                                                c.activa ? 'Activa' : 'Inactiva'
+                                                c.activa
+                                                    ? 'Activa global'
+                                                    : 'Inactiva global'
                                             }}
                                         </Badge>
-                                    </td>
-                                    <td
-                                        class="px-3 py-2 text-right whitespace-nowrap"
-                                    >
-                                        <button
-                                            v-if="
-                                                permisos.administrar_categorias
-                                            "
-                                            class="text-primary text-xs hover:underline"
-                                            @click="abrirEdicionCategoria(c)"
+                                        <span>Tipo: {{ c.tipo ?? '—' }}</span>
+                                        <span
+                                            >Se usa en
+                                            {{ c.activos_count }} activos</span
                                         >
-                                            Editar
-                                        </button>
                                         <button
-                                            v-if="
-                                                permisos.administrar_categorias
-                                            "
-                                            class="text-primary ml-3 text-xs hover:underline"
+                                            type="button"
+                                            class="hover:text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
                                             @click="
-                                                pedirConfirmacion({
-                                                    recurso: 'categoria',
-                                                    id: c.id,
-                                                    nombre: c.nombre,
-                                                    activar: !c.activa,
-                                                })
+                                                abrirGestion('categoria', c)
                                             "
                                         >
+                                            <Building2 class="size-3" />
+                                            {{ c.empresas.length }}
                                             {{
-                                                c.activa
-                                                    ? 'Desactivar'
-                                                    : 'Activar'
+                                                c.empresas.length === 1
+                                                    ? 'empresa'
+                                                    : 'empresas'
                                             }}
                                         </button>
-                                    </td>
-                                </tr>
-                                <tr
-                                    v-if="editandoCategoria === c.id"
-                                    class="bg-muted/30 border-t"
+                                    </div>
+                                </div>
+                                <div
+                                    v-if="permisos.administrar_categorias"
+                                    class="flex shrink-0 items-center gap-1"
                                 >
-                                    <td colspan="5" class="px-3 py-3">
-                                        <div
-                                            class="flex flex-wrap items-end gap-2"
-                                        >
-                                            <div
-                                                class="grid min-w-0 flex-1 gap-1.5"
-                                            >
-                                                <Label>Nombre</Label>
-                                                <Input
-                                                    v-model="
-                                                        categoriaEdit.nombre
-                                                    "
-                                                />
-                                            </div>
-                                            <div class="grid gap-1.5">
-                                                <Label>Tipo</Label>
-                                                <select
-                                                    v-model="
-                                                        categoriaEdit.tipo_activo_id
-                                                    "
-                                                    class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                                                >
-                                                    <option value="">
-                                                        Sin tipo
-                                                    </option>
-                                                    <option
-                                                        v-for="t in tiposSelect"
-                                                        :key="t.id"
-                                                        :value="t.id"
-                                                    >
-                                                        {{ t.nombre }}
-                                                    </option>
-                                                </select>
-                                            </div>
-                                            <label
-                                                class="flex items-center gap-1.5 text-sm"
-                                            >
-                                                <input
-                                                    v-model="
-                                                        categoriaEdit.activa
-                                                    "
-                                                    type="checkbox"
-                                                    class="size-4"
-                                                />
-                                                Activa
-                                            </label>
-                                            <Button
-                                                size="sm"
-                                                :disabled="
-                                                    categoriaEdit.processing
-                                                "
-                                                @click="guardarCategoria(c.id)"
-                                            >
-                                                Guardar
-                                            </Button>
-                                            <Button
-                                                size="sm"
-                                                variant="ghost"
-                                                @click="
-                                                    editandoCategoria = null
-                                                "
-                                            >
-                                                Cancelar
-                                            </Button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        :aria-label="`Editar ${c.nombre}`"
+                                        @click="abrirEdicionCategoria(c)"
+                                    >
+                                        <Pencil class="size-4" />
+                                    </Button>
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        @click="
+                                            confirmacion = {
+                                                recurso: 'categoria',
+                                                id: c.id,
+                                                nombre: c.nombre,
+                                                activar: !c.activa,
+                                            }
+                                        "
+                                    >
+                                        {{
+                                            c.activa
+                                                ? 'Desactivar global'
+                                                : 'Activar global'
+                                        }}
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <label
+                                v-if="permisos.administrar_categorias"
+                                class="mt-2 flex items-center gap-1.5 text-xs"
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="size-4"
+                                    :checked="c.habilitada"
+                                    :aria-label="`Disponible en ${empresaActual}`"
+                                    @change="alternarEmpresaCategoria(c)"
+                                />
+                                Disponible en
+                                <span class="font-medium">{{
+                                    empresaActual
+                                }}</span>
+                                <AyudaTooltip
+                                    texto="Marca la categoría como disponible para la empresa seleccionada arriba. Deshabilitarla aquí no la elimina ni afecta a otras empresas ni a los activos que ya la usan."
+                                    etiqueta="Ayuda sobre disponibilidad por empresa"
+                                />
+                            </label>
+                        </template>
+                    </li>
+                </ul>
             </section>
         </div>
 
+        <!-- Confirmación de estado global -->
         <Dialog
             :open="confirmacion !== null"
             @update:open="(v: boolean) => !v && (confirmacion = null)"
@@ -665,9 +850,10 @@ function guardarCategoria(id: number) {
                         {{ confirmacion.activar ? '¿Activar' : '¿Desactivar' }}
                         {{
                             confirmacion.recurso === 'tipo'
-                                ? 'tipo de activo?'
-                                : 'categoría?'
+                                ? 'tipo de activo'
+                                : 'categoría'
                         }}
+                        globalmente?
                     </DialogTitle>
                     <DialogDescription>
                         <span class="font-medium">{{
@@ -676,8 +862,8 @@ function guardarCategoria(id: number) {
                         >.
                         {{
                             confirmacion.activar
-                                ? 'Volverá a estar disponible para nuevas selecciones.'
-                                : 'Dejará de estar disponible para nuevas selecciones. Los activos existentes conservarán su información.'
+                                ? 'Volverá a poder seleccionarse en las empresas donde esté habilitado.'
+                                : 'Dejará de ofrecerse para nuevas selecciones en TODAS las empresas. Los activos que ya lo usan conservan su información.'
                         }}
                     </DialogDescription>
                 </DialogHeader>
@@ -686,9 +872,8 @@ function guardarCategoria(id: number) {
                         type="button"
                         variant="ghost"
                         @click="confirmacion = null"
+                        >Cancelar</Button
                     >
-                        Cancelar
-                    </Button>
                     <Button
                         type="button"
                         :variant="
@@ -698,6 +883,70 @@ function guardarCategoria(id: number) {
                     >
                         {{ confirmacion.activar ? 'Activar' : 'Desactivar' }}
                     </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Empresas que lo usan -->
+        <Dialog
+            :open="gestion !== null"
+            @update:open="(v: boolean) => !v && (gestion = null)"
+        >
+            <DialogContent v-if="gestion">
+                <DialogHeader>
+                    <DialogTitle
+                        >Empresas que usan «{{ gestion.nombre }}»</DialogTitle
+                    >
+                    <DialogDescription>
+                        Marca las empresas donde este
+                        {{
+                            gestion.recurso === 'tipo' ? 'tipo' : 'la categoría'
+                        }}
+                        debe ofrecerse. Es un catálogo compartido: el cambio no
+                        afecta a las demás empresas ni a los activos que ya lo
+                        usan.
+                    </DialogDescription>
+                </DialogHeader>
+                <div class="grid gap-2">
+                    <Input
+                        v-model="buscarEmpGestion"
+                        class="h-8"
+                        placeholder="Buscar empresa…"
+                        aria-label="Buscar empresa"
+                    />
+                    <div
+                        class="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2"
+                    >
+                        <label
+                            v-for="e in empresasGestion"
+                            :key="e.id"
+                            class="flex items-center gap-2 text-sm"
+                        >
+                            <input
+                                type="checkbox"
+                                class="size-4"
+                                :checked="e.habilitada"
+                                @change="alternarGestion(e.id)"
+                            />
+                            {{ e.nombre_comercial }}
+                            <span
+                                class="text-muted-foreground font-mono text-xs"
+                            >
+                                {{ e.codigo }}
+                            </span>
+                        </label>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        @click="gestion = null"
+                        >Cancelar</Button
+                    >
+                    <Button type="button" @click="guardarGestion"
+                        >Guardar</Button
+                    >
                 </DialogFooter>
             </DialogContent>
         </Dialog>

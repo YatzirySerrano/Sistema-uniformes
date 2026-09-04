@@ -9,6 +9,8 @@ use App\Enums\TipoMovimiento;
  * ServicioInventario. La dimensión del saldo es el ALMACÉN; `sucursalId` sólo
  * se guarda como procedencia/contexto en el movimiento (p. ej. la sucursal del
  * colaborador que recibió una entrega). La dirección se deriva del tipo.
+ *
+ * `tallaId = null` = activo por cantidad SIN variante (ya no hay talla comodín).
  */
 final readonly class MovimientoInventarioDatos
 {
@@ -16,7 +18,7 @@ final readonly class MovimientoInventarioDatos
         public int $empresaId,
         public int $almacenId,
         public int $activoId,
-        public int $tallaId,
+        public ?int $tallaId,
         public TipoMovimiento $tipo,
         public int $cantidad,
         public ?int $realizadoPor = null,

@@ -133,7 +133,7 @@ it('un administrador puede ver, crear, editar y cambiar estado de un área', fun
 
 it('un administrador puede ver, crear, editar, cambiar estado de un activo y administrar tallas', function () {
     $empresa = Empresa::factory()->create();
-    $talla = Talla::factory()->for($empresa)->create(['valor' => 'M']);
+    $talla = Talla::factory()->paraEmpresa($empresa)->create(['valor' => 'M']);
     $admin = usuarioCon(RolSistema::Administrador->value);
     $this->actingAs($admin)->get('/activos')->assertOk();
 
@@ -151,11 +151,11 @@ it('un administrador puede ver, crear, editar, cambiar estado de un activo y adm
         ->post("/activos/{$activo->id}/estado")->assertSessionHas('toast');
     expect($activo->fresh()->activo)->toBeFalse();
 
-    // Administración de variantes / tallas (permiso tallas.administrar).
+    // Administración de variantes / tallas del catálogo compartido.
     $this->actingAs($admin)
-        ->post('/tallas', ['valor' => 'XL', 'empresa_id' => $empresa->id])
+        ->post('/tallas', ['valor' => 'XL', 'empresa_ids' => [$empresa->id]])
         ->assertSessionHasNoErrors();
-    expect(Talla::query()->where('empresa_id', $empresa->id)->where('valor', 'XL')->exists())->toBeTrue();
+    expect(Talla::query()->where('valor', 'XL')->first()?->empresas()->whereKey($empresa->id)->exists())->toBeTrue();
 });
 
 /*

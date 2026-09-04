@@ -10,6 +10,7 @@ use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
 use App\Servicios\DTO\MovimientoInventarioDatos;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -18,18 +19,33 @@ use Illuminate\Support\Facades\DB;
  * pasar por aquí para garantizar coherencia entre saldo y movimientos, control
  * de concurrencia y prohibición de stock negativo.
  *
- * La dimensión del saldo es: empresa + ALMACÉN + activo + talla.
+ * La dimensión del saldo es: empresa + ALMACÉN + activo + talla. `talla_id`
+ * puede ser NULL (activo por cantidad sin variante); la unicidad real la
+ * garantiza el índice sobre la columna generada `talla_ref = COALESCE(talla_id, 0)`.
  */
 class ServicioInventario
 {
-    public function saldoActual(int $empresaId, int $almacenId, int $activoId, int $tallaId): int
+    /**
+     * Acota una consulta de saldo/movimiento a una talla concreta o a "sin
+     * variante" (`talla_id IS NULL`). Un `where('talla_id', null)` normal se
+     * traduce a `talla_id = NULL`, que nunca casa; hay que usar `whereNull`.
+     *
+     * @param  Builder<SaldoInventario>|Builder<MovimientoInventario>  $query
+     */
+    private function acotarTalla(Builder $query, ?int $tallaId): void
     {
-        return (int) SaldoInventario::query()
+        $tallaId === null ? $query->whereNull('talla_id') : $query->where('talla_id', $tallaId);
+    }
+
+    public function saldoActual(int $empresaId, int $almacenId, int $activoId, ?int $tallaId): int
+    {
+        $query = SaldoInventario::query()
             ->where('empresa_id', $empresaId)
             ->where('almacen_id', $almacenId)
-            ->where('activo_id', $activoId)
-            ->where('talla_id', $tallaId)
-            ->value('cantidad');
+            ->where('activo_id', $activoId);
+        $this->acotarTalla($query, $tallaId);
+
+        return (int) $query->value('cantidad');
     }
 
     /**
@@ -43,13 +59,13 @@ class ServicioInventario
         }
 
         return DB::transaction(function () use ($datos): MovimientoInventario {
-            $saldo = SaldoInventario::query()
+            $consulta = SaldoInventario::query()
                 ->where('empresa_id', $datos->empresaId)
                 ->where('almacen_id', $datos->almacenId)
-                ->where('activo_id', $datos->activoId)
-                ->where('talla_id', $datos->tallaId)
-                ->lockForUpdate()
-                ->first();
+                ->where('activo_id', $datos->activoId);
+            $this->acotarTalla($consulta, $datos->tallaId);
+
+            $saldo = $consulta->lockForUpdate()->first();
 
             if ($saldo === null) {
                 $saldo = new SaldoInventario([
@@ -103,19 +119,27 @@ class ServicioInventario
         });
     }
 
-    public function ajustarMinimo(int $empresaId, int $almacenId, int $activoId, int $tallaId, int $minimo): SaldoInventario
+    public function ajustarMinimo(int $empresaId, int $almacenId, int $activoId, ?int $tallaId, int $minimo): SaldoInventario
     {
         return DB::transaction(function () use ($empresaId, $almacenId, $activoId, $tallaId, $minimo): SaldoInventario {
-            /** @var SaldoInventario $saldo */
-            $saldo = SaldoInventario::query()->firstOrCreate(
-                [
+            $consulta = SaldoInventario::query()
+                ->where('empresa_id', $empresaId)
+                ->where('almacen_id', $almacenId)
+                ->where('activo_id', $activoId);
+            $this->acotarTalla($consulta, $tallaId);
+
+            $saldo = $consulta->lockForUpdate()->first();
+
+            if ($saldo === null) {
+                $saldo = SaldoInventario::query()->create([
                     'empresa_id' => $empresaId,
                     'almacen_id' => $almacenId,
                     'activo_id' => $activoId,
                     'talla_id' => $tallaId,
-                ],
-                ['cantidad' => 0, 'minimo' => 0],
-            );
+                    'cantidad' => 0,
+                    'minimo' => 0,
+                ]);
+            }
 
             $saldo->update(['minimo' => max(0, $minimo)]);
 
@@ -131,7 +155,7 @@ class ServicioInventario
         int $empresaId,
         int $almacenId,
         int $activoId,
-        int $tallaId,
+        ?int $tallaId,
         int $objetivo,
         string $motivo,
         ?int $realizadoPor,

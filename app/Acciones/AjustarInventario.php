@@ -6,7 +6,6 @@ use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\MovimientoInventario;
-use App\Models\Talla;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +25,7 @@ class AjustarInventario
         int $empresaId,
         int $almacenId,
         int $activoId,
-        int $tallaId,
+        ?int $tallaId,
         int $existenciaObjetivo,
         string $motivo,
         ?int $realizadoPor,
@@ -45,8 +44,15 @@ class AjustarInventario
             throw new ExcepcionDeNegocioSimple('El almacén está desactivado; no admite ajustes de inventario.');
         }
 
-        Activo::query()->where('empresa_id', $empresaId)->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('El activo no pertenece a esta empresa.'));
-        Talla::query()->where('empresa_id', $empresaId)->findOr($tallaId, fn () => throw new ExcepcionDeNegocioSimple('La talla no pertenece a esta empresa.'));
+        $activo = Activo::query()->where('empresa_id', $empresaId)
+            ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('El activo no pertenece a esta empresa.'));
+
+        // Ajuste = corrección de una fila existente: la variante debe ser nula o
+        // estar asociada al activo. No se exige que siga habilitada para la
+        // empresa (hay que poder corregir existencias históricas).
+        if ($tallaId !== null && ! $activo->tallas()->whereKey($tallaId)->exists()) {
+            throw new ExcepcionDeNegocioSimple('Esa variante no corresponde al activo seleccionado.');
+        }
 
         return DB::transaction(function () use ($empresaId, $almacenId, $activoId, $tallaId, $existenciaObjetivo, $motivo, $realizadoPor): ?MovimientoInventario {
             $anterior = $this->inventario->saldoActual($empresaId, $almacenId, $activoId, $tallaId);

@@ -6,6 +6,7 @@ use App\Enums\TipoControlActivo;
 use App\Models\Concerns\PerteneceAEmpresa;
 use Database\Factories\ActivoFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -83,13 +84,33 @@ class Activo extends Model
     }
 
     /**
-     * Variantes/tallas asociadas (opcional según el tipo de activo).
+     * Variantes/tallas asociadas (opcional según el tipo de activo). Es el
+     * conjunto "crudo": incluye variantes que ya no estén habilitadas para la
+     * empresa del activo (histórico). Para operar usa `tallasHabilitadas()`.
      *
      * @return BelongsToMany<Talla, $this>
      */
     public function tallas(): BelongsToMany
     {
         return $this->belongsToMany(Talla::class, 'activo_talla')->withTimestamps()->orderBy('tallas.orden');
+    }
+
+    /**
+     * Variantes que este activo puede USAR en la empresa indicada: asociadas al
+     * activo (`activo_talla`) **y** habilitadas para esa empresa
+     * (`talla_empresa`) **y** activas globalmente. Es la única fuente de verdad
+     * para poblar selectores de variante y validar el inventario.
+     *
+     * @return Collection<int, Talla>
+     */
+    public function tallasHabilitadas(int $empresaId): Collection
+    {
+        return $this->tallas()
+            ->where('tallas.activa', true)
+            ->whereHas('empresas', fn (Builder $q) => $q->whereKey($empresaId))
+            ->orderBy('tallas.orden')
+            ->orderBy('tallas.valor')
+            ->get();
     }
 
     /**

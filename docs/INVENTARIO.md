@@ -1,5 +1,7 @@
 # Inventario (por almacén)
 
+> **BLOQUE C · Etapa 1 — Catálogos compartidos.** `talla_id` en `saldos_inventario` / `movimientos_inventario` / `detalles_entrega` / `detalles_devolucion` pasa a **nullable** (`NULL` = "sin variante", ya no hay talla comodín). La unicidad de `saldos_inventario` usa la columna generada `talla_ref = COALESCE(talla_id, 0)` en el índice `saldos_inv_almacen_unico`. `ServicioInventario` usa `whereNull('talla_id')` para el caso sin variante.
+
 > **BLOQUE A — actualización.** Llave del inventario actual:
 > `EMPRESA + ALMACÉN + ACTIVO + VARIANTE`. `saldos_inventario` **ya no tiene
 > `sucursal_id`** (`movimientos_inventario` sí lo conserva como procedencia
@@ -99,10 +101,11 @@ no se registra nada (transacción atómica).
       `/almacenes/buscar`, `/activos/buscar?control=cantidad`). Sólo activos por
       cantidad; los serializados se registrarán unidad por unidad en otra fase.
     - **Variante opcional**: si el activo tiene variantes propias, `talla_id` es
-      obligatorio y debe ser una de ellas; si no las tiene, no se envía `talla_id`
-      y el backend usa la **talla comodín** de la empresa (`tallas.es_comodin`,
-      "Sin variante"). Así un mouse, un cable o una gorra unitalla se registran sin
-      forzar una talla ficticia.
+      obligatorio, debe ser una de ellas y estar habilitada para la empresa
+      (`talla_empresa`); si no las tiene, `talla_id` va nulo y el saldo se guarda
+      con `talla_id = NULL` ("sin variante"; ya no hay talla comodín). Así un
+      mouse, un cable o una gorra unitalla se registran sin forzar una talla
+      ficticia.
     - Errores por fila con la clave `items.N.<campo>` (visibles junto a la fila);
       fila duplicada (mismo activo + variante) bloqueada.
 - Ajustes (`AjustarInventario`): se fija una existencia objetivo; **no** se

@@ -31,7 +31,7 @@ it('registra una entrada válida y crea el saldo por almacén', function () {
     expect(SaldoInventario::query()->where('almacen_id', $this->datos['almacenA']->id)->value('cantidad'))->toBe(5);
 });
 
-it('un activo por cantidad SIN variantes no exige talla y usa la comodín', function () {
+it('un activo por cantidad SIN variantes no exige talla y guarda talla_id NULL', function () {
     $mouse = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Mouse', 'tipo_control' => 'cantidad']);
 
     $this->actingAs($this->admin)
@@ -42,9 +42,8 @@ it('un activo por cantidad SIN variantes no exige talla y usa la comodín', func
         ->assertSessionHasNoErrors();
 
     $saldo = SaldoInventario::query()->where('activo_id', $mouse->id)->first();
-    $comodin = $this->datos['empresaA']->tallaComodin();
     expect($saldo->cantidad)->toBe(8)
-        ->and($saldo->talla_id)->toBe($comodin->id);
+        ->and($saldo->talla_id)->toBeNull();
 });
 
 it('exige la variante cuando el activo sí tiene variantes (error por fila)', function () {
@@ -127,7 +126,7 @@ it('un supervisor sin permiso no puede registrar entradas', function () {
         ->assertForbidden();
 });
 
-it('la acción resuelve la comodín para activos sin variante', function () {
+it('la acción guarda talla_id NULL para activos sin variante', function () {
     $gorra = Activo::factory()->for($this->datos['empresaA'])->create(['tipo_control' => 'cantidad']);
 
     app(RegistrarEntradaInventario::class)->ejecutar(
@@ -139,6 +138,6 @@ it('la acción resuelve la comodín para activos sin variante', function () {
     );
 
     $saldo = SaldoInventario::query()->where('activo_id', $gorra->id)->first();
-    expect($saldo->talla_id)->toBe($this->datos['empresaA']->tallaComodin()->id)
+    expect($saldo->talla_id)->toBeNull()
         ->and($saldo->cantidad)->toBe(4);
 });

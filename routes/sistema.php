@@ -63,10 +63,12 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('activos/{activo}/estado', [ActivoController::class, 'toggle'])->name('activos.toggle');
 
     Route::get('tallas', [TallaController::class, 'index'])->name('tallas.index');
+    Route::get('tallas/buscar', [TallaController::class, 'buscar'])->name('tallas.buscar');
     Route::post('tallas', [TallaController::class, 'store'])->name('tallas.store');
     Route::post('tallas/rapido', [TallaController::class, 'rapido'])->name('tallas.rapido');
     Route::post('tallas/reordenar', [TallaController::class, 'reordenar'])->name('tallas.reordenar');
     Route::put('tallas/{talla}', [TallaController::class, 'update'])->name('tallas.update');
+    Route::post('tallas/{talla}/empresa', [TallaController::class, 'empresa'])->name('tallas.empresa');
     Route::delete('tallas/{talla}', [TallaController::class, 'destroy'])->name('tallas.destroy');
 
     // Catálogos de activos: tipos y categorías (dentro del área de Activos)
@@ -75,11 +77,15 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('tipos-activo', [TipoActivoController::class, 'store'])->name('tipos-activo.store');
     Route::post('tipos-activo/rapido', [TipoActivoController::class, 'rapido'])->name('tipos-activo.rapido');
     Route::put('tipos-activo/{tipo}', [TipoActivoController::class, 'update'])->name('tipos-activo.update');
+    Route::put('tipos-activo/{tipo}/empresas', [TipoActivoController::class, 'empresas'])->name('tipos-activo.empresas');
+    Route::post('tipos-activo/{tipo}/empresa', [TipoActivoController::class, 'empresa'])->name('tipos-activo.empresa');
     Route::post('tipos-activo/{tipo}/estado', [TipoActivoController::class, 'toggle'])->name('tipos-activo.toggle');
     Route::get('categorias-activo/buscar', [CategoriaActivoController::class, 'buscar'])->name('categorias-activo.buscar');
     Route::post('categorias-activo', [CategoriaActivoController::class, 'store'])->name('categorias-activo.store');
     Route::post('categorias-activo/rapido', [CategoriaActivoController::class, 'rapido'])->name('categorias-activo.rapido');
     Route::put('categorias-activo/{categoria}', [CategoriaActivoController::class, 'update'])->name('categorias-activo.update');
+    Route::put('categorias-activo/{categoria}/empresas', [CategoriaActivoController::class, 'empresas'])->name('categorias-activo.empresas');
+    Route::post('categorias-activo/{categoria}/empresa', [CategoriaActivoController::class, 'empresa'])->name('categorias-activo.empresa');
     Route::post('categorias-activo/{categoria}/estado', [CategoriaActivoController::class, 'toggle'])->name('categorias-activo.toggle');
 
     // Inventario por almacén

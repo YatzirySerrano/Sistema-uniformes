@@ -33,21 +33,24 @@ class InventarioDemoSeeder extends Seeder
                         continue;
                     }
 
-                    foreach ($activo->tallas as $t => $talla) {
+                    // Un activo por cantidad sin variantes usa talla_id = NULL.
+                    $tallasIds = $activo->tallas->isEmpty() ? [null] : $activo->tallas->pluck('id')->all();
+
+                    foreach ($tallasIds as $t => $tallaId) {
                         $cantidad = match (($a + $t) % 5) {
                             0 => 0,
                             1 => random_int(2, 5),
                             default => random_int(20, 120),
                         };
 
-                        $inventario->ajustarMinimo($empresa->id, $almacen->id, $activo->id, $talla->id, random_int(3, 8));
+                        $inventario->ajustarMinimo($empresa->id, $almacen->id, $activo->id, $tallaId, random_int(3, 8));
 
                         if ($cantidad > 0) {
                             $inventario->registrarMovimiento(new MovimientoInventarioDatos(
                                 empresaId: $empresa->id,
                                 almacenId: $almacen->id,
                                 activoId: $activo->id,
-                                tallaId: $talla->id,
+                                tallaId: $tallaId,
                                 tipo: TipoMovimiento::Inicial,
                                 cantidad: $cantidad,
                                 realizadoPor: $usuario?->id,

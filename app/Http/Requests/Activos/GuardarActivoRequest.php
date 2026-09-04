@@ -57,7 +57,7 @@ class GuardarActivoRequest extends FormRequest
             'descripcion' => ['nullable', 'string', 'max:2000'],
             'categoria_id' => [
                 'nullable', 'integer',
-                Rule::exists('categorias_activo', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('categoria_activo_empresa', 'categoria_activo_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
             'codigo' => [
                 'nullable', 'string', 'max:60', 'alpha_dash',
@@ -67,14 +67,14 @@ class GuardarActivoRequest extends FormRequest
             ],
             'tipo_activo_id' => [
                 'nullable', 'integer',
-                Rule::exists('tipos_activo', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('tipo_activo_empresa', 'tipo_activo_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
             'tipo_control' => ['required', new Enum(TipoControlActivo::class)],
             'activo' => ['boolean'],
             'tallas' => ['nullable', 'array'],
             'tallas.*' => [
                 'integer',
-                Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('talla_empresa', 'talla_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
             'imagen' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
         ];
@@ -96,10 +96,9 @@ class GuardarActivoRequest extends FormRequest
                 return;
             }
 
-            $empresaId = $this->empresaResuelta('activo')->getKey();
-
+            // La categoría y el tipo ya están acotados a la empresa por las
+            // reglas `exists` sobre los pivotes; aquí sólo se valida coherencia.
             $tipoDeLaCategoria = CategoriaActivo::query()
-                ->where('empresa_id', $empresaId)
                 ->whereKey($categoriaId)
                 ->value('tipo_activo_id');
 

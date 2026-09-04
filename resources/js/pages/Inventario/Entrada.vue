@@ -35,8 +35,16 @@ type ActivoBuscado = {
     tipo: string | null;
     categoria: string | null;
     control: string;
+    /** El activo tiene variantes asociadas (independiente de la empresa). */
+    usa_variantes: boolean;
+    /** Variantes ELEGIBLES: asociadas al activo y habilitadas para esta empresa. */
     tallas: TallaOpcion[];
 };
+
+/** Activo con variantes pero ninguna habilitada para la empresa seleccionada. */
+function sinVariantesHabilitadas(a: ActivoBuscado | null): boolean {
+    return !!a && a.usa_variantes && a.tallas.length === 0;
+}
 
 defineOptions({
     layout: {
@@ -77,11 +85,25 @@ const activosSel = reactive<Record<number, ActivoBuscado | null>>({ 0: null });
 
 const enviado = ref(false);
 
-// Empresa efectiva ya aplicada (para poder revertir el <select> si el usuario
-// cancela un cambio que borraría lo capturado).
-const empresaAplicada = ref<number | null>(form.empresa_id);
+// Empresa seleccionada (objeto, para el combobox con buscador).
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === form.empresa_id) ?? null,
+);
 const confirmarCambio = ref(false);
-const empresaPendiente = ref<number | null>(null);
+const empresaPendiente = ref<EmpresaAutorizada | null>(null);
+
+function buscarEmpresas(q: string): Promise<EmpresaAutorizada[]> {
+    const t = q.trim().toLowerCase();
+    return Promise.resolve(
+        t
+            ? props.empresasAutorizadas.filter(
+                  (e) =>
+                      e.nombre_comercial.toLowerCase().includes(t) ||
+                      e.codigo.toLowerCase().includes(t),
+              )
+            : props.empresasAutorizadas,
+    );
+}
 
 /** ¿El usuario ya capturó algo que se perdería al cambiar de empresa? */
 const hayTrabajoCapturado = computed(
@@ -102,41 +124,44 @@ function limpiarDependientes(): void {
     form.clearErrors();
 }
 
-/**
- * Intercepta el cambio del <select> de empresa. Si hay datos capturados, pide
- * confirmación ANTES de borrar nada: mientras tanto el <select> vuelve a la
- * empresa vigente. Si no hay nada que perder, cambia directo.
- */
-function alCambiarEmpresa(): void {
-    const objetivo = form.empresa_id;
+/** Aplica la empresa: fija el id del form y limpia todo lo dependiente. */
+function aplicarEmpresa(e: EmpresaAutorizada | null): void {
+    empresaSel.value = e;
+    form.empresa_id = e?.id ?? null;
+    limpiarDependientes();
+    form.clearErrors('empresa_id');
+}
 
-    if (objetivo === empresaAplicada.value) {
+/**
+ * Intercepta el cambio de empresa. Si hay datos capturados, pide confirmación
+ * ANTES de borrar nada: mientras tanto el combobox vuelve a la empresa vigente.
+ * Si no hay nada que perder, cambia directo.
+ */
+function alElegirEmpresa(e: EmpresaAutorizada | null): void {
+    if ((e?.id ?? null) === form.empresa_id) {
         return;
     }
 
     if (hayTrabajoCapturado.value) {
-        empresaPendiente.value = objetivo;
-        form.empresa_id = empresaAplicada.value; // revierte hasta confirmar
+        empresaPendiente.value = e;
         confirmarCambio.value = true;
 
         return;
     }
 
-    empresaAplicada.value = objetivo;
-    limpiarDependientes();
+    aplicarEmpresa(e);
 }
 
 function confirmarCambioEmpresa(): void {
-    form.empresa_id = empresaPendiente.value;
-    empresaAplicada.value = empresaPendiente.value;
+    aplicarEmpresa(empresaPendiente.value);
     empresaPendiente.value = null;
     confirmarCambio.value = false;
-    limpiarDependientes();
 }
 
 function cancelarCambioEmpresa(): void {
     empresaPendiente.value = null;
     confirmarCambio.value = false;
+    // `empresaSel` no cambió: el combobox ya muestra la empresa vigente.
 }
 
 /** Acceso laxo a errores anidados (`items.0.cantidad`). */
@@ -232,7 +257,8 @@ const incompleto = computed(
             (it, i) =>
                 !it.activo_id ||
                 !(it.cantidad > 0) ||
-                (activosSel[i]?.tallas.length && !it.talla_id),
+                (activosSel[i]?.tallas.length && !it.talla_id) ||
+                sinVariantesHabilitadas(activosSel[i] ?? null),
         ) ||
         duplicados.value.size > 0,
 );
@@ -280,25 +306,26 @@ function enviar() {
             <div class="grid gap-4 sm:grid-cols-2">
                 <div class="grid gap-1.5 sm:col-span-2">
                     <Label for="empresa">Empresa / razón social</Label>
-                    <select
+                    <BuscadorAsync
                         id="empresa"
-                        v-model="form.empresa_id"
-                        class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
-                        @change="alCambiarEmpresa"
-                    >
-                        <option :value="null" disabled>
-                            Selecciona una empresa
-                        </option>
-                        <option
-                            v-for="e in empresasAutorizadas"
-                            :key="e.id"
-                            :value="e.id"
-                        >
-                            {{ e.nombre_comercial }}
-                        </option>
-                    </select>
+                        :model-value="empresaSel"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="
+                            (e) => (e as EmpresaAutorizada).nombre_comercial
+                        "
+                        :descripcion="(e) => (e as EmpresaAutorizada).codigo"
+                        placeholder="Selecciona una empresa"
+                        placeholder-busqueda="Buscar empresa por nombre o código"
+                        :invalido="!!form.errors.empresa_id"
+                        @update:model-value="
+                            (v) =>
+                                alElegirEmpresa(v as EmpresaAutorizada | null)
+                        "
+                    />
                     <p class="text-muted-foreground text-xs">
-                        El almacén y los activos se acotan a esta empresa.
+                        El almacén y los activos se acotan a esta empresa. Sólo
+                        se ofrecen las variantes que la empresa tenga
+                        habilitadas.
                     </p>
                     <InputError :message="form.errors.empresa_id" />
                 </div>
@@ -440,6 +467,17 @@ function enviar() {
                             </select>
                             <InputError :message="errFila(i, 'talla_id')" />
                         </template>
+                        <p
+                            v-else-if="
+                                sinVariantesHabilitadas(activosSel[i] ?? null)
+                            "
+                            class="text-destructive pt-2 text-xs"
+                        >
+                            Este activo usa variantes, pero ninguna está
+                            habilitada para la empresa seleccionada. Habilita
+                            una en «Variantes / tallas» antes de registrar
+                            existencias.
+                        </p>
                         <p
                             v-else-if="activosSel[i]"
                             class="text-muted-foreground pt-2 text-xs"

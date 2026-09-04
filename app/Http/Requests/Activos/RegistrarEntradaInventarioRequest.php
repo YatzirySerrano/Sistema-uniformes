@@ -14,11 +14,15 @@ use Illuminate\Validation\Validator;
  * campo y, en las filas repetibles, con la clave `items.N.<campo>` para que el
  * frontend los pinte junto a la fila correspondiente.
  *
- * Reglas de negocio de variante:
- * - Si el activo tiene variantes/tallas propias → `talla_id` es obligatorio y
- *   debe ser una de ellas.
- * - Si el activo NO tiene variantes → no se debe enviar `talla_id` (el backend
- *   usa la talla comodín "sin variante").
+ * Reglas de negocio de variante (catálogo compartido habilitado por empresa):
+ * - Variante elegible = asociada al activo (`activo_talla`) **y** habilitada para
+ *   la empresa de la entrada (`talla_empresa`) **y** activa globalmente.
+ * - Si el activo tiene ≥ 1 variante elegible → `talla_id` es obligatorio y debe
+ *   ser una de ellas.
+ * - Si el activo NO tiene variantes asociadas → `talla_id` va nulo (saldo con
+ *   `talla_id = NULL` = "sin variante"; ya no hay talla comodín).
+ * - Si el activo tiene variantes asociadas pero NINGUNA habilitada para esta
+ *   empresa → se rechaza (hay que habilitar una en Variantes / tallas).
  * - Activos serializados: no se registran por esta pantalla (fase posterior).
  * - Filas duplicadas (mismo activo + variante) → se marca la segunda.
  */
@@ -55,7 +59,7 @@ class RegistrarEntradaInventarioRequest extends FormRequest
             ],
             'items.*.talla_id' => [
                 'nullable', 'integer',
-                Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('talla_empresa', 'talla_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
             'items.*.cantidad' => ['required', 'integer', 'min:1', 'max:100000'],
         ];
@@ -103,6 +107,7 @@ class RegistrarEntradaInventarioRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            $empresaId = $this->empresaResuelta()->getKey();
             $raw = $this->input('items');
             $items = is_array($raw) ? $raw : [];
 
@@ -114,7 +119,7 @@ class RegistrarEntradaInventarioRequest extends FormRequest
             }
 
             $activos = Activo::query()
-                ->with('tallas:id')
+                ->withCount('tallas')
                 ->whereIn('id', array_values(array_unique($activoIds)))
                 ->get()
                 ->keyBy('id');
@@ -141,14 +146,21 @@ class RegistrarEntradaInventarioRequest extends FormRequest
                     continue;
                 }
 
-                $tallasActivo = $activo->tallas->pluck('id')->all();
-                $tallaId = $item['talla_id'] ?? null;
+                $tallaId = ($item['talla_id'] ?? null) !== null ? (int) $item['talla_id'] : null;
+                $habilitadas = (int) $activo->tallas_count > 0
+                    ? $activo->tallasHabilitadas($empresaId)->pluck('id')->all()
+                    : [];
 
-                if ($tallasActivo !== []) {
+                if ((int) $activo->tallas_count > 0 && $habilitadas === []) {
+                    $validator->errors()->add(
+                        "items.{$i}.activo_id",
+                        'Este activo usa variantes pero ninguna está habilitada para esta empresa. Habilita una en Variantes / tallas antes de registrar existencias.'
+                    );
+                } elseif ($habilitadas !== []) {
                     if ($tallaId === null) {
                         $validator->errors()->add("items.{$i}.talla_id", 'Selecciona la variante / talla.');
-                    } elseif (! in_array((int) $tallaId, $tallasActivo, true)) {
-                        $validator->errors()->add("items.{$i}.talla_id", 'Esa variante no corresponde al activo seleccionado.');
+                    } elseif (! in_array($tallaId, $habilitadas, true)) {
+                        $validator->errors()->add("items.{$i}.talla_id", 'Esa variante no está habilitada para esta empresa o no corresponde al activo.');
                     }
                 } elseif ($tallaId !== null) {
                     $validator->errors()->add("items.{$i}.talla_id", 'Este activo no utiliza variantes.');

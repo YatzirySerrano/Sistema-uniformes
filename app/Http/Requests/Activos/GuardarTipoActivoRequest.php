@@ -3,20 +3,21 @@
 namespace App\Http\Requests\Activos;
 
 use App\Http\Requests\Concerns\NormalizaEntrada;
-use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\TipoActivo;
+use App\Soporte\AccesoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
- * Alta / edición de un tipo de activo. En alta la empresa llega en `empresa_id`
- * y se valida el acceso del usuario; en edición queda fijada por el registro. El
- * nombre es único por empresa sin distinguir mayúsculas ni espacios sobrantes
- * (ver `NombreNormalizado`).
+ * Alta / edición de un tipo de activo del catálogo compartido. En alta se
+ * reciben las `empresa_ids` para las que queda habilitado; en edición sólo se
+ * renombra y se togglea el estado global. El nombre es único **a nivel
+ * plataforma** sin distinguir mayúsculas ni espacios (`NombreNormalizado`).
  */
 class GuardarTipoActivoRequest extends FormRequest
 {
-    use NormalizaEntrada, ResuelveEmpresa;
+    use NormalizaEntrada;
 
     public function authorize(): bool
     {
@@ -35,11 +36,14 @@ class GuardarTipoActivoRequest extends FormRequest
      */
     public function rules(): array
     {
-        $tipo = $this->route('tipo');
-        $tipoId = $tipo instanceof TipoActivo ? $tipo->getKey() : null;
+        $enEdicion = $this->route('tipo') instanceof TipoActivo;
+        $idsAutorizadas = app(AccesoEmpresa::class)->idsAutorizados($this->user())->all();
 
         return [
-            ...($tipoId === null ? ['empresa_id' => ['required', 'integer']] : []),
+            ...($enEdicion ? [] : [
+                'empresa_ids' => ['required', 'array', 'min:1'],
+                'empresa_ids.*' => ['integer', Rule::in($idsAutorizadas)],
+            ]),
             'nombre' => ['required', 'string', 'max:120'],
             'activo' => ['boolean'],
         ];
@@ -56,10 +60,9 @@ class GuardarTipoActivoRequest extends FormRequest
 
             $tipo = $this->route('tipo');
             $ignorar = $tipo instanceof TipoActivo ? $tipo->getKey() : null;
-            $empresaId = $this->empresaResuelta('tipo')->getKey();
 
-            if (TipoActivo::existeNombreEnEmpresa($empresaId, $nombre, $ignorar)) {
-                $validator->errors()->add('nombre', 'Ya existe un tipo de activo con ese nombre en esta empresa.');
+            if (TipoActivo::existeNombre($nombre, $ignorar)) {
+                $validator->errors()->add('nombre', 'Ya existe un tipo de activo con ese nombre.');
             }
         });
     }
@@ -70,7 +73,8 @@ class GuardarTipoActivoRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'empresa_id.required' => 'Selecciona la empresa del tipo de activo.',
+            'empresa_ids.required' => 'Elige al menos una empresa para la que habilitar el tipo.',
+            'empresa_ids.*.in' => 'Una de las empresas seleccionadas está fuera de tu alcance.',
             'nombre.required' => 'El nombre del tipo de activo es obligatorio.',
         ];
     }

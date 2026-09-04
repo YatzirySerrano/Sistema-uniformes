@@ -103,12 +103,14 @@ it('B: registrar entrada con empresa B + Almacén Sur se rechaza con error de va
 });
 
 it('el stock se mantiene separado por empresa dentro del almacén compartido', function () {
-    $tallaA = Talla::factory()->for($this->empresaA)->create(['valor' => 'M']);
-    $tallaB = Talla::factory()->for($this->empresaB)->create(['valor' => 'M']);
+    // "M" es una sola variante del catálogo compartido, habilitada para A y B.
+    $talla = Talla::factory()->paraEmpresa($this->empresaA, $this->empresaB)->create(['valor' => 'M']);
     $activoA = Activo::factory()->for($this->empresaA)->create(['nombre' => 'Camisa A', 'tipo_control' => 'cantidad']);
     $activoB = Activo::factory()->for($this->empresaB)->create(['nombre' => 'Camisa B', 'tipo_control' => 'cantidad']);
-    $activoA->tallas()->attach($tallaA);
-    $activoB->tallas()->attach($tallaB);
+    $activoA->tallas()->attach($talla);
+    $activoB->tallas()->attach($talla);
+    $tallaA = $talla;
+    $tallaB = $talla;
 
     // Empresa A + Almacén Central.
     $this->actingAs($this->admin)->post('/inventario/entrada', [

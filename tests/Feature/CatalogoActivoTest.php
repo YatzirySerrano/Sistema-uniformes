@@ -12,62 +12,71 @@ beforeEach(function () {
 });
 
 /**
- * @return array{0: User, 1: array{empresa_id: int}}
+ * Devuelve el admin y un contexto con `empresa_id` (alta de activo / rápido) y
+ * `empresa_ids` (alta de catálogo compartido).
+ *
+ * @return array{0: User, 1: array{empresa_id: int, empresa_ids: array<int, int>}}
  */
 function adminEn(Empresa $empresa): array
 {
     $usuario = usuarioCon(RolSistema::Administrador->value, [$empresa]);
 
-    return [$usuario, ['empresa_id' => $empresa->id]];
+    return [$usuario, ['empresa_id' => $empresa->id, 'empresa_ids' => [$empresa->id]]];
 }
 
 /*
 |--------------------------------------------------------------------------
-| Tipos de activo
+| Tipos de activo (catálogo compartido)
 |--------------------------------------------------------------------------
 */
 
-it('crea un tipo de activo con código autogenerado y auditoría', function () {
+it('crea un tipo de activo compartido, lo habilita para la empresa y audita', function () {
     $empresa = Empresa::factory()->create();
     [$admin, $ctx] = adminEn($empresa);
 
     $this->actingAs($admin)
         ->post('/tipos-activo', ['nombre' => 'Equipo de protección', ...$ctx])
-        ->assertRedirect();
+        ->assertRedirect()->assertSessionHasNoErrors();
 
-    $tipo = TipoActivo::query()->where('empresa_id', $empresa->id)->where('nombre', 'Equipo de protección')->first();
+    $tipo = TipoActivo::query()->where('nombre', 'Equipo de protección')->first();
     expect($tipo)->not->toBeNull()
         ->and($tipo->codigo)->toStartWith('TAC-')
-        ->and($tipo->activo)->toBeTrue();
+        ->and($tipo->activo)->toBeTrue()
+        ->and($tipo->empresas()->whereKey($empresa->id)->exists())->toBeTrue();
 
     $this->assertDatabaseHas('bitacora_auditoria', [
         'modulo' => 'activos', 'accion' => 'tipo_crear', 'entidad_id' => $tipo->id, 'empresa_id' => $empresa->id,
     ]);
 });
 
-it('no permite dos tipos de activo con el mismo nombre en la empresa', function () {
+it('no permite dos tipos de activo con el mismo nombre a nivel plataforma', function () {
     $empresa = Empresa::factory()->create();
-    TipoActivo::factory()->for($empresa)->create(['nombre' => 'Accesorio']);
+    TipoActivo::factory()->paraEmpresa($empresa)->create(['nombre' => 'Accesorio']);
     [$admin, $ctx] = adminEn($empresa);
 
     $this->actingAs($admin)
-        ->post('/tipos-activo', ['nombre' => 'Accesorio', ...$ctx])
+        ->post('/tipos-activo', ['nombre' => ' accesorio ', ...$ctx])
         ->assertSessionHasErrors('nombre');
 });
 
-it('el alta rápida devuelve el tipo creado para seleccionarlo en el acto', function () {
+it('el alta rápida devuelve el tipo creado y lo habilita sólo para la empresa del formulario', function () {
     $empresa = Empresa::factory()->create();
-    [$admin, $ctx] = adminEn($empresa);
+    $otra = Empresa::factory()->create();
+    [$admin] = adminEn($empresa);
 
     $this->actingAs($admin)
-        ->postJson('/tipos-activo/rapido', ['nombre' => 'Vehículo', ...$ctx])
+        ->postJson('/tipos-activo/rapido', ['nombre' => 'Vehículo', 'empresa_id' => $empresa->id])
         ->assertOk()
         ->assertJsonPath('tipo.nombre', 'Vehículo');
+
+    $tipo = TipoActivo::query()->where('nombre', 'Vehículo')->first();
+    expect($tipo->empresas()->pluck('empresas.id')->all())->toBe([$empresa->id])
+        ->and($tipo->empresas()->whereKey($otra->id)->exists())->toBeFalse();
 });
 
 it('desactivar un tipo de activo no elimina la fila ni toca sus activos', function () {
     $empresa = Empresa::factory()->create();
-    $tipo = TipoActivo::factory()->for($empresa)->create();
+    $tipo = TipoActivo::factory()->paraEmpresa($empresa)->create();
     $activo = Activo::factory()->for($empresa)->create(['tipo_activo_id' => $tipo->id]);
     [$admin] = adminEn($empresa);
 
@@ -79,10 +88,10 @@ it('desactivar un tipo de activo no elimina la fila ni toca sus activos', functi
         ->and($activo->fresh()->tipo_activo_id)->toBe($tipo->id);
 });
 
-it('un rol restringido con el permiso no puede tocar tipos de activo de una empresa fuera de su alcance', function () {
+it('un rol restringido con el permiso no puede administrar un tipo no habilitado para ninguna de sus empresas', function () {
     $miEmpresa = Empresa::factory()->create();
     $ajena = Empresa::factory()->create();
-    $tipoAjeno = TipoActivo::factory()->for($ajena)->create();
+    $tipoAjeno = TipoActivo::factory()->paraEmpresa($ajena)->create();
 
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$miEmpresa]);
     $supervisor->givePermissionTo('tipos-activo.administrar');
@@ -98,62 +107,61 @@ it('un supervisor no puede administrar el catálogo de tipos de activo (403)', f
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresa]);
 
     $this->actingAs($supervisor)
-        ->post('/tipos-activo', ['nombre' => 'Lo que sea', 'empresa_id' => $empresa->id])
+        ->post('/tipos-activo', ['nombre' => 'Lo que sea', 'empresa_ids' => [$empresa->id]])
         ->assertForbidden();
 });
 
 /*
 |--------------------------------------------------------------------------
-| Categorías de activo
+| Categorías de activo (catálogo compartido)
 |--------------------------------------------------------------------------
 */
 
-it('crea una categoría opcionalmente ligada a un tipo de activo', function () {
+it('crea una categoría compartida opcionalmente ligada a un tipo de activo', function () {
     $empresa = Empresa::factory()->create();
-    $tipo = TipoActivo::factory()->for($empresa)->create(['nombre' => 'Equipo de cómputo']);
+    $tipo = TipoActivo::factory()->paraEmpresa($empresa)->create(['nombre' => 'Equipo de cómputo']);
     [$admin, $ctx] = adminEn($empresa);
 
     $this->actingAs($admin)
         ->post('/categorias-activo', ['nombre' => 'Laptop', 'tipo_activo_id' => $tipo->id, ...$ctx])
-        ->assertRedirect();
+        ->assertRedirect()->assertSessionHasNoErrors();
 
-    $categoria = CategoriaActivo::query()->where('empresa_id', $empresa->id)->where('nombre', 'Laptop')->first();
+    $categoria = CategoriaActivo::query()->where('nombre', 'Laptop')->first();
     expect($categoria)->not->toBeNull()
-        ->and($categoria->tipo_activo_id)->toBe($tipo->id);
+        ->and($categoria->tipo_activo_id)->toBe($tipo->id)
+        ->and($categoria->empresas()->whereKey($empresa->id)->exists())->toBeTrue();
 });
 
-it('rechaza una categoría con tipo de activo de otra empresa', function () {
+it('rechaza una categoría con un tipo de activo inexistente', function () {
     $empresa = Empresa::factory()->create();
-    $otra = Empresa::factory()->create();
-    $tipoAjeno = TipoActivo::factory()->for($otra)->create();
     [$admin, $ctx] = adminEn($empresa);
 
     $this->actingAs($admin)
-        ->post('/categorias-activo', ['nombre' => 'X', 'tipo_activo_id' => $tipoAjeno->id, ...$ctx])
+        ->post('/categorias-activo', ['nombre' => 'X', 'tipo_activo_id' => 999999, ...$ctx])
         ->assertSessionHasErrors('tipo_activo_id');
 });
 
 it('el alta rápida de categoría devuelve la categoría creada', function () {
     $empresa = Empresa::factory()->create();
-    [$admin, $ctx] = adminEn($empresa);
+    [$admin] = adminEn($empresa);
 
     $this->actingAs($admin)
-        ->postJson('/categorias-activo/rapido', ['nombre' => 'Teléfono celular', ...$ctx])
+        ->postJson('/categorias-activo/rapido', ['nombre' => 'Teléfono celular', 'empresa_id' => $empresa->id])
         ->assertOk()
         ->assertJsonPath('categoria.nombre', 'Teléfono celular');
 });
 
 it('al guardar un activo con categoría del catálogo se sincroniza el espejo de texto', function () {
     $empresa = Empresa::factory()->create();
-    $categoria = CategoriaActivo::factory()->for($empresa)->create(['nombre' => 'Camisola']);
-    [$admin, $ctx] = adminEn($empresa);
+    $categoria = CategoriaActivo::factory()->paraEmpresa($empresa)->create(['nombre' => 'Camisola']);
+    [$admin] = adminEn($empresa);
 
     $this->actingAs($admin)
         ->post('/activos', [
             'nombre' => 'Camisola manga larga azul',
             'tipo_control' => 'cantidad',
             'categoria_id' => $categoria->id,
-            ...$ctx,
+            'empresa_id' => $empresa->id,
         ])
         ->assertRedirect();
 

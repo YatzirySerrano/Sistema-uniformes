@@ -3,22 +3,22 @@
 namespace App\Http\Requests\Activos;
 
 use App\Http\Requests\Concerns\NormalizaEntrada;
-use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\CategoriaActivo;
+use App\Soporte\AccesoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
- * Alta / edición de una categoría de activo. En alta la empresa llega en
- * `empresa_id` y se valida el acceso; en edición queda fijada por el registro.
- * El `tipo_activo_id` es opcional y, si se envía, debe pertenecer a la empresa.
- * El nombre es único por empresa sin distinguir mayúsculas ni espacios
- * sobrantes (ver `NombreNormalizado`).
+ * Alta / edición de una categoría de activo del catálogo compartido. En alta se
+ * reciben las `empresa_ids` para las que queda habilitada; en edición sólo se
+ * renombra, se re-vincula el tipo (opcional) y se togglea el estado global. El
+ * `tipo_activo_id` es opcional y también del catálogo compartido. El nombre es
+ * único **a nivel plataforma** (`NombreNormalizado`).
  */
 class GuardarCategoriaActivoRequest extends FormRequest
 {
-    use NormalizaEntrada, ResuelveEmpresa;
+    use NormalizaEntrada;
 
     public function authorize(): bool
     {
@@ -37,17 +37,16 @@ class GuardarCategoriaActivoRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = $this->empresaResuelta('categoria')->getKey();
-        $categoria = $this->route('categoria');
-        $categoriaId = $categoria instanceof CategoriaActivo ? $categoria->getKey() : null;
+        $enEdicion = $this->route('categoria') instanceof CategoriaActivo;
+        $idsAutorizadas = app(AccesoEmpresa::class)->idsAutorizados($this->user())->all();
 
         return [
-            ...($categoriaId === null ? ['empresa_id' => ['required', 'integer']] : []),
+            ...($enEdicion ? [] : [
+                'empresa_ids' => ['required', 'array', 'min:1'],
+                'empresa_ids.*' => ['integer', Rule::in($idsAutorizadas)],
+            ]),
             'nombre' => ['required', 'string', 'max:120'],
-            'tipo_activo_id' => [
-                'nullable', 'integer',
-                Rule::exists('tipos_activo', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
-            ],
+            'tipo_activo_id' => ['nullable', 'integer', Rule::exists('tipos_activo', 'id')],
             'activa' => ['boolean'],
         ];
     }
@@ -63,10 +62,9 @@ class GuardarCategoriaActivoRequest extends FormRequest
 
             $categoria = $this->route('categoria');
             $ignorar = $categoria instanceof CategoriaActivo ? $categoria->getKey() : null;
-            $empresaId = $this->empresaResuelta('categoria')->getKey();
 
-            if (CategoriaActivo::existeNombreEnEmpresa($empresaId, $nombre, $ignorar)) {
-                $validator->errors()->add('nombre', 'Ya existe una categoría con ese nombre en esta empresa.');
+            if (CategoriaActivo::existeNombre($nombre, $ignorar)) {
+                $validator->errors()->add('nombre', 'Ya existe una categoría con ese nombre.');
             }
         });
     }
@@ -77,9 +75,10 @@ class GuardarCategoriaActivoRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'empresa_id.required' => 'Selecciona la empresa de la categoría.',
+            'empresa_ids.required' => 'Elige al menos una empresa para la que habilitar la categoría.',
+            'empresa_ids.*.in' => 'Una de las empresas seleccionadas está fuera de tu alcance.',
             'nombre.required' => 'El nombre de la categoría es obligatorio.',
-            'tipo_activo_id.exists' => 'El tipo de activo seleccionado no pertenece a esta empresa.',
+            'tipo_activo_id.exists' => 'El tipo de activo seleccionado no existe.',
         ];
     }
 }

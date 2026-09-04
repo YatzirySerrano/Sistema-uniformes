@@ -51,13 +51,23 @@ talla` (único `saldos_inv_almacen_unico`). **`saldos_inventario.sucursal_id`
 - Tabla `activos`, pivote `activo_talla`, FK `activo_id` en
   `saldos_inventario` / `movimientos_inventario` / `detalles_entrega` /
   `detalles_devolucion`. `Activo` conserva `empresa_id` y `PerteneceAEmpresa`.
-- `tipo_activo_id` / `categoria_id` son **opcionales** e independientes (Bloque
-  B). `TipoActivo` y `CategoriaActivo` usan el trait `NombreNormalizado`:
-  columna `nombre_normalizado` + índice único `(empresa_id, nombre_normalizado)`,
-  sincronizada en `saving`; helper `existeNombreEnEmpresa()`. Desactivar un
-  tipo/categoría no toca los activos que ya lo usan.
-- `tipo_control` (`cantidad` | `serializado`). `tallas()` opcional. Talla comodín
-  por empresa (`es_comodin = true`, `Empresa::tallaComodin()`).
+- `tipo_activo_id` / `categoria_id` son **opcionales** e independientes.
+- **Catálogos COMPARTIDOS (Bloque C · Etapa 1)**: `TipoActivo`, `CategoriaActivo`
+  y `Talla` **ya no tienen `empresa_id`** ni usan `PerteneceAEmpresa`. Se habilitan
+  por empresa con `empresas()` (BelongsToMany vía `tipo_activo_empresa` /
+  `categoria_activo_empresa` / `talla_empresa`) + `scopeParaEmpresa($q, int)`.
+  El trait `NombreNormalizado` es **de columna configurable**
+  (`Talla::columnaNombre() = 'valor'`), con índice único **de plataforma**
+  (`nombre_normalizado` / `valor_normalizado`); helper `existeNombre($n, $ig)`.
+- **`Talla` ya no tiene `es_comodin` ni `scopeSeleccionables`.** `Empresa` ya no
+  tiene `tallaComodin()` ni el hook `booted()`; `Empresa::tallas()` /
+  `tiposActivo()` / `categoriasActivo()` son BelongsToMany. "Sin variante" =
+  `talla_id = NULL`.
+- Deshabilitar/desactivar un tipo/categoría/variante no toca los activos que ya
+  lo usan.
+- `tipo_control` (`cantidad` | `serializado`). `tallas()` (pivote `activo_talla`)
+  opcional; un activo por cantidad sin variantes usa `talla_id = NULL` en el
+  inventario.
 - `categoria_id` es la fuente de verdad; `activos.categoria` (texto) es espejo
   temporal sincronizado por `ActivoController`.
 

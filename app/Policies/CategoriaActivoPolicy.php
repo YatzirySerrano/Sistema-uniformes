@@ -4,7 +4,13 @@ namespace App\Policies;
 
 use App\Models\CategoriaActivo;
 use App\Models\User;
+use App\Soporte\AccesoEmpresa;
 
+/**
+ * El catálogo de categorías es compartido a nivel plataforma. Administrarlo
+ * exige `categorias-activo.administrar`; para un rol restringido, además, la
+ * categoría debe estar habilitada para alguna de sus empresas.
+ */
 class CategoriaActivoPolicy
 {
     public function viewAny(User $user): bool
@@ -18,6 +24,12 @@ class CategoriaActivoPolicy
             return false;
         }
 
-        return $categoria === null || $user->puedeAccederEmpresa($categoria->empresa_id);
+        if ($categoria === null || $user->tieneAlcanceGlobal()) {
+            return true;
+        }
+
+        return $categoria->empresas()
+            ->whereIn('empresas.id', app(AccesoEmpresa::class)->idsAutorizados($user))
+            ->exists();
     }
 }

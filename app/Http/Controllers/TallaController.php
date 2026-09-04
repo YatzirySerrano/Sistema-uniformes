@@ -8,20 +8,23 @@ use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\AccesoEmpresa;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Administración de variantes / tallas de una empresa. El usuario NO captura el
- * campo técnico `orden`: al crear una variante se coloca al final
- * (`max(orden) + 1`) y el orden se cambia con `reordenar`. La talla comodín
- * ("sin variante") no se muestra ni se administra aquí. La empresa llega en
- * `empresa_id` y se valida el acceso del usuario.
+ * Administración del catálogo COMPARTIDO de variantes / tallas. La variante no
+ * pertenece a una empresa: se **habilita por empresa** vía `talla_empresa`. El
+ * usuario NO captura `orden` (se coloca al final; se cambia con `reordenar`,
+ * que es un orden global de plataforma). El "sin variante" ya no es una fila:
+ * es `talla_id = NULL` en el inventario.
  */
 class TallaController extends Controller
 {
@@ -36,8 +39,22 @@ class TallaController extends Controller
         $empresa = $this->empresaDelFiltro($request) ?? $this->empresasAutorizadas($request)->first();
         abort_if($empresa === null, 403, 'No tienes ninguna empresa asignada.');
 
+        $tallas = Talla::query()
+            ->with(['empresas:id,nombre_comercial'])
+            ->withCount('activos')
+            ->ordenadas()
+            ->get()
+            ->map(fn (Talla $t): array => [
+                'id' => $t->id,
+                'valor' => $t->valor,
+                'activa' => $t->activa,
+                'activos_count' => (int) $t->activos_count,
+                'habilitada' => $t->empresas->contains('id', $empresa->id),
+                'empresas' => $t->empresas->map(fn (Empresa $e): array => ['id' => $e->id, 'nombre_comercial' => $e->nombre_comercial])->all(),
+            ]);
+
         return Inertia::render('Activos/Tallas', [
-            'tallas' => $empresa->tallas()->seleccionables()->ordenadas()->get(['id', 'valor', 'activa']),
+            'tallas' => $tallas,
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'empresaSeleccionadaId' => $empresa->id,
             'puedeAdministrar' => $request->user()->can('tallas.administrar'),
@@ -48,44 +65,50 @@ class TallaController extends Controller
     {
         abort_unless($request->user()->can('tallas.administrar'), 403);
 
-        $empresa = $this->resolverEmpresa($request);
-        $datos = $this->validar($request, $empresa->id);
-        $talla = $this->crear($empresa, $datos['valor']);
-
-        $this->auditoria->registrar('activos', 'talla_crear', [
-            'tipo_entidad' => Talla::class, 'entidad_id' => $talla->id, 'empresa_id' => $empresa->id,
-            'descripcion' => 'Alta de variante / talla '.$talla->valor,
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $datos = $request->validate([
+            'valor' => ['required', 'string', 'max:30'],
+            'empresa_ids' => ['required', 'array', 'min:1'],
+            'empresa_ids.*' => ['integer', Rule::in($idsAutorizadas->all())],
+        ], [
+            'valor.required' => 'Escribe el nombre de la variante / talla.',
+            'empresa_ids.required' => 'Elige al menos una empresa para la que habilitar la variante.',
         ]);
+
+        $this->crear($datos['valor'], array_map('intval', $datos['empresa_ids']));
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Variante / talla agregada.']);
     }
 
     /**
-     * Alta rápida desde el formulario de Activo. Devuelve la variante creada.
+     * Alta rápida desde el formulario de Activo: crea la variante y la habilita
+     * SÓLO para la empresa del formulario.
      */
     public function rapido(Request $request): JsonResponse
     {
         abort_unless($request->user()->can('tallas.administrar'), 403);
 
         $empresa = $this->resolverEmpresa($request);
-        $datos = $this->validar($request, $empresa->id);
-        $talla = $this->crear($empresa, $datos['valor']);
+        $datos = $request->validate([
+            'valor' => ['required', 'string', 'max:30'],
+        ], ['valor.required' => 'Escribe el nombre de la variante / talla.']);
 
-        $this->auditoria->registrar('activos', 'talla_crear', [
-            'tipo_entidad' => Talla::class, 'entidad_id' => $talla->id, 'empresa_id' => $empresa->id,
-            'descripcion' => 'Alta de variante / talla '.$talla->valor,
-        ]);
+        $talla = $this->crear($datos['valor'], [$empresa->id]);
 
         return response()->json(['talla' => ['id' => $talla->id, 'valor' => $talla->valor]]);
     }
 
     public function update(Request $request, Talla $talla): RedirectResponse
     {
-        abort_unless($request->user()->can('tallas.administrar'), 403);
-        abort_unless($request->user()->puedeAccederEmpresa($talla->empresa_id), 403);
-        abort_if($talla->es_comodin, 403, 'La variante "sin variante" no se puede editar.');
+        $this->autorizarSobre($request, $talla);
 
-        $datos = $this->validar($request, $talla->empresa_id, $talla->id);
+        $datos = $request->validate([
+            'valor' => ['required', 'string', 'max:30'],
+        ], ['valor.required' => 'Escribe el nombre de la variante / talla.']);
+
+        if (Talla::existeNombre($datos['valor'], $talla->id)) {
+            throw ValidationException::withMessages(['valor' => 'Esa variante / talla ya existe.']);
+        }
 
         $talla->update([
             'valor' => $datos['valor'],
@@ -96,38 +119,60 @@ class TallaController extends Controller
     }
 
     /**
-     * Reordena las variantes de la empresa según la lista de IDs recibida.
+     * Habilita / deshabilita la variante para una empresa concreta (toggle desde
+     * el listado, columna de la empresa seleccionada). El mensaje nombra la
+     * empresa afectada explícitamente.
+     */
+    public function empresa(Request $request, Talla $talla): RedirectResponse
+    {
+        abort_unless($request->user()->can('tallas.administrar'), 403);
+
+        $datos = $request->validate(['empresa_id' => ['required', 'integer']]);
+        $empresa = Empresa::query()->findOrFail((int) $datos['empresa_id']);
+        abort_unless($request->user()->puedeAccederEmpresa($empresa), 403);
+
+        $estaba = $talla->empresas()->whereKey($empresa->id)->exists();
+        $estaba ? $talla->empresas()->detach($empresa->id) : $talla->empresas()->attach($empresa->id);
+
+        $mensaje = $estaba
+            ? "Variante «{$talla->valor}» deshabilitada para «{$empresa->nombre_comercial}». Sigue disponible globalmente y en las demás empresas donde esté habilitada."
+            : "Variante «{$talla->valor}» habilitada para «{$empresa->nombre_comercial}».";
+
+        $this->auditoria->registrar('activos', 'talla_empresas', [
+            'tipo_entidad' => Talla::class, 'entidad_id' => $talla->id, 'empresa_id' => $empresa->id,
+            'descripcion' => ($estaba ? 'Deshabilitación' : 'Habilitación')." de la variante {$talla->valor} para {$empresa->nombre_comercial}",
+        ]);
+
+        return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
+    }
+
+    /**
+     * Reordena el catálogo de variantes (orden global de plataforma).
      */
     public function reordenar(Request $request): RedirectResponse
     {
         abort_unless($request->user()->can('tallas.administrar'), 403);
-        $empresa = $this->resolverEmpresa($request);
 
         $datos = $request->validate([
             'orden' => ['required', 'array', 'min:1'],
             'orden.*' => ['integer'],
         ]);
 
-        $ids = Talla::query()
-            ->where('empresa_id', $empresa->id)
-            ->seleccionables()
-            ->whereIn('id', $datos['orden'])
-            ->pluck('id')
-            ->all();
+        $ids = Talla::query()->whereIn('id', $datos['orden'])->pluck('id')->all();
 
-        DB::transaction(function () use ($datos, $ids, $empresa): void {
+        DB::transaction(function () use ($datos, $ids): void {
             $posicion = 1;
             foreach ($datos['orden'] as $id) {
                 if (! in_array((int) $id, $ids, true)) {
                     continue;
                 }
-                Talla::query()->where('empresa_id', $empresa->id)->whereKey($id)->update(['orden' => $posicion++]);
+                Talla::query()->whereKey($id)->update(['orden' => $posicion++]);
             }
         });
 
         $this->auditoria->registrar('activos', 'talla_reordenar', [
-            'empresa_id' => $empresa->id,
-            'descripcion' => 'Reordenamiento de variantes / tallas',
+            'empresa_id' => $this->empresasAutorizadas($request)->first()?->id,
+            'descripcion' => 'Reordenamiento del catálogo de variantes / tallas',
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Orden actualizado.']);
@@ -135,9 +180,7 @@ class TallaController extends Controller
 
     public function destroy(Request $request, Talla $talla): RedirectResponse
     {
-        abort_unless($request->user()->can('tallas.administrar'), 403);
-        abort_unless($request->user()->puedeAccederEmpresa($talla->empresa_id), 403);
-        abort_if($talla->es_comodin, 403, 'La variante "sin variante" no se puede eliminar.');
+        $this->autorizarSobre($request, $talla);
 
         $enUso = $talla->activos()->exists()
             || SaldoInventario::query()->where('talla_id', $talla->id)->where('cantidad', '>', 0)->exists()
@@ -153,35 +196,71 @@ class TallaController extends Controller
     }
 
     /**
-     * @return array{valor: string}
+     * Búsqueda con autocompletado de variantes (filtros de inventario, etc.).
      */
-    private function validar(Request $request, int $empresaId, ?int $ignorarId = null): array
+    public function buscar(Request $request): JsonResponse
     {
-        return $request->validate([
-            'valor' => [
-                'required', 'string', 'max:30',
-                Rule::unique('tallas', 'valor')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($ignorarId),
-            ],
-        ], [
-            'valor.required' => 'Escribe el nombre de la variante / talla.',
-            'valor.unique' => 'Esa variante / talla ya existe en la empresa.',
-        ]);
+        abort_unless($request->user()->can('activos.ver'), 403);
+
+        $termino = trim((string) $request->query('q', ''));
+        $consulta = Talla::query()->where('activa', true);
+
+        if ($request->filled('empresa_id')) {
+            $empresa = $this->empresaDelFiltro($request);
+            if ($empresa === null) {
+                return response()->json(['tallas' => []]);
+            }
+            $consulta->paraEmpresa($empresa->id);
+        } else {
+            $consulta->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $this->idsEmpresasAutorizadas($request)));
+        }
+
+        $tallas = $consulta
+            ->when($termino !== '', fn (Builder $q) => $q->where('valor', 'like', "%{$termino}%"))
+            ->ordenadas()
+            ->limit(30)
+            ->get(['id', 'valor'])
+            ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor]);
+
+        return response()->json(['tallas' => $tallas]);
     }
 
-    private function crear(Empresa $empresa, string $valor): Talla
+    private function autorizarSobre(Request $request, Talla $talla): void
     {
-        $siguiente = (int) Talla::query()
-            ->where('empresa_id', $empresa->id)
-            ->seleccionables()
-            ->max('orden') + 1;
+        abort_unless($request->user()->can('tallas.administrar'), 403);
 
-        return Talla::query()->create([
-            'empresa_id' => $empresa->id,
+        if ($request->user()->tieneAlcanceGlobal()) {
+            return;
+        }
+
+        $accesibles = app(AccesoEmpresa::class)->idsAutorizados($request->user());
+        abort_unless($talla->empresas()->whereIn('empresas.id', $accesibles)->exists(), 403);
+    }
+
+    /**
+     * @param  array<int, int>  $empresaIds
+     */
+    private function crear(string $valor, array $empresaIds): Talla
+    {
+        if (Talla::existeNombre($valor)) {
+            throw ValidationException::withMessages(['valor' => 'Esa variante / talla ya existe.']);
+        }
+
+        $talla = Talla::query()->create([
             'valor' => $valor,
-            'orden' => $siguiente,
+            'orden' => (int) Talla::query()->max('orden') + 1,
             'activa' => true,
         ]);
+
+        $talla->empresas()->sync(array_values(array_unique($empresaIds)));
+
+        foreach ($empresaIds as $empresaId) {
+            $this->auditoria->registrar('activos', 'talla_crear', [
+                'tipo_entidad' => Talla::class, 'entidad_id' => $talla->id, 'empresa_id' => $empresaId,
+                'descripcion' => 'Alta de variante / talla '.$talla->valor,
+            ]);
+        }
+
+        return $talla;
     }
 }

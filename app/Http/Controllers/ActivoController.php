@@ -95,11 +95,11 @@ class ActivoController extends Controller
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'filtrosSeleccion' => [
                 'tipo' => ($filtros['tipo_activo_id'] ?? null)
-                    ? TipoActivo::query()->whereIn('empresa_id', $idsScope->all())
+                    ? TipoActivo::query()->whereHas('empresas', fn ($q) => $q->whereIn('empresas.id', $idsScope->all()))
                         ->whereKey($filtros['tipo_activo_id'])->first(['id', 'nombre'])
                     : null,
                 'categoria' => ($filtros['categoria_id'] ?? null)
-                    ? CategoriaActivo::query()->whereIn('empresa_id', $idsScope->all())
+                    ? CategoriaActivo::query()->whereHas('empresas', fn ($q) => $q->whereIn('empresas.id', $idsScope->all()))
                         ->whereKey($filtros['categoria_id'])->first(['id', 'nombre', 'tipo_activo_id'])
                     : null,
             ],
@@ -142,7 +142,8 @@ class ActivoController extends Controller
             ->where('empresa_id', $empresa->id)
             ->where('activo', true)
             ->when(in_array($control, ['cantidad', 'serializado'], true), fn (Builder $q) => $q->where('tipo_control', $control))
-            ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
+            ->withCount('tallas')
+            ->with(['tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
             ->when($termino !== '', function (Builder $q) use ($termino): void {
                 $q->where(function (Builder $sub) use ($termino): void {
                     $sub->where('nombre', 'like', "%{$termino}%")
@@ -162,7 +163,13 @@ class ActivoController extends Controller
                 'tipo' => $a->tipoActivo?->nombre,
                 'categoria' => $a->categoriaActivo?->nombre,
                 'control' => $a->tipo_control->value,
-                'tallas' => $a->tallas->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->values(),
+                // `usa_variantes`: el activo tiene variantes asociadas (crudo).
+                // `tallas`: sólo las habilitadas para ESTA empresa (elegibles).
+                // Si `usa_variantes` y `tallas` está vacío → mal configurado
+                // para esta empresa (falta habilitar alguna variante).
+                'usa_variantes' => (int) $a->tallas_count > 0,
+                'tallas' => $a->tallasHabilitadas($empresa->id)
+                    ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->values(),
             ]);
 
         return response()->json(['activos' => $activos]);
@@ -177,6 +184,7 @@ class ActivoController extends Controller
             'seleccion' => ['tipo' => null, 'categoria' => null],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request),
+            'tallasAsignadas' => [],
             'tiposControl' => TipoControlActivo::opciones(),
             'permisos' => $this->permisosCatalogos($request),
         ]);
@@ -237,6 +245,16 @@ class ActivoController extends Controller
             ],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request, [$activo->empresa_id]),
+            // Variantes ya asignadas al activo, con su estado para la empresa del
+            // activo: las deshabilitadas siguen visibles (histórico) para poder
+            // quitarlas, marcadas como tales.
+            'tallasAsignadas' => $activo->tallas()->orderBy('tallas.orden')->orderBy('tallas.valor')
+                ->get(['tallas.id', 'valor', 'activa'])
+                ->map(fn (Talla $t): array => [
+                    'id' => $t->id,
+                    'valor' => $t->valor,
+                    'habilitada' => $t->activa && $t->empresas()->whereKey($activo->empresa_id)->exists(),
+                ])->values(),
             'tiposControl' => TipoControlActivo::opciones(),
             'permisos' => $this->permisosCatalogos($request),
         ]);
@@ -327,8 +345,8 @@ class ActivoController extends Controller
     }
 
     /**
-     * Variantes / tallas seleccionables de cada empresa autorizada, para que el
-     * formulario las muestre según la empresa elegida. Los tipos y las categorías
+     * Variantes / tallas activas habilitadas para cada empresa autorizada, para
+     * que el formulario las muestre según la empresa elegida. Los tipos y las categorías
      * ya no viajan aquí: el formulario los busca en vivo (`/tipos-activo/buscar`,
      * `/categorias-activo/buscar`) con la empresa como dependencia.
      *
@@ -341,7 +359,7 @@ class ActivoController extends Controller
             ->when($soloEmpresas !== [], fn ($c) => $c->whereIn('id', $soloEmpresas));
 
         return $empresas->mapWithKeys(fn (Empresa $e): array => [$e->id => [
-            'tallas' => $e->tallas()->seleccionables()->ordenadas()->get(['id', 'valor']),
+            'tallas' => $e->tallas()->where('activa', true)->orderBy('orden')->orderBy('valor')->get(['tallas.id', 'valor']),
         ]])->all();
     }
 
@@ -357,10 +375,7 @@ class ActivoController extends Controller
 
         $nombre = $categoriaId === null
             ? null
-            : CategoriaActivo::query()
-                ->where('empresa_id', $empresaId)
-                ->whereKey($categoriaId)
-                ->value('nombre');
+            : CategoriaActivo::query()->whereKey($categoriaId)->value('nombre');
 
         return ['categoria_id' => $categoriaId, 'categoria' => $nombre];
     }

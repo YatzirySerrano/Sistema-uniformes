@@ -24,10 +24,15 @@ beforeEach(function () {
     sembrarRolesPermisos();
 });
 
-/** Crea un activo por cantidad con una variante, para la empresa dada. */
+/**
+ * Crea un activo por cantidad con una variante, para la empresa dada. La
+ * variante "M" del catálogo compartido se reutiliza y se habilita para cada
+ * empresa que la pida (una sola fila `tallas`).
+ */
 function activoConVariante(Empresa $empresa, string $nombre = 'Camisola'): array
 {
-    $talla = Talla::factory()->for($empresa)->create(['valor' => 'M']);
+    $talla = Talla::query()->firstOrCreate(['valor' => 'M'], ['orden' => 1, 'activa' => true]);
+    $talla->empresas()->syncWithoutDetaching([$empresa->id]);
     $activo = Activo::factory()->for($empresa)->create(['nombre' => $nombre, 'tipo_control' => 'cantidad']);
     $activo->tallas()->attach($talla);
 

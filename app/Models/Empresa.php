@@ -50,18 +50,6 @@ class Empresa extends Model
         ];
     }
 
-    protected static function booted(): void
-    {
-        // Cada empresa nace con su talla comodín ("sin variante"), que da soporte
-        // a los activos por cantidad que no usan variantes.
-        static::created(function (Empresa $empresa): void {
-            $empresa->tallas()->firstOrCreate(
-                ['es_comodin' => true],
-                ['valor' => 'Sin variante', 'orden' => 0, 'activa' => true],
-            );
-        });
-    }
-
     /**
      * @return BelongsToMany<User, $this>
      */
@@ -118,31 +106,33 @@ class Empresa extends Model
     }
 
     /**
-     * @return HasMany<TipoActivo, $this>
+     * Tipos de activo del catálogo compartido habilitados para esta empresa.
+     *
+     * @return BelongsToMany<TipoActivo, $this>
      */
-    public function tiposActivo(): HasMany
+    public function tiposActivo(): BelongsToMany
     {
-        return $this->hasMany(TipoActivo::class);
+        return $this->belongsToMany(TipoActivo::class, 'tipo_activo_empresa')->withTimestamps();
     }
 
     /**
-     * @return HasMany<Talla, $this>
+     * Categorías de activo del catálogo compartido habilitadas para esta empresa.
+     *
+     * @return BelongsToMany<CategoriaActivo, $this>
      */
-    public function tallas(): HasMany
+    public function categoriasActivo(): BelongsToMany
     {
-        return $this->hasMany(Talla::class);
+        return $this->belongsToMany(CategoriaActivo::class, 'categoria_activo_empresa', 'empresa_id', 'categoria_activo_id')->withTimestamps();
     }
 
     /**
-     * Talla comodín ("sin variante") de la empresa. Se crea por migración; si
-     * faltara (empresa nueva) se crea al vuelo.
+     * Variantes / tallas del catálogo compartido habilitadas para esta empresa.
+     *
+     * @return BelongsToMany<Talla, $this>
      */
-    public function tallaComodin(): Talla
+    public function tallas(): BelongsToMany
     {
-        return $this->tallas()->firstOrCreate(
-            ['es_comodin' => true],
-            ['valor' => 'Sin variante', 'orden' => 0, 'activa' => true],
-        );
+        return $this->belongsToMany(Talla::class, 'talla_empresa')->withTimestamps();
     }
 
     /**

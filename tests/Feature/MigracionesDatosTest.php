@@ -1,51 +1,15 @@
 <?php
 
-use App\Models\Activo;
-use App\Models\Empresa;
-use App\Models\TipoActivo;
 use Illuminate\Support\Facades\Schema;
-
-/**
- * Prueba de las migraciones de datos, ejecutando su `up()` sobre un estado
- * construido a mano (con RefreshDatabase las migraciones corren antes de existir
- * empresas).
- */
-function correrMigracion(string $archivo): void
-{
-    $migracion = require database_path('migrations/'.$archivo);
-    $migracion->up();
-}
-
-it('convierte el tipo "Uniforme / Prenda" en "Prenda" sin perder activos', function () {
-    $empresa = Empresa::factory()->create();
-    $mixto = TipoActivo::factory()->for($empresa)->create(['nombre' => 'Uniforme / Prenda']);
-    $activo = Activo::factory()->for($empresa)->create(['tipo_activo_id' => $mixto->id]);
-
-    correrMigracion('2026_09_02_000009_corregir_tipo_activo_uniforme_a_prenda.php');
-
-    expect(TipoActivo::query()->where('empresa_id', $empresa->id)->where('nombre', 'Uniforme / Prenda')->exists())->toBeFalse()
-        ->and($mixto->fresh()->nombre)->toBe('Prenda')
-        ->and($activo->fresh()->tipo_activo_id)->toBe($mixto->id);
-});
-
-it('si ya existe "Prenda", reasigna los activos del tipo mixto y lo elimina', function () {
-    $empresa = Empresa::factory()->create();
-    $prenda = TipoActivo::factory()->for($empresa)->create(['nombre' => 'Prenda']);
-    $mixto = TipoActivo::factory()->for($empresa)->create(['nombre' => 'Uniforme / Prenda']);
-    $activo = Activo::factory()->for($empresa)->create(['tipo_activo_id' => $mixto->id]);
-
-    correrMigracion('2026_09_02_000009_corregir_tipo_activo_uniforme_a_prenda.php');
-
-    expect(TipoActivo::query()->whereKey($mixto->id)->exists())->toBeFalse()
-        ->and($activo->fresh()->tipo_activo_id)->toBe($prenda->id);
-});
 
 /*
 |--------------------------------------------------------------------------
-| Estado definitivo del esquema tras el Bloque A (forward-only)
+| Estado definitivo del esquema tras los bloques A + Catálogos compartidos
 |--------------------------------------------------------------------------
 | Las migraciones ya corrieron (RefreshDatabase). El esquema resultante debe
-| reflejar la arquitectura Almacén↔Empresa N:M y el inventario por almacén.
+| reflejar: Almacén↔Empresa N:M, inventario por almacén, catálogos compartidos
+| (tipos/categorías/variantes sin `empresa_id`, habilitados por pivote) y
+| `talla_id` nullable ("sin variante" = NULL, sin fila comodín).
 */
 
 it('la tabla legacy almacen_sucursal ya no existe', function () {
@@ -62,4 +26,23 @@ it('saldos_inventario ya no tiene sucursal_id pero movimientos_inventario sí (p
     expect(Schema::hasColumn('saldos_inventario', 'sucursal_id'))->toBeFalse()
         ->and(Schema::hasColumn('saldos_inventario', 'almacen_id'))->toBeTrue()
         ->and(Schema::hasColumn('movimientos_inventario', 'sucursal_id'))->toBeTrue();
+});
+
+it('los catálogos son compartidos: sin empresa_id ni es_comodin, con pivotes por empresa', function () {
+    foreach (['tipos_activo', 'categorias_activo', 'tallas'] as $tabla) {
+        expect(Schema::hasColumn($tabla, 'empresa_id'))->toBeFalse();
+    }
+
+    expect(Schema::hasColumn('tallas', 'es_comodin'))->toBeFalse()
+        ->and(Schema::hasColumn('tallas', 'valor_normalizado'))->toBeTrue()
+        ->and(Schema::hasTable('tipo_activo_empresa'))->toBeTrue()
+        ->and(Schema::hasTable('categoria_activo_empresa'))->toBeTrue()
+        ->and(Schema::hasTable('talla_empresa'))->toBeTrue();
+});
+
+it('el inventario admite "sin variante": talla_id es nullable', function () {
+    $columna = collect(Schema::getColumns('saldos_inventario'))
+        ->firstWhere('name', 'talla_id');
+
+    expect($columna['nullable'])->toBeTrue();
 });

@@ -7,7 +7,6 @@ use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Almacen;
-use App\Models\Empresa;
 use App\Models\MovimientoInventario;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioAuditoria;
@@ -18,7 +17,7 @@ use Illuminate\Support\Facades\DB;
  * Registra una o varias entradas de inventario (compras, recepción, carga
  * inicial) en un ALMACÉN. Valida que almacén / activo / talla pertenezcan a la
  * empresa y que el almacén esté activo. Un activo por cantidad sin variantes
- * usa la talla comodín ("sin variante").
+ * usa `talla_id = NULL`.
  */
 class RegistrarEntradaInventario
 {
@@ -49,14 +48,12 @@ class RegistrarEntradaInventario
 
         $activos = Activo::query()
             ->where('empresa_id', $empresaId)
-            ->with('tallas:id')
+            ->withCount('tallas')
             ->whereIn('id', array_column($items, 'activo_id'))
             ->get()
             ->keyBy('id');
 
-        $comodinId = Empresa::query()->findOrFail($empresaId)->tallaComodin()->id;
-
-        return DB::transaction(function () use ($items, $empresaId, $almacenId, $motivo, $realizadoPor, $cargaInicial, $notas, $activos, $comodinId): array {
+        return DB::transaction(function () use ($items, $empresaId, $almacenId, $motivo, $realizadoPor, $cargaInicial, $notas, $activos): array {
             $movimientos = [];
 
             foreach ($items as $item) {
@@ -74,20 +71,28 @@ class RegistrarEntradaInventario
                     throw new ExcepcionDeNegocioSimple('Los activos serializados no se registran por esta pantalla.');
                 }
 
-                $tallasActivo = $activo->tallas->pluck('id')->all();
                 $tallaId = ($item['talla_id'] ?? null) ?: null;
 
-                if ($tallasActivo === []) {
-                    $tallaId = $comodinId; // activo por cantidad sin variantes
-                } elseif ($tallaId === null || ! in_array((int) $tallaId, $tallasActivo, true)) {
-                    throw new ExcepcionDeNegocioSimple('La variante indicada no corresponde al activo seleccionado.');
+                // Variante elegible = asociada al activo Y habilitada para la empresa.
+                $habilitadas = (int) $activo->tallas_count > 0
+                    ? $activo->tallasHabilitadas($empresaId)->pluck('id')->all()
+                    : [];
+
+                if ((int) $activo->tallas_count > 0 && $habilitadas === []) {
+                    throw new ExcepcionDeNegocioSimple('El activo usa variantes pero ninguna está habilitada para esta empresa.');
+                }
+
+                if ($habilitadas === []) {
+                    $tallaId = null; // activo por cantidad sin variantes
+                } elseif ($tallaId === null || ! in_array((int) $tallaId, $habilitadas, true)) {
+                    throw new ExcepcionDeNegocioSimple('La variante indicada no está habilitada para esta empresa o no corresponde al activo.');
                 }
 
                 $movimientos[] = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                     empresaId: $empresaId,
                     almacenId: $almacenId,
                     activoId: (int) $item['activo_id'],
-                    tallaId: (int) $tallaId,
+                    tallaId: $tallaId === null ? null : (int) $tallaId,
                     tipo: $cargaInicial ? TipoMovimiento::Inicial : TipoMovimiento::Entrada,
                     cantidad: (int) $item['cantidad'],
                     realizadoPor: $realizadoPor,

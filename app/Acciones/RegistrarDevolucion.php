@@ -68,7 +68,7 @@ class RegistrarDevolucion
         }
 
         $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->pluck('id')->all();
-        $tallas = Talla::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'talla_id'))->pluck('id')->all();
+        $tallas = Talla::query()->paraEmpresa($empresaId)->whereIn('id', array_column($items, 'talla_id'))->pluck('id')->all();
 
         return DB::transaction(function () use ($empresaId, $sucursal, $almacen, $colaborador, $entregaId, $fecha, $items, $registradaPor, $motivo, $notas, $activos, $tallas): Devolucion {
             $devolucion = Devolucion::query()->create([

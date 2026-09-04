@@ -41,14 +41,19 @@ type Activo = {
     tallas: number[];
 };
 
-type Variante = { id: number; valor: string };
+type Variante = { id: number; valor: string; deshabilitada?: boolean };
 type Catalogo = { tallas: Variante[] };
+type VarianteAsignada = { id: number; valor: string; habilitada: boolean };
 
 const props = defineProps<{
     activo: Activo | null;
     seleccion: { tipo: OpcionTipo | null; categoria: OpcionCategoria | null };
     empresasAutorizadas: EmpresaAutorizada[];
     catalogosPorEmpresa: Record<number, Catalogo>;
+    // En edición: variantes ya asignadas al activo, con su estado para la
+    // empresa del activo. Las deshabilitadas siguen visibles (para poder
+    // quitarlas) marcadas como tales.
+    tallasAsignadas: VarianteAsignada[];
     tiposControl: { valor: string; etiqueta: string }[];
     permisos: {
         crear_tipo: boolean;
@@ -77,7 +82,19 @@ const empresaId = ref<number | ''>(
 );
 
 function tallasDe(id: number | ''): Variante[] {
-    return (id !== '' && props.catalogosPorEmpresa[id]?.tallas) || [];
+    const habilitadas: Variante[] =
+        (id !== '' && props.catalogosPorEmpresa[id]?.tallas) || [];
+
+    // En edición: añade las variantes ya asignadas que hoy están
+    // deshabilitadas para la empresa del activo, para poder quitarlas.
+    if (esEdicion && id === props.activo?.empresa_id) {
+        const ids = new Set(habilitadas.map((t) => t.id));
+        const extra = props.tallasAsignadas
+            .filter((t) => !t.habilitada && !ids.has(t.id))
+            .map((t) => ({ id: t.id, valor: t.valor, deshabilitada: true }));
+        return [...habilitadas, ...extra];
+    }
+    return habilitadas;
 }
 
 // Las variantes / tallas siguen viajando por empresa (lista corta y con
@@ -609,10 +626,18 @@ const selectClass =
                             v-for="t in tallasFiltradas"
                             :key="t.id"
                             class="flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-sm"
-                            :class="
+                            :class="[
                                 form.tallas.includes(t.id)
                                     ? 'border-primary bg-primary/10'
-                                    : ''
+                                    : '',
+                                t.deshabilitada
+                                    ? 'border-dashed opacity-70'
+                                    : '',
+                            ]"
+                            :title="
+                                t.deshabilitada
+                                    ? 'Esta variante ya no está habilitada para la empresa del activo. Puedes quitarla; no podrás volver a agregarla hasta habilitarla en Variantes / tallas.'
+                                    : undefined
                             "
                         >
                             <input
@@ -621,7 +646,13 @@ const selectClass =
                                 :value="t.id"
                                 class="size-3.5"
                             />
-                            {{ t.valor }}
+                            {{ t.valor
+                            }}<span
+                                v-if="t.deshabilitada"
+                                class="text-muted-foreground text-xs"
+                            >
+                                · deshabilitada</span
+                            >
                         </label>
                         <p
                             v-if="!tallasLocal.length"

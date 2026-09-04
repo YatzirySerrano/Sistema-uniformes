@@ -49,7 +49,7 @@ it('un administrador ve todos los activos y puede filtrarlos por empresa', funct
 
 it('un administrador crea un activo por cantidad con tallas y código autogenerado', function () {
     $empresa = Empresa::factory()->create();
-    $tallas = Talla::factory()->count(2)->for($empresa)->create();
+    $tallas = Talla::factory()->count(2)->paraEmpresa($empresa)->create();
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/activos', [
@@ -88,7 +88,7 @@ it('permite crear un activo serializado sin tallas', function () {
 it('rechaza un tipo de control inválido y un tipo de activo de otra empresa', function () {
     $empresa = Empresa::factory()->create();
     $otra = Empresa::factory()->create();
-    $tipoAjeno = TipoActivo::factory()->for($otra)->create();
+    $tipoAjeno = TipoActivo::factory()->paraEmpresa($otra)->create();
 
     $admin = usuarioCon(RolSistema::Administrador->value);
 
@@ -142,7 +142,7 @@ it('un rol restringido no puede ver ni editar un activo de una empresa fuera de 
 it('el detalle muestra las existencias por almacén y talla del activo', function () {
     $empresa = Empresa::factory()->create();
     $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
-    $talla = Talla::factory()->for($empresa)->create(['valor' => 'M']);
+    $talla = Talla::factory()->paraEmpresa($empresa)->create(['valor' => 'M']);
     $activo = Activo::factory()->for($empresa)->create();
 
     SaldoInventario::factory()->create([

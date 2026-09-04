@@ -105,8 +105,8 @@ class InventarioController extends Controller
                 ->unique('id')
                 ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo])
                 ->values(),
-            'tiposActivo' => TipoActivo::query()->whereIn('empresa_id', $idsScope)->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
-            'categorias' => CategoriaActivo::query()->whereIn('empresa_id', $idsScope)->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
+            'tiposActivo' => TipoActivo::query()->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsScope))->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
+            'categorias' => CategoriaActivo::query()->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsScope))->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
             'tiposControl' => TipoControlActivo::opciones(),
             'permisos' => [
                 'entrada' => $request->user()->can('inventario.entrada'),
@@ -157,7 +157,7 @@ class InventarioController extends Controller
             $empresa->id,
             (int) $datos['almacen_id'],
             (int) $datos['activo_id'],
-            (int) $datos['talla_id'],
+            isset($datos['talla_id']) ? (int) $datos['talla_id'] : null,
             (int) $datos['existencia_objetivo'],
             $datos['motivo'],
             $request->user()->id,
@@ -179,7 +179,7 @@ class InventarioController extends Controller
             $empresa->id,
             (int) $datos['almacen_id'],
             (int) $datos['activo_id'],
-            (int) $datos['talla_id'],
+            isset($datos['talla_id']) ? (int) $datos['talla_id'] : null,
             (int) $datos['minimo'],
         );
 
@@ -187,8 +187,14 @@ class InventarioController extends Controller
     }
 
     /**
-     * Reglas comunes de una operación de inventario: el almacén debe abastecer a
-     * la empresa y estar activo; activo y talla deben pertenecer a la empresa.
+     * Reglas comunes de un ajuste / mínimo (corrección de una fila de saldo que
+     * YA existe): el almacén debe abastecer a la empresa y estar activo; el
+     * activo debe pertenecer a la empresa; la variante debe ser nula ("sin
+     * variante") o estar asociada al activo.
+     *
+     * NOTA: a diferencia de "Registrar entrada", aquí NO se exige que la variante
+     * siga habilitada para la empresa: hay que poder corregir o poner a cero
+     * existencias históricas de variantes que después se deshabilitaron.
      *
      * @param  array<string, mixed>  $extra
      * @return array<string, mixed>
@@ -207,14 +213,14 @@ class InventarioController extends Controller
                 Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
             'talla_id' => [
-                'required', 'integer',
-                Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                'nullable', 'integer',
+                Rule::exists('activo_talla', 'talla_id')->where(fn ($q) => $q->where('activo_id', (int) $request->input('activo_id'))),
             ],
             ...$extra,
         ], [
             'almacen_id.exists' => 'El almacén no abastece a esta empresa o está desactivado.',
             'activo_id.exists' => 'El activo no pertenece a esta empresa.',
-            'talla_id.exists' => 'La variante no pertenece a esta empresa.',
+            'talla_id.exists' => 'Esa variante no corresponde al activo seleccionado.',
         ]);
     }
 }
