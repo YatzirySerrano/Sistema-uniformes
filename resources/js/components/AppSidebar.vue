@@ -4,6 +4,7 @@ import {
     ArrowLeftRight,
     Boxes,
     Building,
+    QrCode,
     ClipboardList,
     FileBarChart2,
     LayoutGrid,
@@ -91,10 +92,16 @@ const grupos = computed<Grupo[]>(() =>
                     visible: puede('almacenes.ver'),
                 },
                 {
-                    titulo: 'Inventario',
-                    href: '/inventario',
+                    titulo: 'Unidades',
+                    href: '/activos/unidades',
+                    icono: QrCode,
+                    visible: puede('unidades-activo.ver'),
+                },
+                {
+                    titulo: 'Conjuntos',
+                    href: '/conjuntos',
                     icono: Boxes,
-                    visible: puede('inventario.ver'),
+                    visible: puede('conjuntos.ver'),
                 },
                 {
                     titulo: 'Movimientos',

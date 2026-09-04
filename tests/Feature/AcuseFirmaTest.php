@@ -27,12 +27,13 @@ beforeEach(function () {
     ));
 
     $this->entrega = app(CrearEntregaUniforme::class)->ejecutar(
-        $this->datos['empresaA']->id,
-        $this->datos['sucursalA']->id,
         $this->datos['colaboradorA']->id,
+        $this->datos['almacenA']->id,
         $this->encargado->id,
         now()->toDateString(),
         [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
+        [],
+        [],
     );
 
     $this->confirmar = app(ConfirmarAcuseRecepcion::class);

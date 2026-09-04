@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import SubidaArchivo from '@/components/sistema/SubidaArchivo.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,24 +36,24 @@ type Activo = {
     codigo: string | null;
     tipo_activo_id: number | null;
     categoria_id: number | null;
-    tipo_control: 'cantidad' | 'serializado';
+    tipo_control: 'cantidad' | 'individual';
     activo: boolean;
     imagen_url: string | null;
     tallas: number[];
 };
 
 type Variante = { id: number; valor: string; deshabilitada?: boolean };
-type Catalogo = { tallas: Variante[] };
 type VarianteAsignada = { id: number; valor: string; habilitada: boolean };
+type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
 
 const props = defineProps<{
     activo: Activo | null;
     seleccion: { tipo: OpcionTipo | null; categoria: OpcionCategoria | null };
     empresasAutorizadas: EmpresaAutorizada[];
-    catalogosPorEmpresa: Record<number, Catalogo>;
-    // En edición: variantes ya asignadas al activo, con su estado para la
-    // empresa del activo. Las deshabilitadas siguen visibles (para poder
-    // quitarlas) marcadas como tales.
+    // Catálogo global de variantes activas (no depende de la empresa).
+    tallasGlobales: Variante[];
+    // En edición: variantes ya asignadas al activo. Las desactivadas
+    // globalmente siguen visibles (para poder quitarlas) marcadas como tales.
     tallasAsignadas: VarianteAsignada[];
     tiposControl: { valor: string; etiqueta: string }[];
     permisos: {
@@ -81,43 +82,35 @@ const empresaId = ref<number | ''>(
             : ''),
 );
 
-function tallasDe(id: number | ''): Variante[] {
-    const habilitadas: Variante[] =
-        (id !== '' && props.catalogosPorEmpresa[id]?.tallas) || [];
+function tallasIniciales(): Variante[] {
+    const globales: Variante[] = [...props.tallasGlobales];
 
-    // En edición: añade las variantes ya asignadas que hoy están
-    // deshabilitadas para la empresa del activo, para poder quitarlas.
-    if (esEdicion && id === props.activo?.empresa_id) {
-        const ids = new Set(habilitadas.map((t) => t.id));
+    // En edición: añade las variantes ya asignadas que estén desactivadas
+    // globalmente, para poder quitarlas.
+    if (esEdicion) {
+        const ids = new Set(globales.map((t) => t.id));
         const extra = props.tallasAsignadas
             .filter((t) => !t.habilitada && !ids.has(t.id))
             .map((t) => ({ id: t.id, valor: t.valor, deshabilitada: true }));
-        return [...habilitadas, ...extra];
+        return [...globales, ...extra];
     }
-    return habilitadas;
+    return globales;
 }
 
-// Las variantes / tallas siguen viajando por empresa (lista corta y con
-// checkboxes). Tipo y categoría se buscan en vivo con la empresa como
-// dependencia (BuscadorAsync).
-const tallasLocal = ref<Variante[]>([...tallasDe(empresaId.value)]);
+// Tipo, categoría y variante son catálogos globales: no dependen de la
+// empresa elegida ni cambian cuando ésta cambia.
+const tallasLocal = ref<Variante[]>(tallasIniciales());
 
 // Objeto seleccionado en cada combobox (el id vive en `form`).
 const tipoSel = ref<OpcionTipo | null>(props.seleccion.tipo);
 const categoriaSel = ref<OpcionCategoria | null>(props.seleccion.categoria);
 const avisoCategoria = ref('');
 
-// Al cambiar de empresa: se limpia todo lo dependiente y BuscadorAsync descarta
-// sus resultados (prop `dependencia`).
 watch(empresaId, (id) => {
-    tallasLocal.value = [...tallasDe(id)];
     form.empresa_id = id === '' ? null : id;
-    form.tipo_activo_id = '';
-    form.categoria_id = '';
-    form.tallas = [];
-    tipoSel.value = null;
-    categoriaSel.value = null;
-    avisoCategoria.value = '';
+    // El almacén sí depende de la empresa (sólo abastece a algunas).
+    almacenSel.value = null;
+    form.almacen_id = null;
 });
 
 const buscarTalla = ref('');
@@ -139,6 +132,14 @@ const form = useForm<{
     activo: boolean;
     tallas: number[];
     imagen: File | null;
+    // Existencia inicial (sólo alta): el almacén es el de la ENTRADA
+    // INICIAL, no una propiedad permanente del activo.
+    almacen_id: number | null;
+    cantidad_inicial: number;
+    existencias: { talla_id: number; cantidad: number }[];
+    // Seguimiento individual: opcional generar etiquetas QR de una vez para
+    // las unidades recién creadas.
+    generar_qr: boolean;
     _method?: string;
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
@@ -151,14 +152,72 @@ const form = useForm<{
     activo: props.activo?.activo ?? true,
     tallas: props.activo?.tallas ?? [],
     imagen: null,
+    almacen_id: null,
+    cantidad_inicial: 0,
+    existencias: [],
+    generar_qr: false,
 });
 
-const esSerializado = computed(() => form.tipo_control === 'serializado');
+const esSeguimientoIndividual = computed(
+    () => form.tipo_control === 'individual',
+);
 
-// Un activo serializado no usa variantes/tallas: no se envían al backend.
-watch(esSerializado, (serializado) => {
-    if (serializado) form.tallas = [];
+// Un activo de seguimiento individual no usa variantes/tallas: no se envían
+// al backend.
+watch(esSeguimientoIndividual, (individual) => {
+    if (individual) form.tallas = [];
 });
+
+// Mantiene `form.existencias` sincronizado 1:1 con `form.tallas`
+// (una fila de cantidad inicial por variante seleccionada), conservando la
+// cantidad ya capturada si la variante sigue elegida.
+watch(
+    () => [...form.tallas],
+    (ids) => {
+        const previas = new Map(
+            form.existencias.map((e) => [e.talla_id, e.cantidad]),
+        );
+        form.existencias = ids.map((id) => ({
+            talla_id: id,
+            cantidad: previas.get(id) ?? 0,
+        }));
+    },
+);
+
+// --- Almacén de la entrada inicial (combobox con búsqueda) ------------------
+const almacenSel = ref<OpcionAlmacen | null>(null);
+async function buscarAlmacenes(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionAlmacen[]> {
+    if (empresaId.value === '') return [];
+    const res = await fetch(
+        `/almacenes/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).almacenes ?? [];
+}
+function alElegirAlmacen(o: OpcionAlmacen | null): void {
+    almacenSel.value = o;
+    form.almacen_id = o?.id ?? null;
+    form.clearErrors('almacen_id');
+}
+
+/** Acceso laxo a errores anidados (`existencias.0.cantidad`). */
+const erroresLaxos = computed(
+    () => form.errors as unknown as Record<string, string>,
+);
+function errorExistencia(tallaId: number): string | undefined {
+    const i = form.tallas.indexOf(tallaId);
+    return i === -1
+        ? undefined
+        : erroresLaxos.value[`existencias.${i}.cantidad`];
+}
 
 function xsrf(): string {
     const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
@@ -166,19 +225,16 @@ function xsrf(): string {
 }
 
 // --- Tipo de activo (combobox con búsqueda + alta inline) --------------------
+// Catálogo global: no depende de la empresa elegida.
 async function buscarTipos(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionTipo[]> {
-    if (empresaId.value === '') return [];
-    const res = await fetch(
-        `/tipos-activo/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
-        {
-            headers: { Accept: 'application/json' },
-            credentials: 'same-origin',
-            signal,
-        },
-    );
+    const res = await fetch(`/tipos-activo/buscar?q=${encodeURIComponent(q)}`, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal,
+    });
     if (!res.ok) return [];
     return (await res.json()).tipos ?? [];
 }
@@ -210,16 +266,16 @@ watch(
 );
 
 // --- Categoría (combobox con búsqueda + alta inline) ------------------------
+// Catálogo global: no depende de la empresa elegida.
 async function buscarCategorias(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionCategoria[]> {
-    if (empresaId.value === '') return [];
     const tipo = form.tipo_activo_id
         ? `&tipo_activo_id=${form.tipo_activo_id}`
         : '';
     const res = await fetch(
-        `/categorias-activo/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}${tipo}`,
+        `/categorias-activo/buscar?q=${encodeURIComponent(q)}${tipo}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -284,7 +340,7 @@ async function crearRapido(
             'X-XSRF-TOKEN': xsrf(),
         },
         credentials: 'same-origin',
-        body: JSON.stringify({ ...cuerpo, empresa_id: empresaId.value }),
+        body: JSON.stringify(cuerpo),
     });
     const json = (await res.json().catch(() => ({}))) as Record<
         string,
@@ -356,10 +412,7 @@ async function agregarVariante() {
             'X-XSRF-TOKEN': xsrf(),
         },
         credentials: 'same-origin',
-        body: JSON.stringify({
-            valor: nuevaVariante.value.trim(),
-            empresa_id: empresaId.value,
-        }),
+        body: JSON.stringify({ valor: nuevaVariante.value.trim() }),
     });
     creandoVariante.value = false;
     if (!res.ok) return;
@@ -416,10 +469,6 @@ const selectClass =
                                 {{ e.nombre_comercial }}
                             </option>
                         </select>
-                        <p class="text-muted-foreground text-xs">
-                            Los tipos, categorías y variantes disponibles
-                            dependen de la empresa.
-                        </p>
                         <InputError :message="form.errors.empresa_id" />
                     </div>
                     <div class="grid gap-1.5">
@@ -453,7 +502,7 @@ const selectClass =
                                 >(opcional)</span
                             >
                             <AyudaTooltip
-                                texto="Qué es el activo dentro de su tipo (Camisola, Pantalón, Laptop, Teléfono celular…). Se elige de un catálogo por empresa. Puedes dejarlo en blanco."
+                                texto="Qué es el activo dentro de su tipo (Camisola, Pantalón, Laptop, Teléfono celular…). Se elige de un catálogo compartido por toda la plataforma. Puedes dejarlo en blanco."
                                 etiqueta="Ayuda sobre la categoría"
                             />
                         </Label>
@@ -461,19 +510,14 @@ const selectClass =
                             id="categoria_id"
                             :model-value="categoriaSel"
                             :buscar="buscarCategorias"
-                            :dependencia="`${empresaId}|${form.tipo_activo_id}`"
-                            :disabled="empresaId === ''"
+                            :dependencia="form.tipo_activo_id"
                             :etiqueta="(c) => (c as OpcionCategoria).nombre"
                             :descripcion="
                                 (c) => (c as OpcionCategoria).tipo ?? 'Sin tipo'
                             "
-                            :placeholder="
-                                empresaId === ''
-                                    ? 'Selecciona primero una empresa'
-                                    : 'Sin categoría'
-                            "
+                            placeholder="Sin categoría"
                             placeholder-busqueda="Buscar categoría por nombre"
-                            sin-resultados="No hay categorías activas para esta empresa."
+                            sin-resultados="No hay categorías activas."
                             :permite-crear="permisos.crear_categoria"
                             texto-crear="Crear nueva categoría"
                             :invalido="!!form.errors.categoria_id"
@@ -528,16 +572,10 @@ const selectClass =
                         id="tipo_activo_id"
                         :model-value="tipoSel"
                         :buscar="buscarTipos"
-                        :dependencia="empresaId"
-                        :disabled="empresaId === ''"
                         :etiqueta="(t) => (t as OpcionTipo).nombre"
-                        :placeholder="
-                            empresaId === ''
-                                ? 'Selecciona primero una empresa'
-                                : 'Sin tipo'
-                        "
+                        placeholder="Sin tipo"
                         placeholder-busqueda="Buscar tipo por nombre"
-                        sin-resultados="No hay tipos activos para esta empresa."
+                        sin-resultados="No hay tipos activos."
                         :permite-crear="permisos.crear_tipo"
                         texto-crear="Crear nuevo tipo"
                         :invalido="!!form.errors.tipo_activo_id"
@@ -557,7 +595,7 @@ const selectClass =
                     <Label class="flex items-center gap-1.5">
                         Tipo de control
                         <AyudaTooltip
-                            texto="«Por cantidad»: se controla por existencias (uniformes, accesorios). «Serializado»: cada unidad se identifica por número de serie / IMEI (laptops, teléfonos). Las series se capturan al ingresar existencias al almacén."
+                            texto="«Por cantidad»: se controla por existencias totales (uniformes, accesorios, consumibles). «Seguimiento individual»: el sistema genera un código único por cada unidad física para saber dónde está, su estado y a quién está asignada (laptops, teléfonos, sillas, herramientas costosas…). Nunca se captura número de serie, IMEI ni etiqueta manual."
                             etiqueta="Ayuda sobre el tipo de control"
                         />
                     </Label>
@@ -585,17 +623,15 @@ const selectClass =
                 </div>
 
                 <div
-                    v-if="esSerializado"
+                    v-if="esSeguimientoIndividual"
                     class="rounded-lg border border-dashed p-3"
                 >
-                    <p class="text-sm font-medium">
-                        Configuración de activo serializado
-                    </p>
+                    <p class="text-sm font-medium">Seguimiento individual</p>
                     <p class="text-muted-foreground mt-1 text-xs">
-                        Este activo no usa variantes / tallas. Los números de
-                        serie, IMEI y etiquetas patrimoniales se registran por
-                        unidad al ingresar existencias al almacén (flujo de
-                        unidades serializadas — próxima fase).
+                        Este activo no usa variantes / tallas: cada unidad es un
+                        objeto físico independiente. El sistema genera
+                        automáticamente el código de cada unidad al capturar la
+                        cantidad inicial abajo — nunca se captura a mano.
                     </p>
                 </div>
 
@@ -636,7 +672,7 @@ const selectClass =
                             ]"
                             :title="
                                 t.deshabilitada
-                                    ? 'Esta variante ya no está habilitada para la empresa del activo. Puedes quitarla; no podrás volver a agregarla hasta habilitarla en Variantes / tallas.'
+                                    ? 'Esta variante está desactivada globalmente. Puedes quitarla; no podrás volver a agregarla hasta reactivarla en Variantes / tallas.'
                                     : undefined
                             "
                         >
@@ -658,7 +694,7 @@ const selectClass =
                             v-if="!tallasLocal.length"
                             class="text-muted-foreground text-sm"
                         >
-                            Aún no hay variantes en la empresa.
+                            Aún no hay variantes en el catálogo.
                         </p>
                         <p
                             v-else-if="!tallasFiltradas.length"
@@ -711,31 +747,134 @@ const selectClass =
             </section>
 
             <section
+                v-if="!esEdicion"
+                class="min-w-0 space-y-4 rounded-xl border p-4 lg:col-span-2"
+            >
+                <h2 class="flex items-center gap-1.5 text-sm font-semibold">
+                    Existencia inicial
+                    <span class="text-muted-foreground font-normal"
+                        >(opcional)</span
+                    >
+                    <AyudaTooltip
+                        :texto="
+                            esSeguimientoIndividual
+                                ? 'Genera de una vez las unidades con las que arranca este activo: el sistema crea un código por cada una. Elige el almacén donde quedarán; si lo dejas en blanco y en 0, el activo se crea sin unidades y puedes agregarlas después desde su detalle.'
+                                : 'Registra de una vez el stock con el que arranca este activo. Elige el almacén donde va a quedar esa existencia; si lo dejas en blanco y en 0, el activo se crea sin stock y puedes agregar existencias después desde su detalle.'
+                        "
+                        etiqueta="Ayuda sobre existencia inicial"
+                    />
+                </h2>
+
+                <div class="grid gap-1.5 sm:max-w-sm">
+                    <Label for="almacen_id">Almacén de entrada</Label>
+                    <BuscadorAsync
+                        id="almacen_id"
+                        :model-value="almacenSel"
+                        :buscar="buscarAlmacenes"
+                        :dependencia="empresaId"
+                        :disabled="empresaId === ''"
+                        :etiqueta="(a) => (a as OpcionAlmacen).nombre"
+                        :descripcion="(a) => (a as OpcionAlmacen).codigo ?? ''"
+                        :placeholder="
+                            empresaId === ''
+                                ? 'Selecciona primero una empresa'
+                                : 'Sin existencia inicial'
+                        "
+                        placeholder-busqueda="Buscar almacén por nombre"
+                        sin-resultados="Este almacén no abastece a la empresa elegida."
+                        :invalido="!!form.errors.almacen_id"
+                        @update:model-value="
+                            (v) => alElegirAlmacen(v as OpcionAlmacen | null)
+                        "
+                    />
+                    <InputError :message="form.errors.almacen_id" />
+                </div>
+
+                <div
+                    v-if="form.tallas.length === 0"
+                    class="grid gap-1.5 sm:max-w-xs"
+                >
+                    <Label for="cantidad_inicial">
+                        {{
+                            esSeguimientoIndividual
+                                ? 'Cantidad de unidades a crear'
+                                : 'Cantidad inicial'
+                        }}
+                    </Label>
+                    <Input
+                        id="cantidad_inicial"
+                        v-model.number="form.cantidad_inicial"
+                        type="number"
+                        min="0"
+                        step="1"
+                    />
+                    <InputError :message="form.errors.cantidad_inicial" />
+
+                    <label
+                        v-if="esSeguimientoIndividual"
+                        class="mt-1 flex items-center gap-2 text-sm"
+                    >
+                        <input
+                            v-model="form.generar_qr"
+                            type="checkbox"
+                            class="size-4"
+                        />
+                        Generar etiquetas QR para estas unidades
+                        <AyudaTooltip
+                            texto="Al guardar, se abrirá el PDF de etiquetas (código + QR) listo para imprimir. Puedes generarlas después desde el listado de unidades si prefieres no hacerlo ahora."
+                            etiqueta="Ayuda sobre etiquetas QR"
+                        />
+                    </label>
+                </div>
+
+                <div v-else-if="!esSeguimientoIndividual" class="grid gap-1.5">
+                    <Label>Cantidad inicial por variante</Label>
+                    <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        <div
+                            v-for="fila in form.existencias"
+                            :key="fila.talla_id"
+                            class="flex items-center gap-2"
+                        >
+                            <span
+                                class="text-muted-foreground w-14 shrink-0 text-sm"
+                            >
+                                {{
+                                    tallasLocal.find(
+                                        (t) => t.id === fila.talla_id,
+                                    )?.valor ?? fila.talla_id
+                                }}
+                            </span>
+                            <Input
+                                v-model.number="fila.cantidad"
+                                type="number"
+                                min="0"
+                                step="1"
+                                class="h-8"
+                                :aria-label="`Cantidad inicial para la variante ${fila.talla_id}`"
+                            />
+                            <InputError
+                                :message="errorExistencia(fila.talla_id)"
+                            />
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section
                 class="min-w-0 space-y-4 rounded-xl border p-4 lg:col-span-2"
             >
                 <h2 class="text-sm font-semibold">Imagen y estado</h2>
                 <div class="grid gap-1.5">
                     <Label for="imagen">Imagen (opcional)</Label>
-                    <input
+                    <SubidaArchivo
                         id="imagen"
-                        type="file"
+                        v-model="form.imagen"
+                        tipo="imagen"
                         accept="image/jpeg,image/png,image/webp"
-                        class="text-sm"
-                        @change="
-                            form.imagen =
-                                ($event.target as HTMLInputElement)
-                                    .files?.[0] ?? null
-                        "
-                    />
-                    <p class="text-muted-foreground text-xs">
-                        Formatos aceptados: JPG, PNG o WebP. Peso máximo:
-                        {{ PESO_MAXIMO_MB }} MB.
-                    </p>
-                    <img
-                        v-if="activo?.imagen_url"
-                        :src="activo.imagen_url"
-                        class="mt-1 h-24 w-24 rounded-md object-cover"
-                        alt=""
+                        formatos-etiqueta="Formatos aceptados: JPG, PNG o WebP."
+                        :peso-maximo-mb="PESO_MAXIMO_MB"
+                        :archivo-actual-url="activo?.imagen_url"
+                        :invalido="!!form.errors.imagen"
                     />
                     <InputError :message="form.errors.imagen" />
                 </div>
@@ -769,8 +908,8 @@ const selectClass =
                 <DialogHeader>
                     <DialogTitle>Nuevo tipo de activo</DialogTitle>
                     <DialogDescription>
-                        Se agrega al catálogo de la empresa seleccionada y queda
-                        elegido en el formulario.
+                        Se agrega al catálogo compartido de la plataforma y
+                        queda elegido en el formulario.
                     </DialogDescription>
                 </DialogHeader>
                 <div class="grid gap-1.5">
@@ -813,8 +952,8 @@ const selectClass =
                 <DialogHeader>
                     <DialogTitle>Nueva categoría</DialogTitle>
                     <DialogDescription>
-                        Se agrega al catálogo de la empresa seleccionada y queda
-                        elegida en el formulario.
+                        Se agrega al catálogo compartido de la plataforma y
+                        queda elegida en el formulario.
                     </DialogDescription>
                 </DialogHeader>
                 <div class="grid gap-3">
@@ -832,11 +971,10 @@ const selectClass =
                         <BuscadorAsync
                             :model-value="tipoNuevaCategoria"
                             :buscar="buscarTipos"
-                            :dependencia="empresaId"
                             :etiqueta="(t) => (t as OpcionTipo).nombre"
                             placeholder="Sin tipo"
                             placeholder-busqueda="Buscar tipo por nombre"
-                            sin-resultados="No hay tipos activos para esta empresa."
+                            sin-resultados="No hay tipos activos."
                             @update:model-value="
                                 (v) =>
                                     (tipoNuevaCategoria =

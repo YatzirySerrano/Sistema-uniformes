@@ -1,6 +1,8 @@
 # Diseño de la base de datos
 
-> **BLOQUE C · Etapa 1 — Catálogos compartidos** (`..._000020`, `..._000021`, forward-only): se elimina `empresa_id` de `tipos_activo`, `categorias_activo` y `tallas`; se crean las pivotes **`tipo_activo_empresa`**, **`categoria_activo_empresa`**, **`talla_empresa`**; `nombre_normalizado` / `valor_normalizado` con único de plataforma; se elimina `tallas.es_comodin`; `saldos/movimientos/detalles.talla_id` → nullable + `nullOnDelete`; nueva columna generada `saldos_inventario.talla_ref`. Consolidación por nombre normalizado: filas equivalentes de distintas empresas se funden en una y se habilitan para todas.
+> **BLOQUE C · Etapa 1 — Catálogos compartidos** (`..._000020`, `..._000021`, forward-only): se elimina `empresa_id` de `tipos_activo`, `categorias_activo` y `tallas`; `nombre_normalizado` / `valor_normalizado` con único de plataforma; se elimina `tallas.es_comodin`; `saldos/movimientos/detalles.talla_id` → nullable + `nullOnDelete`; nueva columna generada `saldos_inventario.talla_ref`. Consolidación por nombre normalizado: filas equivalentes de distintas empresas se funden en una.
+>
+> **Redefinición funcional — Catálogos GLOBALES** (`..._000022_eliminar_pivotes_catalogo_empresa`, forward-only): las pivotes `tipo_activo_empresa`, `categoria_activo_empresa` y `talla_empresa` creadas en la Etapa 1 se **eliminan** — dejaron de tener función válida. `tipos_activo`, `categorias_activo` y `tallas` quedan visibles para todas las empresas por igual sin ninguna tabla de habilitación; no se toca `activos.tipo_activo_id`, `activos.categoria_id`, `activo_talla` ni ningún histórico.
 
 > **BLOQUE A — actualización.** Cambios de esquema forward-only
 > (`..._000016/17/18`): nueva pivote **`almacen_empresa`** (N:M); eliminadas la

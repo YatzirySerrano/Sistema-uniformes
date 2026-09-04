@@ -18,6 +18,7 @@ import { computed, ref } from 'vue';
 import type { EmpresaEditable } from '@/components/empresas/FormularioEmpresa.vue';
 import FormularioEmpresa from '@/components/empresas/FormularioEmpresa.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -45,6 +46,14 @@ const props = defineProps<{
     puedeEditar: boolean;
     puedeCambiarEstado: boolean;
     puedePersonalizar: boolean;
+    suspendidos: {
+        id: number;
+        tipo: string;
+        nombre: string | null;
+        suspendida_en: string;
+        puede_reactivarse: boolean;
+        motivos: string[];
+    }[];
 }>();
 
 defineOptions({
@@ -424,6 +433,13 @@ function irA(ruta: string): void {
                 </div>
             </section>
         </div>
+
+        <PanelSuspendidos
+            v-if="suspendidos.length"
+            :suspendidos="suspendidos"
+            :endpoint="`/empresas/${empresa.id}/suspendidos/reactivar`"
+            :puede-reactivar="puedeCambiarEstado"
+        />
 
         <!-- Modal editar -->
         <Dialog v-model:open="modalEditar">

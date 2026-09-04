@@ -71,33 +71,34 @@ class EntregasDemoSeeder extends Seeder
             ->all();
 
         // 1) Entrega pendiente de firma
-        $crear->ejecutar($empresa->id, $sucursal->id, $colaboradores[0]->id, $encargado->id, now()->subDays(2)->toDateString(), $itemsDisponibles(), 'Dotación inicial');
+        $crear->ejecutar($colaboradores[0]->id, $almacen->id, $encargado->id, now()->subDays(2)->toDateString(), $itemsDisponibles(), [], [], 'Dotación inicial');
 
         // 2) Entrega firmada (con acuse y PDF)
-        $firmada = $crear->ejecutar($empresa->id, $sucursal->id, $colaboradores[1]->id, $encargado->id, now()->subDays(5)->toDateString(), $itemsDisponibles());
+        $firmada = $crear->ejecutar($colaboradores[1]->id, $almacen->id, $encargado->id, now()->subDays(5)->toDateString(), $itemsDisponibles(), [], []);
         $firma = $this->firmaDemo();
         if ($firma !== null) {
             $confirmar->ejecutar($firmada, $firma, $encargado->id, '127.0.0.1', 'SeederDemo/1.0');
         }
 
         // 3) Entrega reciente pendiente
-        $crear->ejecutar($empresa->id, $sucursal->id, $colaboradores[2]->id, $encargado->id, now()->toDateString(), $itemsDisponibles());
+        $crear->ejecutar($colaboradores[2]->id, $almacen->id, $encargado->id, now()->toDateString(), $itemsDisponibles(), [], []);
 
         // 4) Entrega firmada + devolución
-        $conDevolucion = $crear->ejecutar($empresa->id, $sucursal->id, $colaboradores[3]->id, $encargado->id, now()->subDays(10)->toDateString(), $itemsDisponibles());
+        $conDevolucion = $crear->ejecutar($colaboradores[3]->id, $almacen->id, $encargado->id, now()->subDays(10)->toDateString(), $itemsDisponibles(), [], []);
         if ($firma !== null) {
             $confirmar->ejecutar($conDevolucion, $firma, $encargado->id, '127.0.0.1', 'SeederDemo/1.0');
         }
         $primerItem = $conDevolucion->detalles->first();
         $devolver->ejecutar(
-            $empresa->id, $sucursal->id, $colaboradores[3]->id, $conDevolucion->id, now()->subDays(1)->toDateString(),
-            [['activo_id' => $primerItem->activo_id, 'talla_id' => $primerItem->talla_id, 'cantidad' => 1, 'condicion' => 'reutilizable']],
+            $conDevolucion->id, $almacen->id, now()->subDays(1)->toDateString(),
+            [['detalle_entrega_id' => $primerItem->id, 'cantidad' => 1, 'condicion' => 'reutilizable']],
+            [],
             $encargado->id, 'Cambio de talla',
         );
 
         // 5) Entrega firmada + corrección administrativa
         if ($colaboradores->count() >= 5 && $firma !== null) {
-            $aCorregir = $crear->ejecutar($empresa->id, $sucursal->id, $colaboradores[4]->id, $encargado->id, now()->subDays(15)->toDateString(), $itemsDisponibles());
+            $aCorregir = $crear->ejecutar($colaboradores[4]->id, $almacen->id, $encargado->id, now()->subDays(15)->toDateString(), $itemsDisponibles(), [], []);
             $confirmar->ejecutar($aCorregir, $firma, $encargado->id, '127.0.0.1', 'SeederDemo/1.0');
             $nuevos = $aCorregir->detalles->map(fn ($d): array => [
                 'activo_id' => $d->activo_id, 'talla_id' => $d->talla_id, 'cantidad' => max(1, $d->cantidad - 1),

@@ -2,16 +2,23 @@
 
 namespace App\Http\Controllers;
 
+use App\Acciones\CrearActivoConExistencias;
+use App\Acciones\RegistrarEntradaInventario;
+use App\Acciones\RegistrarUnidadesActivo;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ReactivaSuspendidos;
+use App\Http\Requests\Activos\AgregarExistenciasRequest;
 use App\Http\Requests\Activos\GuardarActivoRequest;
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\CategoriaActivo;
-use App\Models\Empresa;
+use App\Models\Conjunto;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioCascadaSuspension;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -28,8 +35,12 @@ use Inertia\Response;
 class ActivoController extends Controller
 {
     use ConEmpresa;
+    use ReactivaSuspendidos;
 
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioCascadaSuspension $cascada,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -43,7 +54,8 @@ class ActivoController extends Controller
             'buscar' => ['nullable', 'string', 'max:100'],
             'tipo_activo_id' => ['nullable', 'integer'],
             'categoria_id' => ['nullable', 'integer'],
-            'control' => ['nullable', Rule::in(['cantidad', 'serializado'])],
+            'almacen_id' => ['nullable', 'integer'],
+            'control' => ['nullable', Rule::in(['cantidad', 'individual'])],
             'estado' => ['nullable', Rule::in(['activos', 'inactivos'])],
             'orden' => ['nullable', Rule::in(['az', 'za'])],
         ]);
@@ -69,6 +81,9 @@ class ActivoController extends Controller
             })
             ->when($filtros['tipo_activo_id'] ?? null, fn (Builder $q, $v) => $q->where('tipo_activo_id', $v))
             ->when($filtros['categoria_id'] ?? null, fn (Builder $q, $v) => $q->where('categoria_id', $v))
+            ->when($filtros['almacen_id'] ?? null, function (Builder $q, $almacenId): void {
+                $q->whereHas('saldos', fn (Builder $s) => $s->where('almacen_id', $almacenId)->where('cantidad', '>', 0));
+            })
             ->when($filtros['control'] ?? null, fn (Builder $q, $v) => $q->where('tipo_control', $v))
             ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
             ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
@@ -95,12 +110,13 @@ class ActivoController extends Controller
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'filtrosSeleccion' => [
                 'tipo' => ($filtros['tipo_activo_id'] ?? null)
-                    ? TipoActivo::query()->whereHas('empresas', fn ($q) => $q->whereIn('empresas.id', $idsScope->all()))
-                        ->whereKey($filtros['tipo_activo_id'])->first(['id', 'nombre'])
+                    ? TipoActivo::query()->whereKey($filtros['tipo_activo_id'])->first(['id', 'nombre'])
                     : null,
                 'categoria' => ($filtros['categoria_id'] ?? null)
-                    ? CategoriaActivo::query()->whereHas('empresas', fn ($q) => $q->whereIn('empresas.id', $idsScope->all()))
-                        ->whereKey($filtros['categoria_id'])->first(['id', 'nombre', 'tipo_activo_id'])
+                    ? CategoriaActivo::query()->whereKey($filtros['categoria_id'])->first(['id', 'nombre', 'tipo_activo_id'])
+                    : null,
+                'almacen' => ($filtros['almacen_id'] ?? null)
+                    ? Almacen::query()->whereKey($filtros['almacen_id'])->first(['id', 'nombre', 'codigo'])
                     : null,
             ],
             'filtros' => [
@@ -108,6 +124,7 @@ class ActivoController extends Controller
                 'empresa_id' => $empresaFiltro?->id,
                 'tipo_activo_id' => $filtros['tipo_activo_id'] ?? '',
                 'categoria_id' => $filtros['categoria_id'] ?? '',
+                'almacen_id' => $filtros['almacen_id'] ?? '',
                 'control' => $filtros['control'] ?? '',
                 'estado' => $filtros['estado'] ?? '',
                 'orden' => $filtros['orden'] ?? 'az',
@@ -141,7 +158,7 @@ class ActivoController extends Controller
         $activos = Activo::query()
             ->where('empresa_id', $empresa->id)
             ->where('activo', true)
-            ->when(in_array($control, ['cantidad', 'serializado'], true), fn (Builder $q) => $q->where('tipo_control', $control))
+            ->when(in_array($control, ['cantidad', 'individual'], true), fn (Builder $q) => $q->where('tipo_control', $control))
             ->withCount('tallas')
             ->with(['tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
             ->when($termino !== '', function (Builder $q) use ($termino): void {
@@ -164,11 +181,11 @@ class ActivoController extends Controller
                 'categoria' => $a->categoriaActivo?->nombre,
                 'control' => $a->tipo_control->value,
                 // `usa_variantes`: el activo tiene variantes asociadas (crudo).
-                // `tallas`: sólo las habilitadas para ESTA empresa (elegibles).
-                // Si `usa_variantes` y `tallas` está vacío → mal configurado
-                // para esta empresa (falta habilitar alguna variante).
+                // `tallas`: sólo las elegibles (asociadas y activas). Si
+                // `usa_variantes` y `tallas` está vacío → todas sus variantes
+                // están desactivadas.
                 'usa_variantes' => (int) $a->tallas_count > 0,
-                'tallas' => $a->tallasHabilitadas($empresa->id)
+                'tallas' => $a->tallasElegibles()
                     ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->values(),
             ]);
 
@@ -183,19 +200,18 @@ class ActivoController extends Controller
             'activo' => null,
             'seleccion' => ['tipo' => null, 'categoria' => null],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request),
+            'tallasGlobales' => $this->tallasGlobales(),
             'tallasAsignadas' => [],
             'tiposControl' => TipoControlActivo::opciones(),
             'permisos' => $this->permisosCatalogos($request),
         ]);
     }
 
-    public function store(GuardarActivoRequest $request): RedirectResponse
+    public function store(GuardarActivoRequest $request, CrearActivoConExistencias $accion): RedirectResponse
     {
         $empresa = $request->empresaResuelta();
 
-        $activo = Activo::query()->create([
-            'empresa_id' => $empresa->id,
+        $datosActivo = [
             'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
             ...$this->datosCategoria($request, $empresa->id),
             'nombre' => $request->string('nombre'),
@@ -206,14 +222,37 @@ class ActivoController extends Controller
             'imagen_ruta' => $request->hasFile('imagen')
                 ? ($request->file('imagen')->store("activos/{$empresa->id}", 'public') ?: null)
                 : null,
-        ]);
+        ];
 
-        $activo->tallas()->sync($request->input('tallas', []));
+        $tallaIds = array_map('intval', $request->input('tallas', []));
+
+        $resultado = $accion->ejecutar(
+            empresaId: $empresa->id,
+            datosActivo: $datosActivo,
+            tallaIds: $tallaIds,
+            almacenId: $request->integer('almacen_id') ?: null,
+            existenciaInicial: $this->existenciaInicialDesdeRequest($request, $tallaIds),
+            cantidadUnidades: (int) $request->input('cantidad_inicial', 0),
+            realizadoPor: $request->user()?->id,
+        );
+        $activo = $resultado['activo'];
 
         $this->auditoria->registrar('activos', 'crear', [
             'tipo_entidad' => Activo::class, 'entidad_id' => $activo->id, 'empresa_id' => $empresa->id,
             'descripcion' => 'Alta de activo '.$activo->nombre,
         ]);
+
+        if ($request->boolean('generar_qr') && $resultado['unidades']->isNotEmpty()) {
+            $ids = $resultado['unidades']->pluck('id')->implode(',');
+
+            // El PDF de etiquetas NUNCA se devuelve en la respuesta de esta
+            // petición Inertia (el cliente la renderizaría como si fuera una
+            // página, mostrando los bytes crudos). Se deja la URL en flash;
+            // el cliente la abre aparte tras la redirección normal.
+            return to_route('activos.show', $activo)
+                ->with('toast', ['type' => 'success', 'message' => 'Activo creado correctamente.'])
+                ->with('etiquetasUrl', route('unidades-activo.etiquetas', ['ids' => $ids]));
+        }
 
         return to_route('activos.index')->with('toast', ['type' => 'success', 'message' => 'Activo creado.']);
     }
@@ -244,16 +283,16 @@ class ActivoController extends Controller
                 ],
             ],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request, [$activo->empresa_id]),
-            // Variantes ya asignadas al activo, con su estado para la empresa del
-            // activo: las deshabilitadas siguen visibles (histórico) para poder
-            // quitarlas, marcadas como tales.
+            'tallasGlobales' => $this->tallasGlobales(),
+            // Variantes ya asignadas al activo: las desactivadas globalmente
+            // siguen visibles (histórico) para poder quitarlas, marcadas como
+            // tales.
             'tallasAsignadas' => $activo->tallas()->orderBy('tallas.orden')->orderBy('tallas.valor')
                 ->get(['tallas.id', 'valor', 'activa'])
                 ->map(fn (Talla $t): array => [
                     'id' => $t->id,
                     'valor' => $t->valor,
-                    'habilitada' => $t->activa && $t->empresas()->whereKey($activo->empresa_id)->exists(),
+                    'habilitada' => $t->activa,
                 ])->values(),
             'tiposControl' => TipoControlActivo::opciones(),
             'permisos' => $this->permisosCatalogos($request),
@@ -290,21 +329,36 @@ class ActivoController extends Controller
         return to_route('activos.index')->with('toast', ['type' => 'success', 'message' => 'Activo actualizado.']);
     }
 
-    public function toggle(Activo $activo): RedirectResponse
+    public function toggle(Request $request, Activo $activo): RedirectResponse
     {
         $this->authorize('administrar', $activo);
 
         $activo->update(['activo' => ! $activo->activo]);
+
+        $mensaje = $activo->activo ? 'Activo activado.' : 'Activo desactivado.';
+
+        if (! $activo->activo) {
+            // Cascada NO destructiva: un conjunto que usa este activo como
+            // componente ya no se puede armar completo, así que queda
+            // suspendido (nunca los que ya estaban inactivos por otra causa).
+            $suspendidos = $this->cascada->suspender(
+                $activo,
+                Conjunto::query()->whereHas('componentes', fn (Builder $q) => $q->where('activo_id', $activo->id)),
+                'activo',
+                $request->user()?->id,
+            );
+
+            if ($suspendidos > 0) {
+                $mensaje .= " {$suspendidos} conjunto(s) que lo usan como componente quedaron suspendidos por cascada.";
+            }
+        }
 
         $this->auditoria->registrar('activos', $activo->activo ? 'activar' : 'desactivar', [
             'tipo_entidad' => Activo::class, 'entidad_id' => $activo->id, 'empresa_id' => $activo->empresa_id,
             'descripcion' => ($activo->activo ? 'Activación' : 'Desactivación').' de activo '.$activo->nombre,
         ]);
 
-        return back()->with('toast', [
-            'type' => 'success',
-            'message' => $activo->activo ? 'Activo activado.' : 'Activo desactivado.',
-        ]);
+        return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
     }
 
     public function show(Request $request, Activo $activo): Response
@@ -313,7 +367,9 @@ class ActivoController extends Controller
 
         $activo->load('tipoActivo:id,nombre', 'empresa:id,nombre_comercial');
 
-        $saldos = SaldoInventario::query()
+        $esIndividual = $activo->tipo_control === TipoControlActivo::SeguimientoIndividual;
+
+        $saldos = $esIndividual ? collect() : SaldoInventario::query()
             ->where('empresa_id', $activo->empresa_id)
             ->where('activo_id', $activo->id)
             ->with(['almacen:id,nombre', 'talla:id,valor'])
@@ -326,6 +382,11 @@ class ActivoController extends Controller
                 'bajo_minimo' => $s->estaBajoMinimo(),
             ]);
 
+        $resumenUnidades = ! $esIndividual ? null : $activo->unidades()
+            ->selectRaw('estado, count(*) as total')
+            ->groupBy('estado')
+            ->pluck('total', 'estado');
+
         return Inertia::render('Activos/Detalle', [
             'activo' => [
                 ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'categoria', 'activo']),
@@ -337,30 +398,98 @@ class ActivoController extends Controller
                 'tallas' => $activo->tallas()->pluck('valor'),
             ],
             'saldos' => $saldos,
+            'usaVariantes' => $activo->tallas()->exists(),
+            'resumenUnidades' => $resumenUnidades === null ? null : [
+                'en_almacen' => (int) ($resumenUnidades['en_almacen'] ?? 0),
+                'asignada' => (int) ($resumenUnidades['asignada'] ?? 0),
+                'baja' => (int) ($resumenUnidades['baja'] ?? 0),
+            ],
             'permisos' => [
                 'editar' => $request->user()->can('update', $activo),
                 'administrar' => $request->user()->can('administrar', $activo),
+                'agregar_existencias' => $request->user()->can('inventario.entrada')
+                    && $request->user()->can('update', $activo),
             ],
+            'suspendidos' => $this->cascada->paraVista($this->cascada->checklistDe($activo)),
         ]);
     }
 
     /**
-     * Variantes / tallas activas habilitadas para cada empresa autorizada, para
-     * que el formulario las muestre según la empresa elegida. Los tipos y las categorías
-     * ya no viajan aquí: el formulario los busca en vivo (`/tipos-activo/buscar`,
-     * `/categorias-activo/buscar`) con la empresa como dependencia.
-     *
-     * @param  array<int, int>  $soloEmpresas  restringe a estos ids (edición)
-     * @return array<int, array{tallas: mixed}>
+     * Reactivación selectiva (Fase 7): sólo levanta las suspensiones VIGENTES
+     * causadas por ESTE activo (conjuntos que lo usan como componente) cuyo
+     * id venga marcado, y sólo si el conjunto ya no depende de otro
+     * componente inactivo ni de una empresa inactiva — blindaje multicausa.
      */
-    private function catalogosPorEmpresa(Request $request, array $soloEmpresas = []): array
+    public function reactivarSuspendidos(Request $request, Activo $activo): RedirectResponse
     {
-        $empresas = $this->empresasAutorizadas($request)
-            ->when($soloEmpresas !== [], fn ($c) => $c->whereIn('id', $soloEmpresas));
+        $this->authorize('administrar', $activo);
 
-        return $empresas->mapWithKeys(fn (Empresa $e): array => [$e->id => [
-            'tallas' => $e->tallas()->where('activa', true)->orderBy('orden')->orderBy('valor')->get(['tallas.id', 'valor']),
-        ]])->all();
+        $ids = array_map('intval', $request->input('ids', []));
+        $resultado = $this->cascada->reactivarSeleccionados($activo, $ids, $request->user()?->id);
+
+        return back()->with('toast', $this->toastDeReactivacion($resultado));
+    }
+
+    /**
+     * "Agregar existencias" desde el contexto del Activo (detalle/edición),
+     * sin navegar a otro módulo. Reutiliza `RegistrarEntradaInventario`.
+     */
+    public function agregarExistencias(
+        AgregarExistenciasRequest $request,
+        Activo $activo,
+        RegistrarEntradaInventario $registrarEntrada,
+        RegistrarUnidadesActivo $registrarUnidades,
+    ): RedirectResponse {
+        $motivo = $request->input('motivo') ?: 'Existencias adicionales';
+
+        if ($activo->tipo_control === TipoControlActivo::SeguimientoIndividual) {
+            $unidades = $registrarUnidades->ejecutar(
+                empresa: $activo->empresa,
+                activo: $activo,
+                almacen: Almacen::query()->findOrFail($request->integer('almacen_id')),
+                cantidad: $request->integer('cantidad'),
+                motivo: $motivo,
+                realizadoPor: $request->user()?->id,
+            );
+
+            if ($request->boolean('generar_qr')) {
+                return back()
+                    ->with('toast', ['type' => 'success', 'message' => 'Unidades agregadas correctamente.'])
+                    ->with('etiquetasUrl', route('unidades-activo.etiquetas', ['ids' => $unidades->pluck('id')->implode(',')]));
+            }
+
+            return back()->with('toast', ['type' => 'success', 'message' => 'Unidades agregadas.']);
+        }
+
+        $registrarEntrada->ejecutar(
+            empresaId: $activo->empresa_id,
+            almacenId: $request->integer('almacen_id'),
+            items: [[
+                'activo_id' => $activo->id,
+                'talla_id' => $request->integer('talla_id') ?: null,
+                'cantidad' => $request->integer('cantidad'),
+            ]],
+            motivo: $motivo,
+            realizadoPor: $request->user()?->id,
+        );
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Existencias agregadas.']);
+    }
+
+    /**
+     * Variantes / tallas activas del catálogo global, para que el formulario
+     * las ofrezca sin importar la empresa del activo. Los tipos y las
+     * categorías tampoco viajan aquí: el formulario los busca en vivo
+     * (`/tipos-activo/buscar`, `/categorias-activo/buscar`).
+     *
+     * @return array<int, array{id: int, valor: string}>
+     */
+    private function tallasGlobales(): array
+    {
+        return Talla::query()->where('activa', true)->orderBy('orden')->orderBy('valor')
+            ->get(['id', 'valor'])
+            ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])
+            ->all();
     }
 
     /**
@@ -378,6 +507,37 @@ class ActivoController extends Controller
             : CategoriaActivo::query()->whereKey($categoriaId)->value('nombre');
 
         return ['categoria_id' => $categoriaId, 'categoria' => $nombre];
+    }
+
+    /**
+     * Traduce el formulario de alta a filas `{talla_id, cantidad}` listas
+     * para `RegistrarEntradaInventario`. Sin variantes: una fila con
+     * `talla_id = null` y `cantidad_inicial`. Con variantes: una fila por
+     * cada entrada de `existencias` (las que no capturó el usuario quedan en
+     * 0 y se descartan aguas abajo).
+     *
+     * @param  array<int, int>  $tallaIds
+     * @return array<int, array{talla_id: int|null, cantidad: int}>
+     */
+    private function existenciaInicialDesdeRequest(GuardarActivoRequest $request, array $tallaIds): array
+    {
+        if ($tallaIds === []) {
+            return [['talla_id' => null, 'cantidad' => (int) $request->input('cantidad_inicial', 0)]];
+        }
+
+        /** @var array<int, mixed> $entradaExistencias */
+        $entradaExistencias = (array) $request->input('existencias', []);
+
+        $existencias = collect($entradaExistencias)
+            ->filter(fn ($f) => is_array($f) && isset($f['talla_id']))
+            ->keyBy(fn (array $f): int => (int) $f['talla_id']);
+
+        return collect($tallaIds)
+            ->map(fn (int $tallaId): array => [
+                'talla_id' => $tallaId,
+                'cantidad' => (int) ($existencias->get($tallaId)['cantidad'] ?? 0),
+            ])
+            ->all();
     }
 
     /**

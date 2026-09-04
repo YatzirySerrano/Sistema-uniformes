@@ -66,8 +66,8 @@ it('rechaza enviar variante a un activo que no usa variantes', function () {
         ->assertSessionHasErrors('items.0.talla_id');
 });
 
-it('no permite activos serializados en esta pantalla', function () {
-    $laptop = Activo::factory()->for($this->datos['empresaA'])->serializado()->create();
+it('no permite activos de seguimiento individual en esta pantalla', function () {
+    $laptop = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
 
     $this->actingAs($this->admin)
         ->from('/inventario/entrada')

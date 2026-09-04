@@ -14,7 +14,7 @@ beforeEach(function () {
 
 it('activos/buscar exige empresa_id, filtra por control y no cruza empresas', function () {
     Activo::factory()->for($this->empresa)->create(['nombre' => 'Camisola azul', 'codigo' => 'ACT-0099', 'tipo_control' => 'cantidad']);
-    Activo::factory()->for($this->empresa)->serializado()->create(['nombre' => 'Camisola serializada rara']);
+    Activo::factory()->for($this->empresa)->seguimientoIndividual()->create(['nombre' => 'Camisola con seguimiento individual']);
     Activo::factory()->for($this->otra)->create(['nombre' => 'Camisola ajena']);
 
     // Sin empresa_id: no devuelve nada.

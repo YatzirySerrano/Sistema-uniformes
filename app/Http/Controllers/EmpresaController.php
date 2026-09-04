@@ -3,9 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Controllers\Concerns\ReactivaSuspendidos;
 use App\Http\Requests\Empresas\GuardarEmpresaRequest;
+use App\Models\Activo;
+use App\Models\Area;
+use App\Models\Colaborador;
+use App\Models\Conjunto;
 use App\Models\Empresa;
+use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioCascadaSuspension;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -15,51 +23,28 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class EmpresaController extends Controller
 {
     use ConEmpresa;
+    use ExportaListado;
+    use ReactivaSuspendidos;
 
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioCascadaSuspension $cascada,
+    ) {}
 
     public function index(Request $request): Response
     {
         $this->authorize('viewAny', Empresa::class);
 
-        $filtros = $request->validate([
-            'buscar' => ['nullable', 'string', 'max:100'],
-            'estado' => ['nullable', Rule::in(['activas', 'inactivas'])],
-            'sucursales' => ['nullable', Rule::in(['con', 'sin'])],
-            'colaboradores' => ['nullable', Rule::in(['con', 'sin'])],
-            'orden' => ['nullable', Rule::in(['az', 'za'])],
-        ]);
-
         $usuario = $request->user();
-        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
+        $filtros = $this->filtrosListado($request);
 
-        // Superadministrador y Administrador ven todas las empresas de la
-        // plataforma; los roles restringidos, sólo las de `empresa_usuario`.
-        $base = $usuario->tieneAlcanceGlobal()
-            ? Empresa::query()
-            : $usuario->empresas()->getQuery();
-
-        $empresas = $base
-            ->withCount(['sucursalesActivas', 'colaboradoresActivos'])
-            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
-                $q->where(function (Builder $sub) use ($buscar): void {
-                    $sub->where('nombre_comercial', 'like', "%{$buscar}%")
-                        ->orWhere('razon_social', 'like', "%{$buscar}%")
-                        ->orWhere('codigo', 'like', "%{$buscar}%")
-                        ->orWhere('rfc', 'like', "%{$buscar}%");
-                });
-            })
-            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
-            ->when(($filtros['sucursales'] ?? null) === 'con', fn (Builder $q) => $q->has('sucursalesActivas'))
-            ->when(($filtros['sucursales'] ?? null) === 'sin', fn (Builder $q) => $q->doesntHave('sucursalesActivas'))
-            ->when(($filtros['colaboradores'] ?? null) === 'con', fn (Builder $q) => $q->has('colaboradoresActivos'))
-            ->when(($filtros['colaboradores'] ?? null) === 'sin', fn (Builder $q) => $q->doesntHave('colaboradoresActivos'))
-            ->orderBy('nombre_comercial', $orden)
+        $empresas = $this->consultaEmpresas($request, $filtros)
             ->paginate($this->porPagina())
             ->withQueryString()
             ->through(fn (Empresa $e): array => [
@@ -90,6 +75,84 @@ class EmpresaController extends Controller
             'puedeCrear' => $usuario->can('create', Empresa::class),
             'puedeEditar' => $usuario->can('empresas.editar') || $usuario->can('configuracion-empresa.editar'),
         ]);
+    }
+
+    /**
+     * Excel/PDF del listado, respetando los mismos filtros que `index()` —
+     * misma consulta, sólo cambia la salida (`?formato=xlsx|pdf`).
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', Empresa::class);
+
+        $filtros = $this->filtrosListado($request);
+        $empresas = $this->consultaEmpresas($request, $filtros)->get();
+
+        $filas = $empresas->map(fn (Empresa $e): array => [
+            $e->codigo,
+            $e->nombre_comercial,
+            $e->razon_social,
+            $e->rfc,
+            $e->telefono,
+            $e->correo,
+            $e->direccion,
+            $e->activa ? 'Activa' : 'Inactiva',
+            (int) $e->sucursales_activas_count,
+            (int) $e->colaboradores_activos_count,
+        ])->all();
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Código', 'Nombre comercial', 'Razón social', 'RFC', 'Teléfono', 'Correo',
+            'Dirección', 'Estado', 'Sucursales activas', 'Colaboradores activos',
+        ], 'Empresas');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'estado' => ['nullable', Rule::in(['activas', 'inactivas'])],
+            'sucursales' => ['nullable', Rule::in(['con', 'sin'])],
+            'colaboradores' => ['nullable', Rule::in(['con', 'sin'])],
+            'orden' => ['nullable', Rule::in(['az', 'za'])],
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<Empresa>
+     */
+    private function consultaEmpresas(Request $request, array $filtros): Builder
+    {
+        $usuario = $request->user();
+        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
+
+        // Superadministrador y Administrador ven todas las empresas de la
+        // plataforma; los roles restringidos, sólo las de `empresa_usuario`.
+        $base = $usuario->tieneAlcanceGlobal()
+            ? Empresa::query()
+            : $usuario->empresas()->getQuery();
+
+        return $base
+            ->withCount(['sucursalesActivas', 'colaboradoresActivos'])
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
+                $q->where(function (Builder $sub) use ($buscar): void {
+                    $sub->where('nombre_comercial', 'like', "%{$buscar}%")
+                        ->orWhere('razon_social', 'like', "%{$buscar}%")
+                        ->orWhere('codigo', 'like', "%{$buscar}%")
+                        ->orWhere('rfc', 'like', "%{$buscar}%");
+                });
+            })
+            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
+            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
+            ->when(($filtros['sucursales'] ?? null) === 'con', fn (Builder $q) => $q->has('sucursalesActivas'))
+            ->when(($filtros['sucursales'] ?? null) === 'sin', fn (Builder $q) => $q->doesntHave('sucursalesActivas'))
+            ->when(($filtros['colaboradores'] ?? null) === 'con', fn (Builder $q) => $q->has('colaboradoresActivos'))
+            ->when(($filtros['colaboradores'] ?? null) === 'sin', fn (Builder $q) => $q->doesntHave('colaboradoresActivos'))
+            ->orderBy('nombre_comercial', $orden);
     }
 
     /**
@@ -144,7 +207,24 @@ class EmpresaController extends Controller
             'puedeEditar' => $request->user()->can('update', $empresa),
             'puedeCambiarEstado' => $request->user()->can('cambiarEstado', $empresa),
             'puedePersonalizar' => $request->user()->can('personalizar', $empresa),
+            'suspendidos' => $this->cascada->paraVista($this->cascada->checklistDe($empresa)),
         ]);
+    }
+
+    /**
+     * Reactivación selectiva (Fase 7): sólo levanta las suspensiones VIGENTES
+     * causadas por ESTA empresa cuyo id venga marcado, y sólo si la entidad ya
+     * no tiene otra dependencia obligatoria inactiva (blindaje multicausa) —
+     * nunca revive algo inactivo por otra causa ni deja un estado a medias.
+     */
+    public function reactivarSuspendidos(Request $request, Empresa $empresa): RedirectResponse
+    {
+        $this->authorize('cambiarEstado', $empresa);
+
+        $ids = array_map('intval', $request->input('ids', []));
+        $resultado = $this->cascada->reactivarSeleccionados($empresa, $ids, $request->user()?->id);
+
+        return back()->with('toast', $this->toastDeReactivacion($resultado));
     }
 
     public function store(GuardarEmpresaRequest $request): RedirectResponse
@@ -188,16 +268,34 @@ class EmpresaController extends Controller
 
         $empresa->update(['activa' => ! $empresa->activa]);
 
+        $mensaje = $empresa->activa
+            ? 'Empresa activada correctamente.'
+            : 'Empresa desactivada correctamente.';
+
+        if (! $empresa->activa) {
+            // Cascada NO destructiva: Sucursales/Colaboradores/Áreas/Activos/
+            // Conjuntos de la empresa quedan suspendidos (nunca los Almacenes:
+            // son N:M y pueden seguir abasteciendo a otras empresas). La
+            // reactivación de cada uno es selectiva, ver `show()`.
+            $realizadoPor = $request->user()?->id;
+            $suspendidos = 0;
+            $suspendidos += $this->cascada->suspender($empresa, Sucursal::query()->where('empresa_id', $empresa->id), 'activa', $realizadoPor);
+            $suspendidos += $this->cascada->suspender($empresa, Colaborador::query()->where('empresa_id', $empresa->id), 'activo', $realizadoPor);
+            $suspendidos += $this->cascada->suspender($empresa, Area::query()->where('empresa_id', $empresa->id), 'activa', $realizadoPor);
+            $suspendidos += $this->cascada->suspender($empresa, Activo::query()->where('empresa_id', $empresa->id), 'activo', $realizadoPor);
+            $suspendidos += $this->cascada->suspender($empresa, Conjunto::query()->where('empresa_id', $empresa->id), 'activo', $realizadoPor);
+
+            if ($suspendidos > 0) {
+                $mensaje .= " {$suspendidos} registro(s) dependiente(s) quedaron suspendidos por cascada.";
+            }
+        }
+
         $this->auditoria->registrar('empresas', $empresa->activa ? 'activar' : 'desactivar', [
             'empresa_id' => $empresa->id,
             'tipo_entidad' => Empresa::class,
             'entidad_id' => $empresa->id,
             'descripcion' => ($empresa->activa ? 'Activación' : 'Desactivación').' de empresa '.$empresa->nombre_comercial,
         ]);
-
-        $mensaje = $empresa->activa
-            ? 'Empresa activada correctamente.'
-            : 'Empresa desactivada correctamente.';
 
         return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
     }

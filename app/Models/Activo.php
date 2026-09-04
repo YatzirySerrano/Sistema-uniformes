@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * Activo del catálogo de una empresa. Evolución del antiguo modelo "Prenda":
  * además de uniformes soporta equipos, dispositivos, accesorios, etc.
  *
- * - `tipo_control` = cantidad | serializado (ver App\Enums\TipoControlActivo).
+ * - `tipo_control` = cantidad | individual (ver App\Enums\TipoControlActivo).
  * - Las variantes/tallas (`tallas()`) son opcionales: un uniforme las usa; una
  *   laptop no.
  * - Este modelo es el CATÁLOGO, no la existencia en un almacén: desactivarlo no
@@ -85,8 +85,8 @@ class Activo extends Model
 
     /**
      * Variantes/tallas asociadas (opcional según el tipo de activo). Es el
-     * conjunto "crudo": incluye variantes que ya no estén habilitadas para la
-     * empresa del activo (histórico). Para operar usa `tallasHabilitadas()`.
+     * conjunto "crudo": incluye variantes que ya estén desactivadas
+     * globalmente (histórico). Para operar usa `tallasElegibles()`.
      *
      * @return BelongsToMany<Talla, $this>
      */
@@ -96,18 +96,17 @@ class Activo extends Model
     }
 
     /**
-     * Variantes que este activo puede USAR en la empresa indicada: asociadas al
-     * activo (`activo_talla`) **y** habilitadas para esa empresa
-     * (`talla_empresa`) **y** activas globalmente. Es la única fuente de verdad
-     * para poblar selectores de variante y validar el inventario.
+     * Variantes que este activo puede USAR: asociadas al activo
+     * (`activo_talla`) **y** activas globalmente (los catálogos de variantes
+     * son de plataforma, sin habilitación por empresa). Es la única fuente de
+     * verdad para poblar selectores de variante y validar el inventario.
      *
      * @return Collection<int, Talla>
      */
-    public function tallasHabilitadas(int $empresaId): Collection
+    public function tallasElegibles(): Collection
     {
         return $this->tallas()
             ->where('tallas.activa', true)
-            ->whereHas('empresas', fn (Builder $q) => $q->whereKey($empresaId))
             ->orderBy('tallas.orden')
             ->orderBy('tallas.valor')
             ->get();
@@ -121,9 +120,21 @@ class Activo extends Model
         return $this->hasMany(SaldoInventario::class);
     }
 
-    public function esSerializado(): bool
+    /**
+     * Unidades físicas individuales (sólo tiene sentido cuando
+     * `tipo_control = individual`). Fuente de verdad de existencias para
+     * seguimiento individual: no hay saldo agregado.
+     *
+     * @return HasMany<UnidadActivo, $this>
+     */
+    public function unidades(): HasMany
     {
-        return $this->tipo_control === TipoControlActivo::Serializado;
+        return $this->hasMany(UnidadActivo::class);
+    }
+
+    public function esDeSeguimientoIndividual(): bool
+    {
+        return $this->tipo_control === TipoControlActivo::SeguimientoIndividual;
     }
 
     /**

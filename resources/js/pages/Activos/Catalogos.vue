@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Building2, Pencil, Plus, X } from '@lucide/vue';
+import { Pencil, Plus, X } from '@lucide/vue';
 import { computed, ref } from 'vue';
-import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
@@ -17,17 +16,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { EmpresaAutorizada } from '@/types/sistema';
 
-type EmpChip = { id: number; nombre_comercial: string };
 type Tipo = {
     id: number;
     nombre: string;
     codigo: string | null;
     activo: boolean;
     activos_count: number;
-    habilitado: boolean;
-    empresas: EmpChip[];
 };
 type Categoria = {
     id: number;
@@ -36,8 +31,6 @@ type Categoria = {
     tipo: string | null;
     activa: boolean;
     activos_count: number;
-    habilitada: boolean;
-    empresas: EmpChip[];
 };
 type OpcionTipo = { id: number; nombre: string };
 
@@ -45,8 +38,6 @@ const props = defineProps<{
     tipos: Tipo[];
     categorias: Categoria[];
     tiposSelect: OpcionTipo[];
-    empresasAutorizadas: EmpresaAutorizada[];
-    empresaSeleccionadaId: number;
     permisos: {
         administrar_tipos: boolean;
         administrar_categorias: boolean;
@@ -61,40 +52,6 @@ defineOptions({
         ],
     },
 });
-
-const empresaActual = computed(
-    () =>
-        props.empresasAutorizadas.find(
-            (e) => e.id === props.empresaSeleccionadaId,
-        )?.nombre_comercial ?? 'la empresa seleccionada',
-);
-
-// --- Selector de empresa (contexto de "Disponible aquí") ---
-const empresaSel = ref<EmpresaAutorizada | null>(
-    props.empresasAutorizadas.find(
-        (e) => e.id === props.empresaSeleccionadaId,
-    ) ?? null,
-);
-function buscarEmpresasLocal(q: string): Promise<EmpresaAutorizada[]> {
-    const t = q.trim().toLowerCase();
-    return Promise.resolve(
-        t
-            ? props.empresasAutorizadas.filter(
-                  (e) =>
-                      e.nombre_comercial.toLowerCase().includes(t) ||
-                      e.codigo.toLowerCase().includes(t),
-              )
-            : props.empresasAutorizadas,
-    );
-}
-function cambiarEmpresa(e: EmpresaAutorizada | null) {
-    if (!e || e.id === props.empresaSeleccionadaId) return;
-    router.get(
-        '/activos-catalogos',
-        { empresa_id: e.id },
-        { preserveScroll: true, preserveState: false },
-    );
-}
 
 // --- Filtros locales ---
 const fTipo = ref({ buscar: '', estado: '' as '' | 'activos' | 'inactivos' });
@@ -154,28 +111,17 @@ function limpiarFiltroCat() {
 }
 
 // --- Alta ---
-const tipoForm = useForm<{ nombre: string; empresa_ids: number[] }>({
-    nombre: '',
-    empresa_ids: [props.empresaSeleccionadaId],
-});
+const tipoForm = useForm<{ nombre: string }>({ nombre: '' });
 const categoriaForm = useForm<{
     nombre: string;
     tipo_activo_id: number | '';
-    empresa_ids: number[];
-}>({
-    nombre: '',
-    tipo_activo_id: '',
-    empresa_ids: [props.empresaSeleccionadaId],
-});
+}>({ nombre: '', tipo_activo_id: '' });
 const categoriaFormTipoSel = ref<OpcionTipo | null>(null);
 
 function crearTipo() {
     tipoForm.post('/tipos-activo', {
         preserveScroll: true,
-        onSuccess: () => {
-            tipoForm.reset();
-            tipoForm.empresa_ids = [props.empresaSeleccionadaId];
-        },
+        onSuccess: () => tipoForm.reset(),
     });
 }
 function crearCategoria() {
@@ -183,74 +129,9 @@ function crearCategoria() {
         preserveScroll: true,
         onSuccess: () => {
             categoriaForm.reset();
-            categoriaForm.empresa_ids = [props.empresaSeleccionadaId];
             categoriaFormTipoSel.value = null;
         },
     });
-}
-
-// --- Habilitación por empresa (toggle rápido de la empresa seleccionada) ---
-function alternarEmpresaTipo(t: Tipo) {
-    router.post(
-        `/tipos-activo/${t.id}/empresa`,
-        { empresa_id: props.empresaSeleccionadaId },
-        { preserveScroll: true },
-    );
-}
-function alternarEmpresaCategoria(c: Categoria) {
-    router.post(
-        `/categorias-activo/${c.id}/empresa`,
-        { empresa_id: props.empresaSeleccionadaId },
-        { preserveScroll: true },
-    );
-}
-
-// --- Diálogo "Empresas que lo usan" (ver + gestionar) ---
-const gestion = ref<{
-    recurso: 'tipo' | 'categoria';
-    id: number;
-    nombre: string;
-    empresa_ids: number[];
-} | null>(null);
-const buscarEmpGestion = ref('');
-const empresasGestion = computed(() => {
-    if (!gestion.value) return [];
-    const set = new Set(gestion.value.empresa_ids);
-    const q = buscarEmpGestion.value.trim().toLowerCase();
-    return props.empresasAutorizadas
-        .filter(
-            (e) =>
-                !q ||
-                e.nombre_comercial.toLowerCase().includes(q) ||
-                e.codigo.toLowerCase().includes(q),
-        )
-        .map((e) => ({ ...e, habilitada: set.has(e.id) }));
-});
-function abrirGestion(recurso: 'tipo' | 'categoria', fila: Tipo | Categoria) {
-    gestion.value = {
-        recurso,
-        id: fila.id,
-        nombre: fila.nombre,
-        empresa_ids: fila.empresas.map((e) => e.id),
-    };
-    buscarEmpGestion.value = '';
-}
-function alternarGestion(id: number) {
-    if (!gestion.value) return;
-    const i = gestion.value.empresa_ids.indexOf(id);
-    if (i === -1) gestion.value.empresa_ids.push(id);
-    else gestion.value.empresa_ids.splice(i, 1);
-}
-function guardarGestion() {
-    const g = gestion.value;
-    if (!g) return;
-    router.put(
-        g.recurso === 'tipo'
-            ? `/tipos-activo/${g.id}/empresas`
-            : `/categorias-activo/${g.id}/empresas`,
-        { empresa_ids: g.empresa_ids },
-        { preserveScroll: true, onSuccess: () => (gestion.value = null) },
-    );
 }
 
 // --- Edición inline ---
@@ -320,7 +201,7 @@ function confirmarEstado() {
     <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Tipos y categorías de activo"
-            descripcion="Catálogos COMPARTIDOS: el mismo tipo o categoría se reutiliza en varias empresas y cada una habilita los que usa. «Estado global» retira un elemento de nuevas selecciones en todas las empresas; «Disponible aquí» sólo lo activa o desactiva para la empresa seleccionada. Deshabilitar aquí no borra nada ni afecta a los activos que ya lo usan."
+            descripcion="Catálogos GLOBALES de la plataforma: el mismo tipo o categoría se reutiliza en todas las empresas por igual. «Activo» / «Activa» retira un elemento de nuevas selecciones en todas las empresas a la vez; los activos que ya lo usan conservan su información."
         >
             <template #acciones>
                 <Button variant="ghost" as-child>
@@ -328,28 +209,6 @@ function confirmarEstado() {
                 </Button>
             </template>
         </EncabezadoPagina>
-
-        <div
-            v-if="empresasAutorizadas.length > 1"
-            class="flex flex-wrap items-center gap-2 text-sm"
-        >
-            <span class="text-muted-foreground"
-                >Administrar disponibilidad para</span
-            >
-            <div class="w-64">
-                <BuscadorAsync
-                    :model-value="empresaSel"
-                    :buscar="buscarEmpresasLocal"
-                    :etiqueta="(e) => (e as EmpresaAutorizada).nombre_comercial"
-                    :descripcion="(e) => (e as EmpresaAutorizada).codigo"
-                    placeholder="Empresa"
-                    placeholder-busqueda="Buscar empresa"
-                    @update:model-value="
-                        (v) => cambiarEmpresa(v as EmpresaAutorizada | null)
-                    "
-                />
-            </div>
-        </div>
 
         <div class="grid gap-6 lg:grid-cols-2">
             <!-- ===== Tipos ===== -->
@@ -381,9 +240,8 @@ function confirmarEstado() {
                             {{ tipoForm.errors.nombre }}
                         </p>
                         <p class="text-muted-foreground text-xs">
-                            Se crea y se habilita para
-                            <span class="font-medium">{{ empresaActual }}</span
-                            >. Con «Empresas» lo habilitas para más.
+                            Se crea en el catálogo compartido y queda disponible
+                            de inmediato para todas las empresas.
                         </p>
                     </div>
                     <Button type="submit" :disabled="tipoForm.processing">
@@ -402,7 +260,7 @@ function confirmarEstado() {
                     <select
                         v-model="fTipo.estado"
                         class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-                        aria-label="Filtrar por estado global"
+                        aria-label="Filtrar por estado"
                     >
                         <option value="">Estado: todos</option>
                         <option value="activos">Activos</option>
@@ -446,7 +304,7 @@ function confirmarEstado() {
                                         type="checkbox"
                                         class="size-4"
                                     />
-                                    Activo globalmente
+                                    Activo
                                 </label>
                                 <Button size="sm" @click="guardarTipo(t.id)"
                                     >Guardar</Button
@@ -488,28 +346,13 @@ function confirmarEstado() {
                                             class="text-xs"
                                         >
                                             {{
-                                                t.activo
-                                                    ? 'Activo global'
-                                                    : 'Inactivo global'
+                                                t.activo ? 'Activo' : 'Inactivo'
                                             }}
                                         </Badge>
                                         <span
                                             >Se usa en
                                             {{ t.activos_count }} activos</span
                                         >
-                                        <button
-                                            type="button"
-                                            class="hover:text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
-                                            @click="abrirGestion('tipo', t)"
-                                        >
-                                            <Building2 class="size-3" />
-                                            {{ t.empresas.length }}
-                                            {{
-                                                t.empresas.length === 1
-                                                    ? 'empresa'
-                                                    : 'empresas'
-                                            }}
-                                        </button>
                                     </div>
                                 </div>
                                 <div
@@ -537,34 +380,11 @@ function confirmarEstado() {
                                         "
                                     >
                                         {{
-                                            t.activo
-                                                ? 'Desactivar global'
-                                                : 'Activar global'
+                                            t.activo ? 'Desactivar' : 'Activar'
                                         }}
                                     </Button>
                                 </div>
                             </div>
-
-                            <label
-                                v-if="permisos.administrar_tipos"
-                                class="mt-2 flex items-center gap-1.5 text-xs"
-                            >
-                                <input
-                                    type="checkbox"
-                                    class="size-4"
-                                    :checked="t.habilitado"
-                                    :aria-label="`Disponible en ${empresaActual}`"
-                                    @change="alternarEmpresaTipo(t)"
-                                />
-                                Disponible en
-                                <span class="font-medium">{{
-                                    empresaActual
-                                }}</span>
-                                <AyudaTooltip
-                                    texto="Marca el tipo como disponible para la empresa seleccionada arriba. Deshabilitarlo aquí no lo elimina ni afecta a otras empresas ni a los activos que ya lo usan."
-                                    etiqueta="Ayuda sobre disponibilidad por empresa"
-                                />
-                            </label>
                         </template>
                     </li>
                 </ul>
@@ -619,9 +439,8 @@ function confirmarEstado() {
                     </div>
                     <div class="flex items-center justify-between gap-2">
                         <p class="text-muted-foreground text-xs">
-                            Se habilita para
-                            <span class="font-medium">{{ empresaActual }}</span
-                            >.
+                            Se crea en el catálogo compartido, disponible para
+                            todas las empresas.
                         </p>
                         <Button
                             type="submit"
@@ -659,7 +478,7 @@ function confirmarEstado() {
                     <select
                         v-model="fCat.estado"
                         class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-                        aria-label="Filtrar por estado global"
+                        aria-label="Filtrar por estado"
                     >
                         <option value="">Estado: todas</option>
                         <option value="activas">Activas</option>
@@ -720,7 +539,7 @@ function confirmarEstado() {
                                             type="checkbox"
                                             class="size-4"
                                         />
-                                        Activa globalmente
+                                        Activa
                                     </label>
                                     <Button
                                         size="sm"
@@ -753,9 +572,7 @@ function confirmarEstado() {
                                             class="text-xs"
                                         >
                                             {{
-                                                c.activa
-                                                    ? 'Activa global'
-                                                    : 'Inactiva global'
+                                                c.activa ? 'Activa' : 'Inactiva'
                                             }}
                                         </Badge>
                                         <span>Tipo: {{ c.tipo ?? '—' }}</span>
@@ -763,21 +580,6 @@ function confirmarEstado() {
                                             >Se usa en
                                             {{ c.activos_count }} activos</span
                                         >
-                                        <button
-                                            type="button"
-                                            class="hover:text-foreground inline-flex items-center gap-1 underline-offset-2 hover:underline"
-                                            @click="
-                                                abrirGestion('categoria', c)
-                                            "
-                                        >
-                                            <Building2 class="size-3" />
-                                            {{ c.empresas.length }}
-                                            {{
-                                                c.empresas.length === 1
-                                                    ? 'empresa'
-                                                    : 'empresas'
-                                            }}
-                                        </button>
                                     </div>
                                 </div>
                                 <div
@@ -805,41 +607,18 @@ function confirmarEstado() {
                                         "
                                     >
                                         {{
-                                            c.activa
-                                                ? 'Desactivar global'
-                                                : 'Activar global'
+                                            c.activa ? 'Desactivar' : 'Activar'
                                         }}
                                     </Button>
                                 </div>
                             </div>
-
-                            <label
-                                v-if="permisos.administrar_categorias"
-                                class="mt-2 flex items-center gap-1.5 text-xs"
-                            >
-                                <input
-                                    type="checkbox"
-                                    class="size-4"
-                                    :checked="c.habilitada"
-                                    :aria-label="`Disponible en ${empresaActual}`"
-                                    @change="alternarEmpresaCategoria(c)"
-                                />
-                                Disponible en
-                                <span class="font-medium">{{
-                                    empresaActual
-                                }}</span>
-                                <AyudaTooltip
-                                    texto="Marca la categoría como disponible para la empresa seleccionada arriba. Deshabilitarla aquí no la elimina ni afecta a otras empresas ni a los activos que ya la usan."
-                                    etiqueta="Ayuda sobre disponibilidad por empresa"
-                                />
-                            </label>
                         </template>
                     </li>
                 </ul>
             </section>
         </div>
 
-        <!-- Confirmación de estado global -->
+        <!-- Confirmación de estado -->
         <Dialog
             :open="confirmacion !== null"
             @update:open="(v: boolean) => !v && (confirmacion = null)"
@@ -852,8 +631,7 @@ function confirmarEstado() {
                             confirmacion.recurso === 'tipo'
                                 ? 'tipo de activo'
                                 : 'categoría'
-                        }}
-                        globalmente?
+                        }}?
                     </DialogTitle>
                     <DialogDescription>
                         <span class="font-medium">{{
@@ -862,7 +640,7 @@ function confirmarEstado() {
                         >.
                         {{
                             confirmacion.activar
-                                ? 'Volverá a poder seleccionarse en las empresas donde esté habilitado.'
+                                ? 'Volverá a poder seleccionarse en todas las empresas.'
                                 : 'Dejará de ofrecerse para nuevas selecciones en TODAS las empresas. Los activos que ya lo usan conservan su información.'
                         }}
                     </DialogDescription>
@@ -883,70 +661,6 @@ function confirmarEstado() {
                     >
                         {{ confirmacion.activar ? 'Activar' : 'Desactivar' }}
                     </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-
-        <!-- Empresas que lo usan -->
-        <Dialog
-            :open="gestion !== null"
-            @update:open="(v: boolean) => !v && (gestion = null)"
-        >
-            <DialogContent v-if="gestion">
-                <DialogHeader>
-                    <DialogTitle
-                        >Empresas que usan «{{ gestion.nombre }}»</DialogTitle
-                    >
-                    <DialogDescription>
-                        Marca las empresas donde este
-                        {{
-                            gestion.recurso === 'tipo' ? 'tipo' : 'la categoría'
-                        }}
-                        debe ofrecerse. Es un catálogo compartido: el cambio no
-                        afecta a las demás empresas ni a los activos que ya lo
-                        usan.
-                    </DialogDescription>
-                </DialogHeader>
-                <div class="grid gap-2">
-                    <Input
-                        v-model="buscarEmpGestion"
-                        class="h-8"
-                        placeholder="Buscar empresa…"
-                        aria-label="Buscar empresa"
-                    />
-                    <div
-                        class="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2"
-                    >
-                        <label
-                            v-for="e in empresasGestion"
-                            :key="e.id"
-                            class="flex items-center gap-2 text-sm"
-                        >
-                            <input
-                                type="checkbox"
-                                class="size-4"
-                                :checked="e.habilitada"
-                                @change="alternarGestion(e.id)"
-                            />
-                            {{ e.nombre_comercial }}
-                            <span
-                                class="text-muted-foreground font-mono text-xs"
-                            >
-                                {{ e.codigo }}
-                            </span>
-                        </label>
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        @click="gestion = null"
-                        >Cancelar</Button
-                    >
-                    <Button type="button" @click="guardarGestion"
-                        >Guardar</Button
-                    >
                 </DialogFooter>
             </DialogContent>
         </Dialog>

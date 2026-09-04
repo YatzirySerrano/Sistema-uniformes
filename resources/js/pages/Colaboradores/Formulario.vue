@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
@@ -8,27 +9,27 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
+type Opcion = { id: number; nombre: string };
+
 type Colaborador = {
     id: number;
     empresa_id: number;
     numero_empleado: string;
     nombre_completo: string;
     sucursal_id: number;
+    sucursal: Opcion | null;
     puesto: string | null;
     area: string | null;
     area_id: number | null;
+    area_actual: Opcion | null;
     correo: string | null;
     activo: boolean;
 };
 
-type Opcion = { id: number; nombre: string };
-type Catalogo = { sucursales: Opcion[]; areas: Opcion[] };
-
 const props = defineProps<{
     colaborador: Colaborador | null;
     empresasAutorizadas: EmpresaAutorizada[];
-    catalogosPorEmpresa: Record<number, Catalogo>;
-    sucursalPreseleccionadaId?: number | null;
+    sucursalPreseleccionada?: Opcion | null;
     empresaPreseleccionadaId?: number | null;
 }>();
 
@@ -51,16 +52,10 @@ const empresaId = ref<number | ''>(
             : ''),
 );
 
-function catalogoDe(id: number | ''): Catalogo {
-    return (
-        (id !== '' && props.catalogosPorEmpresa[id]) || {
-            sucursales: [],
-            areas: [],
-        }
-    );
-}
-
-const catalogo = computed(() => catalogoDe(empresaId.value));
+const sucursalSel = ref<Opcion | null>(
+    props.colaborador?.sucursal ?? props.sucursalPreseleccionada ?? null,
+);
+const areaSel = ref<Opcion | null>(props.colaborador?.area_actual ?? null);
 
 const form = useForm<{
     empresa_id: number | null;
@@ -75,23 +70,53 @@ const form = useForm<{
     empresa_id: empresaId.value === '' ? null : empresaId.value,
     numero_empleado: props.colaborador?.numero_empleado ?? '',
     nombre_completo: props.colaborador?.nombre_completo ?? '',
-    sucursal_id:
-        props.colaborador?.sucursal_id ??
-        props.sucursalPreseleccionadaId ??
-        catalogoDe(empresaId.value).sucursales[0]?.id ??
-        '',
+    sucursal_id: sucursalSel.value?.id ?? '',
     puesto: props.colaborador?.puesto ?? '',
-    area_id: props.colaborador?.area_id ?? '',
+    area_id: areaSel.value?.id ?? '',
     correo: props.colaborador?.correo ?? '',
     activo: props.colaborador?.activo ?? true,
 });
 
-// Al cambiar de empresa se recargan sucursales / áreas y se limpia la selección.
+// Al cambiar de empresa se limpia la selección; sucursal/área se recargan
+// acotadas a la empresa elegida (BuscadorAsync, nunca "traer todo y ocultar").
 watch(empresaId, (id) => {
     form.empresa_id = id === '' ? null : id;
-    form.sucursal_id = catalogoDe(id).sucursales[0]?.id ?? '';
+    form.sucursal_id = '';
     form.area_id = '';
+    sucursalSel.value = null;
+    areaSel.value = null;
 });
+
+async function buscarSucursales(
+    q: string,
+    signal?: AbortSignal,
+): Promise<Opcion[]> {
+    if (empresaId.value === '') return [];
+    const res = await fetch(
+        `/sucursales/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).sucursales ?? [];
+}
+
+async function buscarAreas(q: string, signal?: AbortSignal): Promise<Opcion[]> {
+    if (empresaId.value === '') return [];
+    const res = await fetch(
+        `/areas/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).areas ?? [];
+}
 
 function enviar() {
     if (esEdicion) {
@@ -144,28 +169,26 @@ function enviar() {
                 </div>
                 <div class="grid gap-1.5">
                     <Label for="sucursal_id">Sucursal</Label>
-                    <select
+                    <BuscadorAsync
                         id="sucursal_id"
-                        v-model="form.sucursal_id"
-                        class="border-input bg-background h-9 rounded-md border px-3 text-sm"
+                        :model-value="sucursalSel"
+                        :buscar="buscarSucursales"
+                        :dependencia="empresaId"
                         :disabled="empresaId === ''"
-                        required
-                    >
-                        <option value="" disabled>
-                            {{
-                                empresaId === ''
-                                    ? 'Elige una empresa primero'
-                                    : 'Selecciona una sucursal'
-                            }}
-                        </option>
-                        <option
-                            v-for="s in catalogo.sucursales"
-                            :key="s.id"
-                            :value="s.id"
-                        >
-                            {{ s.nombre }}
-                        </option>
-                    </select>
+                        :etiqueta="(s) => (s as Opcion).nombre"
+                        placeholder="Selecciona una sucursal"
+                        placeholder-busqueda="Buscar sucursal por nombre"
+                        sin-resultados="Esta empresa no tiene sucursales registradas."
+                        :invalido="!!form.errors.sucursal_id"
+                        @update:model-value="
+                            (v) => {
+                                sucursalSel = v as Opcion | null;
+                                form.sucursal_id =
+                                    (v as Opcion | null)?.id ?? '';
+                                form.clearErrors('sucursal_id');
+                            }
+                        "
+                    />
                     <InputError :message="form.errors.sucursal_id" />
                 </div>
             </div>
@@ -188,26 +211,31 @@ function enviar() {
                 </div>
                 <div class="grid gap-1.5">
                     <Label for="area_id">Área / Departamento</Label>
-                    <select
+                    <BuscadorAsync
                         id="area_id"
-                        v-model="form.area_id"
-                        class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                    >
-                        <option value="">Sin área</option>
-                        <option
-                            v-for="a in catalogo.areas"
-                            :key="a.id"
-                            :value="a.id"
-                        >
-                            {{ a.nombre }}
-                        </option>
-                    </select>
+                        :model-value="areaSel"
+                        :buscar="buscarAreas"
+                        :dependencia="empresaId"
+                        :disabled="empresaId === ''"
+                        :etiqueta="(a) => (a as Opcion).nombre"
+                        placeholder="Sin área"
+                        placeholder-busqueda="Buscar área por nombre"
+                        sin-resultados="Esta empresa no tiene áreas registradas."
+                        :invalido="!!form.errors.area_id"
+                        @update:model-value="
+                            (v) => {
+                                areaSel = v as Opcion | null;
+                                form.area_id = (v as Opcion | null)?.id ?? '';
+                                form.clearErrors('area_id');
+                            }
+                        "
+                    />
                     <InputError :message="form.errors.area_id" />
                     <p
-                        v-if="empresaId !== '' && !catalogo.areas.length"
+                        v-if="empresaId !== ''"
                         class="text-muted-foreground text-xs"
                     >
-                        Esta empresa no tiene áreas registradas.
+                        Opcional.
                         <Link href="/areas" class="underline"
                             >Crear un área</Link
                         >.

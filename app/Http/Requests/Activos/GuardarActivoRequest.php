@@ -50,14 +50,32 @@ class GuardarActivoRequest extends FormRequest
         $empresaId = $this->empresaResuelta('activo')->getKey();
         $activo = $this->route('activo');
         $activoId = $activo instanceof Activo ? $activo->getKey() : null;
+        $esAlta = $activoId === null;
 
         return [
-            ...($activoId === null ? ['empresa_id' => ['required', 'integer']] : []),
+            ...($esAlta ? ['empresa_id' => ['required', 'integer']] : []),
+            ...($esAlta ? [
+                // Existencia inicial: se unifica con el alta del Activo. El
+                // almacén es sólo el de la ENTRADA INICIAL, no una propiedad
+                // permanente del Activo.
+                'almacen_id' => [
+                    'nullable', 'integer',
+                    Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                    Rule::exists('almacenes', 'id')->where(fn ($q) => $q->where('activo', true)),
+                ],
+                'cantidad_inicial' => ['nullable', 'integer', 'min:0', 'max:1000'],
+                'existencias' => ['nullable', 'array'],
+                'existencias.*.talla_id' => ['required', 'integer'],
+                'existencias.*.cantidad' => ['required', 'integer', 'min:0'],
+                // Seguimiento individual: opcional generar etiquetas QR de una
+                // vez para las unidades recién creadas.
+                'generar_qr' => ['boolean'],
+            ] : []),
             'nombre' => ['required', 'string', 'max:255'],
             'descripcion' => ['nullable', 'string', 'max:2000'],
             'categoria_id' => [
                 'nullable', 'integer',
-                Rule::exists('categoria_activo_empresa', 'categoria_activo_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('categorias_activo', 'id')->where(fn ($q) => $q->where('activa', true)),
             ],
             'codigo' => [
                 'nullable', 'string', 'max:60', 'alpha_dash',
@@ -67,14 +85,14 @@ class GuardarActivoRequest extends FormRequest
             ],
             'tipo_activo_id' => [
                 'nullable', 'integer',
-                Rule::exists('tipo_activo_empresa', 'tipo_activo_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('tipos_activo', 'id')->where(fn ($q) => $q->where('activo', true)),
             ],
             'tipo_control' => ['required', new Enum(TipoControlActivo::class)],
             'activo' => ['boolean'],
             'tallas' => ['nullable', 'array'],
             'tallas.*' => [
                 'integer',
-                Rule::exists('talla_empresa', 'talla_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('activa', true)),
             ],
             'imagen' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
         ];
@@ -96,8 +114,8 @@ class GuardarActivoRequest extends FormRequest
                 return;
             }
 
-            // La categoría y el tipo ya están acotados a la empresa por las
-            // reglas `exists` sobre los pivotes; aquí sólo se valida coherencia.
+            // Tipo y categoría son catálogos globales; aquí sólo se valida
+            // coherencia entre el tipo y el tipo de la categoría elegida.
             $tipoDeLaCategoria = CategoriaActivo::query()
                 ->whereKey($categoriaId)
                 ->value('tipo_activo_id');
@@ -109,6 +127,66 @@ class GuardarActivoRequest extends FormRequest
                 );
             }
         });
+
+        if ($this->route('activo') !== null) {
+            return; // stock inicial sólo aplica al alta
+        }
+
+        $validator->after(function (Validator $validator): void {
+            $tallaIds = array_map('intval', $this->input('tallas', []));
+            $existencias = is_array($this->input('existencias')) ? $this->input('existencias') : [];
+            $cantidadInicial = (int) $this->input('cantidad_inicial', 0);
+            $tipoControl = $this->input('tipo_control');
+
+            if ($tallaIds === []) {
+                foreach ($existencias as $i => $fila) {
+                    $validator->errors()->add("existencias.{$i}.talla_id", 'Este activo no usa variantes; usa la cantidad inicial.');
+                }
+
+                return;
+            }
+
+            // El activo usa variantes: cada fila de existencia debe referirse
+            // a una de las variantes asociadas, sin duplicados.
+            $vistos = [];
+            foreach ($existencias as $i => $fila) {
+                $tallaId = (int) ($fila['talla_id'] ?? 0);
+
+                if (! in_array($tallaId, $tallaIds, true)) {
+                    $validator->errors()->add("existencias.{$i}.talla_id", 'La variante indicada no está asociada a este activo.');
+
+                    continue;
+                }
+
+                if (isset($vistos[$tallaId])) {
+                    $validator->errors()->add("existencias.{$i}.talla_id", 'Esa variante ya tiene una cantidad inicial capturada.');
+
+                    continue;
+                }
+
+                $vistos[$tallaId] = true;
+            }
+
+            if ($tipoControl === TipoControlActivo::Cantidad->value && $cantidadInicial > 0) {
+                $validator->errors()->add('cantidad_inicial', 'Este activo usa variantes; captura la cantidad por variante.');
+            }
+        });
+
+        $validator->after(function (Validator $validator): void {
+            $tipoControl = $this->input('tipo_control');
+            $almacenId = $this->integer('almacen_id') ?: null;
+            $cantidadInicial = (int) $this->input('cantidad_inicial', 0);
+            $existencias = is_array($this->input('existencias')) ? $this->input('existencias') : [];
+            $hayExistenciaConCantidad = $cantidadInicial > 0
+                || collect($existencias)->contains(fn ($f) => (int) ($f['cantidad'] ?? 0) > 0);
+
+            $necesitaAlmacen = ($tipoControl === TipoControlActivo::Cantidad->value && $hayExistenciaConCantidad)
+                || ($tipoControl === TipoControlActivo::SeguimientoIndividual->value && $cantidadInicial > 0);
+
+            if ($necesitaAlmacen && $almacenId === null) {
+                $validator->errors()->add('almacen_id', 'Selecciona el almacén donde vas a registrar la existencia inicial.');
+            }
+        });
     }
 
     /**
@@ -118,15 +196,17 @@ class GuardarActivoRequest extends FormRequest
     {
         return [
             'empresa_id.required' => 'Selecciona la empresa del activo.',
+            'almacen_id.exists' => 'El almacén no abastece a esta empresa o está desactivado.',
+            'existencias.*.cantidad.min' => 'La cantidad no puede ser negativa.',
             'nombre.required' => 'El nombre del activo es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
             'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',
             'codigo.unique' => 'Ese código de activo ya existe en esta empresa.',
-            'tipo_activo_id.exists' => 'El tipo de activo seleccionado no pertenece a esta empresa.',
-            'categoria_id.exists' => 'La categoría seleccionada no pertenece a esta empresa.',
-            'tipo_control.enum' => 'El tipo de control debe ser "por cantidad" o "serializado".',
+            'tipo_activo_id.exists' => 'El tipo de activo seleccionado no existe o está desactivado.',
+            'categoria_id.exists' => 'La categoría seleccionada no existe o está desactivada.',
+            'tipo_control.enum' => 'El tipo de control debe ser "por cantidad" o "seguimiento individual".',
             'tipo_control.required' => 'Indica cómo se controla el activo.',
-            'tallas.*.exists' => 'Una de las variantes / tallas seleccionadas no pertenece a esta empresa.',
+            'tallas.*.exists' => 'Una de las variantes / tallas seleccionadas no existe o está desactivada.',
             'imagen.image' => 'El archivo debe ser una imagen.',
             'imagen.mimes' => 'La imagen debe ser JPG, PNG o WebP.',
             'imagen.max' => 'La imagen no puede superar los 4 MB.',

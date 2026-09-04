@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -76,7 +77,14 @@ function fecha(iso: string) {
         <EncabezadoPagina
             titulo="Movimientos de inventario"
             descripcion="Historial completo de entradas y salidas. Cada cambio de existencia queda registrado."
-        />
+        >
+            <template #acciones>
+                <BotonesExportar
+                    endpoint="/inventario/movimientos/exportar"
+                    :filtros="filtros"
+                />
+            </template>
+        </EncabezadoPagina>
 
         <div class="flex flex-wrap gap-2">
             <select

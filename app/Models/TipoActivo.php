@@ -7,17 +7,16 @@ use Database\Factories\TipoActivoFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Tipo de activo del **catálogo compartido de plataforma** (Prenda, Equipo de
  * cómputo, Dispositivo móvil, Accesorio, Otro…): la clasificación GENERAL o
- * naturaleza del activo. Ya no pertenece a una empresa: se **habilita por
- * empresa** vía `tipo_activo_empresa`. Opcional (un activo puede no tener tipo).
+ * naturaleza del activo. Es GLOBAL: visible para todas las empresas por igual,
+ * sin habilitación por empresa. Opcional (un activo puede no tener tipo).
  *
- * `activo = false` lo retira globalmente de nuevas selecciones; quitar una
- * empresa del pivote sólo lo retira para esa empresa. Sin borrado físico.
+ * `activo = false` lo retira globalmente de nuevas selecciones. Sin borrado
+ * físico.
  *
  * @property int $id
  * @property string $nombre
@@ -54,37 +53,11 @@ class TipoActivo extends Model
     }
 
     /**
-     * Empresas que tienen habilitado este tipo.
-     *
-     * @return BelongsToMany<Empresa, $this>
-     */
-    public function empresas(): BelongsToMany
-    {
-        return $this->belongsToMany(Empresa::class, 'tipo_activo_empresa')->withTimestamps();
-    }
-
-    public function habilitadoPara(int $empresaId): bool
-    {
-        return $this->empresas()->whereKey($empresaId)->exists();
-    }
-
-    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */
     public function scopeActivos(Builder $query): Builder
     {
         return $query->where('activo', true);
-    }
-
-    /**
-     * Tipos habilitados para la empresa indicada.
-     *
-     * @param  Builder<static>  $query
-     * @return Builder<static>
-     */
-    public function scopeParaEmpresa(Builder $query, int $empresaId): Builder
-    {
-        return $query->whereHas('empresas', fn (Builder $q) => $q->whereKey($empresaId));
     }
 }

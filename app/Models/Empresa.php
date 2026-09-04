@@ -106,36 +106,6 @@ class Empresa extends Model
     }
 
     /**
-     * Tipos de activo del catálogo compartido habilitados para esta empresa.
-     *
-     * @return BelongsToMany<TipoActivo, $this>
-     */
-    public function tiposActivo(): BelongsToMany
-    {
-        return $this->belongsToMany(TipoActivo::class, 'tipo_activo_empresa')->withTimestamps();
-    }
-
-    /**
-     * Categorías de activo del catálogo compartido habilitadas para esta empresa.
-     *
-     * @return BelongsToMany<CategoriaActivo, $this>
-     */
-    public function categoriasActivo(): BelongsToMany
-    {
-        return $this->belongsToMany(CategoriaActivo::class, 'categoria_activo_empresa', 'empresa_id', 'categoria_activo_id')->withTimestamps();
-    }
-
-    /**
-     * Variantes / tallas del catálogo compartido habilitadas para esta empresa.
-     *
-     * @return BelongsToMany<Talla, $this>
-     */
-    public function tallas(): BelongsToMany
-    {
-        return $this->belongsToMany(Talla::class, 'talla_empresa')->withTimestamps();
-    }
-
-    /**
      * @return HasMany<Area, $this>
      */
     public function areas(): HasMany

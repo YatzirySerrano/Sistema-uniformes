@@ -100,9 +100,9 @@ no se registra nada (transacción atómica).
     - Combobox con buscador para almacén y activo (endpoints JSON
       `/almacenes/buscar`, `/activos/buscar?control=cantidad`). Sólo activos por
       cantidad; los serializados se registrarán unidad por unidad en otra fase.
-    - **Variante opcional**: si el activo tiene variantes propias, `talla_id` es
-      obligatorio, debe ser una de ellas y estar habilitada para la empresa
-      (`talla_empresa`); si no las tiene, `talla_id` va nulo y el saldo se guarda
+    - **Variante opcional**: si el activo tiene variantes propias (activas
+      globalmente), `talla_id` es obligatorio y debe ser una de ellas; si no
+      las tiene, `talla_id` va nulo y el saldo se guarda
       con `talla_id = NULL` ("sin variante"; ya no hay talla comodín). Así un
       mouse, un cable o una gorra unitalla se registran sin forzar una talla
       ficticia.

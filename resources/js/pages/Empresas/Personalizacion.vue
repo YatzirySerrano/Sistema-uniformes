@@ -2,6 +2,7 @@
 import { Head, useForm } from '@inertiajs/vue3';
 import { computed } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import SubidaArchivo from '@/components/sistema/SubidaArchivo.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -146,16 +147,14 @@ function enviar() {
 
                 <div class="grid gap-1.5">
                     <Label for="logo">Logotipo (PNG, JPG o SVG)</Label>
-                    <input
+                    <SubidaArchivo
                         id="logo"
-                        type="file"
+                        v-model="form.logo"
+                        tipo="imagen"
                         accept="image/png,image/jpeg,image/svg+xml"
-                        class="text-sm"
-                        @change="
-                            form.logo =
-                                ($event.target as HTMLInputElement)
-                                    .files?.[0] ?? null
-                        "
+                        formatos-etiqueta="Formatos aceptados: PNG, JPG o SVG."
+                        :archivo-actual-url="empresa.logo_url"
+                        :invalido="!!form.errors.logo"
                     />
                     <InputError :message="form.errors.logo" />
                 </div>

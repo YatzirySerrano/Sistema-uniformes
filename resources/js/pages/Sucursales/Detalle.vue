@@ -15,6 +15,7 @@ import { computed, ref } from 'vue';
 import type { SucursalEditable } from '@/components/sucursales/FormularioSucursal.vue';
 import FormularioSucursal from '@/components/sucursales/FormularioSucursal.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,6 +37,14 @@ type SucursalDetalle = SucursalEditable & {
 const props = defineProps<{
     sucursal: SucursalDetalle;
     permisos: { editar: boolean; desactivar: boolean };
+    suspendidos: {
+        id: number;
+        tipo: string;
+        nombre: string | null;
+        suspendida_en: string;
+        puede_reactivarse: boolean;
+        motivos: string[];
+    }[];
 }>();
 
 defineOptions({
@@ -286,6 +295,13 @@ function confirmarDesactivar(): void {
                 </template>
             </section>
         </div>
+
+        <PanelSuspendidos
+            v-if="suspendidos.length"
+            :suspendidos="suspendidos"
+            :endpoint="`/sucursales/${sucursal.id}/suspendidos/reactivar`"
+            :puede-reactivar="permisos.desactivar"
+        />
 
         <!-- Modal editar -->
         <Dialog v-model:open="modalEditar">

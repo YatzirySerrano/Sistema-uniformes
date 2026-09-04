@@ -65,6 +65,14 @@ class Devolucion extends Model
     }
 
     /**
+     * @return BelongsTo<Almacen, $this>
+     */
+    public function almacen(): BelongsTo
+    {
+        return $this->belongsTo(Almacen::class);
+    }
+
+    /**
      * @return BelongsTo<EntregaUniforme, $this>
      */
     public function entrega(): BelongsTo

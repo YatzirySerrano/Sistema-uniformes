@@ -28,16 +28,16 @@ it('saldos_inventario ya no tiene sucursal_id pero movimientos_inventario sí (p
         ->and(Schema::hasColumn('movimientos_inventario', 'sucursal_id'))->toBeTrue();
 });
 
-it('los catálogos son compartidos: sin empresa_id ni es_comodin, con pivotes por empresa', function () {
+it('los catálogos son GLOBALES: sin empresa_id, sin es_comodin y sin pivotes de habilitación por empresa', function () {
     foreach (['tipos_activo', 'categorias_activo', 'tallas'] as $tabla) {
         expect(Schema::hasColumn($tabla, 'empresa_id'))->toBeFalse();
     }
 
     expect(Schema::hasColumn('tallas', 'es_comodin'))->toBeFalse()
         ->and(Schema::hasColumn('tallas', 'valor_normalizado'))->toBeTrue()
-        ->and(Schema::hasTable('tipo_activo_empresa'))->toBeTrue()
-        ->and(Schema::hasTable('categoria_activo_empresa'))->toBeTrue()
-        ->and(Schema::hasTable('talla_empresa'))->toBeTrue();
+        ->and(Schema::hasTable('tipo_activo_empresa'))->toBeFalse()
+        ->and(Schema::hasTable('categoria_activo_empresa'))->toBeFalse()
+        ->and(Schema::hasTable('talla_empresa'))->toBeFalse();
 });
 
 it('el inventario admite "sin variante": talla_id es nullable', function () {

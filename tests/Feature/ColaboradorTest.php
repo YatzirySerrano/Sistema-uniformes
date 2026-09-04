@@ -44,7 +44,7 @@ it('preselecciona la sucursal en el formulario de alta cuando llega por query', 
         ->get("/colaboradores/crear?sucursal_id={$sucursal->id}")
         ->assertInertia(fn ($page) => $page
             ->component('Colaboradores/Formulario')
-            ->where('sucursalPreseleccionadaId', $sucursal->id)
+            ->where('sucursalPreseleccionada.id', $sucursal->id)
         );
 });
 
@@ -55,7 +55,7 @@ it('no preselecciona ninguna sucursal si no llega sucursal_id', function () {
 
     $this->actingAs($admin)
         ->get('/colaboradores/crear')
-        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', null));
+        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionada', null));
 });
 
 it('ignora un sucursal_id de una empresa fuera del alcance del usuario', function () {
@@ -66,7 +66,7 @@ it('ignora un sucursal_id de una empresa fuera del alcance del usuario', functio
 
     $this->actingAs($supervisor)
         ->get("/colaboradores/crear?sucursal_id={$sucursalAjena->id}")
-        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', null));
+        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionada', null));
 });
 
 it('un supervisor no puede preseleccionar una sucursal fuera de su alcance, pero sí la suya', function () {
@@ -79,11 +79,11 @@ it('un supervisor no puede preseleccionar una sucursal fuera de su alcance, pero
 
     $this->actingAs($supervisor)
         ->get("/colaboradores/crear?sucursal_id={$otraSucursal->id}")
-        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', null));
+        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionada', null));
 
     $this->actingAs($supervisor)
         ->get("/colaboradores/crear?sucursal_id={$suSucursal->id}")
-        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionadaId', $suSucursal->id));
+        ->assertInertia(fn ($page) => $page->where('sucursalPreseleccionada.id', $suSucursal->id));
 });
 
 /*

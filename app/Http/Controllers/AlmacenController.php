@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Almacenes\GuardarAlmacenRequest;
 use App\Models\Almacen;
 use App\Models\Colaborador;
@@ -14,8 +15,11 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 /**
  * Almacenes multiempresa. Un almacén abastece a una o varias empresas (N:M vía
@@ -27,6 +31,7 @@ use Inertia\Response;
 class AlmacenController extends Controller
 {
     use ConEmpresa;
+    use ExportaListado;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -35,32 +40,10 @@ class AlmacenController extends Controller
         $this->authorize('viewAny', Almacen::class);
 
         $usuario = $request->user();
-        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
 
-        $filtros = $request->validate([
-            'buscar' => ['nullable', 'string', 'max:100'],
-            'estado' => ['nullable', 'in:activos,inactivos'],
-            'orden' => ['nullable', 'in:az,za'],
-        ]);
-
-        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
-
-        $almacenes = Almacen::query()
-            ->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsAutorizadas))
-            ->when($empresaFiltro !== null, fn (Builder $q) => $q->paraEmpresa($empresaFiltro->id))
-            ->with(['responsable:id,nombre_completo,numero_empleado', 'empresas:id,codigo,nombre_comercial'])
-            ->withCount('empresas')
-            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
-                $q->where(function (Builder $sub) use ($buscar): void {
-                    $sub->where('nombre', 'like', "%{$buscar}%")
-                        ->orWhere('codigo', 'like', "%{$buscar}%")
-                        ->orWhere('direccion', 'like', "%{$buscar}%");
-                });
-            })
-            ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
-            ->orderBy('nombre', $orden)
+        $almacenes = $this->consultaAlmacenes($request, $filtros)
             ->paginate($this->porPagina())
             ->withQueryString()
             ->through(fn (Almacen $a): array => [
@@ -97,6 +80,74 @@ class AlmacenController extends Controller
         ]);
     }
 
+    /**
+     * Excel/PDF del listado, respetando los mismos filtros que `index()`.
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', Almacen::class);
+
+        $filtros = $this->filtrosListado($request);
+        $almacenes = $this->consultaAlmacenes($request, $filtros)->get();
+
+        $filas = $almacenes->map(fn (Almacen $a): array => [
+            $a->nombre,
+            $a->codigo,
+            $a->direccion,
+            $a->activo ? 'Activo' : 'Inactivo',
+            $a->empresas->pluck('nombre_comercial')->implode(', '),
+            $a->responsable?->nombre_completo,
+        ])->all();
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Nombre', 'Código', 'Dirección', 'Estado', 'Empresas abastecidas', 'Responsable',
+        ], 'Almacenes');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'estado' => ['nullable', 'in:activos,inactivos'],
+            'orden' => ['nullable', 'in:az,za'],
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<Almacen>
+     */
+    private function consultaAlmacenes(Request $request, array $filtros): Builder
+    {
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
+
+        return Almacen::query()
+            ->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsAutorizadas))
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->paraEmpresa($empresaFiltro->id))
+            ->with(['responsable:id,nombre_completo,numero_empleado', 'empresas:id,codigo,nombre_comercial'])
+            ->withCount('empresas')
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
+                $q->where(function (Builder $sub) use ($buscar): void {
+                    $sub->where('nombre', 'like', "%{$buscar}%")
+                        ->orWhere('codigo', 'like', "%{$buscar}%")
+                        ->orWhere('direccion', 'like', "%{$buscar}%");
+                });
+            })
+            ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
+            ->orderBy('nombre', $orden);
+    }
+
+    /**
+     * Detalle de Almacén: pura configuración (datos, empresas abastecidas,
+     * responsable) + un resumen mínimo. La operación de stock (saldos,
+     * filtros, movimientos, unidades) vive en Activos, no aquí.
+     */
     public function show(Request $request, Almacen $almacen): Response
     {
         $this->authorize('view', $almacen);
@@ -107,41 +158,15 @@ class AlmacenController extends Controller
             'empresas:id,codigo,nombre_comercial',
         ]);
 
-        $saldos = SaldoInventario::query()
-            ->where('almacen_id', $almacen->id)
-            ->whereIn('empresa_id', $almacen->empresas->pluck('id'))
-            ->with([
-                'empresa:id,nombre_comercial',
-                'activo:id,nombre,tipo_control,categoria_id,tipo_activo_id',
-                'activo.categoriaActivo:id,nombre',
-                'activo.tipoActivo:id,nombre',
-                'talla:id,valor',
-            ])
-            ->get();
-
-        $inventarioPorEmpresa = $saldos
-            ->groupBy('empresa_id')
-            ->map(fn (Collection $filas): array => [
-                'empresa' => [
-                    'id' => (int) $filas->first()->empresa_id,
-                    'nombre_comercial' => $filas->first()->empresa?->nombre_comercial,
-                ],
-                'total' => (int) $filas->sum('cantidad'),
-                'bajo_minimo' => $filas->contains(fn (SaldoInventario $s): bool => $s->estaBajoMinimo()),
-                'activos' => $this->resumirInventario($filas),
-            ])
-            ->sortBy('empresa.nombre_comercial')
-            ->values()
-            ->all();
-
         return Inertia::render('Almacenes/Detalle', [
             'resumen' => [
                 'empresas_abastecidas' => $almacen->empresas->count(),
-                'tipos_activo' => $saldos->pluck('activo_id')->unique()->count(),
-                'existencias' => (int) $saldos->sum('cantidad'),
-                'variantes_bajo_minimo' => $saldos->filter(fn (SaldoInventario $s): bool => $s->estaBajoMinimo())->count(),
+                'activos_con_existencia' => SaldoInventario::query()
+                    ->where('almacen_id', $almacen->id)
+                    ->where('cantidad', '>', 0)
+                    ->distinct()
+                    ->count('activo_id'),
             ],
-            'inventarioPorEmpresa' => $inventarioPorEmpresa,
             'almacen' => [
                 ...$almacen->only(['id', 'nombre', 'codigo', 'descripcion', 'direccion', 'telefono', 'correo', 'activo']),
                 'empresas' => $almacen->empresas->map(fn ($e): array => [
@@ -158,9 +183,7 @@ class AlmacenController extends Controller
             'permisos' => [
                 'editar' => $request->user()->can('update', $almacen),
                 'administrar' => $request->user()->can('administrar', $almacen),
-                'inventario_ver' => $request->user()->can('inventario.ver'),
-                'inventario_entrada' => $request->user()->can('inventario.entrada'),
-                'inventario_ajustar' => $request->user()->can('inventario.ajustar'),
+                'ver_activos' => $request->user()->can('activos.ver'),
             ],
         ]);
     }
@@ -183,16 +206,20 @@ class AlmacenController extends Controller
     {
         $almacen->update($request->safe()->except(['empresa_ids']));
 
-        $empresaIds = $request->collect('empresa_ids')->map(fn ($id): int => (int) $id)->sort()->values();
-        $antes = $almacen->empresas()->pluck('empresas.id')->sort()->values();
+        if ($request->has('empresa_ids')) {
+            $empresaIds = $request->collect('empresa_ids')->map(fn ($id): int => (int) $id)->sort()->values();
+            $antes = $almacen->empresas()->pluck('empresas.id')->sort()->values();
 
-        if ($request->has('empresa_ids') && $antes->all() !== $empresaIds->all()) {
-            $almacen->empresas()->sync($empresaIds->all());
-            $this->auditar('empresas', $almacen, $empresaIds->merge($antes)->unique()->all(), [
-                'descripcion' => 'Actualización de empresas abastecidas de '.$almacen->nombre,
-                'valores_anteriores' => ['empresas' => $antes->all()],
-                'valores_nuevos' => ['empresas' => $empresaIds->all()],
-            ]);
+            if ($antes->all() !== $empresaIds->all()) {
+                $this->rechazarSiHayDependenciasOperativas($almacen, $antes->diff($empresaIds));
+
+                $almacen->empresas()->sync($empresaIds->all());
+                $this->auditar('empresas', $almacen, $empresaIds->merge($antes)->unique()->all(), [
+                    'descripcion' => 'Actualización de empresas abastecidas de '.$almacen->nombre,
+                    'valores_anteriores' => ['empresas' => $antes->all()],
+                    'valores_nuevos' => ['empresas' => $empresaIds->all()],
+                ]);
+            }
         }
 
         $this->auditar('editar', $almacen, $almacen->empresas()->pluck('empresas.id')->all(), [
@@ -200,6 +227,33 @@ class AlmacenController extends Controller
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Almacén actualizado correctamente.']);
+    }
+
+    /**
+     * Regla crítica: no se puede retirar una empresa abastecida de un almacén
+     * si todavía existen existencias operativas de esa empresa en él (saldo
+     * con cantidad > 0). Los históricos (movimientos, saldos en cero) nunca
+     * bloquean la operación. El mensaje nombra la empresa afectada.
+     *
+     * @param  Collection<int, int>  $empresaIdsRetiradas
+     */
+    private function rechazarSiHayDependenciasOperativas(Almacen $almacen, $empresaIdsRetiradas): void
+    {
+        foreach ($empresaIdsRetiradas as $empresaId) {
+            $tieneExistencias = SaldoInventario::query()
+                ->where('almacen_id', $almacen->id)
+                ->where('empresa_id', $empresaId)
+                ->where('cantidad', '>', 0)
+                ->exists();
+
+            if ($tieneExistencias) {
+                $nombre = Empresa::query()->whereKey($empresaId)->value('nombre_comercial');
+
+                throw ValidationException::withMessages([
+                    'empresa_ids' => "No puedes quitar «{$nombre}» de este almacén porque aún existen activos o existencias asociados.",
+                ]);
+            }
+        }
     }
 
     public function toggle(Almacen $almacen): RedirectResponse
@@ -331,47 +385,6 @@ class AlmacenController extends Controller
                 ...$extra,
             ]);
         }
-    }
-
-    /**
-     * Agrupa los saldos por activo para el detalle.
-     *
-     * @param  Collection<int, SaldoInventario>  $saldos
-     * @return array<int, array<string, mixed>>
-     */
-    private function resumirInventario(Collection $saldos): array
-    {
-        return $saldos
-            ->groupBy('activo_id')
-            ->map(function (Collection $filas): array {
-                $activo = $filas->first()?->activo;
-
-                $variantes = $filas
-                    ->map(fn (SaldoInventario $s): array => [
-                        'talla_id' => (int) $s->talla_id,
-                        'talla' => $s->talla?->valor,
-                        'cantidad' => (int) $s->cantidad,
-                        'minimo' => (int) $s->minimo,
-                        'bajo_minimo' => $s->estaBajoMinimo(),
-                    ])
-                    ->sortBy('talla')
-                    ->values()
-                    ->all();
-
-                return [
-                    'activo_id' => $activo?->id,
-                    'activo' => $activo?->nombre,
-                    'tipo' => $activo?->tipoActivo?->nombre,
-                    'categoria' => $activo?->categoriaActivo?->nombre,
-                    'control' => $activo?->tipo_control->value,
-                    'total' => (int) $filas->sum('cantidad'),
-                    'bajo_minimo' => $filas->contains(fn (SaldoInventario $s): bool => $s->estaBajoMinimo()),
-                    'variantes' => $variantes,
-                ];
-            })
-            ->sortBy('activo')
-            ->values()
-            ->all();
     }
 
     /**

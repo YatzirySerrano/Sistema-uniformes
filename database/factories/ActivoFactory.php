@@ -34,9 +34,9 @@ class ActivoFactory extends Factory
         ];
     }
 
-    public function serializado(): static
+    public function seguimientoIndividual(): static
     {
-        return $this->state(fn (): array => ['tipo_control' => TipoControlActivo::Serializado]);
+        return $this->state(fn (): array => ['tipo_control' => TipoControlActivo::SeguimientoIndividual]);
     }
 
     public function inactivo(): static

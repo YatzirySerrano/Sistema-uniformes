@@ -3,15 +3,20 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Area;
 use App\Models\Colaborador;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 /**
  * Colaboradores por empresa. La empresa llega como filtro (listado) o campo
@@ -21,6 +26,7 @@ use Inertia\Response;
 class ColaboradorController extends Controller
 {
     use ConEmpresa;
+    use ExportaListado;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -29,33 +35,10 @@ class ColaboradorController extends Controller
         $this->authorize('viewAny', Colaborador::class);
 
         $usuario = $request->user();
-        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
 
-        $filtros = $request->validate([
-            'buscar' => ['nullable', 'string', 'max:100'],
-            'sucursal_id' => ['nullable', 'integer'],
-            'area_id' => ['nullable', 'integer'],
-            'estado' => ['nullable', 'in:activos,inactivos,todos'],
-        ]);
-
-        $sucursalesVisibles = $idsAutorizadas
-            ->flatMap(fn (int $id): array => $this->acceso()->sucursalesAutorizadas($usuario, $id)->pluck('id')->all())
-            ->unique()->values();
-
-        $colaboradores = Colaborador::query()
-            ->whereIn('empresa_id', $idsAutorizadas)
-            ->whereIn('sucursal_id', $sucursalesVisibles)
-            ->when($empresaFiltro !== null, fn ($q) => $q->where('empresa_id', $empresaFiltro->id))
-            ->when($filtros['buscar'] ?? null, fn ($q, $b) => $q->where(fn ($s) => $s
-                ->where('nombre_completo', 'like', "%{$b}%")
-                ->orWhere('numero_empleado', 'like', "%{$b}%")))
-            ->when($filtros['sucursal_id'] ?? null, fn ($q, $s) => $q->where('sucursal_id', $s))
-            ->when($filtros['area_id'] ?? null, fn ($q, $a) => $q->where('area_id', $a))
-            ->when(($filtros['estado'] ?? 'activos') === 'activos', fn ($q) => $q->where('activo', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivos', fn ($q) => $q->where('activo', false))
-            ->with(['sucursal:id,nombre', 'empresa:id,nombre_comercial'])
-            ->orderBy('nombre_completo')
+        $colaboradores = $this->consultaColaboradores($request, $filtros)
             ->paginate($this->porPagina())
             ->withQueryString();
 
@@ -72,6 +55,74 @@ class ColaboradorController extends Controller
         ]);
     }
 
+    /**
+     * Excel/PDF del listado, respetando los mismos filtros que `index()`.
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', Colaborador::class);
+
+        $filtros = $this->filtrosListado($request);
+        $colaboradores = $this->consultaColaboradores($request, $filtros)->get();
+
+        $filas = $colaboradores->map(fn (Colaborador $c): array => [
+            $c->numero_empleado,
+            $c->nombre_completo,
+            $c->puesto,
+            $c->area,
+            $c->correo,
+            $c->empresa?->nombre_comercial,
+            $c->sucursal?->nombre,
+            $c->activo ? 'Activo' : 'Inactivo',
+        ])->all();
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'N.º empleado', 'Nombre completo', 'Puesto', 'Área', 'Correo', 'Empresa', 'Sucursal', 'Estado',
+        ], 'Colaboradores');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'sucursal_id' => ['nullable', 'integer'],
+            'area_id' => ['nullable', 'integer'],
+            'estado' => ['nullable', 'in:activos,inactivos,todos'],
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<Colaborador>
+     */
+    private function consultaColaboradores(Request $request, array $filtros): Builder
+    {
+        $usuario = $request->user();
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        $sucursalesVisibles = $idsAutorizadas
+            ->flatMap(fn (int $id): array => $this->acceso()->sucursalesAutorizadas($usuario, $id)->pluck('id')->all())
+            ->unique()->values();
+
+        return Colaborador::query()
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->whereIn('sucursal_id', $sucursalesVisibles)
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
+            ->when($filtros['buscar'] ?? null, fn (Builder $q, $b) => $q->where(fn (Builder $s) => $s
+                ->where('nombre_completo', 'like', "%{$b}%")
+                ->orWhere('numero_empleado', 'like', "%{$b}%")))
+            ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
+            ->when($filtros['area_id'] ?? null, fn (Builder $q, $a) => $q->where('area_id', $a))
+            ->when(($filtros['estado'] ?? 'activos') === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
+            ->with(['sucursal:id,nombre', 'empresa:id,nombre_comercial'])
+            ->orderBy('nombre_completo');
+    }
+
     public function create(Request $request): Response
     {
         $this->authorize('create', Colaborador::class);
@@ -86,15 +137,14 @@ class ColaboradorController extends Controller
             $sucursal = Sucursal::query()->find($sucursalId);
 
             if ($sucursal !== null && $request->user()->puedeAccederSucursal($sucursal)) {
-                $preseleccion = ['sucursal_id' => $sucursal->id, 'empresa_id' => $sucursal->empresa_id];
+                $preseleccion = ['sucursal' => ['id' => $sucursal->id, 'nombre' => $sucursal->nombre], 'empresa_id' => $sucursal->empresa_id];
             }
         }
 
         return Inertia::render('Colaboradores/Formulario', [
             'colaborador' => null,
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request),
-            'sucursalPreseleccionadaId' => $preseleccion['sucursal_id'] ?? null,
+            'sucursalPreseleccionada' => $preseleccion['sucursal'] ?? null,
             'empresaPreseleccionadaId' => $preseleccion['empresa_id'] ?? null,
         ]);
     }
@@ -123,10 +173,15 @@ class ColaboradorController extends Controller
     {
         $this->authorize('update', $colaborador);
 
+        $colaborador->load(['sucursal:id,nombre', 'departamento:id,nombre']);
+
         return Inertia::render('Colaboradores/Formulario', [
-            'colaborador' => $colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
+            'colaborador' => [
+                ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
+                'sucursal' => $colaborador->sucursal === null ? null : ['id' => $colaborador->sucursal->id, 'nombre' => $colaborador->sucursal->nombre],
+                'area_actual' => $colaborador->departamento === null ? null : ['id' => $colaborador->departamento->id, 'nombre' => $colaborador->departamento->nombre],
+            ],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'catalogosPorEmpresa' => $this->catalogosPorEmpresa($request, [$colaborador->empresa_id]),
         ]);
     }
 
@@ -165,22 +220,39 @@ class ColaboradorController extends Controller
     }
 
     /**
-     * Sucursales (según alcance) y áreas de cada empresa autorizada, para el
-     * formulario dependiente de la empresa elegida.
-     *
-     * @param  array<int, int>  $soloEmpresas
-     * @return array<int, array{sucursales: mixed, areas: array<int, mixed>}>
+     * Búsqueda con autocompletado para flujos donde la empresa se DERIVA del
+     * colaborador (Entregas/Devoluciones): a diferencia de otros buscadores,
+     * NO exige `empresa_id` — busca entre todas las empresas autorizadas del
+     * usuario y devuelve la empresa/sucursal de cada resultado.
      */
-    private function catalogosPorEmpresa(Request $request, array $soloEmpresas = []): array
+    public function buscar(Request $request): JsonResponse
     {
-        $usuario = $request->user();
+        $this->authorize('viewAny', Colaborador::class);
 
-        return $this->empresasAutorizadas($request)
-            ->when($soloEmpresas !== [], fn ($c) => $c->whereIn('id', $soloEmpresas))
-            ->mapWithKeys(fn ($e): array => [$e->id => [
-                'sucursales' => $this->acceso()->sucursalesAutorizadas($usuario, $e)->map->only(['id', 'nombre'])->values(),
-                'areas' => $this->areasDe($e->id),
-            ]])->all();
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $termino = trim((string) $request->query('q', ''));
+
+        $colaboradores = Colaborador::query()
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->where('activo', true)
+            ->when($termino !== '', fn ($q) => $q->where(fn ($sub) => $sub
+                ->where('nombre_completo', 'like', "%{$termino}%")
+                ->orWhere('numero_empleado', 'like', "%{$termino}%")))
+            ->with(['empresa:id,nombre_comercial', 'sucursal:id,nombre'])
+            ->orderBy('nombre_completo')
+            ->limit(20)
+            ->get()
+            ->map(fn (Colaborador $c): array => [
+                'id' => $c->id,
+                'nombre_completo' => $c->nombre_completo,
+                'numero_empleado' => $c->numero_empleado,
+                'empresa_id' => $c->empresa_id,
+                'empresa' => $c->empresa?->nombre_comercial,
+                'sucursal_id' => $c->sucursal_id,
+                'sucursal' => $c->sucursal?->nombre,
+            ]);
+
+        return response()->json(['colaboradores' => $colaboradores]);
     }
 
     /**

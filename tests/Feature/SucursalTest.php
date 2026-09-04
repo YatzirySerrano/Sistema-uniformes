@@ -322,3 +322,25 @@ it('valida el teléfono a 10 dígitos con mensaje en español y no genera un 500
         ->assertRedirect('/sucursales')
         ->assertSessionHasErrors('nombre');
 });
+
+it('la búsqueda de sucursales requiere empresa_id y respeta el alcance del usuario', function () {
+    $miEmpresa = Empresa::factory()->create();
+    $ajena = Empresa::factory()->create();
+    $miSucursal = Sucursal::factory()->for($miEmpresa)->create(['nombre' => 'Sucursal Visible']);
+    Sucursal::factory()->for($ajena)->create(['nombre' => 'Sucursal Ajena']);
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$miEmpresa]);
+
+    $this->actingAs($supervisor)
+        ->get('/sucursales/buscar')
+        ->assertJson(['sucursales' => []]);
+
+    $this->actingAs($supervisor)
+        ->get("/sucursales/buscar?empresa_id={$miEmpresa->id}")
+        ->assertJsonFragment(['nombre' => 'Sucursal Visible'])
+        ->assertJsonMissing(['nombre' => 'Sucursal Ajena']);
+
+    $this->actingAs($supervisor)
+        ->get("/sucursales/buscar?empresa_id={$ajena->id}")
+        ->assertJson(['sucursales' => []]);
+});

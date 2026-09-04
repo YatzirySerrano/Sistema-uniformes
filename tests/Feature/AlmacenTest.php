@@ -1,10 +1,14 @@
 <?php
 
+use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\RolSistema;
+use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Colaborador;
 use App\Models\Empresa;
+use App\Models\SaldoInventario;
 use App\Models\Sucursal;
+use App\Servicios\ServicioInventario;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -181,6 +185,83 @@ it('valida sin generar un 500 cuando el nombre llega como arreglo', function () 
         ->post('/almacenes', ['nombre' => ['no', 'texto'], 'empresa_ids' => [$empresa->id]])
         ->assertRedirect('/almacenes')
         ->assertSessionHasErrors('nombre');
+});
+
+it('el detalle de almacén es CRUD/configuración: sin desglose de inventario, sólo un resumen mínimo', function () {
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    $activo = Activo::factory()->for($empresa)->create(['tipo_control' => 'cantidad']);
+
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        empresaId: $empresa->id,
+        almacenId: $almacen->id,
+        items: [['activo_id' => $activo->id, 'talla_id' => null, 'cantidad' => 7]],
+        motivo: 'Compra',
+        realizadoPor: null,
+    );
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value, [$empresa]))
+        ->get("/almacenes/{$almacen->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Almacenes/Detalle')
+            ->where('resumen.empresas_abastecidas', 1)
+            ->where('resumen.activos_con_existencia', 1)
+            ->missing('inventarioPorEmpresa')
+            ->missing('resumen.existencias')
+            ->missing('resumen.variantes_bajo_minimo'),
+        );
+});
+
+it('no permite quitar una empresa abastecida de un almacén si todavía tiene existencias operativas', function () {
+    $empresaA = Empresa::factory()->create();
+    $empresaB = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresaA, $empresaB)->create();
+    $activo = Activo::factory()->for($empresaA)->create(['tipo_control' => 'cantidad']);
+
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        empresaId: $empresaA->id,
+        almacenId: $almacen->id,
+        items: [['activo_id' => $activo->id, 'talla_id' => null, 'cantidad' => 5]],
+        motivo: 'Compra',
+        realizadoPor: null,
+    );
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->put("/almacenes/{$almacen->id}", [
+            'nombre' => $almacen->nombre,
+            'empresa_ids' => [$empresaB->id],
+        ])
+        ->assertSessionHasErrors('empresa_ids');
+
+    expect($almacen->fresh()->empresas()->pluck('empresas.id')->sort()->values()->all())
+        ->toBe(collect([$empresaA->id, $empresaB->id])->sort()->values()->all());
+});
+
+it('sí permite quitar una empresa abastecida sin existencias operativas, conservando históricos', function () {
+    $empresaA = Empresa::factory()->create();
+    $empresaB = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresaA, $empresaB)->create();
+    $activo = Activo::factory()->for($empresaA)->create(['tipo_control' => 'cantidad']);
+
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        empresaId: $empresaA->id,
+        almacenId: $almacen->id,
+        items: [['activo_id' => $activo->id, 'talla_id' => null, 'cantidad' => 5]],
+        motivo: 'Compra',
+        realizadoPor: null,
+    );
+    app(ServicioInventario::class)->fijarExistencia($empresaA->id, $almacen->id, $activo->id, null, 0, 'Salida total', null);
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->put("/almacenes/{$almacen->id}", [
+            'nombre' => $almacen->nombre,
+            'empresa_ids' => [$empresaB->id],
+        ])
+        ->assertSessionHasNoErrors();
+
+    expect($almacen->fresh()->empresas()->pluck('empresas.id')->all())->toBe([$empresaB->id])
+        ->and(SaldoInventario::query()->where('activo_id', $activo->id)->exists())->toBeTrue();
 });
 
 it('la búsqueda de colaboradores para responsable exige empresa_id y sólo devuelve activos de esa empresa', function () {

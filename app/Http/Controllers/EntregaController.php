@@ -6,13 +6,10 @@ use App\Acciones\CrearEntregaUniforme;
 use App\Enums\EstadoEntrega;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Entregas\GuardarEntregaRequest;
-use App\Models\Activo;
 use App\Models\Colaborador;
-use App\Models\Empresa;
+use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\SaldoInventario;
-use App\Models\Talla;
-use App\Servicios\ResolverAlmacenOperativo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,10 +17,11 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Entregas de activos. La empresa se DERIVA del colaborador; la sucursal es la
- * del colaborador (contexto, no dimensión de stock). El almacén de origen se
- * resuelve con ResolverAlmacenOperativo::paraEmpresa. La reingeniería completa
- * de esta UI (selector de almacén, uniformes, serializados) es el Bloque E.
+ * Entregas de activos. La empresa y la sucursal se DERIVAN del colaborador
+ * (contexto/histórico, no dimensión de stock); el almacén de origen se elige
+ * explícitamente en el formulario (`ResolverAlmacenOperativo` sólo valida esa
+ * elección o preselecciona cuando es inequívoca). La entrega combina activos
+ * sueltos, unidades de seguimiento individual y conjuntos.
  */
 class EntregaController extends Controller
 {
@@ -82,75 +80,69 @@ class EntregaController extends Controller
     {
         $this->authorize('create', EntregaUniforme::class);
 
-        $empresas = $this->empresasAutorizadas($request);
-
-        $colaboradores = Colaborador::query()
-            ->whereIn('empresa_id', $empresas->pluck('id'))
-            ->where('activo', true)
-            ->with(['sucursal:id,nombre', 'empresa:id,nombre_comercial'])
-            ->orderBy('nombre_completo')
-            ->get()
-            ->map(fn (Colaborador $c): array => [
-                'id' => $c->id,
-                'nombre_completo' => $c->nombre_completo,
-                'numero_empleado' => $c->numero_empleado,
-                'empresa_id' => $c->empresa_id,
-                'empresa' => $c->empresa?->nombre_comercial,
-                'sucursal_id' => $c->sucursal_id,
-                'sucursal' => $c->sucursal?->nombre,
-            ]);
-
-        $activosPorEmpresa = [];
-        foreach ($empresas as $empresa) {
-            $activosPorEmpresa[$empresa->id] = $this->activosDeEmpresa($empresa);
-        }
-
-        return Inertia::render('Entregas/Crear', [
-            'colaboradores' => $colaboradores,
-            'activosPorEmpresa' => $activosPorEmpresa,
-        ]);
+        return Inertia::render('Entregas/Crear');
     }
 
     /**
-     * @return array<int, array{id: int, nombre: string, tallas: array<int, mixed>}>
+     * Existencias por cantidad (empresa+almacén, sin variante desglosada) para
+     * mostrar un aviso de disponibilidad en el formulario. El backend siempre
+     * revalida con bloqueo al registrar; esto es sólo UX.
      */
-    private function activosDeEmpresa(Empresa $empresa): array
-    {
-        return $empresa->activos()
-            ->where('activo', true)
-            ->where('tipo_control', 'cantidad')
-            ->with('tallas:id,valor')
-            ->orderBy('nombre')
-            ->get()
-            ->map(fn (Activo $a): array => [
-                'id' => $a->id,
-                'nombre' => $a->nombre,
-                'tallas' => $a->tallas->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->all(),
-            ])
-            ->all();
-    }
-
-    public function disponibilidad(Request $request, ResolverAlmacenOperativo $resolver): JsonResponse
+    public function disponibilidad(Request $request): JsonResponse
     {
         $this->authorize('create', EntregaUniforme::class);
 
-        $datos = $request->validate(['colaborador_id' => ['required', 'integer']]);
+        $datos = $request->validate([
+            'empresa_id' => ['required', 'integer'],
+            'almacen_id' => ['required', 'integer'],
+        ]);
 
-        $colaborador = Colaborador::query()->find((int) $datos['colaborador_id']);
-
-        if ($colaborador === null || ! $request->user()->puedeAccederEmpresa($colaborador->empresa_id)) {
+        if (! $request->user()->puedeAccederEmpresa((int) $datos['empresa_id'])) {
             return response()->json(['saldos' => []]);
         }
 
-        $almacen = $resolver->paraEmpresa($colaborador->empresa);
-
         $saldos = SaldoInventario::query()
-            ->where('empresa_id', $colaborador->empresa_id)
-            ->where('almacen_id', $almacen->id)
+            ->where('empresa_id', $datos['empresa_id'])
+            ->where('almacen_id', $datos['almacen_id'])
             ->get(['activo_id', 'talla_id', 'cantidad'])
             ->map(fn ($s): array => ['activo_id' => $s->activo_id, 'talla_id' => $s->talla_id, 'disponible' => (int) $s->cantidad]);
 
-        return response()->json(['saldos' => $saldos, 'almacen' => ['id' => $almacen->id, 'nombre' => $almacen->nombre]]);
+        return response()->json(['saldos' => $saldos]);
+    }
+
+    /**
+     * Búsqueda de entregas para originar una devolución (`Devoluciones/Crear`
+     * sin `?entrega_id=` precargado). Devuelve entregas no anuladas de las
+     * empresas autorizadas; el detalle de renglones pendientes se resuelve al
+     * cargar la entrega concreta.
+     */
+    public function buscar(Request $request): JsonResponse
+    {
+        $this->authorize('create', Devolucion::class);
+
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $termino = trim((string) $request->query('q', ''));
+
+        $entregas = EntregaUniforme::query()
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->where('estado', '!=', EstadoEntrega::Anulada)
+            ->when($termino !== '', fn ($q) => $q->where(fn ($s) => $s
+                ->where('folio', 'like', "%{$termino}%")
+                ->orWhereHas('colaborador', fn ($c) => $c->where('nombre_completo', 'like', "%{$termino}%")->orWhere('numero_empleado', 'like', "%{$termino}%"))))
+            ->with(['colaborador:id,nombre_completo,numero_empleado', 'empresa:id,nombre_comercial'])
+            ->latest()
+            ->limit(20)
+            ->get()
+            ->map(fn (EntregaUniforme $e): array => [
+                'id' => $e->id,
+                'folio' => $e->folio,
+                'colaborador' => $e->colaborador?->nombre_completo,
+                'numero_empleado' => $e->colaborador?->numero_empleado,
+                'empresa' => $e->empresa?->nombre_comercial,
+                'fecha_entrega' => $e->fecha_entrega->toDateString(),
+            ]);
+
+        return response()->json(['entregas' => $entregas]);
     }
 
     public function store(GuardarEntregaRequest $request, CrearEntregaUniforme $accion): RedirectResponse
@@ -161,12 +153,13 @@ class EntregaController extends Controller
         $datos = $request->validated();
 
         $entrega = $accion->ejecutar(
-            $colaborador->empresa_id,
-            $colaborador->sucursal_id,
             $colaborador->id,
+            (int) $datos['almacen_id'],
             $request->user()->id,
             $datos['fecha_entrega'],
-            $datos['items'],
+            $datos['activos'] ?? [],
+            $datos['unidades'] ?? [],
+            $datos['conjuntos'] ?? [],
             $datos['notas'] ?? null,
         );
 
@@ -180,7 +173,18 @@ class EntregaController extends Controller
     {
         $this->authorize('view', $entrega);
 
-        $entrega->load(['detalles.activo:id,nombre', 'detalles.talla:id,valor', 'colaborador:id,nombre_completo,numero_empleado,usuario_id', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'encargado:id,name', 'acuse', 'correcciones.corregidaPor:id,name']);
+        $entrega->load([
+            'detalles.activo:id,nombre',
+            'detalles.talla:id,valor',
+            'detalles.unidadActivo:id,codigo,public_token',
+            'colaborador:id,nombre_completo,numero_empleado,usuario_id',
+            'sucursal:id,nombre',
+            'empresa:id,nombre_comercial',
+            'almacen:id,nombre',
+            'encargado:id,name',
+            'acuse',
+            'correcciones.corregidaPor:id,name',
+        ]);
 
         return Inertia::render('Entregas/Detalle', [
             'entrega' => [
@@ -192,6 +196,7 @@ class EntregaController extends Controller
                 'confirmada_en' => $entrega->confirmada_en?->toIso8601String(),
                 'notas' => $entrega->notas,
                 'empresa' => $entrega->empresa?->nombre_comercial,
+                'almacen' => $entrega->almacen?->nombre,
                 'colaborador' => $entrega->colaborador?->only(['id', 'nombre_completo', 'numero_empleado']),
                 'sucursal' => $entrega->sucursal?->nombre,
                 'encargado' => $entrega->encargado?->name,
@@ -199,6 +204,8 @@ class EntregaController extends Controller
                     'activo' => $d->activo_nombre_snapshot,
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
+                    'unidad_codigo' => $d->unidadActivo?->codigo,
+                    'conjunto' => $d->conjunto_nombre_snapshot,
                 ]),
                 'correcciones' => $entrega->correcciones->map(fn ($c): array => [
                     'id' => $c->id,
@@ -218,6 +225,7 @@ class EntregaController extends Controller
                 'corregir' => $request->user()->can('corregir', $entrega),
                 'ver_pdf' => $entrega->acuse !== null && $request->user()->can('verPdf', $entrega->acuse),
                 'ver_firma' => $entrega->acuse !== null && $request->user()->can('verFirma', $entrega->acuse),
+                'devolver' => $entrega->estado !== EstadoEntrega::Anulada && $request->user()->can('create', Devolucion::class),
             ],
         ]);
     }

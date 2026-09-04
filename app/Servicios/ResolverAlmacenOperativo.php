@@ -27,6 +27,10 @@ class ResolverAlmacenOperativo
             if ($preferido instanceof Almacen) {
                 return $preferido;
             }
+
+            throw new ExcepcionDeNegocioSimple(
+                "El almacén seleccionado no está activo o no abastece a «{$empresa->nombre_comercial}»."
+            );
         }
 
         $almacenes = Almacen::query()

@@ -43,7 +43,7 @@ class InventarioController extends Controller
             'tipo_activo_id' => ['nullable', 'integer'],
             'categoria_id' => ['nullable', 'integer'],
             'talla_id' => ['nullable', 'integer'],
-            'control' => ['nullable', Rule::in(['cantidad', 'serializado'])],
+            'control' => ['nullable', Rule::in(['cantidad', 'individual'])],
             'estado_stock' => ['nullable', Rule::in(['bajo_minimo', 'sin_stock', 'con_stock'])],
         ]);
 
@@ -105,8 +105,8 @@ class InventarioController extends Controller
                 ->unique('id')
                 ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo])
                 ->values(),
-            'tiposActivo' => TipoActivo::query()->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsScope))->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
-            'categorias' => CategoriaActivo::query()->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsScope))->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
+            'tiposActivo' => TipoActivo::query()->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
+            'categorias' => CategoriaActivo::query()->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
             'tiposControl' => TipoControlActivo::opciones(),
             'permisos' => [
                 'entrada' => $request->user()->can('inventario.entrada'),

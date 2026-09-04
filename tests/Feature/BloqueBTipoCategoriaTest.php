@@ -42,7 +42,7 @@ it('A) guarda un activo sin tipo ni categoría', function () {
 });
 
 it('B) guarda un activo sólo con tipo', function () {
-    $tipo = TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Herramienta']);
+    $tipo = TipoActivo::factory()->create(['nombre' => 'Herramienta']);
 
     $this->actingAs($this->admin)
         ->post('/activos', activoPayload(['tipo_activo_id' => $tipo->id]))
@@ -54,7 +54,7 @@ it('B) guarda un activo sólo con tipo', function () {
 });
 
 it('C) guarda un activo sólo con categoría', function () {
-    $categoria = CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Material promocional']);
+    $categoria = CategoriaActivo::factory()->create(['nombre' => 'Material promocional']);
 
     $this->actingAs($this->admin)
         ->post('/activos', activoPayload(['categoria_id' => $categoria->id]))
@@ -67,8 +67,8 @@ it('C) guarda un activo sólo con categoría', function () {
 });
 
 it('D) guarda un activo con tipo y categoría coherentes', function () {
-    $tipo = TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Equipo de cómputo']);
-    $categoria = CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Laptop', 'tipo_activo_id' => $tipo->id]);
+    $tipo = TipoActivo::factory()->create(['nombre' => 'Equipo de cómputo']);
+    $categoria = CategoriaActivo::factory()->create(['nombre' => 'Laptop', 'tipo_activo_id' => $tipo->id]);
 
     $this->actingAs($this->admin)
         ->post('/activos', activoPayload(['tipo_activo_id' => $tipo->id, 'categoria_id' => $categoria->id]))
@@ -77,23 +77,23 @@ it('D) guarda un activo con tipo y categoría coherentes', function () {
     expect(Activo::query()->where('nombre', 'Extensión eléctrica 10 m')->first()->categoria_id)->toBe($categoria->id);
 });
 
-it('E) rechaza tipo o categoría de otra empresa', function () {
-    $tipoAjeno = TipoActivo::factory()->paraEmpresa($this->otra)->create();
-    $categoriaAjena = CategoriaActivo::factory()->paraEmpresa($this->otra)->create();
+it('E) un tipo o categoría creados sin relación previa con la empresa se pueden usar (catálogo global)', function () {
+    $tipo = TipoActivo::factory()->create();
+    $categoria = CategoriaActivo::factory()->create();
 
     $this->actingAs($this->admin)->from('/activos/crear')
-        ->post('/activos', activoPayload(['tipo_activo_id' => $tipoAjeno->id]))
-        ->assertSessionHasErrors('tipo_activo_id');
+        ->post('/activos', activoPayload(['tipo_activo_id' => $tipo->id]))
+        ->assertSessionHasNoErrors();
 
     $this->actingAs($this->admin)->from('/activos/crear')
-        ->post('/activos', activoPayload(['categoria_id' => $categoriaAjena->id]))
-        ->assertSessionHasErrors('categoria_id');
+        ->post('/activos', activoPayload(['nombre' => 'Otro', 'categoria_id' => $categoria->id]))
+        ->assertSessionHasNoErrors();
 });
 
 it('rechaza una categoría ligada a un tipo distinto del elegido (coherencia)', function () {
-    $tipoA = TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Prenda']);
-    $tipoB = TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Equipo de cómputo']);
-    $categoriaDeA = CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Camisola', 'tipo_activo_id' => $tipoA->id]);
+    $tipoA = TipoActivo::factory()->create(['nombre' => 'Prenda']);
+    $tipoB = TipoActivo::factory()->create(['nombre' => 'Equipo de cómputo']);
+    $categoriaDeA = CategoriaActivo::factory()->create(['nombre' => 'Camisola', 'tipo_activo_id' => $tipoA->id]);
 
     $this->actingAs($this->admin)->from('/activos/crear')
         ->post('/activos', activoPayload(['tipo_activo_id' => $tipoB->id, 'categoria_id' => $categoriaDeA->id]))
@@ -101,8 +101,8 @@ it('rechaza una categoría ligada a un tipo distinto del elegido (coherencia)', 
 });
 
 it('permite una categoría sin tipo aunque el activo lleve tipo', function () {
-    $tipo = TipoActivo::factory()->paraEmpresa($this->empresa)->create();
-    $categoriaSinTipo = CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['tipo_activo_id' => null]);
+    $tipo = TipoActivo::factory()->create();
+    $categoriaSinTipo = CategoriaActivo::factory()->create(['tipo_activo_id' => null]);
 
     $this->actingAs($this->admin)
         ->post('/activos', activoPayload(['tipo_activo_id' => $tipo->id, 'categoria_id' => $categoriaSinTipo->id]))
@@ -115,45 +115,45 @@ it('permite una categoría sin tipo aunque el activo lleve tipo', function () {
 |--------------------------------------------------------------------------
 */
 
-it('F) /tipos-activo/buscar sólo devuelve tipos de la empresa indicada', function () {
-    TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Prenda propia']);
-    TipoActivo::factory()->paraEmpresa($this->otra)->create(['nombre' => 'Prenda ajena']);
+it('F) /tipos-activo/buscar devuelve tipos globales sin importar la empresa indicada', function () {
+    TipoActivo::factory()->create(['nombre' => 'Prenda propia']);
+    TipoActivo::factory()->create(['nombre' => 'Prenda ajena']);
 
     $nombres = $this->actingAs($this->admin)
-        ->getJson('/tipos-activo/buscar?empresa_id='.$this->empresa->id.'&q=prenda')
+        ->getJson('/tipos-activo/buscar?empresa_id='.$this->otra->id.'&q=prenda')
         ->assertOk()->json('tipos.*.nombre');
 
-    expect($nombres)->toContain('Prenda propia')->not->toContain('Prenda ajena');
+    expect($nombres)->toContain('Prenda propia')->toContain('Prenda ajena');
 });
 
-it('G) /categorias-activo/buscar sólo devuelve categorías de la empresa indicada', function () {
-    CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Camisola propia']);
-    CategoriaActivo::factory()->paraEmpresa($this->otra)->create(['nombre' => 'Camisola ajena']);
+it('G) /categorias-activo/buscar devuelve categorías globales sin importar la empresa indicada', function () {
+    CategoriaActivo::factory()->create(['nombre' => 'Camisola propia']);
+    CategoriaActivo::factory()->create(['nombre' => 'Camisola ajena']);
 
     $nombres = $this->actingAs($this->admin)
-        ->getJson('/categorias-activo/buscar?empresa_id='.$this->empresa->id.'&q=camisola')
+        ->getJson('/categorias-activo/buscar?empresa_id='.$this->otra->id.'&q=camisola')
         ->assertOk()->json('categorias.*.nombre');
 
-    expect($nombres)->toContain('Camisola propia')->not->toContain('Camisola ajena');
+    expect($nombres)->toContain('Camisola propia')->toContain('Camisola ajena');
 });
 
-it('H) empresa fuera de alcance no filtra hacia otras empresas (lista vacía)', function () {
-    TipoActivo::factory()->paraEmpresa($this->empresa)->create();
-    CategoriaActivo::factory()->paraEmpresa($this->empresa)->create();
+it('H) un rol restringido con permiso de lectura ve el catálogo global aunque consulte con otra empresa', function () {
+    TipoActivo::factory()->create(['nombre' => 'Visible desde cualquier empresa']);
+    CategoriaActivo::factory()->create(['nombre' => 'Visible desde cualquier empresa']);
 
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->empresa]);
 
     $this->actingAs($supervisor)
-        ->getJson('/tipos-activo/buscar?empresa_id='.$this->otra->id)
-        ->assertOk()->assertJsonCount(0, 'tipos');
+        ->getJson('/tipos-activo/buscar?empresa_id='.$this->otra->id.'&q=cualquier')
+        ->assertOk()->assertJsonCount(1, 'tipos');
 
     $this->actingAs($supervisor)
-        ->getJson('/categorias-activo/buscar?empresa_id='.$this->otra->id)
-        ->assertOk()->assertJsonCount(0, 'categorias');
+        ->getJson('/categorias-activo/buscar?empresa_id='.$this->otra->id.'&q=cualquier')
+        ->assertOk()->assertJsonCount(1, 'categorias');
 });
 
 it('M) un tipo desactivado no aparece en el buscador', function () {
-    TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Obsoleto', 'activo' => false]);
+    TipoActivo::factory()->create(['nombre' => 'Obsoleto', 'activo' => false]);
 
     $this->actingAs($this->admin)
         ->getJson('/tipos-activo/buscar?empresa_id='.$this->empresa->id.'&q=obsoleto')
@@ -161,7 +161,7 @@ it('M) un tipo desactivado no aparece en el buscador', function () {
 });
 
 it('N) una categoría desactivada no aparece en el buscador', function () {
-    CategoriaActivo::factory()->paraEmpresa($this->empresa)->inactiva()->create(['nombre' => 'Obsoleta']);
+    CategoriaActivo::factory()->inactiva()->create(['nombre' => 'Obsoleta']);
 
     $this->actingAs($this->admin)
         ->getJson('/categorias-activo/buscar?empresa_id='.$this->empresa->id.'&q=obsoleta')
@@ -169,11 +169,11 @@ it('N) una categoría desactivada no aparece en el buscador', function () {
 });
 
 it('el buscador de categorías prioriza el tipo elegido y siempre incluye las sin tipo', function () {
-    $tipoA = TipoActivo::factory()->paraEmpresa($this->empresa)->create();
-    $tipoB = TipoActivo::factory()->paraEmpresa($this->empresa)->create();
-    CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'De A', 'tipo_activo_id' => $tipoA->id]);
-    CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'De B', 'tipo_activo_id' => $tipoB->id]);
-    CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Sin tipo', 'tipo_activo_id' => null]);
+    $tipoA = TipoActivo::factory()->create();
+    $tipoB = TipoActivo::factory()->create();
+    CategoriaActivo::factory()->create(['nombre' => 'De A', 'tipo_activo_id' => $tipoA->id]);
+    CategoriaActivo::factory()->create(['nombre' => 'De B', 'tipo_activo_id' => $tipoB->id]);
+    CategoriaActivo::factory()->create(['nombre' => 'Sin tipo', 'tipo_activo_id' => null]);
 
     $nombres = $this->actingAs($this->admin)
         ->getJson('/categorias-activo/buscar?empresa_id='.$this->empresa->id.'&tipo_activo_id='.$tipoA->id)
@@ -211,7 +211,7 @@ it('I) el alta rápida de tipo persiste y queda disponible en el buscador', func
 });
 
 it('J) el alta rápida de categoría persiste (con tipo relacionado opcional)', function () {
-    $tipo = TipoActivo::factory()->paraEmpresa($this->empresa)->create();
+    $tipo = TipoActivo::factory()->create();
 
     $this->actingAs($this->admin)
         ->postJson('/categorias-activo/rapido', [
@@ -225,8 +225,8 @@ it('J) el alta rápida de categoría persiste (con tipo relacionado opcional)', 
 });
 
 it('K) rechaza un duplicado que sólo difiere en mayúsculas o espacios (plataforma)', function () {
-    TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Prenda']);
-    CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Camisola']);
+    TipoActivo::factory()->create(['nombre' => 'Prenda']);
+    CategoriaActivo::factory()->create(['nombre' => 'Camisola']);
 
     // Alta rápida
     $this->actingAs($this->admin)
@@ -235,33 +235,27 @@ it('K) rechaza un duplicado que sólo difiere en mayúsculas o espacios (platafo
 
     // Formulario completo
     $this->actingAs($this->admin)->from('/activos-catalogos')
-        ->post('/tipos-activo', ['nombre' => ' prenda', 'empresa_ids' => [$this->empresa->id]])
+        ->post('/tipos-activo', ['nombre' => ' prenda'])
         ->assertSessionHasErrors('nombre');
 
     $this->actingAs($this->admin)->from('/activos-catalogos')
-        ->post('/categorias-activo', ['nombre' => 'CAMISOLA', 'empresa_ids' => [$this->empresa->id]])
+        ->post('/categorias-activo', ['nombre' => 'CAMISOLA'])
         ->assertSessionHasErrors('nombre');
 
     expect(TipoActivo::query()->where('nombre_normalizado', 'prenda')->count())->toBe(1)
         ->and(CategoriaActivo::query()->where('nombre_normalizado', 'camisola')->count())->toBe(1);
 });
 
-it('L) el mismo nombre NO se duplica: el tipo compartido se habilita para otra empresa', function () {
-    $tipo = TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Prenda']);
+it('L) el mismo nombre NO se duplica: el tipo global ya existente se reutiliza desde cualquier empresa', function () {
+    TipoActivo::factory()->create(['nombre' => 'Prenda']);
     $adminOtra = usuarioCon(RolSistema::Administrador->value, [$this->otra]);
 
-    // Un segundo "Prenda" a nivel plataforma se rechaza…
+    // Un segundo "Prenda" a nivel plataforma se rechaza, sin importar la empresa.
     $this->actingAs($adminOtra)
         ->postJson('/tipos-activo/rapido', ['nombre' => 'Prenda', 'empresa_id' => $this->otra->id])
         ->assertStatus(422);
 
-    // …pero el tipo existente se puede habilitar para la otra empresa.
-    $this->actingAs($this->admin)
-        ->put("/tipos-activo/{$tipo->id}/empresas", ['empresa_ids' => [$this->empresa->id, $this->otra->id]])
-        ->assertRedirect();
-
-    expect(TipoActivo::query()->where('nombre_normalizado', 'prenda')->count())->toBe(1)
-        ->and($tipo->empresas()->count())->toBe(2);
+    expect(TipoActivo::query()->where('nombre_normalizado', 'prenda')->count())->toBe(1);
 });
 
 it('P) un rol sin el permiso no puede crear tipos ni categorías', function () {
@@ -291,8 +285,8 @@ it('Q) el administrador sí puede crear tipos y categorías', function () {
 */
 
 it('O) un activo conserva y muestra su tipo y categoría aunque se desactiven', function () {
-    $tipo = TipoActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Prenda']);
-    $categoria = CategoriaActivo::factory()->paraEmpresa($this->empresa)->create(['nombre' => 'Camisola', 'tipo_activo_id' => $tipo->id]);
+    $tipo = TipoActivo::factory()->create(['nombre' => 'Prenda']);
+    $categoria = CategoriaActivo::factory()->create(['nombre' => 'Camisola', 'tipo_activo_id' => $tipo->id]);
     $activo = Activo::factory()->for($this->empresa)->create([
         'tipo_activo_id' => $tipo->id,
         'categoria_id' => $categoria->id,

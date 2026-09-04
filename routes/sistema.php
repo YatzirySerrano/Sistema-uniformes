@@ -8,6 +8,7 @@ use App\Http\Controllers\BitacoraController;
 use App\Http\Controllers\CatalogoActivoController;
 use App\Http\Controllers\CategoriaActivoController;
 use App\Http\Controllers\ColaboradorController;
+use App\Http\Controllers\ConjuntoController;
 use App\Http\Controllers\CorreccionEntregaController;
 use App\Http\Controllers\DevolucionController;
 use App\Http\Controllers\EmpresaController;
@@ -23,6 +24,7 @@ use App\Http\Controllers\RolController;
 use App\Http\Controllers\SucursalController;
 use App\Http\Controllers\TallaController;
 use App\Http\Controllers\TipoActivoController;
+use App\Http\Controllers\UnidadActivoController;
 use App\Http\Controllers\UsuarioController;
 use Illuminate\Support\Facades\Route;
 
@@ -38,6 +40,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/importar/plantilla', [ImportacionColaboradorController::class, 'plantilla'])->name('colaboradores.importar.plantilla');
     Route::post('colaboradores/importar/analizar', [ImportacionColaboradorController::class, 'analizar'])->name('colaboradores.importar.analizar');
     Route::post('colaboradores/importar/confirmar', [ImportacionColaboradorController::class, 'confirmar'])->name('colaboradores.importar.confirmar');
+    Route::get('colaboradores/buscar', [ColaboradorController::class, 'buscar'])->name('colaboradores.buscar');
+    Route::get('colaboradores/exportar', [ColaboradorController::class, 'exportar'])->name('colaboradores.exportar');
     Route::get('colaboradores/crear', [ColaboradorController::class, 'create'])->name('colaboradores.create');
     Route::post('colaboradores', [ColaboradorController::class, 'store'])->name('colaboradores.store');
     Route::get('colaboradores/{colaborador}/editar', [ColaboradorController::class, 'edit'])->name('colaboradores.edit');
@@ -46,6 +50,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     // Áreas / Departamentos
     Route::get('areas', [AreaController::class, 'index'])->name('areas.index');
+    Route::get('areas/buscar', [AreaController::class, 'buscar'])->name('areas.buscar');
+    Route::get('areas/exportar', [AreaController::class, 'exportar'])->name('areas.exportar');
     Route::post('areas', [AreaController::class, 'store'])->name('areas.store');
     Route::get('areas/{area}', [AreaController::class, 'show'])->name('areas.show');
     Route::put('areas/{area}', [AreaController::class, 'update'])->name('areas.update');
@@ -57,10 +63,25 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('activos/buscar', [ActivoController::class, 'buscar'])->name('activos.buscar');
     Route::get('activos/crear', [ActivoController::class, 'create'])->name('activos.create');
     Route::post('activos', [ActivoController::class, 'store'])->name('activos.store');
+
+    // Unidades de seguimiento individual (dentro del hub de Activos). Deben
+    // registrarse ANTES de `activos/{activo}` para que "unidades" no sea
+    // capturado como un id de activo por el binding implícito.
+    Route::get('activos/unidades', [UnidadActivoController::class, 'index'])->name('unidades-activo.index');
+    Route::get('activos/unidades/buscar', [UnidadActivoController::class, 'buscar'])->name('unidades-activo.buscar');
+    Route::get('activos/unidades/etiquetas', [UnidadActivoController::class, 'generarEtiquetas'])->name('unidades-activo.etiquetas');
+    Route::get('activos/unidades/exportar', [UnidadActivoController::class, 'exportar'])->name('unidades-activo.exportar');
+    Route::get('activos/unidades/{unidad:public_token}', [UnidadActivoController::class, 'show'])->name('unidades-activo.show');
+    Route::post('activos/unidades/{unidad:public_token}/baja', [UnidadActivoController::class, 'darDeBaja'])->name('unidades-activo.baja');
+    Route::post('activos/unidades/{unidad:public_token}/incidencia', [UnidadActivoController::class, 'marcarIncidencia'])->name('unidades-activo.incidencia');
+    Route::post('activos/unidades/{unidad:public_token}/recuperar', [UnidadActivoController::class, 'recuperar'])->name('unidades-activo.recuperar');
+
     Route::get('activos/{activo}', [ActivoController::class, 'show'])->name('activos.show');
     Route::get('activos/{activo}/editar', [ActivoController::class, 'edit'])->name('activos.edit');
     Route::post('activos/{activo}', [ActivoController::class, 'update'])->name('activos.update'); // POST por subida de imagen
     Route::post('activos/{activo}/estado', [ActivoController::class, 'toggle'])->name('activos.toggle');
+    Route::post('activos/{activo}/existencias', [ActivoController::class, 'agregarExistencias'])->name('activos.existencias');
+    Route::post('activos/{activo}/suspendidos/reactivar', [ActivoController::class, 'reactivarSuspendidos'])->name('activos.suspendidos.reactivar');
 
     Route::get('tallas', [TallaController::class, 'index'])->name('tallas.index');
     Route::get('tallas/buscar', [TallaController::class, 'buscar'])->name('tallas.buscar');
@@ -68,7 +89,6 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('tallas/rapido', [TallaController::class, 'rapido'])->name('tallas.rapido');
     Route::post('tallas/reordenar', [TallaController::class, 'reordenar'])->name('tallas.reordenar');
     Route::put('tallas/{talla}', [TallaController::class, 'update'])->name('tallas.update');
-    Route::post('tallas/{talla}/empresa', [TallaController::class, 'empresa'])->name('tallas.empresa');
     Route::delete('tallas/{talla}', [TallaController::class, 'destroy'])->name('tallas.destroy');
 
     // Catálogos de activos: tipos y categorías (dentro del área de Activos)
@@ -77,15 +97,11 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('tipos-activo', [TipoActivoController::class, 'store'])->name('tipos-activo.store');
     Route::post('tipos-activo/rapido', [TipoActivoController::class, 'rapido'])->name('tipos-activo.rapido');
     Route::put('tipos-activo/{tipo}', [TipoActivoController::class, 'update'])->name('tipos-activo.update');
-    Route::put('tipos-activo/{tipo}/empresas', [TipoActivoController::class, 'empresas'])->name('tipos-activo.empresas');
-    Route::post('tipos-activo/{tipo}/empresa', [TipoActivoController::class, 'empresa'])->name('tipos-activo.empresa');
     Route::post('tipos-activo/{tipo}/estado', [TipoActivoController::class, 'toggle'])->name('tipos-activo.toggle');
     Route::get('categorias-activo/buscar', [CategoriaActivoController::class, 'buscar'])->name('categorias-activo.buscar');
     Route::post('categorias-activo', [CategoriaActivoController::class, 'store'])->name('categorias-activo.store');
     Route::post('categorias-activo/rapido', [CategoriaActivoController::class, 'rapido'])->name('categorias-activo.rapido');
     Route::put('categorias-activo/{categoria}', [CategoriaActivoController::class, 'update'])->name('categorias-activo.update');
-    Route::put('categorias-activo/{categoria}/empresas', [CategoriaActivoController::class, 'empresas'])->name('categorias-activo.empresas');
-    Route::post('categorias-activo/{categoria}/empresa', [CategoriaActivoController::class, 'empresa'])->name('categorias-activo.empresa');
     Route::post('categorias-activo/{categoria}/estado', [CategoriaActivoController::class, 'toggle'])->name('categorias-activo.toggle');
 
     // Inventario por almacén
@@ -95,10 +111,23 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('inventario/ajuste', [InventarioController::class, 'ajuste'])->name('inventario.ajuste');
     Route::post('inventario/minimos', [InventarioController::class, 'minimos'])->name('inventario.minimos');
     Route::get('inventario/movimientos', [MovimientoInventarioController::class, 'index'])->name('inventario.movimientos');
+    Route::get('inventario/movimientos/exportar', [MovimientoInventarioController::class, 'exportar'])->name('inventario.movimientos.exportar');
+
+    // Conjuntos
+    Route::get('conjuntos', [ConjuntoController::class, 'index'])->name('conjuntos.index');
+    Route::get('conjuntos/buscar', [ConjuntoController::class, 'buscar'])->name('conjuntos.buscar');
+    Route::get('conjuntos/crear', [ConjuntoController::class, 'create'])->name('conjuntos.create');
+    Route::get('conjuntos/exportar', [ConjuntoController::class, 'exportar'])->name('conjuntos.exportar');
+    Route::post('conjuntos', [ConjuntoController::class, 'store'])->name('conjuntos.store');
+    Route::get('conjuntos/{conjunto}', [ConjuntoController::class, 'show'])->name('conjuntos.show');
+    Route::get('conjuntos/{conjunto}/editar', [ConjuntoController::class, 'edit'])->name('conjuntos.edit');
+    Route::put('conjuntos/{conjunto}', [ConjuntoController::class, 'update'])->name('conjuntos.update');
+    Route::post('conjuntos/{conjunto}/estado', [ConjuntoController::class, 'toggle'])->name('conjuntos.toggle');
 
     // Entregas
     Route::get('entregas', [EntregaController::class, 'index'])->name('entregas.index');
     Route::get('entregas/crear', [EntregaController::class, 'create'])->name('entregas.create');
+    Route::get('entregas/buscar', [EntregaController::class, 'buscar'])->name('entregas.buscar');
     Route::get('entregas/disponibilidad', [EntregaController::class, 'disponibilidad'])->name('entregas.disponibilidad');
     Route::post('entregas', [EntregaController::class, 'store'])->name('entregas.store');
     Route::get('entregas/{entrega}', [EntregaController::class, 'show'])->name('entregas.show');
@@ -115,6 +144,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Devoluciones
     Route::get('devoluciones', [DevolucionController::class, 'index'])->name('devoluciones.index');
     Route::get('devoluciones/crear', [DevolucionController::class, 'create'])->name('devoluciones.create');
+    Route::get('devoluciones/exportar', [DevolucionController::class, 'exportar'])->name('devoluciones.exportar');
     Route::post('devoluciones', [DevolucionController::class, 'store'])->name('devoluciones.store');
 
     // Reportes
@@ -125,10 +155,12 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Administración
     Route::get('empresas', [EmpresaController::class, 'index'])->name('empresas.index');
     Route::get('empresas/buscar', [EmpresaController::class, 'buscar'])->name('empresas.buscar');
+    Route::get('empresas/exportar', [EmpresaController::class, 'exportar'])->name('empresas.exportar');
     Route::post('empresas', [EmpresaController::class, 'store'])->name('empresas.store');
     Route::get('empresas/{empresa}', [EmpresaController::class, 'show'])->name('empresas.show');
     Route::put('empresas/{empresa}', [EmpresaController::class, 'update'])->name('empresas.update');
     Route::post('empresas/{empresa}/estado', [EmpresaController::class, 'toggleEstado'])->name('empresas.estado');
+    Route::post('empresas/{empresa}/suspendidos/reactivar', [EmpresaController::class, 'reactivarSuspendidos'])->name('empresas.suspendidos.reactivar');
 
     Route::get('empresas/{empresa}/personalizacion', [PersonalizacionEmpresaController::class, 'edit'])->name('personalizacion.edit');
     Route::post('empresas/{empresa}/personalizacion', [PersonalizacionEmpresaController::class, 'update'])->name('personalizacion.update');
@@ -137,16 +169,20 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('almacenes', [AlmacenController::class, 'index'])->name('almacenes.index');
     Route::get('almacenes/buscar', [AlmacenController::class, 'buscar'])->name('almacenes.buscar');
     Route::get('almacenes/colaboradores-buscar', [AlmacenController::class, 'colaboradoresBuscar'])->name('almacenes.colaboradores-buscar');
+    Route::get('almacenes/exportar', [AlmacenController::class, 'exportar'])->name('almacenes.exportar');
     Route::post('almacenes', [AlmacenController::class, 'store'])->name('almacenes.store');
     Route::get('almacenes/{almacen}', [AlmacenController::class, 'show'])->name('almacenes.show');
     Route::put('almacenes/{almacen}', [AlmacenController::class, 'update'])->name('almacenes.update');
     Route::post('almacenes/{almacen}/estado', [AlmacenController::class, 'toggle'])->name('almacenes.toggle');
 
     Route::get('sucursales', [SucursalController::class, 'index'])->name('sucursales.index');
+    Route::get('sucursales/buscar', [SucursalController::class, 'buscar'])->name('sucursales.buscar');
+    Route::get('sucursales/exportar', [SucursalController::class, 'exportar'])->name('sucursales.exportar');
     Route::post('sucursales', [SucursalController::class, 'store'])->name('sucursales.store');
     Route::get('sucursales/{sucursal}', [SucursalController::class, 'show'])->name('sucursales.show');
     Route::put('sucursales/{sucursal}', [SucursalController::class, 'update'])->name('sucursales.update');
     Route::post('sucursales/{sucursal}/estado', [SucursalController::class, 'toggle'])->name('sucursales.toggle');
+    Route::post('sucursales/{sucursal}/suspendidos/reactivar', [SucursalController::class, 'reactivarSuspendidos'])->name('sucursales.suspendidos.reactivar');
 
     Route::get('usuarios', [UsuarioController::class, 'index'])->name('usuarios.index');
     Route::get('usuarios/crear', [UsuarioController::class, 'create'])->name('usuarios.create');
@@ -161,4 +197,5 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::delete('roles/{rol}', [RolController::class, 'destroy'])->name('roles.destroy');
 
     Route::get('auditoria', [BitacoraController::class, 'index'])->name('auditoria.index');
+    Route::get('auditoria/exportar', [BitacoraController::class, 'exportar'])->name('auditoria.exportar');
 });

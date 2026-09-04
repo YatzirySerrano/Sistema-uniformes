@@ -54,7 +54,7 @@ class CorregirEntrega
         }
 
         $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($nuevos, 'activo_id'))->get()->keyBy('id');
-        $tallas = Talla::query()->paraEmpresa($empresaId)->whereIn('id', array_column($nuevos, 'talla_id'))->get()->keyBy('id');
+        $tallas = Talla::query()->where('activa', true)->whereIn('id', array_column($nuevos, 'talla_id'))->get()->keyBy('id');
 
         $anteriores = [];
         foreach ($entrega->detalles as $d) {

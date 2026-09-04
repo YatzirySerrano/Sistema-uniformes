@@ -13,13 +13,16 @@ enum TipoMovimiento: string
     case Correccion = 'correccion';
     case TraspasoEntrada = 'traspaso_entrada';
     case TraspasoSalida = 'traspaso_salida';
+    case Baja = 'baja';
+    case Incidencia = 'incidencia';
+    case Recuperacion = 'recuperacion';
     case MigracionLegacy = 'migracion_legacy';
 
     public function direccion(): DireccionMovimiento
     {
         return match ($this) {
-            self::Inicial, self::Entrada, self::Devolucion, self::AjusteEntrada, self::TraspasoEntrada, self::MigracionLegacy => DireccionMovimiento::Entrada,
-            self::Entrega, self::AjusteSalida, self::TraspasoSalida => DireccionMovimiento::Salida,
+            self::Inicial, self::Entrada, self::Devolucion, self::AjusteEntrada, self::TraspasoEntrada, self::Recuperacion, self::MigracionLegacy => DireccionMovimiento::Entrada,
+            self::Entrega, self::AjusteSalida, self::TraspasoSalida, self::Baja, self::Incidencia => DireccionMovimiento::Salida,
             self::Correccion => DireccionMovimiento::Entrada,
         };
     }
@@ -36,6 +39,9 @@ enum TipoMovimiento: string
             self::Correccion => 'Corrección de entrega',
             self::TraspasoEntrada => 'Traspaso (entrada)',
             self::TraspasoSalida => 'Traspaso (salida)',
+            self::Baja => 'Baja de unidad',
+            self::Incidencia => 'Pérdida / robo',
+            self::Recuperacion => 'Recuperación de unidad',
             self::MigracionLegacy => 'Migración a almacén',
         };
     }

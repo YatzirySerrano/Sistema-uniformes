@@ -2,6 +2,7 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -88,6 +89,10 @@ const hrefNuevoColaborador = computed(() =>
             descripcion="Personal registrado por empresa. Usa el filtro de empresa para acotar el listado y elegir sucursal."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/colaboradores/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="puedeImportar" variant="outline" as-child>
                     <Link href="/colaboradores/importar">
                         <FileSpreadsheet class="size-4" /> Importar desde Excel

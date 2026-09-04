@@ -12,6 +12,7 @@ import { computed, ref, watch } from 'vue';
 import type { EmpresaEditable } from '@/components/empresas/FormularioEmpresa.vue';
 import FormularioEmpresa from '@/components/empresas/FormularioEmpresa.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -162,6 +163,10 @@ function verDetalle(empresa: EmpresaTarjeta): void {
             descripcion="Organizaciones que tienes autorizadas en la plataforma."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/empresas/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="puedeCrear" @click="nuevaEmpresa">
                     <Plus class="size-4" /> Nueva empresa
                 </Button>

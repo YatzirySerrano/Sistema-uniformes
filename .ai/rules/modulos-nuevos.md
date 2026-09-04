@@ -1,11 +1,12 @@
 ---
 paths:
-    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario}Controller.php'
-    - 'app/Http/Requests/{Almacenes,Areas,Activos}/**'
+    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,Conjunto}Controller.php'
+    - 'app/Http/Requests/{Almacenes,Areas,Activos,Conjuntos}/**'
     - 'app/Http/Requests/Concerns/ResuelveEmpresa.php'
     - 'app/Soporte/AccesoEmpresa.php'
     - 'app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php'
     - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario}.php'
+    - 'app/Models/{Conjunto,ConjuntoComponente}.php'
 ---
 
 # Módulos Almacenes / Áreas / Activos / Inventario
@@ -102,81 +103,137 @@ obtiene el almacén de origen (activo **único** que abastece a la empresa; cero
 varios → `ExcepcionDeNegocioSimple`, nunca 500). `EntregaController` /
 `DevolucionController` reciben `colaborador_id` y derivan todo.
 
-## Catálogos COMPARTIDOS: tipos, categorías y variantes (Bloque C · Etapa 1)
+## Catálogos GLOBALES: tipos, categorías y variantes (redefinición funcional)
 
 - `tipos_activo`, `categorias_activo`, `tallas` son catálogos **de plataforma**:
-  **sin `empresa_id`**. Se **habilitan por empresa** con pivotes N:M
-  (`tipo_activo_empresa`, `categoria_activo_empresa`, `talla_empresa`). Catálogo
-  compartido ≠ inventario compartido: el activo pertenece a una empresa y el
+  **sin `empresa_id`** y **sin habilitación por empresa**. Son visibles para
+  TODAS las empresas por igual; el único estado es el global (`activo`/`activa`).
+  Los pivotes `tipo_activo_empresa`, `categoria_activo_empresa`, `talla_empresa`
+  **ya no existen** (eliminados por `2026_09_04_000022_eliminar_pivotes_catalogo_empresa`).
+  Catálogo global ≠ inventario compartido: el activo pertenece a una empresa y el
   stock se llavea por `empresa + almacén + activo + talla`.
-- Modelos: `empresas()` (BelongsToMany), `scopeParaEmpresa($q, int $empresaId)`
-  (`whereHas('empresas', whereKey)`), `habilitado/aPara(int)`. Los tres usan el
-  trait `NombreNormalizado` (columna configurable: `Talla` normaliza `valor`).
-  `existeNombre($nombre, $ignorar)` — **unicidad de plataforma**, sin `empresa_id`.
-- **Tipo y categoría siguen siendo OPCIONALES** e independientes. En el formulario
-  de Activo son `BuscadorAsync` (`dependencia = empresa_id`):
-    - `GET tipos-activo/buscar?empresa_id=&q=` — filtra por pivote
-      (`scopeParaEmpresa`). Sin `empresa_id` → habilitados para alguna empresa
-      autorizada. `empresa_id` inválido/sin acceso → `[]`. Sólo `activo = true`.
-    - `GET categorias-activo/buscar?empresa_id=&q=&tipo_activo_id=` — con
-      `tipo_activo_id` prioriza y acota a ese tipo + las sin tipo.
-    - `GET tallas/buscar?empresa_id=&q=` — mismo patrón.
+- Modelos: sin `empresas()`, `habilitado(a)Para()` ni `scopeParaEmpresa()`. Los
+  tres usan el trait `NombreNormalizado` (columna configurable: `Talla`
+  normaliza `valor`). `existeNombre($nombre, $ignorar)` — unicidad de
+  plataforma, sin `empresa_id`.
+- **Tipo y categoría siguen siendo OPCIONALES** e independientes. En el
+  formulario de Activo son `BuscadorAsync` **sin dependencia de empresa**:
+    - `GET tipos-activo/buscar?q=` — sólo `activo = true`, no depende de
+      `empresa_id` (se ignora si llega).
+    - `GET categorias-activo/buscar?q=&tipo_activo_id=` — con `tipo_activo_id`
+      prioriza y acota a ese tipo + las sin tipo.
+    - `GET tallas/buscar?q=` — mismo patrón.
 - **Alta inline** (`crear` del combobox): `POST tipos-activo/rapido` /
-  `categorias-activo/rapido` / `tallas/rapido` (JSON) crean el registro y lo
-  **habilitan SÓLO para la empresa del formulario** (`resolverEmpresa`).
-- **Habilitación por empresa** — dos vías, todas con mensaje que **nombra la
-  empresa afectada** (`«X» habilitado/deshabilitado para «Empresa»`):
-    - Toggle de una empresa: `POST tipos-activo/{tipo}/empresa` /
-      `POST categorias-activo/{categoria}/empresa` / `POST tallas/{talla}/empresa`
-      (`{empresa_id}`). Attach/detach; valida `puedeAccederEmpresa`.
-    - Bulk (diálogo "Empresas"): `PUT tipos-activo/{tipo}/empresas` /
-      `PUT categorias-activo/{categoria}/empresas` (`empresa_ids[]`,
-      `Rule::in(idsAutorizados)`; conserva las empresas fuera del alcance del
-      usuario).
-- **Alta desde `Activos/Catalogos.vue`**: `POST tipos-activo` / `categorias-activo`
-  con `empresa_ids[]` (`Rule::in(idsAutorizados)`). `POST tallas` con
-  `empresa_ids[]`.
-- **Reglas cross-company en `GuardarActivoRequest`**:
-  `Rule::exists('tipo_activo_empresa', 'tipo_activo_id')->where('empresa_id', $e)`,
-  `categoria_activo_empresa`, `talla_empresa`. Igual en `GuardarEntregaRequest` y
-  `DevolucionController`.
-- **Variante elegible de un activo en una empresa** = asociada al activo
-  (`activo_talla`) **Y** habilitada para esa empresa (`talla_empresa`) **Y**
-  `tallas.activa`. Fuente de verdad única: `Activo::tallasHabilitadas(int
-$empresaId)`. La usan:
+  `categorias-activo/rapido` / `tallas/rapido` (JSON) crean el registro global,
+  visible de inmediato para todas las empresas.
+- **No existe habilitación por empresa**: no hay rutas `.../empresa` ni
+  `.../empresas`, ni checkbox "Disponible en «Empresa»", ni diálogo "N
+  empresas". `Activos/Catalogos.vue` y `Activos/Tallas.vue` son listas de
+  cards responsive (sin tablas) con búsqueda + alta + edición +
+  activar/desactivar **global** únicamente. `TipoActivoPolicy` /
+  `CategoriaActivoPolicy::administrar` exige sólo el permiso correspondiente
+  (`tipos-activo.administrar` / `categorias-activo.administrar`), sin
+  revalidar empresa.
+- **Reglas en `GuardarActivoRequest`**: `Rule::exists('tipos_activo', 'id')
+->where('activo', true)`, `Rule::exists('categorias_activo', 'id')
+->where('activa', true)`, `Rule::exists('tallas', 'id')->where('activa', true)`.
+  Igual en `GuardarEntregaRequest` y `DevolucionController` para `talla_id`.
+- **Variante elegible de un activo** = asociada al activo (`activo_talla`) **Y**
+  `tallas.activa`. Fuente de verdad única: `Activo::tallasElegibles()` (sin
+  parámetro de empresa). La usan:
     - `GET activos/buscar` → `tallas` = sólo elegibles; `usa_variantes` = el
-      activo tiene alguna variante asociada (crudo). `usa_variantes && tallas ===
-[]` ⇒ el activo tiene variantes pero ninguna habilitada para esa empresa
-      (mal configurado): el frontend lo marca y bloquea, el backend lo rechaza.
+      activo tiene alguna variante asociada (crudo). `usa_variantes && tallas
+=== []` ⇒ todas las variantes asociadas están desactivadas globalmente.
     - `RegistrarEntradaInventarioRequest::withValidator` + `RegistrarEntrada`
-      acción: exigen que `talla_id` esté en `tallasHabilitadas`; si el activo usa
-      variantes pero no hay ninguna elegible → error en `items.N.activo_id`.
+      acción: exigen que `talla_id` esté en `tallasElegibles()`.
     - **Ajuste / mínimos** (`InventarioController::validarOperacion`,
       `AjustarInventario`) — corrigen filas de saldo que YA existen: `talla_id`
       sólo debe ser nula **o** estar asociada al activo (`activo_talla`). **No**
-      se exige que siga habilitada para la empresa: hay que poder corregir/poner
-      a cero existencias históricas de variantes luego deshabilitadas.
+      se exige que siga activa: hay que poder corregir/poner a cero existencias
+      históricas de variantes luego desactivadas.
 - **Coherencia tipo ↔ categoría**: sin cambios (backend
-  `GuardarActivoRequest::withValidator`; la categoría ya no se acota por empresa
-  ahí porque las reglas `exists` sobre pivotes ya lo hacen).
-- **Estado global vs habilitación por empresa**: `activo`/`activa` = estado
-  global (retira de nuevas selecciones en todas); quitar una empresa del pivote
-  = deja de ofrecerse sólo ahí. `Activos/Catalogos.vue` y `Activos/Tallas.vue`
-  son **listas de cards responsive** (sin tablas): selector de empresa searchable
-  ("Administrar disponibilidad para …"), checkbox **"Disponible en «Empresa»"**
-  por fila, botón/contador **"N empresas"** que abre el diálogo con la lista
-  completa de empresas (habilitadas marcadas) + buscador para ver/gestionar, y
-  diálogo de confirmación para el estado global. `TipoActivoPolicy` /
-  `CategoriaActivoPolicy`: `administrar` exige el permiso y (rol restringido) que
-  el catálogo esté habilitado para alguna empresa del usuario.
+  `GuardarActivoRequest::withValidator`).
 - **Sin talla comodín**: "sin variante" = `talla_id = NULL` en `saldos_inventario`
   / `movimientos_inventario` / `detalles_entrega` / `detalles_devolucion` (todos
   nullable + `nullOnDelete`). `ServicioInventario::acotarTalla()` usa `whereNull`
   cuando `tallaId === null`. Unicidad real vía columna generada
   `saldos_inventario.talla_ref = COALESCE(talla_id, 0)` en el índice
   `saldos_inv_almacen_unico`. `MovimientoInventarioDatos::$tallaId` es `?int`.
-- **Históricos**: deshabilitar/desactivar un catálogo NO toca los activos que ya
-  lo usan (FK no se pone a null). `edit` de Activo manda `seleccion.{tipo,
-categoria}` para mostrar el nombre asignado aunque esté inactivo/deshabilitado.
+- **Históricos**: desactivar un catálogo NO toca los activos que ya lo usan (FK
+  no se pone a null). `edit` de Activo manda `seleccion.{tipo, categoria}` para
+  mostrar el nombre asignado aunque esté inactivo/desactivado.
 - `activos.categoria_id` es la fuente de verdad; `activos.categoria` (texto) es
   espejo temporal que sincroniza `ActivoController`.
+
+## Activo como hub operativo + alta unificada (redefinición funcional)
+
+- **Almacenes es sólo CRUD/configuración** (datos, empresas abastecidas,
+  responsable, activar/desactivar + un resumen de 2 cifras). **Activos** es el
+  hub operativo: catálogo + existencias por almacén + filtros + "Agregar
+  existencias"/"Agregar unidades". No reintroducir el desglose de inventario en
+  `AlmacenController::show()`/`Almacenes/Detalle.vue`.
+- `ActivoController::store()` delega en `App\Acciones\CrearActivoConExistencias`
+  (transacción única: crea el Activo, asocia variantes o genera unidades, y
+  registra la existencia inicial) — nunca crear el Activo "pelón" y el stock
+  aparte. El almacén elegido en el alta es sólo el de la ENTRADA INICIAL;
+  `activos.almacen_id` no existe ni debe añadirse.
+- `AlmacenController::update()` rechaza quitar una empresa de `empresa_ids[]`
+  si esa empresa tiene `SaldoInventario.cantidad > 0` o unidades activas en ese
+  almacén (`rechazarSiHayDependenciasOperativas()`); el mensaje nombra la
+  empresa. Nunca bloquea por históricos.
+
+## Identificación individual: `UnidadActivo`, códigos y QR
+
+- Sólo para `Activo::tipo_control = individual` (`TipoControlActivo::SeguimientoIndividual`).
+  Nunca mostrar "Serializado" ni pedir número de serie/IMEI/MAC/etiqueta: el
+  código lo genera `App\Soporte\ServicioGeneradorCodigos::siguiente($empresa)`
+  (transacción + `lockForUpdate()` sobre `secuencias_codigo`, formato
+  `"{$empresa->codigo}-{consecutivo de 6 dígitos}"`), nunca lo captura el
+  usuario ni se deriva de `MAX(id)+1`.
+- Alta atómica: `App\Acciones\RegistrarUnidadesActivo::ejecutar()` valida
+  invariantes (activo pertenece a la empresa, `tipo_control = individual`,
+  almacén abastece la empresa y está activo) y crea N unidades, cada una con
+  un movimiento propio vía `ServicioInventario::registrarMovimientoUnidad()`
+  (NO toca `saldos_inventario`; `talla_id` siempre nulo). Baja no destructiva:
+  `App\Acciones\DarDeBajaUnidadActivo` (rechaza baja de una unidad asignada o
+  ya dada de baja).
+- `UnidadActivoController` vive bajo `activos/unidades/*` (dentro del hub de
+  Activos, no un módulo de navegación aparte) — sus rutas van **antes** de
+  `activos/{activo}` en `routes/sistema.php` para que "unidades" no sea
+  capturado por el binding implícito. `show`/`baja` resuelven por
+  `{unidad:public_token}`, nunca por id incremental.
+- QR: `App\Servicios\ServicioEtiquetasQr` usa `BaconQrCode\Writer` +
+  `BaconQrCode\Renderer\GDLibRenderer` (PNG vía GD, ya vendored por Fortify
+  para 2FA — no usar `SvgImageBackEnd`/Imagick, no están garantizados). La URL
+  del QR es siempre `URL::to("/activos/unidades/{$unidad->public_token}")` —
+  permanente, nunca firmada ni con expiración. `generarEtiquetas()` es una
+  acción distinta de cualquier export de reporte.
+
+## Conjuntos: plantilla sin stock propio
+
+- `Conjunto` pertenece a UNA empresa; `conjunto_componentes` liga Activos de
+  **esa misma empresa** — no hay FK que lo garantice (los catálogos de tipo/
+  categoría/variante son de plataforma, pero el Activo sí es por-empresa), así
+  que `GuardarConjuntoRequest` valida `Rule::exists('activos','id')->where('empresa_id', ...)`
+  y además, en `withValidator`, la coherencia de variante por fila.
+- **Nunca se persiste un saldo del conjunto.** `Conjunto::disponibilidad(int
+  $almacenId): int` se calcula siempre en vivo: por componente,
+  `intdiv(existencia, cantidad_requerida)`, y el resultado del conjunto es el
+  **mínimo** entre todos los componentes. Existencia real:
+    - Control por cantidad: `SaldoInventario` de `empresa + almacén + activo`;
+      si el componente tiene variante fija (`talla_id`) se filtra por ella, si
+      es `talla_libre` se **suma** la existencia de todas las variantes.
+    - Seguimiento individual: cuenta de `UnidadActivo` en ese almacén con
+      `estado=en_almacen` **y** `condicion=funcionando` (mismo criterio que
+      `esEntregable()`).
+- Variante por componente: **fija** (`talla_id` no nulo, debe estar en
+  `activo->tallasElegibles()`), **libre** (`talla_libre=true`, se elige hasta
+  la Entrega) o **ninguna** si el activo no usa variantes — nunca `talla_id` y
+  `talla_libre` a la vez, y si el activo usa variantes hay que elegir una de
+  las dos opciones (no dejarlo ambiguo).
+- `sincronizarComponentes()` (en `ConjuntoController::store/update`) borra y
+  recrea todas las filas en cada guardado — no hace diff línea por línea; es
+  intencional porque los componentes no tienen identidad propia fuera del
+  conjunto (sin históricos que preservar en esa tabla).
+- Agregar un Activo suelto a una Entrega que incluye un Conjunto (Fase 5) NO
+  modifica la definición del Conjunto — son conceptos independientes.

@@ -1,6 +1,6 @@
 # Almacenes, Áreas / Departamentos y Activos
 
-> **BLOQUE C · Etapa 1 — Catálogos compartidos.** `tipos_activo`, `categorias_activo` y `tallas` ya **no tienen `empresa_id`**: son catálogos de plataforma habilitados por empresa vía pivotes N:M (`tipo_activo_empresa`, `categoria_activo_empresa`, `talla_empresa`). `activo`/`activa` es el estado global; el pivote define para qué empresas se ofrece. Unicidad de nombre normalizada a nivel plataforma. La "talla comodín" se eliminó: "sin variante" = `talla_id = NULL`. Migraciones `..._000020` (consolidación) y `..._000021` (absorbe "Uniforme / Prenda" en "Prenda").
+> **Catálogos GLOBALES (redefinición funcional).** `tipos_activo`, `categorias_activo` y `tallas` ya **no tienen `empresa_id`** ni se habilitan por empresa: son catálogos de plataforma visibles para todas las empresas por igual. `activo`/`activa` es el único estado. Unicidad de nombre normalizada a nivel plataforma. La "talla comodín" se eliminó: "sin variante" = `talla_id = NULL`. Migraciones `..._000020` (consolidación), `..._000021` (absorbe "Uniforme / Prenda" en "Prenda") y `..._000022` (elimina los pivotes de habilitación por empresa).
 
 > **BLOQUE A — actualización.** `Almacén ↔ Empresa` es ahora **N:M**
 > (`almacen_empresa`). El almacén NO pertenece a una empresa y NO se relaciona

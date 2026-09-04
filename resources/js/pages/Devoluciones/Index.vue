@@ -2,6 +2,7 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import { ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -49,6 +50,10 @@ watch(empresaId, (id) => {
             descripcion="Registra los activos o prendas que un colaborador regresa a un almacén y su condición. Solo los reutilizables reingresan al inventario."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/devoluciones/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="puedeCrear" as-child>
                     <Link href="/devoluciones/crear"
                         ><Plus class="size-4" /> Nueva devolución</Link

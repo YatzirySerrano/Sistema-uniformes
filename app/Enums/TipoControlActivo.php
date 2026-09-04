@@ -6,20 +6,22 @@ namespace App\Enums;
  * Forma en que se controla un activo:
  *
  * - Cantidad: se lleva por existencias agregadas (uniformes, accesorios…).
- * - Serializado: cada unidad se identifica individualmente por número de serie /
- *   IMEI (laptops, teléfonos, tablets…). El flujo de unidades serializadas se
- *   implementará en un bloque posterior; aquí sólo se contempla en el catálogo.
+ * - SeguimientoIndividual: cada unidad física se identifica con un código
+ *   generado por el sistema (laptops, teléfonos, sillas, herramientas
+ *   costosas…). Nunca se pide número de serie / IMEI / etiqueta manual — el
+ *   código interno generado es la identidad oficial dentro del sistema. Ver
+ *   `App\Models\UnidadActivo`.
  */
 enum TipoControlActivo: string
 {
     case Cantidad = 'cantidad';
-    case Serializado = 'serializado';
+    case SeguimientoIndividual = 'individual';
 
     public function etiqueta(): string
     {
         return match ($this) {
             self::Cantidad => 'Por cantidad',
-            self::Serializado => 'Serializado',
+            self::SeguimientoIndividual => 'Seguimiento individual',
         };
     }
 

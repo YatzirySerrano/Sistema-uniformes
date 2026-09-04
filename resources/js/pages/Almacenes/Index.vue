@@ -15,6 +15,7 @@ import { computed, ref, watch } from 'vue';
 import type { AlmacenEditable } from '@/components/almacenes/FormularioAlmacen.vue';
 import FormularioAlmacen from '@/components/almacenes/FormularioAlmacen.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -181,6 +182,10 @@ function alternarEstado(a: AlmacenFila): void {
             descripcion="Administra los lugares físicos donde se resguardan las existencias. Un almacén puede abastecer a varias empresas / razones sociales; su inventario se mantiene separado por empresa."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/almacenes/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="permisos.crear" @click="nuevo">
                     <Plus class="size-4" /> Nuevo almacén
                 </Button>

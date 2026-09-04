@@ -5,10 +5,14 @@ import {
     Boxes,
     Layers,
     Package,
+    PackagePlus,
     Pencil,
     ScrollText,
 } from '@lucide/vue';
+import { ref } from 'vue';
+import AgregarExistenciasDialog from '@/components/sistema/AgregarExistenciasDialog.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -20,20 +24,39 @@ defineProps<{
         categoria: string | null;
         codigo: string | null;
         activo: boolean;
+        empresa: { id: number; nombre_comercial: string | null };
         tipo: string | null;
-        tipo_control: 'cantidad' | 'serializado';
+        tipo_control: 'cantidad' | 'individual';
         tipo_control_etiqueta: string;
         imagen_url: string | null;
         tallas: string[];
     };
     saldos: {
-        sucursal: string;
-        talla: string;
+        almacen: string | null;
+        talla: string | null;
         cantidad: number;
         minimo: number;
         bajo_minimo: boolean;
     }[];
-    permisos: { editar: boolean; administrar: boolean };
+    usaVariantes: boolean;
+    resumenUnidades: {
+        en_almacen: number;
+        asignada: number;
+        baja: number;
+    } | null;
+    permisos: {
+        editar: boolean;
+        administrar: boolean;
+        agregar_existencias: boolean;
+    };
+    suspendidos: {
+        id: number;
+        tipo: string;
+        nombre: string | null;
+        suspendida_en: string;
+        puede_reactivarse: boolean;
+        motivos: string[];
+    }[];
 }>();
 
 defineOptions({
@@ -44,6 +67,8 @@ defineOptions({
         ],
     },
 });
+
+const dialogoExistencias = ref(false);
 </script>
 
 <template>
@@ -83,11 +108,31 @@ defineOptions({
                 </div>
             </div>
 
-            <Button v-if="permisos.editar" variant="outline" size="sm" as-child>
-                <Link :href="`/activos/${activo.id}/editar`">
-                    <Pencil class="size-3.5" /> Editar
-                </Link>
-            </Button>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    v-if="permisos.agregar_existencias"
+                    variant="outline"
+                    size="sm"
+                    @click="dialogoExistencias = true"
+                >
+                    <PackagePlus class="size-3.5" />
+                    {{
+                        activo.tipo_control === 'individual'
+                            ? 'Agregar unidades'
+                            : 'Agregar existencias'
+                    }}
+                </Button>
+                <Button
+                    v-if="permisos.editar"
+                    variant="outline"
+                    size="sm"
+                    as-child
+                >
+                    <Link :href="`/activos/${activo.id}/editar`">
+                        <Pencil class="size-3.5" /> Editar
+                    </Link>
+                </Button>
+            </div>
         </div>
 
         <div class="grid gap-4 lg:grid-cols-[320px_1fr]">
@@ -174,32 +219,85 @@ defineOptions({
                 </section>
             </div>
 
-            <section class="rounded-xl border p-4">
-                <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
-                    <Boxes class="text-muted-foreground size-4" />
-                    Inventario relacionado
-                    <AyudaTooltip
-                        texto="Existencias actuales por sucursal y talla. La administración de inventario por almacén llegará en un bloque posterior."
-                        etiqueta="Ayuda sobre inventario relacionado"
-                    />
-                </h2>
-
-                <p
-                    v-if="activo.tipo_control === 'serializado'"
-                    class="text-muted-foreground bg-muted/40 rounded-lg p-3 text-sm"
+            <section
+                v-if="activo.tipo_control === 'individual'"
+                class="rounded-xl border p-4"
+            >
+                <div
+                    class="mb-3 flex flex-wrap items-center justify-between gap-2"
                 >
-                    Este activo es serializado. El control de unidades
-                    individuales (número de serie / IMEI) se habilitará en un
-                    bloque posterior.
-                </p>
+                    <h2 class="flex items-center gap-2 text-sm font-semibold">
+                        <Boxes class="text-muted-foreground size-4" />
+                        Unidades
+                        <AyudaTooltip
+                            texto="Cada unidad de este activo tiene su propio código generado por el sistema y su propio QR. El estado de posesión (en almacén / asignada / baja) y la condición física se gestionan por unidad."
+                            etiqueta="Ayuda sobre unidades"
+                        />
+                    </h2>
+                    <Button variant="outline" size="sm" as-child>
+                        <Link :href="`/activos/unidades?activo_id=${activo.id}`"
+                            >Ver todas las unidades</Link
+                        >
+                    </Button>
+                </div>
 
-                <div v-else class="overflow-x-auto rounded-lg border">
+                <div
+                    v-if="resumenUnidades"
+                    class="grid grid-cols-3 gap-3 text-center"
+                >
+                    <div class="bg-muted/40 rounded-lg p-3">
+                        <p class="text-2xl font-semibold">
+                            {{ resumenUnidades.en_almacen }}
+                        </p>
+                        <p class="text-muted-foreground text-xs">En almacén</p>
+                    </div>
+                    <div class="bg-muted/40 rounded-lg p-3">
+                        <p class="text-2xl font-semibold">
+                            {{ resumenUnidades.asignada }}
+                        </p>
+                        <p class="text-muted-foreground text-xs">Asignadas</p>
+                    </div>
+                    <div class="bg-muted/40 rounded-lg p-3">
+                        <p class="text-2xl font-semibold">
+                            {{ resumenUnidades.baja }}
+                        </p>
+                        <p class="text-muted-foreground text-xs">Baja</p>
+                    </div>
+                </div>
+            </section>
+
+            <section v-else class="rounded-xl border p-4">
+                <div
+                    class="mb-3 flex flex-wrap items-center justify-between gap-2"
+                >
+                    <h2 class="flex items-center gap-2 text-sm font-semibold">
+                        <Boxes class="text-muted-foreground size-4" />
+                        Existencias por almacén
+                        <AyudaTooltip
+                            texto="Existencias actuales de este activo en cada almacén y variante. El almacén elegido al crear el activo fue sólo el de la entrada inicial; puede tener existencia en varios."
+                            etiqueta="Ayuda sobre existencias"
+                        />
+                    </h2>
+                    <Button
+                        v-if="usaVariantes === false && permisos.administrar"
+                        variant="ghost"
+                        size="sm"
+                        as-child
+                    >
+                        <Link
+                            :href="`/inventario/movimientos?activo_id=${activo.id}`"
+                            >Ver movimientos</Link
+                        >
+                    </Button>
+                </div>
+
+                <div class="overflow-x-auto rounded-lg border">
                     <table class="w-full min-w-[420px] text-sm">
                         <thead
                             class="bg-muted/50 text-muted-foreground text-left"
                         >
                             <tr>
-                                <th class="px-3 py-2 font-medium">Sucursal</th>
+                                <th class="px-3 py-2 font-medium">Almacén</th>
                                 <th class="px-3 py-2 font-medium">Talla</th>
                                 <th class="px-3 py-2 text-right font-medium">
                                     Existencia
@@ -216,8 +314,12 @@ defineOptions({
                                 :key="i"
                                 class="border-t"
                             >
-                                <td class="px-3 py-2">{{ s.sucursal }}</td>
-                                <td class="px-3 py-2">{{ s.talla }}</td>
+                                <td class="px-3 py-2">
+                                    {{ s.almacen ?? '—' }}
+                                </td>
+                                <td class="px-3 py-2">
+                                    {{ s.talla ?? 'Sin variante' }}
+                                </td>
                                 <td class="px-3 py-2 text-right font-medium">
                                     {{ s.cantidad }}
                                 </td>
@@ -241,6 +343,10 @@ defineOptions({
                                     class="text-muted-foreground px-3 py-6 text-center"
                                 >
                                     Este activo todavía no tiene existencias.
+                                    <span v-if="permisos.agregar_existencias">
+                                        Usa "Agregar existencias" para registrar
+                                        la primera entrada.</span
+                                    >
                                 </td>
                             </tr>
                         </tbody>
@@ -248,5 +354,20 @@ defineOptions({
                 </div>
             </section>
         </div>
+
+        <PanelSuspendidos
+            v-if="suspendidos.length"
+            :suspendidos="suspendidos"
+            :endpoint="`/activos/${activo.id}/suspendidos/reactivar`"
+            :puede-reactivar="permisos.administrar"
+        />
+
+        <AgregarExistenciasDialog
+            v-model:open="dialogoExistencias"
+            :activo-id="activo.id"
+            :empresa-id="activo.empresa.id"
+            :usa-variantes="usaVariantes"
+            :es-seguimiento-individual="activo.tipo_control === 'individual'"
+        />
     </div>
 </template>

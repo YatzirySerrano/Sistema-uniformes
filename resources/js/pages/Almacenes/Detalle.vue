@@ -6,6 +6,7 @@ import {
     Building2,
     Hash,
     MapPin,
+    Package,
     Pencil,
     Phone,
     Power,
@@ -53,65 +54,19 @@ type AlmacenDetalle = {
     } | null;
 };
 
-type VarianteStock = {
-    talla_id: number;
-    talla: string | null;
-    cantidad: number;
-    minimo: number;
-    bajo_minimo: boolean;
-};
-type ActivoStock = {
-    activo_id: number;
-    activo: string | null;
-    tipo: string | null;
-    categoria: string | null;
-    control: string;
-    total: number;
-    bajo_minimo: boolean;
-    variantes: VarianteStock[];
-};
-type InventarioEmpresa = {
-    empresa: { id: number; nombre_comercial: string | null };
-    total: number;
-    bajo_minimo: boolean;
-    activos: ActivoStock[];
-};
-
 const props = defineProps<{
     almacen: AlmacenDetalle;
     empresasAutorizadas: EmpresaAutorizada[];
     resumen: {
         empresas_abastecidas: number;
-        tipos_activo: number;
-        existencias: number;
-        variantes_bajo_minimo: number;
+        activos_con_existencia: number;
     };
-    inventarioPorEmpresa: InventarioEmpresa[];
     permisos: {
         editar: boolean;
         administrar: boolean;
-        inventario_ver: boolean;
-        inventario_entrada: boolean;
-        inventario_ajustar: boolean;
+        ver_activos: boolean;
     };
 }>();
-
-const buscarInv = ref('');
-const inventarioFiltrado = computed<InventarioEmpresa[]>(() => {
-    const q = buscarInv.value.trim().toLowerCase();
-    if (!q) return props.inventarioPorEmpresa;
-    return props.inventarioPorEmpresa
-        .map((grupo) => ({
-            ...grupo,
-            activos: grupo.activos.filter(
-                (a) =>
-                    (a.activo ?? '').toLowerCase().includes(q) ||
-                    (a.categoria ?? '').toLowerCase().includes(q) ||
-                    (a.tipo ?? '').toLowerCase().includes(q),
-            ),
-        }))
-        .filter((grupo) => grupo.activos.length > 0);
-});
 
 defineOptions({
     layout: {
@@ -230,6 +185,16 @@ function confirmarDesactivar(): void {
             </div>
 
             <div class="flex flex-wrap gap-2">
+                <Button
+                    v-if="permisos.ver_activos"
+                    variant="outline"
+                    size="sm"
+                    as-child
+                >
+                    <Link :href="`/activos?almacen_id=${almacen.id}`">
+                        <Package class="size-3.5" /> Ver activos aquí
+                    </Link>
+                </Button>
                 <Button
                     v-if="permisos.editar"
                     variant="outline"
@@ -405,9 +370,13 @@ function confirmarDesactivar(): void {
         <section class="rounded-xl border p-4">
             <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
                 <ScrollText class="text-muted-foreground size-4" />
-                Resumen operativo
+                Resumen
             </h2>
-            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <p class="text-muted-foreground mb-3 text-xs">
+                El detalle de existencias, movimientos y unidades vive en
+                Activos — este resumen es sólo informativo.
+            </p>
+            <div class="grid gap-3 sm:grid-cols-2">
                 <div class="bg-muted/40 min-w-0 rounded-lg p-3">
                     <p class="text-muted-foreground text-xs">
                         Empresas abastecidas
@@ -418,161 +387,11 @@ function confirmarDesactivar(): void {
                 </div>
                 <div class="bg-muted/40 min-w-0 rounded-lg p-3">
                     <p class="text-muted-foreground text-xs">
-                        Tipos de activo con stock
+                        Activos con existencia
                     </p>
                     <p class="text-2xl font-semibold">
-                        {{ resumen.tipos_activo }}
+                        {{ resumen.activos_con_existencia }}
                     </p>
-                </div>
-                <div class="bg-muted/40 min-w-0 rounded-lg p-3">
-                    <p class="text-muted-foreground text-xs">
-                        Existencias totales
-                    </p>
-                    <p class="text-2xl font-semibold">
-                        {{ resumen.existencias }}
-                    </p>
-                </div>
-                <div class="bg-muted/40 min-w-0 rounded-lg p-3">
-                    <p class="text-muted-foreground text-xs">
-                        Variantes bajo mínimo
-                    </p>
-                    <p
-                        class="text-2xl font-semibold"
-                        :class="
-                            resumen.variantes_bajo_minimo > 0
-                                ? 'text-amber-600'
-                                : ''
-                        "
-                    >
-                        {{ resumen.variantes_bajo_minimo }}
-                    </p>
-                </div>
-            </div>
-        </section>
-
-        <section class="rounded-xl border p-4">
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <h2 class="flex items-center gap-2 text-sm font-semibold">
-                    <Warehouse class="text-muted-foreground size-4" />
-                    Inventario del almacén (por empresa)
-                </h2>
-                <div class="flex flex-wrap items-center gap-2">
-                    <input
-                        v-model="buscarInv"
-                        type="search"
-                        placeholder="Buscar activo, tipo o categoría"
-                        class="border-input bg-background h-9 min-w-0 rounded-md border px-3 text-sm"
-                    />
-                    <Button
-                        v-if="permisos.inventario_entrada"
-                        size="sm"
-                        as-child
-                    >
-                        <Link href="/inventario/entrada"
-                            >Registrar entrada</Link
-                        >
-                    </Button>
-                    <Button
-                        v-if="permisos.inventario_ver"
-                        size="sm"
-                        variant="outline"
-                        as-child
-                    >
-                        <Link :href="`/inventario?almacen_id=${almacen.id}`">
-                            Ver inventario
-                        </Link>
-                    </Button>
-                    <Button
-                        v-if="permisos.inventario_ver"
-                        size="sm"
-                        variant="ghost"
-                        as-child
-                    >
-                        <Link
-                            :href="`/inventario/movimientos?almacen_id=${almacen.id}`"
-                        >
-                            Movimientos
-                        </Link>
-                    </Button>
-                </div>
-            </div>
-
-            <p
-                v-if="!inventarioPorEmpresa.length"
-                class="text-muted-foreground py-6 text-center text-sm"
-            >
-                Este almacén todavía no tiene existencias. Registra una entrada
-                indicando la empresa y el almacén.
-            </p>
-            <p
-                v-else-if="!inventarioFiltrado.length"
-                class="text-muted-foreground py-6 text-center text-sm"
-            >
-                Sin resultados para «{{ buscarInv }}».
-            </p>
-
-            <div v-else class="flex flex-col gap-4">
-                <div
-                    v-for="grupo in inventarioFiltrado"
-                    :key="grupo.empresa.id"
-                >
-                    <h3
-                        class="mb-2 flex items-center gap-2 text-xs font-semibold"
-                    >
-                        <Building2 class="text-muted-foreground size-3.5" />
-                        {{ grupo.empresa.nombre_comercial }}
-                        <Badge variant="outline" class="text-xs">
-                            {{ grupo.total }}
-                        </Badge>
-                    </h3>
-                    <div class="grid gap-3 md:grid-cols-2">
-                        <article
-                            v-for="a in grupo.activos"
-                            :key="a.activo_id"
-                            class="min-w-0 rounded-lg border p-3"
-                        >
-                            <div class="flex items-start justify-between gap-2">
-                                <div class="min-w-0">
-                                    <p class="truncate font-medium">
-                                        {{ a.activo }}
-                                    </p>
-                                    <p
-                                        class="text-muted-foreground truncate text-xs"
-                                    >
-                                        {{
-                                            [a.tipo, a.categoria]
-                                                .filter(Boolean)
-                                                .join(' · ') || '—'
-                                        }}
-                                    </p>
-                                </div>
-                                <Badge
-                                    :variant="
-                                        a.bajo_minimo ? 'secondary' : 'outline'
-                                    "
-                                    class="shrink-0 text-xs"
-                                    :class="
-                                        a.bajo_minimo ? 'text-amber-600' : ''
-                                    "
-                                >
-                                    {{ a.total }}
-                                </Badge>
-                            </div>
-                            <ul class="mt-2 flex flex-wrap gap-1.5 text-xs">
-                                <li
-                                    v-for="v in a.variantes"
-                                    :key="v.talla_id"
-                                    class="bg-muted/50 rounded px-2 py-0.5"
-                                    :class="
-                                        v.bajo_minimo ? 'text-amber-600' : ''
-                                    "
-                                >
-                                    {{ v.talla ?? 's/v' }}:
-                                    <strong>{{ v.cantidad }}</strong>
-                                </li>
-                            </ul>
-                        </article>
-                    </div>
                 </div>
             </div>
         </section>

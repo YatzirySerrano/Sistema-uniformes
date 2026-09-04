@@ -41,6 +41,7 @@ class MovimientoInventario extends Model
         'sucursal_id',
         'activo_id',
         'talla_id',
+        'unidad_activo_id',
         'tipo',
         'direccion',
         'cantidad',
@@ -104,5 +105,13 @@ class MovimientoInventario extends Model
     public function realizadoPor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'realizado_por');
+    }
+
+    /**
+     * @return BelongsTo<UnidadActivo, $this>
+     */
+    public function unidadActivo(): BelongsTo
+    {
+        return $this->belongsTo(UnidadActivo::class);
     }
 }

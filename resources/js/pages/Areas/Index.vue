@@ -15,6 +15,7 @@ import { computed, ref, watch } from 'vue';
 import type { AreaEditable } from '@/components/areas/FormularioArea.vue';
 import FormularioArea from '@/components/areas/FormularioArea.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -185,6 +186,10 @@ function alternarEstado(a: AreaFila): void {
             descripcion="Estructura organizacional por empresa. Usa el filtro de empresa para acotar el listado."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/areas/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="permisos.crear" @click="nueva">
                     <Plus class="size-4" /> Nueva área
                 </Button>

@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import { CheckCircle2, Download, TriangleAlert, XCircle } from '@lucide/vue';
 import { ref } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import SubidaArchivo from '@/components/sistema/SubidaArchivo.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -120,15 +121,12 @@ const urlPlantilla = () =>
                         columnas.join(', ')
                     }}</code>
                 </p>
-                <input
-                    type="file"
+                <SubidaArchivo
+                    v-model="archivo"
+                    tipo="documento"
                     accept=".xlsx,.xls,.csv"
-                    class="text-sm"
-                    @change="
-                        archivo =
-                            ($event.target as HTMLInputElement).files?.[0] ??
-                            null
-                    "
+                    formatos-etiqueta="Formatos aceptados: XLSX, XLS o CSV."
+                    :invalido="!!form.errors.archivo"
                 />
                 <InputError :message="form.errors.archivo" />
                 <Button

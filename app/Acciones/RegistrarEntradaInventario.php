@@ -67,25 +67,21 @@ class RegistrarEntradaInventario
                 if ($activo === null) {
                     throw new ExcepcionDeNegocioSimple('Un activo seleccionado no pertenece a esta empresa.');
                 }
-                if ($activo->tipo_control === TipoControlActivo::Serializado) {
-                    throw new ExcepcionDeNegocioSimple('Los activos serializados no se registran por esta pantalla.');
+                if ($activo->tipo_control === TipoControlActivo::SeguimientoIndividual) {
+                    throw new ExcepcionDeNegocioSimple('Los activos de seguimiento individual no se registran por esta pantalla.');
                 }
 
                 $tallaId = ($item['talla_id'] ?? null) ?: null;
 
-                // Variante elegible = asociada al activo Y habilitada para la empresa.
-                $habilitadas = (int) $activo->tallas_count > 0
-                    ? $activo->tallasHabilitadas($empresaId)->pluck('id')->all()
+                // Variante elegible = asociada al activo y activa globalmente.
+                $elegibles = (int) $activo->tallas_count > 0
+                    ? $activo->tallasElegibles()->pluck('id')->all()
                     : [];
 
-                if ((int) $activo->tallas_count > 0 && $habilitadas === []) {
-                    throw new ExcepcionDeNegocioSimple('El activo usa variantes pero ninguna está habilitada para esta empresa.');
-                }
-
-                if ($habilitadas === []) {
+                if ($elegibles === []) {
                     $tallaId = null; // activo por cantidad sin variantes
-                } elseif ($tallaId === null || ! in_array((int) $tallaId, $habilitadas, true)) {
-                    throw new ExcepcionDeNegocioSimple('La variante indicada no está habilitada para esta empresa o no corresponde al activo.');
+                } elseif ($tallaId === null || ! in_array((int) $tallaId, $elegibles, true)) {
+                    throw new ExcepcionDeNegocioSimple('La variante indicada no corresponde al activo o está desactivada.');
                 }
 
                 $movimientos[] = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(

@@ -143,3 +143,27 @@ it('valida sin generar un 500 cuando el nombre llega como arreglo', function () 
         ->assertRedirect('/areas')
         ->assertSessionHasErrors('nombre');
 });
+
+it('la búsqueda de áreas requiere empresa_id, respeta el alcance del usuario y sólo trae áreas activas', function () {
+    $miEmpresa = Empresa::factory()->create();
+    $ajena = Empresa::factory()->create();
+    Area::factory()->for($miEmpresa)->create(['nombre' => 'Recursos Humanos', 'activa' => true]);
+    Area::factory()->for($miEmpresa)->create(['nombre' => 'Area Inactiva', 'activa' => false]);
+    Area::factory()->for($ajena)->create(['nombre' => 'Area Ajena']);
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$miEmpresa]);
+
+    $this->actingAs($supervisor)
+        ->get('/areas/buscar')
+        ->assertJson(['areas' => []]);
+
+    $this->actingAs($supervisor)
+        ->get("/areas/buscar?empresa_id={$miEmpresa->id}")
+        ->assertJsonFragment(['nombre' => 'Recursos Humanos'])
+        ->assertJsonMissing(['nombre' => 'Area Inactiva'])
+        ->assertJsonMissing(['nombre' => 'Area Ajena']);
+
+    $this->actingAs($supervisor)
+        ->get("/areas/buscar?empresa_id={$ajena->id}")
+        ->assertJson(['areas' => []]);
+});

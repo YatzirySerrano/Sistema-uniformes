@@ -1,5 +1,6 @@
 <?php
 
+use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\RolSistema;
 use App\Enums\TipoControlActivo;
 use App\Models\Activo;
@@ -49,7 +50,7 @@ it('un administrador ve todos los activos y puede filtrarlos por empresa', funct
 
 it('un administrador crea un activo por cantidad con tallas y código autogenerado', function () {
     $empresa = Empresa::factory()->create();
-    $tallas = Talla::factory()->count(2)->paraEmpresa($empresa)->create();
+    $tallas = Talla::factory()->count(2)->create();
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/activos', [
@@ -69,26 +70,139 @@ it('un administrador crea un activo por cantidad con tallas y código autogenera
     expect($activo->tallas()->count())->toBe(2);
 });
 
-it('permite crear un activo serializado sin tallas', function () {
+it('crea un activo por cantidad sin variantes junto con su existencia inicial (alta unificada)', function () {
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->post('/activos', [
+            'empresa_id' => $empresa->id,
+            'nombre' => 'Extintor',
+            'tipo_control' => 'cantidad',
+            'almacen_id' => $almacen->id,
+            'cantidad_inicial' => 25,
+        ])
+        ->assertRedirect('/activos')
+        ->assertSessionHasNoErrors();
+
+    $activo = Activo::query()->where('nombre', 'Extintor')->firstOrFail();
+    $saldo = SaldoInventario::query()->where('activo_id', $activo->id)->sole();
+    expect($saldo->cantidad)->toBe(25)
+        ->and($saldo->almacen_id)->toBe($almacen->id)
+        ->and($saldo->talla_id)->toBeNull();
+
+    $this->assertDatabaseHas('movimientos_inventario', [
+        'activo_id' => $activo->id, 'tipo' => 'inicial', 'cantidad' => 25,
+    ]);
+});
+
+it('crea un activo por cantidad con variantes y una cantidad inicial por cada una', function () {
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    $chica = Talla::factory()->create(['valor' => 'CH']);
+    $grande = Talla::factory()->create(['valor' => 'G']);
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->post('/activos', [
+            'empresa_id' => $empresa->id,
+            'nombre' => 'Playera',
+            'tipo_control' => 'cantidad',
+            'tallas' => [$chica->id, $grande->id],
+            'almacen_id' => $almacen->id,
+            'existencias' => [
+                ['talla_id' => $chica->id, 'cantidad' => 10],
+                ['talla_id' => $grande->id, 'cantidad' => 15],
+            ],
+        ])
+        ->assertSessionHasNoErrors();
+
+    $activo = Activo::query()->where('nombre', 'Playera')->firstOrFail();
+    expect(SaldoInventario::query()->where(['activo_id' => $activo->id, 'talla_id' => $chica->id])->value('cantidad'))->toBe(10)
+        ->and(SaldoInventario::query()->where(['activo_id' => $activo->id, 'talla_id' => $grande->id])->value('cantidad'))->toBe(15);
+});
+
+it('crea un activo sin existencia inicial cuando no se indica cantidad ni almacén', function () {
+    $empresa = Empresa::factory()->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Sólo catálogo', 'tipo_control' => 'cantidad'])
+        ->assertSessionHasNoErrors();
+
+    $activo = Activo::query()->where('nombre', 'Sólo catálogo')->firstOrFail();
+    expect(SaldoInventario::query()->where('activo_id', $activo->id)->exists())->toBeFalse();
+});
+
+it('exige almacén cuando se captura una cantidad inicial mayor a cero', function () {
+    $empresa = Empresa::factory()->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->from('/activos/crear')
+        ->post('/activos', [
+            'empresa_id' => $empresa->id, 'nombre' => 'X', 'tipo_control' => 'cantidad', 'cantidad_inicial' => 10,
+        ])
+        ->assertSessionHasErrors('almacen_id');
+
+    expect(Activo::query()->where('nombre', 'X')->exists())->toBeFalse();
+});
+
+it('si el almacén no abastece a la empresa, el alta se rechaza y no queda ningún Activo huérfano', function () {
+    $empresa = Empresa::factory()->create();
+    $otra = Empresa::factory()->create();
+    $almacenAjeno = Almacen::factory()->paraEmpresa($otra)->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->from('/activos/crear')
+        ->post('/activos', [
+            'empresa_id' => $empresa->id, 'nombre' => 'Huérfano', 'tipo_control' => 'cantidad',
+            'almacen_id' => $almacenAjeno->id, 'cantidad_inicial' => 5,
+        ])
+        ->assertSessionHasErrors('almacen_id');
+
+    expect(Activo::query()->where('nombre', 'Huérfano')->exists())->toBeFalse();
+});
+
+it('filtra activos por almacén: sólo los que tienen existencia ahí', function () {
+    $empresa = Empresa::factory()->create();
+    $almacenA = Almacen::factory()->paraEmpresa($empresa)->create();
+    $almacenB = Almacen::factory()->paraEmpresa($empresa)->create();
+    $enA = Activo::factory()->for($empresa)->create(['nombre' => 'En almacén A', 'tipo_control' => 'cantidad']);
+    $enB = Activo::factory()->for($empresa)->create(['nombre' => 'En almacén B', 'tipo_control' => 'cantidad']);
+
+    app(RegistrarEntradaInventario::class)->ejecutar($empresa->id, $almacenA->id, [
+        ['activo_id' => $enA->id, 'talla_id' => null, 'cantidad' => 3],
+    ], 'Compra', null);
+    app(RegistrarEntradaInventario::class)->ejecutar($empresa->id, $almacenB->id, [
+        ['activo_id' => $enB->id, 'talla_id' => null, 'cantidad' => 3],
+    ], 'Compra', null);
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->get('/activos?almacen_id='.$almacenA->id)
+        ->assertInertia(fn ($page) => $page
+            ->component('Activos/Index')
+            ->has('activos', 1)
+            ->where('activos.0.nombre', 'En almacén A'),
+        );
+});
+
+it('permite crear un activo de seguimiento individual sin tallas', function () {
     $empresa = Empresa::factory()->create();
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/activos', [
             'empresa_id' => $empresa->id,
             'nombre' => 'Laptop Dell',
-            'tipo_control' => 'serializado',
+            'tipo_control' => 'individual',
         ])
         ->assertSessionHasNoErrors();
 
     $activo = Activo::query()->where('nombre', 'Laptop Dell')->first();
-    expect($activo->tipo_control)->toBe(TipoControlActivo::Serializado);
+    expect($activo->tipo_control)->toBe(TipoControlActivo::SeguimientoIndividual);
     expect($activo->tallas()->count())->toBe(0);
 });
 
-it('rechaza un tipo de control inválido y un tipo de activo de otra empresa', function () {
+it('rechaza un tipo de control inválido y un tipo de activo inactivo o inexistente', function () {
     $empresa = Empresa::factory()->create();
-    $otra = Empresa::factory()->create();
-    $tipoAjeno = TipoActivo::factory()->paraEmpresa($otra)->create();
+    $tipoInactivo = TipoActivo::factory()->create(['activo' => false]);
 
     $admin = usuarioCon(RolSistema::Administrador->value);
 
@@ -97,8 +211,20 @@ it('rechaza un tipo de control inválido y un tipo de activo de otra empresa', f
         ->assertSessionHasErrors('tipo_control');
 
     $this->actingAs($admin)->from('/activos/crear')
-        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Y', 'tipo_control' => 'cantidad', 'tipo_activo_id' => $tipoAjeno->id])
+        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Y', 'tipo_control' => 'cantidad', 'tipo_activo_id' => $tipoInactivo->id])
         ->assertSessionHasErrors('tipo_activo_id');
+});
+
+it('un tipo de activo creado para una empresa puede usarse desde cualquier otra (catálogo global)', function () {
+    $empresa = Empresa::factory()->create();
+    $tipo = TipoActivo::factory()->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->from('/activos/crear')
+        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Y', 'tipo_control' => 'cantidad', 'tipo_activo_id' => $tipo->id])
+        ->assertSessionHasNoErrors();
+
+    expect(Activo::query()->where('nombre', 'Y')->first()?->tipo_activo_id)->toBe($tipo->id);
 });
 
 it('valida la imagen: rechaza un archivo que no es imagen', function () {
@@ -142,7 +268,7 @@ it('un rol restringido no puede ver ni editar un activo de una empresa fuera de 
 it('el detalle muestra las existencias por almacén y talla del activo', function () {
     $empresa = Empresa::factory()->create();
     $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
-    $talla = Talla::factory()->paraEmpresa($empresa)->create(['valor' => 'M']);
+    $talla = Talla::factory()->create(['valor' => 'M']);
     $activo = Activo::factory()->for($empresa)->create();
 
     SaldoInventario::factory()->create([

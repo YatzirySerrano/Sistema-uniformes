@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { Download, FileSignature, PenLine, Pencil } from '@lucide/vue';
+import { Download, FileSignature, PenLine, Pencil, Undo2 } from '@lucide/vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,13 +15,21 @@ const props = defineProps<{
         fecha_entrega: string;
         confirmada_en: string | null;
         notas: string | null;
+        empresa: string | null;
+        almacen: string | null;
         colaborador: {
             nombre_completo: string;
             numero_empleado: string;
         } | null;
         sucursal: string;
         encargado: string;
-        items: { activo: string; talla: string; cantidad: number }[];
+        items: {
+            activo: string;
+            talla: string | null;
+            cantidad: number;
+            unidad_codigo: string | null;
+            conjunto: string | null;
+        }[];
         correcciones: {
             id: number;
             motivo: string;
@@ -40,6 +48,7 @@ const props = defineProps<{
         corregir: boolean;
         ver_pdf: boolean;
         ver_firma: boolean;
+        devolver: boolean;
     };
 }>();
 
@@ -103,6 +112,11 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                     <Pencil class="size-4" /> Corregir entrega
                 </Link>
             </Button>
+            <Button v-if="permisos.devolver" variant="outline" as-child>
+                <Link :href="`/devoluciones/crear?entrega_id=${entrega.id}`">
+                    <Undo2 class="size-4" /> Devolver
+                </Link>
+            </Button>
         </div>
 
         <Card>
@@ -123,6 +137,12 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                 <p>
                     <span class="text-muted-foreground">Responsable:</span>
                     {{ entrega.encargado }}
+                </p>
+                <p>
+                    <span class="text-muted-foreground"
+                        >Almacén de origen:</span
+                    >
+                    {{ entrega.almacen }}
                 </p>
                 <p>
                     <span class="text-muted-foreground">Fecha de entrega:</span>
@@ -148,7 +168,8 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                     <thead class="text-muted-foreground text-left">
                         <tr>
                             <th class="py-1.5">Activo</th>
-                            <th class="py-1.5">Talla</th>
+                            <th class="py-1.5">Talla / unidad</th>
+                            <th class="py-1.5">Conjunto</th>
                             <th class="py-1.5 text-right">Cantidad</th>
                         </tr>
                     </thead>
@@ -159,7 +180,17 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                             class="border-t"
                         >
                             <td class="py-1.5">{{ it.activo }}</td>
-                            <td class="py-1.5">{{ it.talla }}</td>
+                            <td class="py-1.5">
+                                <span
+                                    v-if="it.unidad_codigo"
+                                    class="font-mono text-xs"
+                                    >{{ it.unidad_codigo }}</span
+                                >
+                                <span v-else>{{ it.talla ?? '—' }}</span>
+                            </td>
+                            <td class="text-muted-foreground py-1.5">
+                                {{ it.conjunto ?? '—' }}
+                            </td>
                             <td class="py-1.5 text-right">{{ it.cantidad }}</td>
                         </tr>
                     </tbody>

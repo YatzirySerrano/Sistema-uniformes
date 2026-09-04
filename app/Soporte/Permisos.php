@@ -101,6 +101,22 @@ final class Permisos
                 'inventario.transferir' => 'Transferir entre almacenes',
             ],
         ],
+        'unidades-activo' => [
+            'etiqueta' => 'Unidades de seguimiento individual',
+            'permisos' => [
+                'unidades-activo.ver' => 'Ver unidades y sus códigos',
+                'unidades-activo.administrar' => 'Registrar, corregir y dar de baja unidades',
+            ],
+        ],
+        'conjuntos' => [
+            'etiqueta' => 'Conjuntos',
+            'permisos' => [
+                'conjuntos.ver' => 'Ver conjuntos',
+                'conjuntos.crear' => 'Crear conjuntos',
+                'conjuntos.editar' => 'Editar conjuntos',
+                'conjuntos.administrar' => 'Activar / desactivar conjuntos',
+            ],
+        ],
         'entregas' => [
             'etiqueta' => 'Entregas',
             'permisos' => [
@@ -182,6 +198,8 @@ final class Permisos
                 'areas.ver', 'areas.crear', 'areas.editar',
                 'activos.ver',
                 'inventario.ver', 'inventario.entrada', 'inventario.minimos',
+                'unidades-activo.ver', 'unidades-activo.administrar',
+                'conjuntos.ver', 'conjuntos.crear', 'conjuntos.editar',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf', 'acuses.ver-firma',
                 'devoluciones.ver', 'devoluciones.crear',
@@ -193,6 +211,8 @@ final class Permisos
                 'almacenes.ver',
                 'activos.ver',
                 'inventario.ver',
+                'unidades-activo.ver',
+                'conjuntos.ver',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf',
                 'devoluciones.ver', 'devoluciones.crear',

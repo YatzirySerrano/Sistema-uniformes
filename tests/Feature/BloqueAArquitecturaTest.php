@@ -26,13 +26,11 @@ beforeEach(function () {
 
 /**
  * Crea un activo por cantidad con una variante, para la empresa dada. La
- * variante "M" del catálogo compartido se reutiliza y se habilita para cada
- * empresa que la pida (una sola fila `tallas`).
+ * variante "M" del catálogo global se reutiliza (una sola fila `tallas`).
  */
 function activoConVariante(Empresa $empresa, string $nombre = 'Camisola'): array
 {
     $talla = Talla::query()->firstOrCreate(['valor' => 'M'], ['orden' => 1, 'activa' => true]);
-    $talla->empresas()->syncWithoutDetaching([$empresa->id]);
     $activo = Activo::factory()->for($empresa)->create(['nombre' => $nombre, 'tipo_control' => 'cantidad']);
     $activo->tallas()->attach($talla);
 
@@ -87,8 +85,8 @@ it('4. una operación de la empresa A no puede consumir el stock de la empresa B
     $colaboradorA = Colaborador::factory()->for($a)->for($sucursalA)->create();
 
     expect(fn () => app(CrearEntregaUniforme::class)->ejecutar(
-        $a->id, $sucursalA->id, $colaboradorA->id, usuarioCon(RolSistema::Administrador->value)->id,
-        now()->toDateString(), [['activo_id' => $activoB->id, 'talla_id' => $tallaB->id, 'cantidad' => 1]],
+        $colaboradorA->id, $almacen->id, usuarioCon(RolSistema::Administrador->value)->id,
+        now()->toDateString(), [['activo_id' => $activoB->id, 'talla_id' => $tallaB->id, 'cantidad' => 1]], [], [],
     ))->toThrow(ExcepcionDeNegocio::class);
 
     expect(SaldoInventario::query()->where('empresa_id', $b->id)->sum('cantidad'))->toBe(50);
@@ -174,8 +172,8 @@ it('9. el puente de entregas resuelve el almacén por EMPRESA del colaborador', 
     app(RegistrarEntradaInventario::class)->ejecutar($empresa->id, $almacen->id, [['activo_id' => $activo->id, 'talla_id' => $talla->id, 'cantidad' => 10]], 'Alta', null);
 
     $entrega = app(CrearEntregaUniforme::class)->ejecutar(
-        $empresa->id, $sucursal->id, $colaborador->id, $encargado->id, now()->toDateString(),
-        [['activo_id' => $activo->id, 'talla_id' => $talla->id, 'cantidad' => 3]],
+        $colaborador->id, $almacen->id, $encargado->id, now()->toDateString(),
+        [['activo_id' => $activo->id, 'talla_id' => $talla->id, 'cantidad' => 3]], [], [],
     );
 
     expect($entrega->almacen_id)->toBe($almacen->id)

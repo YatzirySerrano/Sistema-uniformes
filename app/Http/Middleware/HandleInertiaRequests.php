@@ -61,6 +61,11 @@ class HandleInertiaRequests extends Middleware
             // que las siguientes respuestas sobrescriban el prop con null.
             'flash' => Inertia::always([
                 'toast' => $request->session()->pull('toast'),
+                // URL de un PDF (p. ej. etiquetas QR) a abrir tras una acción
+                // Inertia exitosa. Nunca se devuelve el PDF directamente en la
+                // respuesta de una petición Inertia (el cliente la renderizaría
+                // como si fuera una página) — ver `resources/js/lib/flashEtiquetas.ts`.
+                'etiquetasUrl' => $request->session()->pull('etiquetasUrl'),
             ]),
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
         ];

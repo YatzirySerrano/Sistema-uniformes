@@ -26,6 +26,7 @@ type OpcionCategoria = {
     tipo_activo_id: number | null;
     tipo?: string | null;
 };
+type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
 
 type Activo = {
     id: number;
@@ -33,7 +34,7 @@ type Activo = {
     categoria: string | null;
     codigo: string | null;
     tipo: string | null;
-    tipo_control: 'cantidad' | 'serializado';
+    tipo_control: 'cantidad' | 'individual';
     tipo_control_etiqueta: string;
     activo: boolean;
     imagen_url: string | null;
@@ -48,13 +49,15 @@ const props = defineProps<{
     filtrosSeleccion: {
         tipo: OpcionTipo | null;
         categoria: OpcionCategoria | null;
+        almacen: OpcionAlmacen | null;
     };
     filtros: {
         buscar: string;
         empresa_id: number | null;
         tipo_activo_id: number | '';
         categoria_id: number | '';
-        control: '' | 'cantidad' | 'serializado';
+        almacen_id: number | '';
+        control: '' | 'cantidad' | 'individual';
         estado: '' | 'activos' | 'inactivos';
         orden: 'az' | 'za';
     };
@@ -74,7 +77,8 @@ const buscar = ref(props.filtros.buscar);
 const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
 const tipoActivoId = ref<number | ''>(props.filtros.tipo_activo_id);
 const categoriaId = ref<number | ''>(props.filtros.categoria_id);
-const control = ref<'' | 'cantidad' | 'serializado'>(props.filtros.control);
+const almacenId = ref<number | ''>(props.filtros.almacen_id);
+const control = ref<'' | 'cantidad' | 'individual'>(props.filtros.control);
 const estado = ref<'' | 'activos' | 'inactivos'>(props.filtros.estado);
 const orden = ref<'az' | 'za'>(props.filtros.orden);
 
@@ -83,20 +87,18 @@ const tipoSel = ref<OpcionTipo | null>(props.filtrosSeleccion.tipo);
 const categoriaSel = ref<OpcionCategoria | null>(
     props.filtrosSeleccion.categoria,
 );
+const almacenSel = ref<OpcionAlmacen | null>(props.filtrosSeleccion.almacen);
 
+// Tipo y categoría son catálogos globales: no dependen de la empresa.
 async function buscarTipos(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionTipo[]> {
-    const emp = empresaId.value ? `&empresa_id=${empresaId.value}` : '';
-    const res = await fetch(
-        `/tipos-activo/buscar?q=${encodeURIComponent(q)}${emp}`,
-        {
-            headers: { Accept: 'application/json' },
-            credentials: 'same-origin',
-            signal,
-        },
-    );
+    const res = await fetch(`/tipos-activo/buscar?q=${encodeURIComponent(q)}`, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal,
+    });
     if (!res.ok) return [];
     return (await res.json()).tipos ?? [];
 }
@@ -105,12 +107,11 @@ async function buscarCategorias(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionCategoria[]> {
-    const emp = empresaId.value ? `&empresa_id=${empresaId.value}` : '';
     const tipo = tipoActivoId.value
         ? `&tipo_activo_id=${tipoActivoId.value}`
         : '';
     const res = await fetch(
-        `/categorias-activo/buscar?q=${encodeURIComponent(q)}${emp}${tipo}`,
+        `/categorias-activo/buscar?q=${encodeURIComponent(q)}${tipo}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -121,6 +122,25 @@ async function buscarCategorias(
     return (await res.json()).categorias ?? [];
 }
 
+// El almacén sí depende de la empresa (sólo tiene sentido dentro de las que
+// abastece).
+async function buscarAlmacenes(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionAlmacen[]> {
+    const emp = empresaId.value ? `&empresa_id=${empresaId.value}` : '';
+    const res = await fetch(
+        `/almacenes/buscar?q=${encodeURIComponent(q)}${emp}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).almacenes ?? [];
+}
+
 function alElegirTipo(o: OpcionTipo | null): void {
     tipoSel.value = o;
     tipoActivoId.value = o?.id ?? '';
@@ -129,13 +149,15 @@ function alElegirCategoria(o: OpcionCategoria | null): void {
     categoriaSel.value = o;
     categoriaId.value = o?.id ?? '';
 }
+function alElegirAlmacen(o: OpcionAlmacen | null): void {
+    almacenSel.value = o;
+    almacenId.value = o?.id ?? '';
+}
 
-// Cambiar de empresa invalida tipos / categorías (ids por empresa).
+// Cambiar de empresa invalida el almacén elegido (depende de ella).
 watch(empresaId, () => {
-    tipoSel.value = null;
-    tipoActivoId.value = '';
-    categoriaSel.value = null;
-    categoriaId.value = '';
+    almacenSel.value = null;
+    almacenId.value = '';
 });
 
 const hayFiltrosActivos = computed(
@@ -144,6 +166,7 @@ const hayFiltrosActivos = computed(
         empresaId.value !== '' ||
         tipoActivoId.value !== '' ||
         categoriaId.value !== '' ||
+        almacenId.value !== '' ||
         control.value !== '' ||
         estado.value !== '' ||
         orden.value !== 'az',
@@ -151,7 +174,16 @@ const hayFiltrosActivos = computed(
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
 watch(
-    [buscar, empresaId, tipoActivoId, categoriaId, control, estado, orden],
+    [
+        buscar,
+        empresaId,
+        tipoActivoId,
+        categoriaId,
+        almacenId,
+        control,
+        estado,
+        orden,
+    ],
     () => {
         clearTimeout(temporizador);
         temporizador = setTimeout(() => {
@@ -162,6 +194,7 @@ watch(
                     empresa_id: empresaId.value || undefined,
                     tipo_activo_id: tipoActivoId.value || undefined,
                     categoria_id: categoriaId.value || undefined,
+                    almacen_id: almacenId.value || undefined,
                     control: control.value || undefined,
                     estado: estado.value || undefined,
                     orden: orden.value === 'az' ? undefined : orden.value,
@@ -182,8 +215,10 @@ function limpiarFiltros(): void {
     empresaId.value = '';
     tipoActivoId.value = '';
     categoriaId.value = '';
+    almacenId.value = '';
     tipoSel.value = null;
     categoriaSel.value = null;
+    almacenSel.value = null;
     control.value = '';
     estado.value = '';
     orden.value = 'az';
@@ -268,7 +303,6 @@ function alternarEstado(a: Activo): void {
                         <BuscadorAsync
                             :model-value="tipoSel"
                             :buscar="buscarTipos"
-                            :dependencia="empresaId"
                             :etiqueta="(t) => (t as OpcionTipo).nombre"
                             placeholder="Todos"
                             placeholder-busqueda="Buscar tipo"
@@ -286,7 +320,7 @@ function alternarEstado(a: Activo): void {
                         <BuscadorAsync
                             :model-value="categoriaSel"
                             :buscar="buscarCategorias"
-                            :dependencia="`${empresaId}|${tipoActivoId}`"
+                            :dependencia="tipoActivoId"
                             :etiqueta="(c) => (c as OpcionCategoria).nombre"
                             :descripcion="
                                 (c) => (c as OpcionCategoria).tipo ?? 'Sin tipo'
@@ -305,6 +339,28 @@ function alternarEstado(a: Activo): void {
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Almacén</span>
+                    <div class="w-44">
+                        <BuscadorAsync
+                            :model-value="almacenSel"
+                            :buscar="buscarAlmacenes"
+                            :dependencia="empresaId"
+                            :etiqueta="(a) => (a as OpcionAlmacen).nombre"
+                            :descripcion="
+                                (a) => (a as OpcionAlmacen).codigo ?? ''
+                            "
+                            placeholder="Todos"
+                            placeholder-busqueda="Buscar almacén"
+                            sin-resultados="Sin almacenes"
+                            @update:model-value="
+                                (v) =>
+                                    alElegirAlmacen(v as OpcionAlmacen | null)
+                            "
+                        />
+                    </div>
+                </label>
+
+                <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Control</span>
                     <select
                         v-model="control"
@@ -313,7 +369,9 @@ function alternarEstado(a: Activo): void {
                     >
                         <option value="">Todos</option>
                         <option value="cantidad">Por cantidad</option>
-                        <option value="serializado">Serializado</option>
+                        <option value="individual">
+                            Seguimiento individual
+                        </option>
                     </select>
                 </label>
 

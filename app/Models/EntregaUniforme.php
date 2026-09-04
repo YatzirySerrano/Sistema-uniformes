@@ -71,6 +71,14 @@ class EntregaUniforme extends Model
     }
 
     /**
+     * @return BelongsTo<Almacen, $this>
+     */
+    public function almacen(): BelongsTo
+    {
+        return $this->belongsTo(Almacen::class);
+    }
+
+    /**
      * @return BelongsTo<User, $this>
      */
     public function encargado(): BelongsTo

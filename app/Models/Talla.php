@@ -11,9 +11,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 /**
  * Variante / talla del **catálogo compartido de plataforma** (S, M, 32, 36R,
- * Unitalla…). Ya no pertenece a una empresa: se **habilita por empresa** vía el
- * pivote `talla_empresa`. Un mismo valor ("M") es una sola fila reutilizada por
- * todas las empresas que lo habiliten; su stock sigue separado por
+ * Unitalla…). Es GLOBAL: visible para todas las empresas por igual, sin
+ * habilitación por empresa. Un mismo valor ("M") es una sola fila reutilizada
+ * por todas las empresas; su stock sigue separado por
  * `empresa + almacen + activo + talla`.
  *
  * El "sin variante" ya no es una fila comodín: es `talla_id = NULL` en el
@@ -65,21 +65,6 @@ class Talla extends Model
     }
 
     /**
-     * Empresas que tienen habilitada esta variante.
-     *
-     * @return BelongsToMany<Empresa, $this>
-     */
-    public function empresas(): BelongsToMany
-    {
-        return $this->belongsToMany(Empresa::class, 'talla_empresa')->withTimestamps();
-    }
-
-    public function habilitadaPara(int $empresaId): bool
-    {
-        return $this->empresas()->whereKey($empresaId)->exists();
-    }
-
-    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */
@@ -95,16 +80,5 @@ class Talla extends Model
     public function scopeOrdenadas(Builder $query): Builder
     {
         return $query->orderBy('orden')->orderBy('valor');
-    }
-
-    /**
-     * Variantes habilitadas para la empresa indicada.
-     *
-     * @param  Builder<static>  $query
-     * @return Builder<static>
-     */
-    public function scopeParaEmpresa(Builder $query, int $empresaId): Builder
-    {
-        return $query->whereHas('empresas', fn (Builder $q) => $q->whereKey($empresaId));
     }
 }

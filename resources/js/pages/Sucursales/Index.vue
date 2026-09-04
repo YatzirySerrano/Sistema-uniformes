@@ -17,6 +17,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import type { SucursalEditable } from '@/components/sucursales/FormularioSucursal.vue';
 import FormularioSucursal from '@/components/sucursales/FormularioSucursal.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -204,6 +205,10 @@ function alternarEstado(s: SucursalFila): void {
             descripcion="Ubicaciones de las empresas. Usa el filtro de empresa para acotar el listado."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/sucursales/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="permisos.crear" @click="nueva">
                     <Plus class="size-4" /> Nueva sucursal
                 </Button>

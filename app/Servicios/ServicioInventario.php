@@ -2,6 +2,7 @@
 
 namespace App\Servicios;
 
+use App\Enums\DireccionMovimiento;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
@@ -9,6 +10,7 @@ use App\Models\Almacen;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
+use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -117,6 +119,47 @@ class ServicioInventario
                 'ocurrido_en' => now(),
             ]);
         });
+    }
+
+    /**
+     * Movimiento de una UNIDAD de seguimiento individual (alta, baja, y en el
+     * futuro entrega/devolución). A diferencia de `registrarMovimiento()`, NO
+     * toca `saldos_inventario` — las unidades no tienen saldo agregado, cada
+     * objeto físico es su propia fila en `unidades_activo`. `talla_id` va
+     * siempre nulo; `cantidad = 1`.
+     */
+    public function registrarMovimientoUnidad(
+        UnidadActivo $unidad,
+        TipoMovimiento $tipo,
+        ?int $realizadoPor = null,
+        ?string $referenciaTipo = null,
+        ?int $referenciaId = null,
+        ?string $motivo = null,
+        ?string $notas = null,
+        ?int $sucursalId = null,
+    ): MovimientoInventario {
+        $direccion = $tipo->direccion();
+        $entra = $direccion === DireccionMovimiento::Entrada;
+
+        return MovimientoInventario::query()->create([
+            'empresa_id' => $unidad->empresa_id,
+            'almacen_id' => $unidad->almacen_id,
+            'sucursal_id' => $sucursalId,
+            'activo_id' => $unidad->activo_id,
+            'talla_id' => null,
+            'unidad_activo_id' => $unidad->id,
+            'tipo' => $tipo,
+            'direccion' => $direccion,
+            'cantidad' => 1,
+            'existencia_anterior' => $entra ? 0 : 1,
+            'existencia_resultante' => $entra ? 1 : 0,
+            'referencia_tipo' => $referenciaTipo,
+            'referencia_id' => $referenciaId,
+            'motivo' => $motivo,
+            'notas' => $notas,
+            'realizado_por' => $realizadoPor,
+            'ocurrido_en' => now(),
+        ]);
     }
 
     public function ajustarMinimo(int $empresaId, int $almacenId, int $activoId, ?int $tallaId, int $minimo): SaldoInventario

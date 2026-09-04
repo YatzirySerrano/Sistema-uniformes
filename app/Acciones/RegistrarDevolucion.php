@@ -3,129 +3,190 @@
 namespace App\Acciones;
 
 use App\Enums\CondicionDevolucion;
+use App\Enums\CondicionUnidadActivo;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
-use App\Models\Activo;
-use App\Models\Colaborador;
+use App\Models\DetalleDevolucion;
+use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
 use App\Models\Empresa;
 use App\Models\EntregaUniforme;
-use App\Models\Sucursal;
-use App\Models\Talla;
+use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
+use App\Servicios\ServicioUnidadesActivo;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Registra la devolución de activos por parte de un colaborador. Sólo los
- * activos marcados como reutilizables (y con reingreso habilitado) vuelven al
- * inventario disponible mediante un movimiento de tipo devolución.
+ * Registra la devolución de activos, SIEMPRE originada desde una entrega
+ * concreta. Cada renglón referencia el renglón real de esa entrega
+ * (`DetalleEntrega`) — nunca activo/talla sueltos — así se deriva la
+ * cantidad ya devuelta y se rechaza devolver más de lo pendiente. Las
+ * unidades de seguimiento individual vuelven a almacén según la condición
+ * resultante (`ServicioUnidadesActivo::devolver`); Perdido/Robado nunca pasa
+ * por aquí (son incidencias, `App\Acciones\MarcarUnidadIncidencia`).
  */
 class RegistrarDevolucion
 {
     public function __construct(
         private readonly ServicioInventario $inventario,
+        private readonly ServicioUnidadesActivo $unidadesActivo,
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
         private readonly ResolverAlmacenOperativo $resolverAlmacen,
     ) {}
 
     /**
-     * @param  array<int, array<string, mixed>>  $items
+     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}>  $activos
+     * @param  array<int, array{detalle_entrega_id: int|string, condicion: string}>  $unidades
      */
     public function ejecutar(
-        int $empresaId,
-        int $sucursalId,
-        int $colaboradorId,
-        ?int $entregaId,
+        int $entregaId,
+        int $almacenId,
         string $fecha,
-        array $items,
+        array $activos,
+        array $unidades,
         ?int $registradaPor,
         ?string $motivo = null,
         ?string $notas = null,
     ): Devolucion {
-        $sucursal = Sucursal::query()->where('empresa_id', $empresaId)->findOr($sucursalId, fn () => throw new ExcepcionDeNegocioSimple('La sucursal no pertenece a esta empresa.'));
-        $colaborador = Colaborador::query()->where('empresa_id', $empresaId)->findOr($colaboradorId, fn () => throw new ExcepcionDeNegocioSimple('El colaborador no pertenece a esta empresa.'));
+        $entrega = EntregaUniforme::query()->findOr($entregaId, fn () => throw new ExcepcionDeNegocioSimple('La entrega indicada no existe.'));
 
-        $entregaOrigen = null;
-        if ($entregaId !== null) {
-            $entregaOrigen = EntregaUniforme::query()->where('empresa_id', $empresaId)->where('colaborador_id', $colaboradorId)
-                ->findOr($entregaId, fn () => throw new ExcepcionDeNegocioSimple('La entrega indicada no corresponde a este colaborador.'));
+        $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($entrega->empresa_id), $almacenId);
+
+        if ($activos === [] && $unidades === []) {
+            throw new ExcepcionDeNegocioSimple('Agrega al menos un renglón a devolver.');
         }
 
-        // Destino de la devolución: por defecto el almacén de origen de la
-        // entrega si sigue disponible; si no, el abastecedor inequívoco de la
-        // empresa.
-        $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId), $entregaOrigen?->almacen_id);
-
-        $items = array_values(array_filter($items, fn ($i): bool => (int) $i['cantidad'] > 0));
-
-        if ($items === []) {
-            throw new ExcepcionDeNegocioSimple('Agrega al menos un activo a la devolución.');
-        }
-
-        $activos = Activo::query()->where('empresa_id', $empresaId)->whereIn('id', array_column($items, 'activo_id'))->pluck('id')->all();
-        $tallas = Talla::query()->paraEmpresa($empresaId)->whereIn('id', array_column($items, 'talla_id'))->pluck('id')->all();
-
-        return DB::transaction(function () use ($empresaId, $sucursal, $almacen, $colaborador, $entregaId, $fecha, $items, $registradaPor, $motivo, $notas, $activos, $tallas): Devolucion {
+        return DB::transaction(function () use ($entrega, $almacen, $activos, $unidades, $fecha, $registradaPor, $motivo, $notas): Devolucion {
             $devolucion = Devolucion::query()->create([
-                'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION, $empresaId),
-                'empresa_id' => $empresaId,
-                'sucursal_id' => $sucursal->getKey(),
+                'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION, $entrega->empresa_id),
+                'empresa_id' => $entrega->empresa_id,
+                'sucursal_id' => $entrega->sucursal_id,
                 'almacen_id' => $almacen->getKey(),
-                'colaborador_id' => $colaborador->getKey(),
-                'entrega_uniforme_id' => $entregaId,
+                'colaborador_id' => $entrega->colaborador_id,
+                'entrega_uniforme_id' => $entrega->getKey(),
                 'registrada_por' => $registradaPor,
                 'fecha' => $fecha,
                 'motivo' => $motivo,
                 'notas' => $notas,
             ]);
 
-            foreach ($items as $item) {
-                if (! in_array((int) $item['activo_id'], $activos, true) || ! in_array((int) $item['talla_id'], $tallas, true)) {
-                    throw new ExcepcionDeNegocioSimple('Un activo o talla seleccionado no pertenece a esta empresa.');
-                }
+            foreach ($activos as $item) {
+                $this->procesarLineaCantidad($devolucion, $entrega, $almacen->getKey(), $registradaPor, $item);
+            }
 
-                $condicion = CondicionDevolucion::tryFrom((string) ($item['condicion'] ?? 'reutilizable')) ?? CondicionDevolucion::Reutilizable;
-                $reingresa = $condicion->reingresaInventario();
-
-                $devolucion->detalles()->create([
-                    'activo_id' => (int) $item['activo_id'],
-                    'talla_id' => (int) $item['talla_id'],
-                    'cantidad' => (int) $item['cantidad'],
-                    'condicion' => $condicion,
-                    'reingresa_inventario' => $reingresa,
-                ]);
-
-                if ($reingresa) {
-                    $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-                        empresaId: $empresaId,
-                        almacenId: $almacen->getKey(),
-                        activoId: (int) $item['activo_id'],
-                        tallaId: (int) $item['talla_id'],
-                        tipo: TipoMovimiento::Devolucion,
-                        cantidad: (int) $item['cantidad'],
-                        realizadoPor: $registradaPor,
-                        referenciaTipo: Devolucion::class,
-                        referenciaId: $devolucion->getKey(),
-                        motivo: 'Devolución '.$devolucion->folio,
-                        sucursalId: $sucursal->getKey(),
-                    ));
-                }
+            foreach ($unidades as $item) {
+                $this->procesarLineaUnidad($devolucion, $entrega, $almacen->getKey(), $registradaPor, $item);
             }
 
             $this->auditoria->registrar('devoluciones', 'crear', [
                 'tipo_entidad' => Devolucion::class,
                 'entidad_id' => $devolucion->getKey(),
-                'empresa_id' => $empresaId,
-                'sucursal_id' => $sucursal->getKey(),
-                'descripcion' => 'Devolución '.$devolucion->folio.' registrada para '.$colaborador->nombre_completo,
+                'empresa_id' => $entrega->empresa_id,
+                'sucursal_id' => $entrega->sucursal_id,
+                'descripcion' => 'Devolución '.$devolucion->folio.' registrada para la entrega '.$entrega->folio,
             ]);
 
             return $devolucion->load('detalles');
         });
+    }
+
+    /**
+     * @param  array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}  $item
+     */
+    private function procesarLineaCantidad(Devolucion $devolucion, EntregaUniforme $entrega, int $almacenId, ?int $registradaPor, array $item): void
+    {
+        $detalleOriginal = DetalleEntrega::query()
+            ->where('entrega_uniforme_id', $entrega->getKey())
+            ->whereNull('unidad_activo_id')
+            ->lockForUpdate()
+            ->findOr((int) $item['detalle_entrega_id'], fn () => throw new ExcepcionDeNegocioSimple('Ese renglón no pertenece a esta entrega.'));
+
+        $cantidad = (int) $item['cantidad'];
+
+        if ($cantidad <= 0) {
+            return;
+        }
+
+        $yaDevuelto = (int) DetalleDevolucion::query()
+            ->where('detalle_entrega_id', $detalleOriginal->getKey())
+            ->sum('cantidad');
+        $pendiente = (int) $detalleOriginal->cantidad - $yaDevuelto;
+
+        if ($cantidad > $pendiente) {
+            throw new ExcepcionDeNegocioSimple(sprintf(
+                'Intentas devolver %d de %s, pero sólo quedan %d pendientes de esta entrega.',
+                $cantidad,
+                $detalleOriginal->activo_nombre_snapshot,
+                max($pendiente, 0),
+            ));
+        }
+
+        $condicion = CondicionDevolucion::from($item['condicion']);
+        $reingresa = $condicion->reingresaInventario();
+
+        $devolucion->detalles()->create([
+            'detalle_entrega_id' => $detalleOriginal->getKey(),
+            'activo_id' => $detalleOriginal->activo_id,
+            'talla_id' => $detalleOriginal->talla_id,
+            'cantidad' => $cantidad,
+            'condicion' => $condicion,
+            'reingresa_inventario' => $reingresa,
+        ]);
+
+        if ($reingresa) {
+            $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
+                empresaId: $entrega->empresa_id,
+                almacenId: $almacenId,
+                activoId: $detalleOriginal->activo_id,
+                tallaId: $detalleOriginal->talla_id,
+                tipo: TipoMovimiento::Devolucion,
+                cantidad: $cantidad,
+                realizadoPor: $registradaPor,
+                referenciaTipo: Devolucion::class,
+                referenciaId: $devolucion->getKey(),
+                motivo: 'Devolución '.$devolucion->folio,
+                sucursalId: $entrega->sucursal_id,
+            ));
+        }
+    }
+
+    /**
+     * @param  array{detalle_entrega_id: int|string, condicion: string}  $item
+     */
+    private function procesarLineaUnidad(Devolucion $devolucion, EntregaUniforme $entrega, int $almacenId, ?int $registradaPor, array $item): void
+    {
+        $detalleOriginal = DetalleEntrega::query()
+            ->where('entrega_uniforme_id', $entrega->getKey())
+            ->whereNotNull('unidad_activo_id')
+            ->findOr((int) $item['detalle_entrega_id'], fn () => throw new ExcepcionDeNegocioSimple('Esa unidad no pertenece a esta entrega.'));
+
+        $unidad = UnidadActivo::query()->whereKey($detalleOriginal->unidad_activo_id)->lockForUpdate()->firstOrFail();
+        $condicion = CondicionUnidadActivo::from($item['condicion']);
+
+        $devolucion->detalles()->create([
+            'detalle_entrega_id' => $detalleOriginal->getKey(),
+            'activo_id' => $detalleOriginal->activo_id,
+            'talla_id' => null,
+            'unidad_activo_id' => $unidad->getKey(),
+            'cantidad' => 1,
+            'condicion_unidad' => $condicion,
+            'reingresa_inventario' => false,
+        ]);
+
+        $this->unidadesActivo->devolver(
+            $unidad,
+            $condicion,
+            $almacenId,
+            $registradaPor,
+            Devolucion::class,
+            $devolucion->getKey(),
+            'Devolución '.$devolucion->folio,
+            $entrega->sucursal_id,
+        );
     }
 }

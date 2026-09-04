@@ -3,18 +3,23 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Areas\GuardarAreaRequest;
 use App\Models\Area;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class AreaController extends Controller
 {
     use ConEmpresa;
+    use ExportaListado;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -23,31 +28,10 @@ class AreaController extends Controller
         $this->authorize('viewAny', Area::class);
 
         $usuario = $request->user();
-        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
 
-        $filtros = $request->validate([
-            'buscar' => ['nullable', 'string', 'max:100'],
-            'estado' => ['nullable', 'in:activas,inactivas'],
-            'orden' => ['nullable', 'in:az,za'],
-        ]);
-
-        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
-
-        $areas = Area::query()
-            ->whereIn('empresa_id', $idsAutorizadas)
-            ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
-            ->with('empresa:id,nombre_comercial')
-            ->withCount(['colaboradores', 'colaboradoresActivos'])
-            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
-                $q->where(function (Builder $sub) use ($buscar): void {
-                    $sub->where('nombre', 'like', "%{$buscar}%")
-                        ->orWhere('codigo', 'like', "%{$buscar}%");
-                });
-            })
-            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
-            ->orderBy('nombre', $orden)
+        $areas = $this->consultaAreas($request, $filtros)
             ->paginate($this->porPagina())
             ->withQueryString()
             ->through(fn (Area $a): array => [
@@ -76,6 +60,96 @@ class AreaController extends Controller
                 'desactivar' => $usuario->can('areas.desactivar'),
             ],
         ]);
+    }
+
+    /**
+     * Excel/PDF del listado, respetando los mismos filtros que `index()`.
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', Area::class);
+
+        $filtros = $this->filtrosListado($request);
+        $areas = $this->consultaAreas($request, $filtros)->get();
+
+        $filas = $areas->map(fn (Area $a): array => [
+            $a->nombre,
+            $a->codigo,
+            $a->descripcion,
+            $a->activa ? 'Activa' : 'Inactiva',
+            $a->empresa?->nombre_comercial,
+            (int) $a->colaboradores_count,
+            (int) $a->colaboradores_activos_count,
+        ])->all();
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Nombre', 'Código', 'Descripción', 'Estado', 'Empresa', 'Colaboradores (total)', 'Colaboradores activos',
+        ], 'Áreas');
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'estado' => ['nullable', 'in:activas,inactivas'],
+            'orden' => ['nullable', 'in:az,za'],
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<Area>
+     */
+    private function consultaAreas(Request $request, array $filtros): Builder
+    {
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
+
+        return Area::query()
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
+            ->with('empresa:id,nombre_comercial')
+            ->withCount(['colaboradores', 'colaboradoresActivos'])
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
+                $q->where(function (Builder $sub) use ($buscar): void {
+                    $sub->where('nombre', 'like', "%{$buscar}%")
+                        ->orWhere('codigo', 'like', "%{$buscar}%");
+                });
+            })
+            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
+            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
+            ->orderBy('nombre', $orden);
+    }
+
+    /**
+     * Búsqueda con autocompletado de áreas de UNA empresa (BuscadorAsync,
+     * p. ej. alta de colaborador). Requiere `empresa_id`.
+     */
+    public function buscar(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Area::class);
+
+        $empresa = $this->empresaDelFiltro($request);
+
+        if ($empresa === null) {
+            return response()->json(['areas' => []]);
+        }
+
+        $termino = trim((string) $request->query('q', ''));
+
+        $areas = Area::query()
+            ->where('empresa_id', $empresa->id)
+            ->where('activa', true)
+            ->when($termino !== '', fn (Builder $q) => $q->where('nombre', 'like', "%{$termino}%"))
+            ->orderBy('nombre')
+            ->limit(20)
+            ->get(['id', 'nombre']);
+
+        return response()->json(['areas' => $areas]);
     }
 
     public function show(Request $request, Area $area): Response
