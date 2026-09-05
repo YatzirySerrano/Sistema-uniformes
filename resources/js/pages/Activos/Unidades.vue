@@ -11,6 +11,7 @@ import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Unidad = {
@@ -24,6 +25,8 @@ type Unidad = {
     estado_etiqueta: string;
     condicion: string;
     condicion_etiqueta: string;
+    estado_visible: string;
+    estado_visible_etiqueta: string;
     entregable: boolean;
 };
 
@@ -34,6 +37,7 @@ const props = defineProps<{
         total: number;
     };
     empresasAutorizadas: EmpresaAutorizada[];
+    estadosVisibles: { valor: string; etiqueta: string }[];
     filtros: {
         buscar: string;
         empresa_id: number | null;
@@ -41,6 +45,7 @@ const props = defineProps<{
         almacen_id: number | '';
         estado: string;
         condicion: string;
+        estado_visible: string;
     };
     permisos: { administrar: boolean };
 }>();
@@ -62,6 +67,7 @@ const empresaSeleccionada = ref<EmpresaAutorizada | null>(
 const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado);
 const condicion = ref(props.filtros.condicion);
+const estadoVisible = ref(props.filtros.estado_visible);
 
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
@@ -76,11 +82,12 @@ const hayFiltros = computed(
         buscar.value !== '' ||
         empresaId.value !== '' ||
         estado.value !== '' ||
-        condicion.value !== '',
+        condicion.value !== '' ||
+        estadoVisible.value !== '',
 );
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
-watch([buscar, empresaId, estado, condicion], () => {
+watch([buscar, empresaId, estado, condicion, estadoVisible], () => {
     clearTimeout(temporizador);
     temporizador = setTimeout(() => {
         router.get(
@@ -90,6 +97,7 @@ watch([buscar, empresaId, estado, condicion], () => {
                 empresa_id: empresaId.value || undefined,
                 estado: estado.value || undefined,
                 condicion: condicion.value || undefined,
+                estado_visible: estadoVisible.value || undefined,
             },
             {
                 preserveState: true,
@@ -106,6 +114,7 @@ function limpiarFiltros(): void {
     empresaSeleccionada.value = null;
     estado.value = '';
     condicion.value = '';
+    estadoVisible.value = '';
 }
 
 const idsSeleccionados = ref<number[]>([]);
@@ -181,9 +190,22 @@ function generarEtiquetas(): void {
                     <span class="text-muted-foreground">Estado</span>
                     <div class="w-40">
                         <SelectSimple
-                            v-model="estado"
+                            v-model="estadoVisible"
                             :opciones="[
                                 { valor: '', etiqueta: 'Todos' },
+                                ...estadosVisibles,
+                            ]"
+                        />
+                    </div>
+                </label>
+
+                <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Posesión</span>
+                    <div class="w-40">
+                        <SelectSimple
+                            v-model="estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todas' },
                                 { valor: 'en_almacen', etiqueta: 'En almacén' },
                                 { valor: 'asignada', etiqueta: 'Asignada' },
                                 { valor: 'baja', etiqueta: 'Baja' },
@@ -271,12 +293,17 @@ function generarEtiquetas(): void {
 
                 <div class="flex flex-wrap gap-1.5">
                     <Badge
-                        :variant="u.entregable ? 'default' : 'secondary'"
+                        variant="outline"
                         class="text-xs"
+                        :class="claseEstadoVisibleUnidad(u.estado_visible)"
                     >
-                        {{ u.estado_etiqueta }}
+                        {{ u.estado_visible_etiqueta }}
                     </Badge>
-                    <Badge variant="outline" class="text-xs">
+                    <Badge
+                        v-if="u.condicion !== 'funcionando'"
+                        variant="outline"
+                        class="text-muted-foreground text-xs"
+                    >
                         {{ u.condicion_etiqueta }}
                     </Badge>
                 </div>

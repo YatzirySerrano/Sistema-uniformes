@@ -10,9 +10,12 @@ import {
     LayoutGrid,
     Network,
     Package,
+    Palette,
+    Ruler,
     ScrollText,
     ShieldCheck,
     Store,
+    Tags,
     Undo2,
     UserCog,
     Users,
@@ -60,8 +63,23 @@ const grupos = computed<Grupo[]>(() =>
             ],
         },
         {
-            titulo: 'Personal',
+            titulo: 'Organización',
             enlaces: [
+                {
+                    titulo: 'Empresas',
+                    href: '/empresas',
+                    icono: Building,
+                    visible: puede([
+                        'empresas.ver',
+                        'configuracion-empresa.ver',
+                    ]),
+                },
+                {
+                    titulo: 'Sucursales',
+                    href: '/sucursales',
+                    icono: Store,
+                    visible: puede('sucursales.ver'),
+                },
                 {
                     titulo: 'Colaboradores',
                     href: '/colaboradores',
@@ -77,7 +95,7 @@ const grupos = computed<Grupo[]>(() =>
             ],
         },
         {
-            titulo: 'Catálogo e inventario',
+            titulo: 'Inventario y activos',
             enlaces: [
                 {
                     titulo: 'Activos',
@@ -109,6 +127,18 @@ const grupos = computed<Grupo[]>(() =>
                     icono: ArrowLeftRight,
                     visible: puede('inventario.ver'),
                 },
+                {
+                    titulo: 'Tipos y categorías',
+                    href: '/activos-catalogos',
+                    icono: Tags,
+                    visible: puede('activos.ver'),
+                },
+                {
+                    titulo: 'Variantes / tallas',
+                    href: '/tallas',
+                    icono: Ruler,
+                    visible: puede('activos.ver'),
+                },
             ],
         },
         {
@@ -129,7 +159,7 @@ const grupos = computed<Grupo[]>(() =>
             ],
         },
         {
-            titulo: null,
+            titulo: 'Análisis',
             enlaces: [
                 {
                     titulo: 'Reportes',
@@ -137,26 +167,17 @@ const grupos = computed<Grupo[]>(() =>
                     icono: FileBarChart2,
                     visible: puede('reportes.ver'),
                 },
+                {
+                    titulo: 'Auditoría',
+                    href: '/auditoria',
+                    icono: ScrollText,
+                    visible: puede('auditoria.ver'),
+                },
             ],
         },
         {
             titulo: 'Administración',
             enlaces: [
-                {
-                    titulo: 'Empresas',
-                    href: '/empresas',
-                    icono: Building,
-                    visible: puede([
-                        'empresas.ver',
-                        'configuracion-empresa.ver',
-                    ]),
-                },
-                {
-                    titulo: 'Sucursales',
-                    href: '/sucursales',
-                    icono: Store,
-                    visible: puede('sucursales.ver'),
-                },
                 {
                     titulo: 'Usuarios',
                     href: '/usuarios',
@@ -169,17 +190,20 @@ const grupos = computed<Grupo[]>(() =>
                     icono: ShieldCheck,
                     visible: puede('roles.ver'),
                 },
+                {
+                    titulo: 'Configuración',
+                    href: '/configuracion',
+                    icono: Palette,
+                    visible: puede([
+                        'configuracion.ver',
+                        'configuracion.administrar',
+                    ]),
+                },
             ],
         },
         {
             titulo: null,
             enlaces: [
-                {
-                    titulo: 'Auditoría',
-                    href: '/auditoria',
-                    icono: ScrollText,
-                    visible: puede('auditoria.ver'),
-                },
                 {
                     titulo: 'Mis entregas',
                     href: '/portal/mis-entregas',

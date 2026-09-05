@@ -16,6 +16,7 @@ defineOptions({
     layout: {
         title: 'Inicia sesión en tu cuenta',
         description: 'Ingresa tu correo y contraseña para acceder',
+        variant: 'split',
     },
 });
 

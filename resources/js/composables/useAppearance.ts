@@ -1,5 +1,6 @@
 import type { ComputedRef, Ref } from 'vue';
 import { computed, onMounted, ref } from 'vue';
+import { reaplicarTemaVisual } from '@/lib/temaVisual';
 import type { Appearance, ResolvedAppearance } from '@/types';
 
 export type { Appearance, ResolvedAppearance };
@@ -28,6 +29,8 @@ export function updateTheme(value: Appearance): void {
     } else {
         document.documentElement.classList.toggle('dark', value === 'dark');
     }
+
+    reaplicarTemaVisual();
 }
 
 const setCookie = (name: string, value: string, days = 365) => {

@@ -227,6 +227,34 @@ it('el listado de unidades filtra por empresa, almacén y estado', function () {
         ->assertInertia(fn ($page) => $page->component('Activos/Unidades')->has('unidades.data', 1));
 });
 
+it('el listado expone el estado visible consolidado y permite filtrar por él', function () {
+    UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+    UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->asignada()->create();
+    UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)
+        ->create(['condicion' => CondicionUnidadActivo::Inservible]);
+    UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->baja()->create();
+
+    $this->actingAs($this->admin)
+        ->get('/activos/unidades')
+        ->assertInertia(fn ($page) => $page->component('Activos/Unidades')
+            ->has('unidades.data', 4)
+            ->where('unidades.data.0.estado_visible', 'baja')
+        );
+
+    // "Inservible" se agrupa como Reparación en el filtro visible, sin tocar
+    // la columna `condicion` real.
+    $this->actingAs($this->admin)
+        ->get('/activos/unidades?estado_visible=reparacion')
+        ->assertInertia(fn ($page) => $page
+            ->has('unidades.data', 1)
+            ->where('unidades.data.0.condicion', 'inservible')
+        );
+
+    $this->actingAs($this->admin)
+        ->get('/activos/unidades?estado_visible=disponible')
+        ->assertInertia(fn ($page) => $page->has('unidades.data', 1));
+});
+
 it('genera un PDF de etiquetas para las unidades seleccionadas, con las cabeceras y el contenido correctos', function () {
     $unidades = app(RegistrarUnidadesActivo::class)->ejecutar($this->empresa, $this->activo, $this->almacen, 2, 'x', null);
     $ids = $unidades->pluck('id')->implode(',');

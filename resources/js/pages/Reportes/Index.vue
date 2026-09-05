@@ -3,6 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { Download } from '@lucide/vue';
 import { reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
@@ -50,8 +51,8 @@ const f = reactive({
     empresa_id: props.filtros.empresa_id ?? '',
     estado: String(props.filtros.estado ?? ''),
     firmado: props.filtros.firmado ?? '',
-    desde: props.filtros.desde ?? '',
-    hasta: props.filtros.hasta ?? '',
+    desde: String(props.filtros.desde ?? ''),
+    hasta: String(props.filtros.hasta ?? ''),
     solo_bajo_minimo: !!props.filtros.solo_bajo_minimo,
 });
 
@@ -151,16 +152,12 @@ function urlExport(formato: string) {
                             ]"
                         />
                     </div>
-                    <input
-                        v-model="f.desde"
-                        type="date"
-                        class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                    />
-                    <input
-                        v-model="f.hasta"
-                        type="date"
-                        class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                    />
+                    <div class="w-40">
+                        <DatePicker v-model="f.desde" placeholder="Desde" />
+                    </div>
+                    <div class="w-40">
+                        <DatePicker v-model="f.hasta" placeholder="Hasta" />
+                    </div>
                 </template>
                 <label v-else class="flex items-center gap-2 text-sm">
                     <input

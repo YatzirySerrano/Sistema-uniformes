@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\ConfiguracionSistema;
 use App\Soporte\AccesoEmpresa;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -25,6 +26,7 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $usuario = $request->user();
+        $configuracionVisual = ConfiguracionSistema::actual();
 
         $empresasAutorizadas = $usuario === null
             ? []
@@ -54,6 +56,14 @@ class HandleInertiaRequests extends Middleware
             // contexto de empresa se elige en cada formulario / filtro. Esta
             // lista alimenta esos combobox en el cliente.
             'empresasAutorizadas' => $empresasAutorizadas,
+            // Personalización visual GLOBAL (nunca por empresa): custom
+            // properties CSS aplicadas en el cliente tras cada navegación /
+            // guardado, además del <style> ya renderizado por el servidor en
+            // app.blade.php para el primer pintado (sin parpadeo).
+            'temaVisual' => [
+                'claro' => $configuracionVisual->variablesClaro(),
+                'oscuro' => $configuracionVisual->variablesOscuro(),
+            ],
             // Inertia::always: sin esto, un partial reload (p. ej. cambiar un
             // filtro con `only`) no incluye 'flash' en la respuesta y el
             // cliente conserva el toast anterior en memoria, reapareciendo en

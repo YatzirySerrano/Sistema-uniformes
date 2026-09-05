@@ -30,6 +30,25 @@
             }
         </style>
 
+        {{-- Personalización visual GLOBAL: custom properties calculadas en
+        el servidor para que el primer pintado ya use los colores
+        configurados, sin parpadeo. `resources/js/lib/temaVisual.ts` toma el
+        relevo en el cliente tras cada guardado / navegación. --}}
+        @php($temaVisual = \App\Models\ConfiguracionSistema::actual())
+        <style>
+            :root {
+                @foreach ($temaVisual->variablesClaro() as $variable => $valor)
+                    {{ $variable }}: {{ $valor }};
+                @endforeach
+            }
+
+            .dark {
+                @foreach ($temaVisual->variablesOscuro() as $variable => $valor)
+                    {{ $variable }}: {{ $valor }};
+                @endforeach
+            }
+        </style>
+
         <link rel="icon" href="/favicon.ico" sizes="any">
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">

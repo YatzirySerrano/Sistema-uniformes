@@ -154,11 +154,18 @@ final class Permisos
                 'auditoria.ver' => 'Ver la bitácora de auditoría',
             ],
         ],
-        'configuracion' => [
-            'etiqueta' => 'Personalización de empresa',
+        'configuracion-empresa' => [
+            'etiqueta' => 'Datos administrativos de empresa',
             'permisos' => [
-                'configuracion-empresa.ver' => 'Ver la personalización de la empresa',
-                'configuracion-empresa.editar' => 'Editar branding y datos de la empresa',
+                'configuracion-empresa.ver' => 'Ver los datos administrativos de la empresa',
+                'configuracion-empresa.editar' => 'Editar datos administrativos de la empresa',
+            ],
+        ],
+        'configuracion' => [
+            'etiqueta' => 'Configuración del sistema',
+            'permisos' => [
+                'configuracion.ver' => 'Ver la configuración global del sistema',
+                'configuracion.administrar' => 'Editar la personalización visual global del sistema',
             ],
         ],
     ];

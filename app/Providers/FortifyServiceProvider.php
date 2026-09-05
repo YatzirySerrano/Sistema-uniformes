@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Actions\Fortify\ResetUserPassword;
+use App\Http\Responses\Fortify\SolicitudRecuperacionExitosaResponse;
+use App\Http\Responses\Fortify\SolicitudRecuperacionFallidaResponse;
 use App\Models\User;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -15,6 +17,8 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
+use Laravel\Fortify\Contracts\FailedPasswordResetLinkRequestResponse;
+use Laravel\Fortify\Contracts\SuccessfulPasswordResetLinkRequestResponse;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
 
@@ -25,7 +29,10 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Recuperación de contraseña sin enumeración de correos: éxito y
+        // "correo no existe" responden exactamente igual de cara al usuario.
+        $this->app->bind(SuccessfulPasswordResetLinkRequestResponse::class, SolicitudRecuperacionExitosaResponse::class);
+        $this->app->bind(FailedPasswordResetLinkRequestResponse::class, SolicitudRecuperacionFallidaResponse::class);
     }
 
     /**

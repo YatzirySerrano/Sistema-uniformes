@@ -6,7 +6,6 @@ import {
     Hash,
     Mail,
     MapPin,
-    Palette,
     Pencil,
     Phone,
     Power,
@@ -31,9 +30,6 @@ import {
 } from '@/components/ui/dialog';
 
 type EmpresaDetalle = EmpresaEditable & {
-    color_principal: string;
-    color_secundario: string;
-    color_acento: string;
     logo_url: string | null;
     sucursales_total: number;
     sucursales_activas: number;
@@ -45,7 +41,6 @@ const props = defineProps<{
     empresa: EmpresaDetalle;
     puedeEditar: boolean;
     puedeCambiarEstado: boolean;
-    puedePersonalizar: boolean;
     suspendidos: {
         id: number;
         tipo: string;
@@ -89,12 +84,6 @@ const telefonoLegible = computed(() => {
         ? `${t.slice(0, 2)} ${t.slice(2, 6)} ${t.slice(6)}`
         : t;
 });
-
-const colores = computed(() => [
-    { nombre: 'Principal', valor: props.empresa.color_principal },
-    { nombre: 'Secundario', valor: props.empresa.color_secundario },
-    { nombre: 'Acento', valor: props.empresa.color_acento },
-]);
 
 function abrirEditar(): void {
     claveFormulario.value++;
@@ -145,8 +134,7 @@ function irA(ruta: string): void {
         >
             <div class="flex min-w-0 items-center gap-3">
                 <span
-                    class="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border"
-                    :style="{ background: empresa.color_principal }"
+                    class="bg-muted flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border"
                 >
                     <img
                         v-if="empresa.logo_url"
@@ -154,10 +142,7 @@ function irA(ruta: string): void {
                         :alt="`Logotipo de ${empresa.nombre_comercial}`"
                         class="size-full object-contain"
                     />
-                    <Building2
-                        v-else
-                        class="size-6 text-white mix-blend-difference"
-                    />
+                    <Building2 v-else class="text-muted-foreground size-6" />
                 </span>
                 <div class="min-w-0">
                     <h1 class="truncate text-xl font-semibold tracking-tight">
@@ -374,64 +359,6 @@ function irA(ruta: string): void {
                     empresa.
                 </p>
             </section>
-
-            <!-- Identidad -->
-            <section class="rounded-xl border p-4">
-                <div class="mb-3 flex items-center justify-between gap-2">
-                    <h2 class="flex items-center gap-2 text-sm font-semibold">
-                        <Palette class="text-muted-foreground size-4" />
-                        Identidad
-                        <AyudaTooltip
-                            texto="Logotipo y colores con los que se identifica visualmente esta empresa. Se editan en Personalización."
-                            etiqueta="Ayuda sobre la identidad de la empresa"
-                        />
-                    </h2>
-                    <Button
-                        v-if="puedePersonalizar"
-                        variant="outline"
-                        size="sm"
-                        :disabled="navegando"
-                        @click="irA('/personalizacion')"
-                    >
-                        <Palette class="size-3.5" /> Personalizar empresa
-                    </Button>
-                </div>
-                <div class="flex items-center gap-4">
-                    <span
-                        class="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border"
-                        :style="{ background: empresa.color_principal }"
-                    >
-                        <img
-                            v-if="empresa.logo_url"
-                            :src="empresa.logo_url"
-                            :alt="`Logotipo de ${empresa.nombre_comercial}`"
-                            class="size-full object-contain"
-                        />
-                        <Building2
-                            v-else
-                            class="size-6 text-white mix-blend-difference"
-                        />
-                    </span>
-                    <ul class="grid flex-1 gap-2">
-                        <li
-                            v-for="c in colores"
-                            :key="c.nombre"
-                            class="flex items-center gap-2 text-sm"
-                        >
-                            <span
-                                class="size-5 shrink-0 rounded border"
-                                :style="{ background: c.valor }"
-                            />
-                            <span class="text-muted-foreground">{{
-                                c.nombre
-                            }}</span>
-                            <span class="ml-auto font-mono text-xs uppercase">{{
-                                c.valor
-                            }}</span>
-                        </li>
-                    </ul>
-                </div>
-            </section>
         </div>
 
         <PanelSuspendidos
@@ -454,6 +381,7 @@ function irA(ruta: string): void {
                 <FormularioEmpresa
                     :key="claveFormulario"
                     :empresa="empresaEditable"
+                    :logo-url-actual="empresa.logo_url"
                     @guardado="alGuardar"
                     @cancelar="modalEditar = false"
                 />

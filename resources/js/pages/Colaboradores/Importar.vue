@@ -130,9 +130,11 @@ const urlPlantilla = () =>
                 <SubidaArchivo
                     v-model="archivo"
                     tipo="documento"
+                    tamano="large"
                     accept=".xlsx,.xls,.csv"
                     formatos-etiqueta="Formatos aceptados: XLSX, XLS o CSV."
                     :invalido="!!form.errors.archivo"
+                    :cargando="form.processing"
                 />
                 <InputError :message="form.errors.archivo" />
                 <Button

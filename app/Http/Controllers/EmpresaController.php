@@ -59,7 +59,6 @@ class EmpresaController extends Controller
                 'activa' => $e->activa,
                 'sucursales_activas' => (int) $e->sucursales_activas_count,
                 'colaboradores_activos' => (int) $e->colaboradores_activos_count,
-                'color_principal' => $e->color_principal,
                 'logo_url' => $this->logoUrl($e),
             ]);
 
@@ -199,7 +198,6 @@ class EmpresaController extends Controller
                 ...$empresa->only([
                     'id', 'codigo', 'nombre_comercial', 'razon_social', 'rfc',
                     'telefono', 'correo', 'direccion', 'activa',
-                    'color_principal', 'color_secundario', 'color_acento',
                 ]),
                 'logo_url' => $this->logoUrl($empresa),
                 'sucursales_total' => (int) $empresa->sucursales_count,
@@ -209,7 +207,6 @@ class EmpresaController extends Controller
             ],
             'puedeEditar' => $request->user()->can('update', $empresa),
             'puedeCambiarEstado' => $request->user()->can('cambiarEstado', $empresa),
-            'puedePersonalizar' => $request->user()->can('personalizar', $empresa),
             'suspendidos' => $this->cascada->paraVista($this->cascada->checklistDe($empresa)),
         ]);
     }
@@ -251,7 +248,17 @@ class EmpresaController extends Controller
     public function update(GuardarEmpresaRequest $request, Empresa $empresa): RedirectResponse
     {
         $anteriores = $empresa->toArray();
-        $empresa->update($request->validated());
+
+        $empresa->fill($request->safe()->except('logo'));
+
+        if ($request->hasFile('logo')) {
+            if ($empresa->logo_ruta) {
+                Storage::disk('public')->delete($empresa->logo_ruta);
+            }
+            $empresa->logo_ruta = $request->file('logo')->store("empresas/{$empresa->id}", 'public') ?: null;
+        }
+
+        $empresa->save();
 
         $this->auditoria->registrar('empresas', 'editar', [
             'empresa_id' => $empresa->id,

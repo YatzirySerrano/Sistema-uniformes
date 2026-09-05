@@ -137,46 +137,4 @@ class Empresa extends Model
     {
         return $query->where('activa', true);
     }
-
-    /**
-     * Paleta de marca lista para inyectar como CSS custom properties.
-     *
-     * @return array<string, string>
-     */
-    public function tokensDeMarca(): array
-    {
-        return [
-            '--marca-principal' => $this->color_principal,
-            '--marca-principal-texto' => self::colorContrastante($this->color_principal),
-            '--marca-secundaria' => $this->color_secundario,
-            '--marca-secundaria-texto' => self::colorContrastante($this->color_secundario),
-            '--marca-acento' => $this->color_acento,
-            '--marca-acento-texto' => self::colorContrastante($this->color_acento),
-        ];
-    }
-
-    /**
-     * Devuelve #ffffff o #0f172a según la luminancia del color de fondo para
-     * mantener contraste legible (WCAG aproximado).
-     */
-    public static function colorContrastante(string $hex): string
-    {
-        $hex = ltrim($hex, '#');
-
-        if (strlen($hex) === 3) {
-            $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
-        }
-
-        if (strlen($hex) !== 6 || ! ctype_xdigit($hex)) {
-            return '#0f172a';
-        }
-
-        $r = hexdec(substr($hex, 0, 2)) / 255;
-        $g = hexdec(substr($hex, 2, 2)) / 255;
-        $b = hexdec(substr($hex, 4, 2)) / 255;
-
-        $luminancia = 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
-
-        return $luminancia > 0.55 ? '#0f172a' : '#ffffff';
-    }
 }

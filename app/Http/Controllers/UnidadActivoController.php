@@ -7,6 +7,7 @@ use App\Acciones\MarcarUnidadIncidencia;
 use App\Acciones\RecuperarUnidadActivo;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\EstadoVisibleUnidad;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Activos\DarDeBajaUnidadRequest;
@@ -61,6 +62,8 @@ class UnidadActivoController extends Controller
                 'estado_etiqueta' => $u->estado->etiqueta(),
                 'condicion' => $u->condicion->value,
                 'condicion_etiqueta' => $u->condicion->etiqueta(),
+                'estado_visible' => $u->estadoVisible()->value,
+                'estado_visible_etiqueta' => $u->estadoVisible()->etiqueta(),
                 'entregable' => $u->esEntregable(),
             ]);
 
@@ -74,7 +77,10 @@ class UnidadActivoController extends Controller
                 'almacen_id' => $filtros['almacen_id'] ?? '',
                 'estado' => $filtros['estado'] ?? '',
                 'condicion' => $filtros['condicion'] ?? '',
+                'estado_visible' => $filtros['estado_visible'] ?? '',
             ],
+            'estadosVisibles' => collect(EstadoVisibleUnidad::cases())
+                ->map(fn (EstadoVisibleUnidad $e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
             'permisos' => [
                 'administrar' => $request->user()->can('unidades-activo.administrar'),
             ],
@@ -96,12 +102,13 @@ class UnidadActivoController extends Controller
             $u->activo?->nombre,
             $u->almacen?->nombre,
             $u->colaborador?->nombre_completo,
+            $u->estadoVisible()->etiqueta(),
             $u->estado->etiqueta(),
             $u->condicion->etiqueta(),
         ])->all();
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'Código', 'Activo', 'Almacén', 'Colaborador', 'Estado', 'Condición',
+            'Código', 'Activo', 'Almacén', 'Colaborador', 'Estado', 'Posesión', 'Condición',
         ], 'Unidades identificadas');
     }
 
@@ -116,6 +123,7 @@ class UnidadActivoController extends Controller
             'almacen_id' => ['nullable', 'integer'],
             'estado' => ['nullable', Rule::enum(EstadoUnidadActivo::class)],
             'condicion' => ['nullable', Rule::enum(CondicionUnidadActivo::class)],
+            'estado_visible' => ['nullable', Rule::enum(EstadoVisibleUnidad::class)],
         ]);
     }
 
@@ -142,7 +150,33 @@ class UnidadActivoController extends Controller
             ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $v) => $q->where('almacen_id', $v))
             ->when($filtros['estado'] ?? null, fn (Builder $q, $v) => $q->where('estado', $v))
             ->when($filtros['condicion'] ?? null, fn (Builder $q, $v) => $q->where('condicion', $v))
+            ->when($filtros['estado_visible'] ?? null, fn (Builder $q, $v) => $this->aplicarFiltroEstadoVisible($q, $v))
             ->orderByDesc('id');
+    }
+
+    /**
+     * Traduce el estado VISIBLE consolidado (ver `EstadoVisibleUnidad`) a
+     * condiciones SQL sobre las columnas reales `estado`/`condicion`, con la
+     * misma prioridad que `UnidadActivo::estadoVisible()` — nunca al revés,
+     * para no tener dos fuentes de verdad del mismo cálculo.
+     *
+     * @param  Builder<UnidadActivo>  $q
+     */
+    private function aplicarFiltroEstadoVisible(Builder $q, string $valor): void
+    {
+        match (EstadoVisibleUnidad::from($valor)) {
+            EstadoVisibleUnidad::Baja => $q->where('estado', EstadoUnidadActivo::Baja),
+            EstadoVisibleUnidad::Robado => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->where('condicion', CondicionUnidadActivo::Robado),
+            EstadoVisibleUnidad::Perdido => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->where('condicion', CondicionUnidadActivo::Perdido),
+            EstadoVisibleUnidad::Reparacion => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->whereIn('condicion', [CondicionUnidadActivo::EnReparacion, CondicionUnidadActivo::Inservible]),
+            EstadoVisibleUnidad::Asignado => $q->where('estado', EstadoUnidadActivo::Asignada)
+                ->where('condicion', CondicionUnidadActivo::Funcionando),
+            EstadoVisibleUnidad::Disponible => $q->where('estado', EstadoUnidadActivo::EnAlmacen)
+                ->where('condicion', CondicionUnidadActivo::Funcionando),
+        };
     }
 
     public function show(Request $request, UnidadActivo $unidad): Response
@@ -170,6 +204,9 @@ class UnidadActivoController extends Controller
                 'estado_etiqueta' => $unidad->estado->etiqueta(),
                 'condicion' => $unidad->condicion->value,
                 'condicion_etiqueta' => $unidad->condicion->etiqueta(),
+                'estado_visible' => $unidad->estadoVisible()->value,
+                'estado_visible_etiqueta' => $unidad->estadoVisible()->etiqueta(),
+                'estado_visible_descripcion' => $unidad->estadoVisible()->descripcion(),
                 'observaciones' => $unidad->observaciones,
                 'motivo_baja' => $unidad->motivo_baja,
                 'dado_de_baja_en' => $unidad->dado_de_baja_en?->toDateTimeString(),

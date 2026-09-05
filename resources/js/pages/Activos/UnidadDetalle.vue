@@ -14,6 +14,7 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import InputError from '@/components/InputError.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
+import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -37,6 +38,9 @@ const props = defineProps<{
         estado_etiqueta: string;
         condicion: string;
         condicion_etiqueta: string;
+        estado_visible: string;
+        estado_visible_etiqueta: string;
+        estado_visible_descripcion: string;
         observaciones: string | null;
         motivo_baja: string | null;
         dado_de_baja_en: string | null;
@@ -171,11 +175,23 @@ function darDeBaja(): void {
                     {{ unidad.activo.nombre }}
                 </p>
                 <div class="mt-1.5 flex flex-wrap items-center gap-2">
-                    <Badge>{{ unidad.estado_etiqueta }}</Badge>
-                    <Badge variant="outline">{{
-                        unidad.condicion_etiqueta
-                    }}</Badge>
+                    <Badge
+                        variant="outline"
+                        :class="claseEstadoVisibleUnidad(unidad.estado_visible)"
+                    >
+                        {{ unidad.estado_visible_etiqueta }}
+                    </Badge>
+                    <Badge
+                        v-if="unidad.condicion !== 'funcionando'"
+                        variant="outline"
+                        class="text-muted-foreground"
+                    >
+                        {{ unidad.condicion_etiqueta }}
+                    </Badge>
                 </div>
+                <p class="text-muted-foreground mt-1 text-xs">
+                    {{ unidad.estado_visible_descripcion }}
+                </p>
             </div>
 
             <div class="flex flex-wrap gap-2">

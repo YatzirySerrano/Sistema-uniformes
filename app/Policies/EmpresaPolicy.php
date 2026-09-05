@@ -28,11 +28,6 @@ class EmpresaPolicy
             && ($user->can('empresas.editar') || $user->can('configuracion-empresa.editar'));
     }
 
-    public function personalizar(User $user, Empresa $empresa): bool
-    {
-        return $user->puedeAccederEmpresa($empresa) && $user->can('configuracion-empresa.editar');
-    }
-
     /**
      * Activar / desactivar una empresa es una acción sensible: exige el permiso
      * específico de empresas, no basta con el de personalización.

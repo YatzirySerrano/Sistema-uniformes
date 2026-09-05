@@ -3,6 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -37,8 +38,8 @@ const f = ref({
     empresa_id: props.filtros.empresa_id ?? '',
     modulo: props.filtros.modulo ?? '',
     buscar: props.filtros.buscar ?? '',
-    desde: props.filtros.desde ?? '',
-    hasta: props.filtros.hasta ?? '',
+    desde: String(props.filtros.desde ?? ''),
+    hasta: String(props.filtros.hasta ?? ''),
 });
 
 const empresaSeleccionada = ref<EmpresaAutorizada | null>(
@@ -122,16 +123,12 @@ function fecha(iso: string) {
                 placeholder="Buscar en descripción o usuario"
                 class="max-w-xs"
             />
-            <input
-                v-model="f.desde"
-                type="date"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            />
-            <input
-                v-model="f.hasta"
-                type="date"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            />
+            <div class="w-40">
+                <DatePicker v-model="f.desde" placeholder="Desde" />
+            </div>
+            <div class="w-40">
+                <DatePicker v-model="f.hasta" placeholder="Hasta" />
+            </div>
         </div>
 
         <EstadoVacio

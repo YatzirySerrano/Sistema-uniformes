@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\EstadoVisibleUnidad;
 use Database\Factories\UnidadActivoFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -133,5 +134,39 @@ class UnidadActivo extends Model
     {
         return $this->estado === EstadoUnidadActivo::EnAlmacen
             && $this->condicion === CondicionUnidadActivo::Funcionando;
+    }
+
+    /**
+     * Estado visible consolidado (ver `EstadoVisibleUnidad`). `Inservible` se
+     * agrupa junto con `EnReparacion` bajo "Reparación": ambas son "fuera de
+     * operación con diagnóstico abierto" de cara al usuario, aunque
+     * `condicion` (el eje real) conserva la distinción — nunca se colapsa
+     * "Inservible" a "Baja" automáticamente, esa sigue siendo una operación
+     * explícita y auditada (`App\Acciones\DarDeBajaUnidadActivo`).
+     */
+    public function estadoVisible(): EstadoVisibleUnidad
+    {
+        if ($this->estado === EstadoUnidadActivo::Baja) {
+            return EstadoVisibleUnidad::Baja;
+        }
+
+        if ($this->condicion === CondicionUnidadActivo::Robado) {
+            return EstadoVisibleUnidad::Robado;
+        }
+
+        if ($this->condicion === CondicionUnidadActivo::Perdido) {
+            return EstadoVisibleUnidad::Perdido;
+        }
+
+        if ($this->condicion === CondicionUnidadActivo::EnReparacion
+            || $this->condicion === CondicionUnidadActivo::Inservible) {
+            return EstadoVisibleUnidad::Reparacion;
+        }
+
+        if ($this->estado === EstadoUnidadActivo::Asignada) {
+            return EstadoVisibleUnidad::Asignado;
+        }
+
+        return EstadoVisibleUnidad::Disponible;
     }
 }

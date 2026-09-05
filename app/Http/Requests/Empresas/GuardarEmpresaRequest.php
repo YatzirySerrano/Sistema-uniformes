@@ -59,6 +59,7 @@ class GuardarEmpresaRequest extends FormRequest
             'correo' => ['nullable', 'email', 'max:255'],
             'direccion' => ['nullable', 'string', 'max:500'],
             'activa' => ['boolean'],
+            'logo' => ['nullable', 'image', 'mimes:png,jpg,jpeg,svg', 'max:2048'],
         ];
     }
 

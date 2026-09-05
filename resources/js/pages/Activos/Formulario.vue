@@ -871,6 +871,7 @@ function enviar() {
                         id="imagen"
                         v-model="form.imagen"
                         tipo="imagen"
+                        tamano="compact"
                         accept="image/jpeg,image/png,image/webp"
                         formatos-etiqueta="Formatos aceptados: JPG, PNG o WebP."
                         :peso-maximo-mb="PESO_MAXIMO_MB"

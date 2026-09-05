@@ -2,6 +2,7 @@
 import { useForm } from '@inertiajs/vue3';
 import { computed, reactive } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import SubidaArchivo from '@/components/sistema/SubidaArchivo.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,12 +20,25 @@ export type EmpresaEditable = {
     activa: boolean;
 };
 
-const props = defineProps<{ empresa: EmpresaEditable | null }>();
+const props = defineProps<{
+    empresa: EmpresaEditable | null;
+    logoUrlActual?: string | null;
+}>();
 const emit = defineEmits<{ (e: 'guardado'): void; (e: 'cancelar'): void }>();
 
 const esEdicion = computed(() => props.empresa !== null);
 
-const form = useForm({
+const form = useForm<{
+    nombre_comercial: string;
+    razon_social: string;
+    rfc: string;
+    codigo: string;
+    telefono: string;
+    correo: string;
+    direccion: string;
+    activa: boolean;
+    logo: File | null;
+}>({
     nombre_comercial: props.empresa?.nombre_comercial ?? '',
     razon_social: props.empresa?.razon_social ?? '',
     rfc: props.empresa?.rfc ?? '',
@@ -33,6 +47,7 @@ const form = useForm({
     correo: props.empresa?.correo ?? '',
     direccion: props.empresa?.direccion ?? '',
     activa: props.empresa?.activa ?? true,
+    logo: null,
 });
 
 /** Campos que el usuario ya tocó: sólo mostramos error en tiempo real tras salir del campo. */
@@ -115,6 +130,7 @@ function enviar(): void {
 
     const opciones = {
         preserveScroll: true,
+        forceFormData: true,
         onSuccess: () => emit('guardado'),
     };
 
@@ -257,6 +273,27 @@ function enviar(): void {
                 />
                 <InputError :message="error('direccion')" />
             </div>
+        </div>
+
+        <div class="grid gap-1.5">
+            <Label class="flex items-center gap-1.5">
+                Logotipo
+                <AyudaTooltip
+                    texto="Se usa como referencia administrativa y en comprobantes/PDF de esta empresa. No define los colores de la aplicación (eso se configura globalmente en Configuración)."
+                    etiqueta="Ayuda sobre el logotipo"
+                />
+            </Label>
+            <SubidaArchivo
+                v-model="form.logo"
+                tipo="imagen"
+                tamano="compact"
+                accept="image/png,image/jpeg,image/svg+xml"
+                formatos-etiqueta="PNG, JPG o SVG"
+                :peso-maximo-mb="2"
+                :archivo-actual-url="logoUrlActual"
+                :invalido="!!error('logo')"
+            />
+            <InputError :message="error('logo')" />
         </div>
 
         <label class="flex items-start gap-2.5 rounded-lg border p-3 text-sm">

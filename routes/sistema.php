@@ -8,6 +8,7 @@ use App\Http\Controllers\BitacoraController;
 use App\Http\Controllers\CatalogoActivoController;
 use App\Http\Controllers\CategoriaActivoController;
 use App\Http\Controllers\ColaboradorController;
+use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\ConjuntoController;
 use App\Http\Controllers\CorreccionEntregaController;
 use App\Http\Controllers\DevolucionController;
@@ -17,7 +18,6 @@ use App\Http\Controllers\ImportacionColaboradorController;
 use App\Http\Controllers\InventarioController;
 use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
-use App\Http\Controllers\PersonalizacionEmpresaController;
 use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\RolController;
@@ -162,8 +162,9 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('empresas/{empresa}/estado', [EmpresaController::class, 'toggleEstado'])->name('empresas.estado');
     Route::post('empresas/{empresa}/suspendidos/reactivar', [EmpresaController::class, 'reactivarSuspendidos'])->name('empresas.suspendidos.reactivar');
 
-    Route::get('empresas/{empresa}/personalizacion', [PersonalizacionEmpresaController::class, 'edit'])->name('personalizacion.edit');
-    Route::post('empresas/{empresa}/personalizacion', [PersonalizacionEmpresaController::class, 'update'])->name('personalizacion.update');
+    // Configuración (personalización visual GLOBAL de la instancia, no por empresa)
+    Route::get('configuracion', [ConfiguracionController::class, 'edit'])->name('configuracion.edit');
+    Route::post('configuracion', [ConfiguracionController::class, 'update'])->name('configuracion.update');
 
     // Almacenes
     Route::get('almacenes', [AlmacenController::class, 'index'])->name('almacenes.index');

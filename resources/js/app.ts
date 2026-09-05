@@ -5,6 +5,7 @@ import AuthLayout from '@/layouts/AuthLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
 import { initializeFlashEtiquetas } from '@/lib/flashEtiquetas';
 import { initializeFlashToast } from '@/lib/flashToast';
+import { initializeTemaVisual } from '@/lib/temaVisual';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
 
@@ -29,6 +30,10 @@ void createInertiaApp({
 
 // This will set light / dark mode on page load...
 initializeTheme();
+
+// This will apply the global visual personalization (brand colors) on page
+// load and keep it in sync after each Inertia navigation / save...
+initializeTemaVisual();
 
 // This will listen for flash toast data from the server...
 initializeFlashToast();

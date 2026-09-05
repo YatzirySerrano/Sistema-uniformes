@@ -2,6 +2,7 @@
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
@@ -275,12 +276,11 @@ function enviar(): void {
                 </div>
                 <div class="grid gap-1.5">
                     <Label for="fecha">Fecha</Label>
-                    <Input
+                    <DatePicker
                         id="fecha"
                         v-model="form.fecha"
-                        type="date"
                         :max="hoy"
-                        required
+                        :invalido="!!form.errors.fecha"
                     />
                     <InputError :message="form.errors.fecha" />
                 </div>

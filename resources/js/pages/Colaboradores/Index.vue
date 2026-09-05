@@ -7,10 +7,12 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Colaborador = {
@@ -107,6 +109,8 @@ const hrefNuevoColaborador = computed(() =>
         ? `/colaboradores/crear?sucursal_id=${sucursalId.value}`
         : '/colaboradores/crear',
 );
+
+const vista = useVistaPreferida('colaboradores', 'tabla');
 </script>
 
 <template>
@@ -176,6 +180,7 @@ const hrefNuevoColaborador = computed(() =>
                     ]"
                 />
             </div>
+            <SelectorVista v-model="vista" />
         </div>
 
         <EstadoVacio
@@ -194,6 +199,36 @@ const hrefNuevoColaborador = computed(() =>
                 </Button>
             </template>
         </EstadoVacio>
+
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+            <Link
+                v-for="c in colaboradores.data"
+                :key="c.id"
+                :href="`/colaboradores/${c.id}/editar`"
+                class="hover:border-primary/40 flex flex-col gap-2 rounded-xl border p-4 transition-colors"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <p class="min-w-0 truncate font-medium">
+                        {{ c.nombre_completo }}
+                    </p>
+                    <Badge :variant="c.activo ? 'default' : 'secondary'">
+                        {{ c.activo ? 'Activo' : 'Inactivo' }}
+                    </Badge>
+                </div>
+                <p class="text-muted-foreground font-mono text-xs">
+                    {{ c.numero_empleado }}
+                </p>
+                <p class="text-muted-foreground text-sm">
+                    {{ c.sucursal?.nombre ?? '—' }}
+                </p>
+                <p class="text-muted-foreground text-sm">
+                    {{ [c.puesto, c.area].filter(Boolean).join(' · ') || '—' }}
+                </p>
+            </Link>
+        </div>
 
         <div v-else class="overflow-x-auto rounded-xl border">
             <table class="w-full min-w-[640px] text-sm">
