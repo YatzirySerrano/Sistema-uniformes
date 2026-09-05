@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { Plus, Trash2 } from '@lucide/vue';
 import { computed } from 'vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { ActivoOpcion } from '@/types/sistema';
@@ -31,6 +33,21 @@ const items = computed({
 
 function tallasDe(activoId: number | null) {
     return props.activos.find((p) => p.id === activoId)?.tallas ?? [];
+}
+
+function activoSeleccionado(item: Item): ActivoOpcion | null {
+    return props.activos.find((p) => p.id === item.activo_id) ?? null;
+}
+
+async function buscarActivos(termino: string): Promise<ActivoOpcion[]> {
+    const t = termino.trim().toLowerCase();
+
+    return props.activos.filter((p) => p.nombre.toLowerCase().includes(t));
+}
+
+function alElegirActivo(item: Item, opcion: ActivoOpcion | null): void {
+    item.activo_id = opcion?.id ?? null;
+    item.talla_id = null;
 }
 
 function disponibleDe(item: Item): number | null {
@@ -66,32 +83,34 @@ function quitar(i: number) {
             "
         >
             <div>
-                <select
-                    v-model="item.activo_id"
-                    class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-                    @change="item.talla_id = null"
-                >
-                    <option :value="null" disabled>Selecciona activo</option>
-                    <option v-for="p in activos" :key="p.id" :value="p.id">
-                        {{ p.nombre }}
-                    </option>
-                </select>
+                <BuscadorAsync
+                    :model-value="activoSeleccionado(item)"
+                    :buscar="buscarActivos"
+                    :etiqueta="(p) => String(p.nombre)"
+                    placeholder="Selecciona activo"
+                    placeholder-busqueda="Buscar activo…"
+                    @update:model-value="
+                        (v) => alElegirActivo(item, v as ActivoOpcion | null)
+                    "
+                />
             </div>
             <div>
-                <select
-                    v-model="item.talla_id"
-                    class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
+                <SelectSimple
+                    :model-value="item.talla_id ?? ''"
                     :disabled="!item.activo_id"
-                >
-                    <option :value="null" disabled>Talla</option>
-                    <option
-                        v-for="t in tallasDe(item.activo_id)"
-                        :key="t.id"
-                        :value="t.id"
-                    >
-                        {{ t.valor }}
-                    </option>
-                </select>
+                    :opciones="[
+                        { valor: '', etiqueta: 'Talla' },
+                        ...tallasDe(item.activo_id).map((t) => ({
+                            valor: t.id,
+                            etiqueta: t.valor,
+                        })),
+                    ]"
+                    @update:model-value="
+                        (v) =>
+                            (item.talla_id =
+                                v === '' || v === null ? null : Number(v))
+                    "
+                />
             </div>
             <div>
                 <Input
@@ -113,18 +132,19 @@ function quitar(i: number) {
                 </p>
             </div>
             <div v-if="conCondicion">
-                <select
-                    v-model="item.condicion"
-                    class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-                >
-                    <option
-                        v-for="c in condiciones"
-                        :key="c.valor"
-                        :value="c.valor"
-                    >
-                        {{ c.etiqueta }}
-                    </option>
-                </select>
+                <SelectSimple
+                    :model-value="item.condicion ?? ''"
+                    :opciones="
+                        (condiciones ?? []).map((c) => ({
+                            valor: c.valor,
+                            etiqueta: c.etiqueta,
+                        }))
+                    "
+                    @update:model-value="
+                        (v) =>
+                            (item.condicion = v === '' ? undefined : String(v))
+                    "
+                />
             </div>
             <Button
                 type="button"

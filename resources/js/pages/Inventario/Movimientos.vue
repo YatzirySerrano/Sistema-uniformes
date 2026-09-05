@@ -2,10 +2,12 @@
 import { Head, router } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
-import type { Paginado } from '@/types/sistema';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Movimiento = {
     id: number;
@@ -27,7 +29,7 @@ type Movimiento = {
 const props = defineProps<{
     movimientos: Paginado<Movimiento>;
     filtros: Record<string, string | number | undefined>;
-    empresasAutorizadas: import('@/types/sistema').EmpresaAutorizada[];
+    empresasAutorizadas: EmpresaAutorizada[];
     almacenes: { id: number; nombre: string }[];
     tipos: { valor: string; etiqueta: string }[];
 }>();
@@ -47,6 +49,35 @@ const f = ref({
     tipo: props.filtros.tipo ?? '',
     desde: props.filtros.desde ?? '',
     hasta: props.filtros.hasta ?? '',
+});
+
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === f.value.empresa_id) ?? null,
+);
+const almacenSeleccionado = ref<{ id: number; nombre: string } | null>(
+    props.almacenes.find((a) => a.id === f.value.almacen_id) ?? null,
+);
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+
+async function buscarAlmacenes(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.almacenes.filter((a) => a.nombre.toLowerCase().includes(t));
+}
+
+watch(empresaSeleccionada, (e) => {
+    f.value.empresa_id = e?.id ?? '';
+    almacenSeleccionado.value = null;
+});
+watch(almacenSeleccionado, (a) => {
+    f.value.almacen_id = a?.id ?? '';
 });
 
 watch(
@@ -87,39 +118,35 @@ function fecha(iso: string) {
         </EncabezadoPagina>
 
         <div class="flex flex-wrap gap-2">
-            <select
+            <BuscadorAsync
                 v-if="empresasAutorizadas.length > 1"
-                v-model="f.empresa_id"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                aria-label="Filtrar por empresa"
-            >
-                <option value="">Todas las empresas</option>
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
-            <select
-                v-model="f.almacen_id"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="">Todos los almacenes</option>
-                <option v-for="a in almacenes" :key="a.id" :value="a.id">
-                    {{ a.nombre }}
-                </option>
-            </select>
-            <select
-                v-model="f.tipo"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="">Todos los tipos</option>
-                <option v-for="t in tipos" :key="t.valor" :value="t.valor">
-                    {{ t.etiqueta }}
-                </option>
-            </select>
+                v-model="empresaSeleccionada"
+                :buscar="buscarEmpresas"
+                :etiqueta="(e) => String(e.nombre_comercial)"
+                placeholder="Todas las empresas"
+                placeholder-busqueda="Buscar empresa…"
+                class="w-56"
+            />
+            <BuscadorAsync
+                v-model="almacenSeleccionado"
+                :buscar="buscarAlmacenes"
+                :etiqueta="(a) => String(a.nombre)"
+                placeholder="Todos los almacenes"
+                placeholder-busqueda="Buscar almacén…"
+                class="w-56"
+            />
+            <div class="w-56">
+                <SelectSimple
+                    v-model="f.tipo"
+                    :opciones="[
+                        { valor: '', etiqueta: 'Todos los tipos' },
+                        ...tipos.map((t) => ({
+                            valor: t.valor,
+                            etiqueta: t.etiqueta,
+                        })),
+                    ]"
+                />
+            </div>
             <input
                 v-model="f.desde"
                 type="date"

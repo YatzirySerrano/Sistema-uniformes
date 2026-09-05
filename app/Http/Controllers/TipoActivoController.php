@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\Activos\GuardarTipoActivoRequest;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -19,7 +20,10 @@ use Illuminate\Validation\ValidationException;
  */
 class TipoActivoController extends Controller
 {
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioGeneradorCodigosGlobal $codigos,
+    ) {}
 
     public function store(GuardarTipoActivoRequest $request): RedirectResponse
     {
@@ -129,13 +133,6 @@ class TipoActivoController extends Controller
 
     private function generarCodigo(): string
     {
-        $n = TipoActivo::query()->count() + 1;
-
-        do {
-            $codigo = 'TAC-'.str_pad((string) $n, 4, '0', STR_PAD_LEFT);
-            $n++;
-        } while (TipoActivo::query()->where('codigo', $codigo)->exists());
-
-        return $codigo;
+        return $this->codigos->siguiente('tipo_activo', 'TAC');
     }
 }

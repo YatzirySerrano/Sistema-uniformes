@@ -16,6 +16,7 @@ import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -113,9 +114,6 @@ const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
         { valor: 'inactivas', texto: 'Inactivas' },
     ];
 
-const claseSelect =
-    'border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none';
-
 // --- Modal de alta / edición ---
 const modalAbierto = ref(false);
 const empresaEnEdicion = ref<EmpresaEditable | null>(null);
@@ -206,40 +204,43 @@ function verDetalle(empresa: EmpresaTarjeta): void {
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Sucursales</span>
-                    <select
-                        v-model="sucursales"
-                        :class="claseSelect"
-                        aria-label="Filtrar por sucursales activas"
-                    >
-                        <option value="">Todas</option>
-                        <option value="con">Con sucursales</option>
-                        <option value="sin">Sin sucursales</option>
-                    </select>
+                    <div class="w-44">
+                        <SelectSimple
+                            v-model="sucursales"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todas' },
+                                { valor: 'con', etiqueta: 'Con sucursales' },
+                                { valor: 'sin', etiqueta: 'Sin sucursales' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Colaboradores</span>
-                    <select
-                        v-model="colaboradores"
-                        :class="claseSelect"
-                        aria-label="Filtrar por colaboradores activos"
-                    >
-                        <option value="">Todas</option>
-                        <option value="con">Con colaboradores</option>
-                        <option value="sin">Sin colaboradores</option>
-                    </select>
+                    <div class="w-48">
+                        <SelectSimple
+                            v-model="colaboradores"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todas' },
+                                { valor: 'con', etiqueta: 'Con colaboradores' },
+                                { valor: 'sin', etiqueta: 'Sin colaboradores' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Orden</span>
-                    <select
-                        v-model="orden"
-                        :class="claseSelect"
-                        aria-label="Ordenar empresas"
-                    >
-                        <option value="az">Nombre A–Z</option>
-                        <option value="za">Nombre Z–A</option>
-                    </select>
+                    <div class="w-36">
+                        <SelectSimple
+                            v-model="orden"
+                            :opciones="[
+                                { valor: 'az', etiqueta: 'Nombre A–Z' },
+                                { valor: 'za', etiqueta: 'Nombre Z–A' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <Button

@@ -75,7 +75,7 @@ class Conjunto extends Model
         return (int) $componentes->map(function (ConjuntoComponente $c) use ($almacenId): int {
             $activo = $c->activo;
 
-            if ($activo === null || $c->cantidad_requerida <= 0) {
+            if ($activo === null || ! $activo->activo || $c->cantidad_requerida <= 0) {
                 return 0;
             }
 

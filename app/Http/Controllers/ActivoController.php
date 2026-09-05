@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Acciones\CrearActivoConExistencias;
 use App\Acciones\RegistrarEntradaInventario;
 use App\Acciones\RegistrarUnidadesActivo;
+use App\Enums\CondicionUnidadActivo;
+use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ReactivaSuspendidos;
@@ -14,11 +16,14 @@ use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\CategoriaActivo;
 use App\Models\Conjunto;
+use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
 use App\Models\TipoActivo;
+use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -40,6 +45,7 @@ class ActivoController extends Controller
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
         private readonly ServicioCascadaSuspension $cascada,
+        private readonly ServicioGeneradorCodigos $codigos,
     ) {}
 
     public function index(Request $request): Response
@@ -142,6 +148,14 @@ class ActivoController extends Controller
      * Búsqueda con autocompletado para los combobox de activos. Requiere
      * `empresa_id`: el activo pertenece a una empresa concreta.
      */
+    /**
+     * Búsqueda de activos de UNA empresa. Cuando viene `almacen_id`, cada
+     * resultado incluye la disponibilidad REAL en ESE almacén (nunca el total
+     * general ni el de otro almacén) — por variante cuando aplique, o el
+     * conteo de unidades entregables para seguimiento individual — así el
+     * selector de Entregas puede deshabilitar/explicar lo que no tiene
+     * existencias en vez de dejarlo seleccionable a ciegas.
+     */
     public function buscar(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Activo::class);
@@ -154,6 +168,7 @@ class ActivoController extends Controller
 
         $termino = trim((string) $request->query('q', ''));
         $control = $request->query('control');
+        $almacenId = $request->filled('almacen_id') ? (int) $request->query('almacen_id') : null;
 
         $activos = Activo::query()
             ->where('empresa_id', $empresa->id)
@@ -173,21 +188,58 @@ class ActivoController extends Controller
             ->orderBy('nombre')
             ->limit(20)
             ->get()
-            ->map(fn (Activo $a): array => [
-                'id' => $a->id,
-                'nombre' => $a->nombre,
-                'codigo' => $a->codigo,
-                'tipo' => $a->tipoActivo?->nombre,
-                'categoria' => $a->categoriaActivo?->nombre,
-                'control' => $a->tipo_control->value,
-                // `usa_variantes`: el activo tiene variantes asociadas (crudo).
-                // `tallas`: sólo las elegibles (asociadas y activas). Si
-                // `usa_variantes` y `tallas` está vacío → todas sus variantes
-                // están desactivadas.
-                'usa_variantes' => (int) $a->tallas_count > 0,
-                'tallas' => $a->tallasElegibles()
-                    ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])->values(),
-            ]);
+            ->map(function (Activo $a) use ($almacenId): array {
+                $tallas = $a->tallasElegibles()
+                    ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])
+                    ->values();
+
+                $fila = [
+                    'id' => $a->id,
+                    'nombre' => $a->nombre,
+                    'codigo' => $a->codigo,
+                    'tipo' => $a->tipoActivo?->nombre,
+                    'categoria' => $a->categoriaActivo?->nombre,
+                    'control' => $a->tipo_control->value,
+                    // `usa_variantes`: el activo tiene variantes asociadas (crudo).
+                    // `tallas`: sólo las elegibles (asociadas y activas). Si
+                    // `usa_variantes` y `tallas` está vacío → todas sus variantes
+                    // están desactivadas.
+                    'usa_variantes' => (int) $a->tallas_count > 0,
+                    'tallas' => $tallas,
+                ];
+
+                if ($almacenId === null) {
+                    return $fila;
+                }
+
+                if ($a->tipo_control === TipoControlActivo::SeguimientoIndividual) {
+                    $fila['disponible'] = UnidadActivo::query()
+                        ->where('activo_id', $a->id)
+                        ->where('almacen_id', $almacenId)
+                        ->where('estado', EstadoUnidadActivo::EnAlmacen)
+                        ->where('condicion', CondicionUnidadActivo::Funcionando)
+                        ->count();
+
+                    return $fila;
+                }
+
+                $saldosPorTalla = SaldoInventario::query()
+                    ->where('empresa_id', $a->empresa_id)
+                    ->where('almacen_id', $almacenId)
+                    ->where('activo_id', $a->id)
+                    ->get(['talla_id', 'cantidad'])
+                    ->keyBy(fn (SaldoInventario $s) => $s->talla_id ?? 0);
+
+                $fila['disponible'] = (int) $saldosPorTalla->sum('cantidad');
+                $fila['tallas'] = $tallas->map(function (array $t) use ($saldosPorTalla): array {
+                    $saldo = $saldosPorTalla->get($t['id']);
+                    $t['disponible'] = $saldo !== null ? (int) $saldo->cantidad : 0;
+
+                    return $t;
+                })->values();
+
+                return $fila;
+            });
 
         return response()->json(['activos' => $activos]);
     }
@@ -217,7 +269,7 @@ class ActivoController extends Controller
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
             'tipo_control' => (string) $request->string('tipo_control'),
-            'codigo' => ($request->input('codigo') ?: null) ?: $this->generarCodigo($empresa->id),
+            'codigo' => ($request->input('codigo') ?: null) ?: $this->generarCodigo($empresa),
             'activo' => $request->boolean('activo', true),
             'imagen_ruta' => $request->hasFile('imagen')
                 ? ($request->file('imagen')->store("activos/{$empresa->id}", 'public') ?: null)
@@ -555,18 +607,13 @@ class ActivoController extends Controller
     }
 
     /**
-     * Genera un código consecutivo y único dentro de la empresa
-     * (ACT-0001, ACT-0002, …) cuando el usuario no captura uno.
+     * Genera un código consecutivo y único dentro de la empresa (ACT-0001,
+     * ACT-0002, …) cuando el usuario no captura uno. Race-safe:
+     * `ServicioGeneradorCodigos` bloquea el contador dentro de una
+     * transacción (nunca `count() + 1` sin lock).
      */
-    private function generarCodigo(int $empresaId): string
+    private function generarCodigo(Empresa $empresa): string
     {
-        $n = Activo::query()->withTrashed()->where('empresa_id', $empresaId)->count() + 1;
-
-        do {
-            $codigo = 'ACT-'.str_pad((string) $n, 4, '0', STR_PAD_LEFT);
-            $n++;
-        } while (Activo::query()->withTrashed()->where('empresa_id', $empresaId)->where('codigo', $codigo)->exists());
-
-        return $codigo;
+        return $this->codigos->siguienteConPrefijo($empresa, 'activo', 'ACT');
     }
 }

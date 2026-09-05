@@ -10,6 +10,7 @@ use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -33,7 +34,10 @@ class AlmacenController extends Controller
     use ConEmpresa;
     use ExportaListado;
 
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioGeneradorCodigosGlobal $codigos,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -389,17 +393,12 @@ class AlmacenController extends Controller
 
     /**
      * Genera un código consecutivo y único a nivel plataforma (ALM-0001, …)
-     * cuando el usuario no captura uno. El almacén ya no pertenece a una empresa.
+     * cuando el usuario no captura uno. El almacén ya no pertenece a una
+     * empresa. Race-safe: `ServicioGeneradorCodigosGlobal` bloquea el
+     * contador dentro de una transacción (nunca `count() + 1` sin lock).
      */
     private function generarCodigo(): string
     {
-        $n = Almacen::query()->withTrashed()->count() + 1;
-
-        do {
-            $codigo = 'ALM-'.str_pad((string) $n, 4, '0', STR_PAD_LEFT);
-            $n++;
-        } while (Almacen::query()->withTrashed()->where('codigo', $codigo)->exists());
-
-        return $codigo;
+        return $this->codigos->siguiente('almacen', 'ALM');
     }
 }

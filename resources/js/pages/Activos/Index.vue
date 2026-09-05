@@ -15,9 +15,11 @@ import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import type { EmpresaAutorizada } from '@/types/sistema';
 
 type OpcionTipo = { id: number; nombre: string };
 type OpcionCategoria = {
@@ -45,7 +47,7 @@ type Activo = {
 
 const props = defineProps<{
     activos: Activo[];
-    empresasAutorizadas: import('@/types/sistema').EmpresaAutorizada[];
+    empresasAutorizadas: EmpresaAutorizada[];
     filtrosSeleccion: {
         tipo: OpcionTipo | null;
         categoria: OpcionCategoria | null;
@@ -74,7 +76,20 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar);
-const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
+);
+const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+
 const tipoActivoId = ref<number | ''>(props.filtros.tipo_activo_id);
 const categoriaId = ref<number | ''>(props.filtros.categoria_id);
 const almacenId = ref<number | ''>(props.filtros.almacen_id);
@@ -212,7 +227,7 @@ watch(
 
 function limpiarFiltros(): void {
     buscar.value = '';
-    empresaId.value = '';
+    empresaSeleccionada.value = null;
     tipoActivoId.value = '';
     categoriaId.value = '';
     almacenId.value = '';
@@ -223,9 +238,6 @@ function limpiarFiltros(): void {
     estado.value = '';
     orden.value = 'az';
 }
-
-const claseSelect =
-    'border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none';
 
 function alternarEstado(a: Activo): void {
     router.post(`/activos/${a.id}/estado`, {}, { preserveScroll: true });
@@ -282,20 +294,14 @@ function alternarEstado(a: Activo): void {
                     class="flex items-center gap-1.5 text-sm"
                 >
                     <span class="text-muted-foreground">Empresa</span>
-                    <select
-                        v-model="empresaId"
-                        :class="claseSelect"
-                        aria-label="Filtrar por empresa"
-                    >
-                        <option value="">Todas</option>
-                        <option
-                            v-for="e in empresasAutorizadas"
-                            :key="e.id"
-                            :value="e.id"
-                        >
-                            {{ e.nombre_comercial }}
-                        </option>
-                    </select>
+                    <BuscadorAsync
+                        v-model="empresaSeleccionada"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        placeholder="Todas"
+                        placeholder-busqueda="Buscar empresa…"
+                        class="w-56"
+                    />
                 </label>
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Tipo</span>
@@ -362,42 +368,46 @@ function alternarEstado(a: Activo): void {
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Control</span>
-                    <select
-                        v-model="control"
-                        :class="claseSelect"
-                        aria-label="Filtrar por tipo de control"
-                    >
-                        <option value="">Todos</option>
-                        <option value="cantidad">Por cantidad</option>
-                        <option value="individual">
-                            Seguimiento individual
-                        </option>
-                    </select>
+                    <div class="w-48">
+                        <SelectSimple
+                            v-model="control"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todos' },
+                                { valor: 'cantidad', etiqueta: 'Por cantidad' },
+                                {
+                                    valor: 'individual',
+                                    etiqueta: 'Seguimiento individual',
+                                },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Estado</span>
-                    <select
-                        v-model="estado"
-                        :class="claseSelect"
-                        aria-label="Filtrar por estado"
-                    >
-                        <option value="">Todos</option>
-                        <option value="activos">Activos</option>
-                        <option value="inactivos">Inactivos</option>
-                    </select>
+                    <div class="w-36">
+                        <SelectSimple
+                            v-model="estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todos' },
+                                { valor: 'activos', etiqueta: 'Activos' },
+                                { valor: 'inactivos', etiqueta: 'Inactivos' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Orden</span>
-                    <select
-                        v-model="orden"
-                        :class="claseSelect"
-                        aria-label="Ordenar activos"
-                    >
-                        <option value="az">Nombre A–Z</option>
-                        <option value="za">Nombre Z–A</option>
-                    </select>
+                    <div class="w-36">
+                        <SelectSimple
+                            v-model="orden"
+                            :opciones="[
+                                { valor: 'az', etiqueta: 'Nombre A–Z' },
+                                { valor: 'za', etiqueta: 'Nombre Z–A' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <Button

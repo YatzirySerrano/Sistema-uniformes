@@ -2,11 +2,13 @@
 import { Head, router } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Input } from '@/components/ui/input';
-import type { Paginado } from '@/types/sistema';
+import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Registro = {
     id: number;
@@ -23,7 +25,7 @@ type Registro = {
 const props = defineProps<{
     registros: Paginado<Registro>;
     filtros: Record<string, string | number | undefined>;
-    empresasAutorizadas: import('@/types/sistema').EmpresaAutorizada[];
+    empresasAutorizadas: EmpresaAutorizada[];
     modulos: string[];
 }>();
 
@@ -37,6 +39,22 @@ const f = ref({
     buscar: props.filtros.buscar ?? '',
     desde: props.filtros.desde ?? '',
     hasta: props.filtros.hasta ?? '',
+});
+
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === f.value.empresa_id) ?? null,
+);
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+
+watch(empresaSeleccionada, (e) => {
+    f.value.empresa_id = e?.id ?? '';
 });
 
 let t: ReturnType<typeof setTimeout>;
@@ -81,30 +99,24 @@ function fecha(iso: string) {
         </EncabezadoPagina>
 
         <div class="flex flex-wrap gap-2">
-            <select
+            <BuscadorAsync
                 v-if="empresasAutorizadas.length > 1"
-                v-model="f.empresa_id"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                aria-label="Filtrar por empresa"
-            >
-                <option value="">Todas las empresas</option>
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
-            <select
-                v-model="f.modulo"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="">Todos los módulos</option>
-                <option v-for="m in modulos" :key="m" :value="m">
-                    {{ m }}
-                </option>
-            </select>
+                v-model="empresaSeleccionada"
+                :buscar="buscarEmpresas"
+                :etiqueta="(e) => String(e.nombre_comercial)"
+                placeholder="Todas las empresas"
+                placeholder-busqueda="Buscar empresa…"
+                class="w-56"
+            />
+            <div class="w-52">
+                <SelectSimple
+                    v-model="f.modulo"
+                    :opciones="[
+                        { valor: '', etiqueta: 'Todos los módulos' },
+                        ...modulos.map((m) => ({ valor: m, etiqueta: m })),
+                    ]"
+                />
+            </div>
             <Input
                 v-model="f.buscar"
                 placeholder="Buscar en descripción o usuario"

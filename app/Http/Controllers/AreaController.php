@@ -6,7 +6,9 @@ use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Areas\GuardarAreaRequest;
 use App\Models\Area;
+use App\Models\Empresa;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -21,7 +23,10 @@ class AreaController extends Controller
     use ConEmpresa;
     use ExportaListado;
 
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioGeneradorCodigos $codigos,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -181,7 +186,7 @@ class AreaController extends Controller
         $empresa = $request->empresaResuelta();
 
         $datos = $request->validated();
-        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa->id);
+        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa);
 
         $area = Area::query()->create([
             ...$datos,
@@ -227,18 +232,13 @@ class AreaController extends Controller
     }
 
     /**
-     * Genera un código consecutivo y único dentro de la empresa
-     * (ARE-0001, ARE-0002, …) cuando el usuario no captura uno.
+     * Genera un código consecutivo y único dentro de la empresa (ARE-0001,
+     * ARE-0002, …) cuando el usuario no captura uno. Race-safe:
+     * `ServicioGeneradorCodigos` bloquea el contador dentro de una
+     * transacción (nunca `count() + 1` sin lock).
      */
-    private function generarCodigo(int $empresaId): string
+    private function generarCodigo(Empresa $empresa): string
     {
-        $n = Area::query()->withTrashed()->where('empresa_id', $empresaId)->count() + 1;
-
-        do {
-            $codigo = 'ARE-'.str_pad((string) $n, 4, '0', STR_PAD_LEFT);
-            $n++;
-        } while (Area::query()->withTrashed()->where('empresa_id', $empresaId)->where('codigo', $codigo)->exists());
-
-        return $codigo;
+        return $this->codigos->siguienteConPrefijo($empresa, 'area', 'ARE');
     }
 }

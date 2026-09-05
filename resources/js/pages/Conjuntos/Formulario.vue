@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Plus, Trash2 } from '@lucide/vue';
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -56,12 +57,27 @@ defineOptions({
 
 const esEdicion = !!props.conjunto;
 
-const empresaId = ref<number | ''>(
+const empresaIdInicial =
     props.conjunto?.empresa_id ??
-        (props.empresasAutorizadas.length === 1
-            ? props.empresasAutorizadas[0].id
-            : ''),
+    (props.empresasAutorizadas.length === 1
+        ? props.empresasAutorizadas[0].id
+        : '');
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === empresaIdInicial) ?? null,
 );
+const empresaId = computed(() => empresaSel.value?.id ?? '');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+
+watch(empresaId, (id) => {
+    form.empresa_id = id === '' ? null : id;
+});
 
 type Fila = {
     activo_id: number | '';
@@ -218,26 +234,15 @@ function enviar(): void {
 
                 <div v-if="!esEdicion" class="grid gap-1.5">
                     <Label for="empresa_id">Empresa / razón social</Label>
-                    <select
+                    <BuscadorAsync
                         id="empresa_id"
-                        v-model="empresaId"
-                        class="border-input bg-background h-9 min-w-0 rounded-md border px-3 text-sm"
-                        @change="
-                            form.empresa_id =
-                                empresaId === '' ? null : empresaId
-                        "
-                    >
-                        <option value="" disabled>
-                            Selecciona una empresa
-                        </option>
-                        <option
-                            v-for="e in empresasAutorizadas"
-                            :key="e.id"
-                            :value="e.id"
-                        >
-                            {{ e.nombre_comercial }}
-                        </option>
-                    </select>
+                        v-model="empresaSel"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        :invalido="!!form.errors.empresa_id"
+                        placeholder="Selecciona una empresa"
+                        placeholder-busqueda="Buscar empresa…"
+                    />
                     <InputError :message="form.errors.empresa_id" />
                 </div>
 
@@ -366,20 +371,27 @@ function enviar(): void {
                             class="grid gap-1.5"
                         >
                             <Label>Variante</Label>
-                            <select
-                                v-model="fila.talla_id"
-                                class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
+                            <SelectSimple
+                                :model-value="fila.talla_id ?? ''"
                                 :disabled="fila.talla_libre"
-                            >
-                                <option :value="null">Sin variante fija</option>
-                                <option
-                                    v-for="t in filasUI[i].tallas"
-                                    :key="t.id"
-                                    :value="t.id"
-                                >
-                                    {{ t.valor }}
-                                </option>
-                            </select>
+                                :opciones="[
+                                    {
+                                        valor: '',
+                                        etiqueta: 'Sin variante fija',
+                                    },
+                                    ...filasUI[i].tallas.map((t) => ({
+                                        valor: t.id,
+                                        etiqueta: t.valor,
+                                    })),
+                                ]"
+                                @update:model-value="
+                                    (v) =>
+                                        (fila.talla_id =
+                                            v === '' || v === null
+                                                ? null
+                                                : (v as number))
+                                "
+                            />
                             <label
                                 class="mt-1 flex items-center gap-1.5 text-xs"
                             >

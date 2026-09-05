@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
@@ -44,13 +44,24 @@ defineOptions({
 
 const esEdicion = !!props.colaborador;
 
-const empresaId = ref<number | ''>(
+const empresaIdInicial =
     props.colaborador?.empresa_id ??
-        props.empresaPreseleccionadaId ??
-        (props.empresasAutorizadas.length === 1
-            ? props.empresasAutorizadas[0].id
-            : ''),
+    props.empresaPreseleccionadaId ??
+    (props.empresasAutorizadas.length === 1
+        ? props.empresasAutorizadas[0].id
+        : '');
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === empresaIdInicial) ?? null,
 );
+const empresaId = computed(() => empresaSel.value?.id ?? '');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
 
 const sucursalSel = ref<Opcion | null>(
     props.colaborador?.sucursal ?? props.sucursalPreseleccionada ?? null,
@@ -139,21 +150,15 @@ function enviar() {
         <form class="space-y-5" @submit.prevent="enviar">
             <div v-if="!esEdicion" class="grid gap-1.5">
                 <Label for="empresa_id">Empresa / razón social</Label>
-                <select
+                <BuscadorAsync
                     id="empresa_id"
-                    v-model="empresaId"
-                    class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                    required
-                >
-                    <option value="" disabled>Selecciona una empresa</option>
-                    <option
-                        v-for="e in empresasAutorizadas"
-                        :key="e.id"
-                        :value="e.id"
-                    >
-                        {{ e.nombre_comercial }}
-                    </option>
-                </select>
+                    v-model="empresaSel"
+                    :buscar="buscarEmpresas"
+                    :etiqueta="(e) => String(e.nombre_comercial)"
+                    :invalido="!!form.errors.empresa_id"
+                    placeholder="Selecciona una empresa"
+                    placeholder-busqueda="Buscar empresa…"
+                />
                 <InputError :message="form.errors.empresa_id" />
             </div>
 

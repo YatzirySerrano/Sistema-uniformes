@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, Search } from '@lucide/vue';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,8 +39,20 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar ?? '');
-const empresaId = ref(props.filtros.empresa_id ?? '');
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
+);
+const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado ?? '');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
 
 let t: ReturnType<typeof setTimeout>;
 watch([buscar, empresaId, estado], () => {
@@ -89,30 +103,27 @@ function variante(estado: string) {
                     class="pl-8"
                 />
             </div>
-            <select
+            <BuscadorAsync
                 v-if="empresasAutorizadas.length > 1"
-                v-model="empresaId"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                aria-label="Filtrar por empresa"
-            >
-                <option value="">Todas las empresas</option>
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
-            <select
-                v-model="estado"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="">Todos los estados</option>
-                <option v-for="e in estados" :key="e.valor" :value="e.valor">
-                    {{ e.etiqueta }}
-                </option>
-            </select>
+                v-model="empresaSeleccionada"
+                :buscar="buscarEmpresas"
+                :etiqueta="(e) => String(e.nombre_comercial)"
+                placeholder="Todas las empresas"
+                placeholder-busqueda="Buscar empresa…"
+                class="w-56"
+            />
+            <div class="w-48">
+                <SelectSimple
+                    v-model="estado"
+                    :opciones="[
+                        { valor: '', etiqueta: 'Todos los estados' },
+                        ...estados.map((e) => ({
+                            valor: e.valor,
+                            etiqueta: e.etiqueta,
+                        })),
+                    ]"
+                />
+            </div>
         </div>
 
         <EstadoVacio

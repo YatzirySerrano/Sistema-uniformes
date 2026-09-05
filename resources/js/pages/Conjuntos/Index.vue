@@ -3,8 +3,10 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { Boxes, Package, Pencil, Plus, Search, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,8 +38,20 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar);
-const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
+);
+const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado);
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
 
 const hayFiltros = computed(
     () => buscar.value !== '' || empresaId.value !== '' || estado.value !== '',
@@ -66,12 +80,9 @@ watch([buscar, empresaId, estado], () => {
 
 function limpiarFiltros(): void {
     buscar.value = '';
-    empresaId.value = '';
+    empresaSeleccionada.value = null;
     estado.value = '';
 }
-
-const claseSelect =
-    'border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none';
 
 function alternarEstado(c: Conjunto): void {
     router.post(`/conjuntos/${c.id}/estado`, {}, { preserveScroll: true });
@@ -118,33 +129,28 @@ function alternarEstado(c: Conjunto): void {
                     class="flex items-center gap-1.5 text-sm"
                 >
                     <span class="text-muted-foreground">Empresa</span>
-                    <select
-                        v-model="empresaId"
-                        :class="claseSelect"
-                        aria-label="Filtrar por empresa"
-                    >
-                        <option value="">Todas</option>
-                        <option
-                            v-for="e in empresasAutorizadas"
-                            :key="e.id"
-                            :value="e.id"
-                        >
-                            {{ e.nombre_comercial }}
-                        </option>
-                    </select>
+                    <BuscadorAsync
+                        v-model="empresaSeleccionada"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        placeholder="Todas"
+                        placeholder-busqueda="Buscar empresa…"
+                        class="w-56"
+                    />
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Estado</span>
-                    <select
-                        v-model="estado"
-                        :class="claseSelect"
-                        aria-label="Filtrar por estado"
-                    >
-                        <option value="">Todos</option>
-                        <option value="activos">Activos</option>
-                        <option value="inactivos">Inactivos</option>
-                    </select>
+                    <div class="w-36">
+                        <SelectSimple
+                            v-model="estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todos' },
+                                { valor: 'activos', etiqueta: 'Activos' },
+                                { valor: 'inactivos', etiqueta: 'Inactivos' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <Button

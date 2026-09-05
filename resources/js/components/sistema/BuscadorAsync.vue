@@ -58,6 +58,19 @@ const props = defineProps<{
     permiteCrear?: boolean;
     /** Texto de la opción de creación (p. ej. "Crear nuevo tipo"). */
     textoCrear?: string;
+    /**
+     * Marca una opción como no seleccionable sin ocultarla — explica al
+     * usuario POR QUÉ (p. ej. "Sin existencias en Almacén Sur", "Unidad ya
+     * asignada"), mejor que ocultarla sin explicación. Devuelve el motivo
+     * (string) si está deshabilitada, o `false`/`undefined` si es seleccionable.
+     */
+    deshabilitarOpcion?: (item: Opcion) => string | false | undefined;
+    /**
+     * Pista discreta mostrada mientras el término de búsqueda está vacío (p.
+     * ej. "Escribe para buscar entre todos los colaboradores"), para dejar
+     * claro que la lista visible no es el catálogo completo.
+     */
+    sugerenciaBusqueda?: string;
 }>();
 
 const emit = defineEmits<{
@@ -153,7 +166,12 @@ function cerrar(): void {
     termino.value = '';
 }
 
+function motivoDeshabilitado(item: Opcion): string | false | undefined {
+    return props.deshabilitarOpcion?.(item);
+}
+
 function elegir(item: Opcion): void {
+    if (motivoDeshabilitado(item)) return;
     emit('update:modelValue', item);
     cerrar();
 }
@@ -235,6 +253,13 @@ onBeforeUnmount(() => {
                 />
             </div>
 
+            <p
+                v-if="sugerenciaBusqueda && !termino.trim()"
+                class="text-muted-foreground border-b px-3 py-1.5 text-xs"
+            >
+                {{ sugerenciaBusqueda }}
+            </p>
+
             <ul class="max-h-56 overflow-y-auto py-1">
                 <li
                     v-if="cargando"
@@ -254,8 +279,14 @@ onBeforeUnmount(() => {
                     :key="item.id"
                     role="option"
                     :aria-selected="modelValue?.id === item.id"
-                    tabindex="0"
-                    class="hover:bg-accent focus-visible:bg-accent flex cursor-pointer items-start gap-2 px-3 py-2 text-sm outline-none"
+                    :aria-disabled="!!motivoDeshabilitado(item)"
+                    :tabindex="motivoDeshabilitado(item) ? -1 : 0"
+                    class="flex items-start gap-2 px-3 py-2 text-sm outline-none"
+                    :class="
+                        motivoDeshabilitado(item)
+                            ? 'cursor-not-allowed opacity-50'
+                            : 'hover:bg-accent focus-visible:bg-accent cursor-pointer'
+                    "
                     @click="elegir(item)"
                     @keydown.enter="elegir(item)"
                     @keydown.space.prevent="elegir(item)"
@@ -271,7 +302,13 @@ onBeforeUnmount(() => {
                     <span class="min-w-0">
                         <span class="block truncate">{{ etiqueta(item) }}</span>
                         <span
-                            v-if="descripcion"
+                            v-if="motivoDeshabilitado(item)"
+                            class="text-destructive block truncate text-xs"
+                        >
+                            {{ motivoDeshabilitado(item) }}
+                        </span>
+                        <span
+                            v-else-if="descripcion"
                             class="text-muted-foreground block truncate text-xs"
                         >
                             {{ descripcion(item) }}

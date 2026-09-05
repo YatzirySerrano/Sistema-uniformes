@@ -4,19 +4,25 @@ import { Plus, Trash2 } from '@lucide/vue';
 import { computed, reactive, ref } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
+type OpcionEmpresa = {
+    id: number;
+    nombre_comercial: string;
+    codigo: string | null;
+};
+type OpcionSucursal = { id: number; nombre: string };
 
 type OpcionColaborador = {
     id: number;
     nombre_completo: string;
     numero_empleado: string;
     empresa_id: number;
-    empresa: string | null;
     sucursal_id: number;
-    sucursal: string | null;
 };
 
 type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
@@ -29,10 +35,16 @@ type OpcionActivo = {
     categoria: string | null;
     control: 'cantidad' | 'individual';
     usa_variantes: boolean;
-    tallas: { id: number; valor: string }[];
+    tallas: { id: number; valor: string; disponible?: number }[];
+    disponible?: number;
 };
 
-type OpcionUnidad = { id: number; codigo: string };
+type OpcionUnidad = {
+    id: number;
+    codigo: string;
+    entregable: boolean;
+    motivo_no_entregable: string | null;
+};
 
 type ComponenteVarianteLibre = {
     componente_id: number;
@@ -46,6 +58,7 @@ type OpcionConjunto = {
     nombre: string;
     codigo: string | null;
     componentes_variante_libre: ComponenteVarianteLibre[];
+    disponible: number | null;
 };
 
 defineOptions({
@@ -60,18 +73,52 @@ defineOptions({
 const hoy = new Date().toISOString().slice(0, 10);
 
 // ------------------------------------------------------------------
-// Colaborador → empresa/sucursal derivadas, almacén de origen explícito
+// Empresa → Sucursal → Colaborador → Almacén de origen
 // ------------------------------------------------------------------
+const empresaSel = ref<OpcionEmpresa | null>(null);
+const sucursalSel = ref<OpcionSucursal | null>(null);
 const colaboradorSel = ref<OpcionColaborador | null>(null);
 const almacenSel = ref<OpcionAlmacen | null>(null);
-const empresaId = computed(() => colaboradorSel.value?.empresa_id ?? null);
+const empresaId = computed(() => empresaSel.value?.id ?? null);
+const sucursalId = computed(() => sucursalSel.value?.id ?? null);
+
+async function buscarEmpresas(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionEmpresa[]> {
+    const res = await fetch(`/empresas/buscar?q=${encodeURIComponent(q)}`, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal,
+    });
+    if (!res.ok) return [];
+    return (await res.json()).empresas ?? [];
+}
+
+async function buscarSucursales(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionSucursal[]> {
+    if (empresaId.value === null) return [];
+    const res = await fetch(
+        `/sucursales/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).sucursales ?? [];
+}
 
 async function buscarColaboradores(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionColaborador[]> {
+    if (empresaId.value === null || sucursalId.value === null) return [];
     const res = await fetch(
-        `/colaboradores/buscar?q=${encodeURIComponent(q)}`,
+        `/colaboradores/buscar?empresa_id=${empresaId.value}&sucursal_id=${sucursalId.value}&q=${encodeURIComponent(q)}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -99,43 +146,58 @@ async function buscarAlmacenes(
     return (await res.json()).almacenes ?? [];
 }
 
-function alElegirColaborador(o: OpcionColaborador | null): void {
-    colaboradorSel.value = o;
+function alElegirEmpresa(o: OpcionEmpresa | null): void {
+    empresaSel.value = o;
+    sucursalSel.value = null;
+    colaboradorSel.value = null;
     almacenSel.value = null;
-    form.colaborador_id = o?.id ?? '';
+    form.colaborador_id = '';
     form.almacen_id = null;
+    limpiarRenglones();
+    form.clearErrors();
+}
+
+function alElegirSucursal(o: OpcionSucursal | null): void {
+    sucursalSel.value = o;
+    colaboradorSel.value = null;
+    form.colaborador_id = '';
     form.clearErrors('colaborador_id');
 }
 
-const disponibilidad = ref<Record<string, number>>({});
-
-async function cargarDisponibilidad(): Promise<void> {
-    disponibilidad.value = {};
-    if (empresaId.value === null || !almacenSel.value) return;
-    const res = await fetch(
-        `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}`,
-        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
-    );
-    if (!res.ok) return;
-    const json = (await res.json()) as {
-        saldos: {
-            activo_id: number;
-            talla_id: number | null;
-            disponible: number;
-        }[];
-    };
-    const mapa: Record<string, number> = {};
-    for (const s of json.saldos) {
-        mapa[`${s.activo_id}-${s.talla_id ?? '0'}`] = s.disponible;
-    }
-    disponibilidad.value = mapa;
+function alElegirColaborador(o: OpcionColaborador | null): void {
+    colaboradorSel.value = o;
+    form.colaborador_id = o?.id ?? '';
+    form.clearErrors('colaborador_id');
 }
 
+const avisoAlmacenCambiado = ref(false);
+
 function alElegirAlmacen(o: OpcionAlmacen | null): void {
+    const habiaRenglones =
+        form.activos.length > 0 ||
+        form.unidades.length > 0 ||
+        form.conjuntos.length > 0;
+
     almacenSel.value = o;
     form.almacen_id = o?.id ?? null;
     form.clearErrors('almacen_id');
+
+    if (habiaRenglones) {
+        limpiarRenglones();
+        avisoAlmacenCambiado.value = true;
+    }
+
     void cargarDisponibilidad();
+}
+
+function limpiarRenglones(): void {
+    form.activos = [];
+    form.unidades = [];
+    form.conjuntos = [];
+    activosUI.splice(0, activosUI.length);
+    unidadesUI.splice(0, unidadesUI.length);
+    conjuntosUI.splice(0, conjuntosUI.length);
+    disponibilidad.value = {};
 }
 
 // ------------------------------------------------------------------
@@ -176,6 +238,31 @@ const erroresLaxos = computed(
     () => form.errors as unknown as Record<string, string>,
 );
 
+// --- Disponibilidad general (hint agregado, el backend siempre revalida) ---
+const disponibilidad = ref<Record<string, number>>({});
+
+async function cargarDisponibilidad(): Promise<void> {
+    disponibilidad.value = {};
+    if (empresaId.value === null || !almacenSel.value) return;
+    const res = await fetch(
+        `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}`,
+        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+    );
+    if (!res.ok) return;
+    const json = (await res.json()) as {
+        saldos: {
+            activo_id: number;
+            talla_id: number | null;
+            disponible: number;
+        }[];
+    };
+    const mapa: Record<string, number> = {};
+    for (const s of json.saldos) {
+        mapa[`${s.activo_id}-${s.talla_id ?? '0'}`] = s.disponible;
+    }
+    disponibilidad.value = mapa;
+}
+
 // --- Activos sueltos (por cantidad) --------------------------------
 const activosUI = reactive<{ sel: OpcionActivo | null }[]>([]);
 
@@ -183,9 +270,9 @@ async function buscarActivosCantidad(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionActivo[]> {
-    if (empresaId.value === null) return [];
+    if (empresaId.value === null || !almacenSel.value) return [];
     const res = await fetch(
-        `/activos/buscar?empresa_id=${empresaId.value}&control=cantidad&q=${encodeURIComponent(q)}`,
+        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=cantidad&q=${encodeURIComponent(q)}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -194,6 +281,21 @@ async function buscarActivosCantidad(
     );
     if (!res.ok) return [];
     return (await res.json()).activos ?? [];
+}
+
+function activoSinExistencias(item: OpcionActivo): string | false {
+    if (item.usa_variantes) {
+        // Con variantes: sólo se bloquea si NINGUNA variante tiene existencia.
+        const algunaConStock = item.tallas.some((t) => (t.disponible ?? 0) > 0);
+
+        return algunaConStock
+            ? false
+            : `Sin existencias en ${almacenSel.value?.nombre ?? 'este almacén'}`;
+    }
+
+    return (item.disponible ?? 0) > 0
+        ? false
+        : `Sin existencias en ${almacenSel.value?.nombre ?? 'este almacén'}`;
 }
 
 function agregarActivo(): void {
@@ -231,9 +333,9 @@ async function buscarActivosIndividual(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionActivo[]> {
-    if (empresaId.value === null) return [];
+    if (empresaId.value === null || !almacenSel.value) return [];
     const res = await fetch(
-        `/activos/buscar?empresa_id=${empresaId.value}&control=individual&q=${encodeURIComponent(q)}`,
+        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=individual&q=${encodeURIComponent(q)}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -242,6 +344,12 @@ async function buscarActivosIndividual(
     );
     if (!res.ok) return [];
     return (await res.json()).activos ?? [];
+}
+
+function activoIndividualSinExistencias(item: OpcionActivo): string | false {
+    return (item.disponible ?? 0) > 0
+        ? false
+        : `Sin unidades disponibles en ${almacenSel.value?.nombre ?? 'este almacén'}`;
 }
 
 function buscarUnidades(i: number) {
@@ -259,6 +367,12 @@ function buscarUnidades(i: number) {
         if (!res.ok) return [];
         return (await res.json()).unidades ?? [];
     };
+}
+
+function unidadNoEntregable(item: OpcionUnidad): string | false {
+    return item.entregable
+        ? false
+        : (item.motivo_no_entregable ?? 'No disponible');
 }
 
 function agregarUnidad(): void {
@@ -292,9 +406,9 @@ async function buscarConjuntos(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionConjunto[]> {
-    if (empresaId.value === null) return [];
+    if (empresaId.value === null || !almacenSel.value) return [];
     const res = await fetch(
-        `/conjuntos/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        `/conjuntos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&q=${encodeURIComponent(q)}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -303,6 +417,12 @@ async function buscarConjuntos(
     );
     if (!res.ok) return [];
     return (await res.json()).conjuntos ?? [];
+}
+
+function conjuntoSinDisponibilidad(item: OpcionConjunto): string | false {
+    return (item.disponible ?? 0) > 0
+        ? false
+        : 'Sin disponibilidad en este almacén';
 }
 
 function agregarConjunto(): void {
@@ -333,26 +453,71 @@ function enviar(): void {
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar entrega"
-            descripcion="La empresa y la sucursal se toman del colaborador; el almacén de origen se elige explícitamente. Combina, en cualquier mezcla, activos sueltos, unidades identificadas y conjuntos."
+            descripcion="Empresa → Sucursal → Colaborador → Almacén de origen → activos. Cada paso acota al siguiente; el inventario se descuenta del almacén elegido."
         />
 
         <form class="space-y-6" @submit.prevent="enviar">
-            <div class="grid gap-4 sm:grid-cols-2">
+            <section class="grid gap-4 rounded-xl border p-4 sm:grid-cols-2">
                 <div class="grid gap-1.5">
+                    <Label for="empresa">Empresa</Label>
+                    <BuscadorAsync
+                        id="empresa"
+                        :model-value="empresaSel"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => (e as OpcionEmpresa).nombre_comercial"
+                        :descripcion="(e) => (e as OpcionEmpresa).codigo ?? ''"
+                        placeholder="Selecciona una empresa"
+                        placeholder-busqueda="Buscar por nombre o código"
+                        sin-resultados="No tienes empresas activas autorizadas."
+                        @update:model-value="
+                            (v) => alElegirEmpresa(v as OpcionEmpresa | null)
+                        "
+                    />
+                </div>
+
+                <div class="grid gap-1.5">
+                    <Label for="sucursal">Sucursal</Label>
+                    <BuscadorAsync
+                        id="sucursal"
+                        :model-value="sucursalSel"
+                        :buscar="buscarSucursales"
+                        :dependencia="empresaId"
+                        :disabled="empresaId === null"
+                        :etiqueta="(s) => (s as OpcionSucursal).nombre"
+                        placeholder="Selecciona una sucursal"
+                        placeholder-busqueda="Buscar sucursal por nombre"
+                        sin-resultados="Esta empresa no tiene sucursales activas."
+                        @update:model-value="
+                            (v) => alElegirSucursal(v as OpcionSucursal | null)
+                        "
+                    />
+                    <p
+                        v-if="empresaId === null"
+                        class="text-muted-foreground text-xs"
+                    >
+                        Selecciona primero una empresa.
+                    </p>
+                </div>
+
+                <div class="grid gap-1.5 sm:col-span-2">
                     <Label for="colaborador">Colaborador</Label>
                     <BuscadorAsync
                         id="colaborador"
                         :model-value="colaboradorSel"
                         :buscar="buscarColaboradores"
+                        :dependencia="`${empresaId ?? ''}-${sucursalId ?? ''}`"
+                        :disabled="empresaId === null || sucursalId === null"
                         :etiqueta="
                             (c) => (c as OpcionColaborador).nombre_completo
                         "
                         :descripcion="
                             (c) =>
-                                `${(c as OpcionColaborador).numero_empleado} · ${(c as OpcionColaborador).empresa ?? ''}`
+                                `N.º ${(c as OpcionColaborador).numero_empleado}`
                         "
-                        placeholder="Selecciona un colaborador"
+                        placeholder="Buscar colaborador por nombre o número de empleado"
                         placeholder-busqueda="Buscar por nombre o número de empleado"
+                        sugerencia-busqueda="Escribe para buscar entre todos los colaboradores de esta sucursal."
+                        sin-resultados="No hay colaboradores activos en esta sucursal."
                         :invalido="!!form.errors.colaborador_id"
                         @update:model-value="
                             (v) =>
@@ -362,7 +527,14 @@ function enviar(): void {
                         "
                     />
                     <InputError :message="form.errors.colaborador_id" />
+                    <p
+                        v-if="empresaId === null || sucursalId === null"
+                        class="text-muted-foreground text-xs"
+                    >
+                        Selecciona empresa y sucursal.
+                    </p>
                 </div>
+
                 <div class="grid gap-1.5">
                     <Label for="fecha_entrega">Fecha de entrega</Label>
                     <Input
@@ -374,18 +546,7 @@ function enviar(): void {
                     />
                     <InputError :message="form.errors.fecha_entrega" />
                 </div>
-            </div>
 
-            <div
-                v-if="colaboradorSel"
-                class="bg-muted/40 grid gap-3 rounded-lg border p-3 text-sm sm:grid-cols-2"
-            >
-                <p>
-                    <span class="text-muted-foreground text-xs">Empresa</span
-                    ><br />{{ colaboradorSel.empresa }}
-                    <span class="text-muted-foreground"> · Sucursal: </span
-                    >{{ colaboradorSel.sucursal }}
-                </p>
                 <div class="grid gap-1.5">
                     <Label for="almacen">Almacén de origen</Label>
                     <BuscadorAsync
@@ -393,6 +554,7 @@ function enviar(): void {
                         :model-value="almacenSel"
                         :buscar="buscarAlmacenes"
                         :dependencia="empresaId"
+                        :disabled="empresaId === null"
                         :etiqueta="(a) => (a as OpcionAlmacen).nombre"
                         :descripcion="(a) => (a as OpcionAlmacen).codigo ?? ''"
                         placeholder="Selecciona el almacén"
@@ -404,8 +566,23 @@ function enviar(): void {
                         "
                     />
                     <InputError :message="form.errors.almacen_id" />
+                    <p
+                        v-if="empresaId === null"
+                        class="text-muted-foreground text-xs"
+                    >
+                        Selecciona primero una empresa.
+                    </p>
                 </div>
-            </div>
+            </section>
+
+            <p
+                v-if="avisoAlmacenCambiado"
+                class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+            >
+                Se limpiaron los elementos de la entrega porque cambió el
+                almacén de origen: la disponibilidad correspondía al almacén
+                anterior.
+            </p>
 
             <InputError :message="erroresLaxos['items']" />
 
@@ -417,12 +594,15 @@ function enviar(): void {
                         type="button"
                         variant="outline"
                         size="sm"
-                        :disabled="!colaboradorSel"
+                        :disabled="!almacenSel"
                         @click="agregarActivo"
                     >
                         <Plus class="size-4" /> Agregar activo
                     </Button>
                 </div>
+                <p v-if="!almacenSel" class="text-muted-foreground text-sm">
+                    Selecciona empresa y almacén para consultar existencias.
+                </p>
 
                 <div
                     v-for="(fila, i) in form.activos"
@@ -433,10 +613,16 @@ function enviar(): void {
                         <BuscadorAsync
                             :model-value="activosUI[i].sel"
                             :buscar="buscarActivosCantidad"
-                            :dependencia="empresaId"
+                            :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                            :deshabilitar-opcion="
+                                (a) => activoSinExistencias(a as OpcionActivo)
+                            "
                             :etiqueta="(a) => (a as OpcionActivo).nombre"
                             :descripcion="
-                                (a) => (a as OpcionActivo).codigo ?? ''
+                                (a) =>
+                                    (a as OpcionActivo).usa_variantes
+                                        ? ((a as OpcionActivo).codigo ?? '')
+                                        : `Disponible: ${(a as OpcionActivo).disponible ?? 0}`
                             "
                             placeholder="Buscar activo…"
                             placeholder-busqueda="Buscar por nombre o código"
@@ -451,19 +637,21 @@ function enviar(): void {
                         />
                     </div>
                     <div v-if="activosUI[i].sel?.usa_variantes">
-                        <select
-                            v-model="fila.talla_id"
-                            class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-                        >
-                            <option :value="null" disabled>Variante</option>
-                            <option
-                                v-for="t in activosUI[i].sel?.tallas ?? []"
-                                :key="t.id"
-                                :value="t.id"
-                            >
-                                {{ t.valor }}
-                            </option>
-                        </select>
+                        <SelectSimple
+                            :model-value="fila.talla_id"
+                            :opciones="
+                                (activosUI[i].sel?.tallas ?? []).map((t) => ({
+                                    valor: t.id,
+                                    etiqueta: `${t.valor}${(t.disponible ?? 0) > 0 ? ` (${t.disponible})` : ' (sin existencias)'}`,
+                                    disabled: (t.disponible ?? 0) <= 0,
+                                }))
+                            "
+                            placeholder="Variante"
+                            :invalido="!!erroresLaxos[`activos.${i}.talla_id`]"
+                            @update:model-value="
+                                (v) => (fila.talla_id = v as number | null)
+                            "
+                        />
                         <InputError
                             :message="erroresLaxos[`activos.${i}.talla_id`]"
                         />
@@ -473,6 +661,10 @@ function enviar(): void {
                             v-model.number="fila.cantidad"
                             type="number"
                             min="1"
+                            :max="
+                                disponibleDe(fila.activo_id, fila.talla_id) ??
+                                undefined
+                            "
                             class="h-9"
                         />
                         <p
@@ -488,7 +680,7 @@ function enviar(): void {
                                     : ''
                             "
                         >
-                            Disp.:
+                            Disponible:
                             {{ disponibleDe(fila.activo_id, fila.talla_id) }}
                         </p>
                         <InputError
@@ -505,7 +697,7 @@ function enviar(): void {
                     </Button>
                 </div>
                 <p
-                    v-if="!form.activos.length"
+                    v-if="almacenSel && !form.activos.length"
                     class="text-muted-foreground text-sm"
                 >
                     Sin activos por cantidad agregados.
@@ -522,7 +714,7 @@ function enviar(): void {
                         type="button"
                         variant="outline"
                         size="sm"
-                        :disabled="!colaboradorSel || !almacenSel"
+                        :disabled="!almacenSel"
                         @click="agregarUnidad"
                     >
                         <Plus class="size-4" /> Agregar unidad
@@ -538,7 +730,13 @@ function enviar(): void {
                         <BuscadorAsync
                             :model-value="unidadesUI[i].activoSel"
                             :buscar="buscarActivosIndividual"
-                            :dependencia="empresaId"
+                            :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                            :deshabilitar-opcion="
+                                (a) =>
+                                    activoIndividualSinExistencias(
+                                        a as OpcionActivo,
+                                    )
+                            "
                             :etiqueta="(a) => (a as OpcionActivo).nombre"
                             :descripcion="
                                 (a) => (a as OpcionActivo).codigo ?? ''
@@ -560,10 +758,13 @@ function enviar(): void {
                             :buscar="buscarUnidades(i)"
                             :dependencia="`${unidadesUI[i].activoSel?.id ?? ''}-${almacenSel?.id ?? ''}`"
                             :disabled="!unidadesUI[i].activoSel"
+                            :deshabilitar-opcion="
+                                (u) => unidadNoEntregable(u as OpcionUnidad)
+                            "
                             :etiqueta="(u) => (u as OpcionUnidad).codigo"
                             placeholder="Unidad (código)…"
                             placeholder-busqueda="Buscar por código"
-                            sin-resultados="Sin unidades disponibles de este activo en el almacén."
+                            sin-resultados="Sin unidades de este activo en el almacén."
                             :invalido="
                                 !!erroresLaxos[`unidades.${i}.unidad_activo_id`]
                             "
@@ -588,7 +789,7 @@ function enviar(): void {
                     </Button>
                 </div>
                 <p
-                    v-if="!form.unidades.length"
+                    v-if="almacenSel && !form.unidades.length"
                     class="text-muted-foreground text-sm"
                 >
                     Sin unidades identificadas agregadas.
@@ -603,7 +804,7 @@ function enviar(): void {
                         type="button"
                         variant="outline"
                         size="sm"
-                        :disabled="!colaboradorSel"
+                        :disabled="!almacenSel"
                         @click="agregarConjunto"
                     >
                         <Plus class="size-4" /> Agregar conjunto
@@ -622,10 +823,17 @@ function enviar(): void {
                             <BuscadorAsync
                                 :model-value="conjuntosUI[i].sel"
                                 :buscar="buscarConjuntos"
-                                :dependencia="empresaId"
+                                :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                                :deshabilitar-opcion="
+                                    (c) =>
+                                        conjuntoSinDisponibilidad(
+                                            c as OpcionConjunto,
+                                        )
+                                "
                                 :etiqueta="(c) => (c as OpcionConjunto).nombre"
                                 :descripcion="
-                                    (c) => (c as OpcionConjunto).codigo ?? ''
+                                    (c) =>
+                                        `Disponible: ${(c as OpcionConjunto).disponible ?? 0}`
                                 "
                                 placeholder="Buscar conjunto…"
                                 placeholder-busqueda="Buscar por nombre"
@@ -646,12 +854,22 @@ function enviar(): void {
                                 "
                             />
                         </div>
-                        <Input
-                            v-model.number="fila.cantidad"
-                            type="number"
-                            min="1"
-                            class="h-9"
-                        />
+                        <div>
+                            <Input
+                                v-model.number="fila.cantidad"
+                                type="number"
+                                min="1"
+                                :max="
+                                    conjuntosUI[i].sel?.disponible ?? undefined
+                                "
+                                class="h-9"
+                            />
+                            <InputError
+                                :message="
+                                    erroresLaxos[`conjuntos.${i}.cantidad`]
+                                "
+                            />
+                        </div>
                         <Button
                             type="button"
                             variant="ghost"
@@ -678,21 +896,28 @@ function enviar(): void {
                             <Label class="text-xs">
                                 Variante de {{ comp.activo_nombre }}
                             </Label>
-                            <select
-                                v-model="fila.variantes[comp.componente_id]"
-                                class="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                            >
-                                <option :value="null" disabled>
-                                    Selecciona
-                                </option>
-                                <option
-                                    v-for="t in comp.tallas"
-                                    :key="t.id"
-                                    :value="t.id"
-                                >
-                                    {{ t.valor }}
-                                </option>
-                            </select>
+                            <SelectSimple
+                                :model-value="
+                                    fila.variantes[comp.componente_id] ?? null
+                                "
+                                :opciones="
+                                    comp.tallas.map((t) => ({
+                                        valor: t.id,
+                                        etiqueta: t.valor,
+                                    }))
+                                "
+                                placeholder="Selecciona"
+                                :invalido="
+                                    !!erroresLaxos[
+                                        `conjuntos.${i}.variantes.${comp.componente_id}`
+                                    ]
+                                "
+                                @update:model-value="
+                                    (v) =>
+                                        (fila.variantes[comp.componente_id] =
+                                            v as number | null)
+                                "
+                            />
                             <InputError
                                 :message="
                                     erroresLaxos[
@@ -704,7 +929,7 @@ function enviar(): void {
                     </div>
                 </div>
                 <p
-                    v-if="!form.conjuntos.length"
+                    v-if="almacenSel && !form.conjuntos.length"
                     class="text-muted-foreground text-sm"
                 >
                     Sin conjuntos agregados.

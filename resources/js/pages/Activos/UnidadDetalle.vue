@@ -12,6 +12,7 @@ import {
 import { ref } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import InputError from '@/components/InputError.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -359,19 +360,17 @@ function darDeBaja(): void {
                 <form class="grid gap-3" @submit.prevent="reportarIncidencia">
                     <div class="grid gap-1.5">
                         <Label for="incidencia-tipo">Tipo</Label>
-                        <select
+                        <SelectSimple
                             id="incidencia-tipo"
                             v-model="formIncidencia.tipo"
-                            class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
-                        >
-                            <option
-                                v-for="c in condicionesIncidencia"
-                                :key="c.valor"
-                                :value="c.valor"
-                            >
-                                {{ c.etiqueta }}
-                            </option>
-                        </select>
+                            :opciones="
+                                condicionesIncidencia.map((c) => ({
+                                    valor: c.valor,
+                                    etiqueta: c.etiqueta,
+                                }))
+                            "
+                            :invalido="!!formIncidencia.errors.tipo"
+                        />
                         <InputError :message="formIncidencia.errors.tipo" />
                     </div>
                     <div class="grid gap-1.5">
@@ -462,19 +461,19 @@ function darDeBaja(): void {
                         <Label for="recuperar-condicion"
                             >Condición al regresar</Label
                         >
-                        <select
+                        <SelectSimple
                             id="recuperar-condicion"
                             v-model="formRecuperar.condicion_resultante"
-                            class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
-                        >
-                            <option
-                                v-for="c in condicionesRecuperacion"
-                                :key="c.valor"
-                                :value="c.valor"
-                            >
-                                {{ c.etiqueta }}
-                            </option>
-                        </select>
+                            :opciones="
+                                condicionesRecuperacion.map((c) => ({
+                                    valor: c.valor,
+                                    etiqueta: c.etiqueta,
+                                }))
+                            "
+                            :invalido="
+                                !!formRecuperar.errors.condicion_resultante
+                            "
+                        />
                         <InputError
                             :message="formRecuperar.errors.condicion_resultante"
                         />

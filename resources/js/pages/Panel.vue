@@ -8,6 +8,7 @@ import {
     Users,
 } from '@lucide/vue';
 import { ref, watch } from 'vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { EmpresaAutorizada } from '@/types/sistema';
@@ -53,9 +54,20 @@ const props = defineProps<{
     sinEmpresa: boolean;
 }>();
 
-const empresaId = ref<number | ''>(props.empresaSeleccionadaId ?? '');
-watch(empresaId, (id) => {
-    router.get('/dashboard', id ? { empresa_id: id } : {}, {
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find(
+        (e) => e.id === props.empresaSeleccionadaId,
+    ) ?? null,
+);
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+watch(empresaSeleccionada, (e) => {
+    router.get('/dashboard', e ? { empresa_id: e.id } : {}, {
         preserveScroll: true,
         preserveState: false,
     });
@@ -77,19 +89,14 @@ defineOptions({
             class="flex w-fit items-center gap-1.5 text-sm"
         >
             <span class="text-muted-foreground">Empresa</span>
-            <select
-                v-model="empresaId"
-                class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
-                aria-label="Empresa del panel"
-            >
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
+            <BuscadorAsync
+                v-model="empresaSeleccionada"
+                :buscar="buscarEmpresas"
+                :etiqueta="(e) => String(e.nombre_comercial)"
+                placeholder="Selecciona una empresa"
+                placeholder-busqueda="Buscar empresa…"
+                class="w-56"
+            />
         </label>
 
         <EstadoVacio

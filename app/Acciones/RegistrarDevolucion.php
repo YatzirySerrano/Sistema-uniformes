@@ -63,7 +63,7 @@ class RegistrarDevolucion
 
         return DB::transaction(function () use ($entrega, $almacen, $activos, $unidades, $fecha, $registradaPor, $motivo, $notas): Devolucion {
             $devolucion = Devolucion::query()->create([
-                'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION, $entrega->empresa_id),
+                'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION),
                 'empresa_id' => $entrega->empresa_id,
                 'sucursal_id' => $entrega->sucursal_id,
                 'almacen_id' => $almacen->getKey(),

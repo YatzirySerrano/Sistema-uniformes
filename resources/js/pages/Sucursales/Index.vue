@@ -18,9 +18,11 @@ import type { SucursalEditable } from '@/components/sucursales/FormularioSucursa
 import FormularioSucursal from '@/components/sucursales/FormularioSucursal.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -66,7 +68,19 @@ defineOptions({
 const buscar = ref(props.filtros.buscar);
 const estado = ref<'' | 'activas' | 'inactivas'>(props.filtros.estado);
 const orden = ref<'az' | 'za'>(props.filtros.orden);
-const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
+);
+const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
 
 const hayFiltrosActivos = computed(
     () =>
@@ -102,7 +116,7 @@ function limpiarFiltros(): void {
     buscar.value = '';
     estado.value = '';
     orden.value = 'az';
-    empresaId.value = '';
+    empresaSeleccionada.value = null;
 }
 
 const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
@@ -111,9 +125,6 @@ const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
         { valor: 'activas', texto: 'Activas' },
         { valor: 'inactivas', texto: 'Inactivas' },
     ];
-
-const claseSelect =
-    'border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none';
 
 // --- Alta / edición ---
 const modalAbierto = ref(false);
@@ -234,20 +245,14 @@ function alternarEstado(s: SucursalFila): void {
                     class="flex items-center gap-1.5 text-sm"
                 >
                     <span class="text-muted-foreground">Empresa</span>
-                    <select
-                        v-model="empresaId"
-                        :class="claseSelect"
-                        aria-label="Filtrar por empresa"
-                    >
-                        <option value="">Todas</option>
-                        <option
-                            v-for="e in empresasAutorizadas"
-                            :key="e.id"
-                            :value="e.id"
-                        >
-                            {{ e.nombre_comercial }}
-                        </option>
-                    </select>
+                    <BuscadorAsync
+                        v-model="empresaSeleccionada"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        placeholder="Todas"
+                        placeholder-busqueda="Buscar empresa…"
+                        class="w-56"
+                    />
                 </label>
 
                 <div
@@ -269,14 +274,15 @@ function alternarEstado(s: SucursalFila): void {
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Orden</span>
-                    <select
-                        v-model="orden"
-                        :class="claseSelect"
-                        aria-label="Ordenar sucursales"
-                    >
-                        <option value="az">Nombre A–Z</option>
-                        <option value="za">Nombre Z–A</option>
-                    </select>
+                    <div class="w-36">
+                        <SelectSimple
+                            v-model="orden"
+                            :opciones="[
+                                { valor: 'az', etiqueta: 'Nombre A–Z' },
+                                { valor: 'za', etiqueta: 'Nombre Z–A' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <Button

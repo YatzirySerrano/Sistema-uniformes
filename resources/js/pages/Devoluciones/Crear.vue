@@ -4,6 +4,7 @@ import { computed, ref } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -348,19 +349,16 @@ function enviar(): void {
                             "
                         />
                     </div>
-                    <select
+                    <SelectSimple
                         v-model="fila.condicion"
-                        class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                        :opciones="
+                            condiciones.map((c) => ({
+                                valor: c.valor,
+                                etiqueta: c.etiqueta,
+                            }))
+                        "
                         :disabled="!fila.incluir"
-                    >
-                        <option
-                            v-for="c in condiciones"
-                            :key="c.valor"
-                            :value="c.valor"
-                        >
-                            {{ c.etiqueta }}
-                        </option>
-                    </select>
+                    />
                 </div>
 
                 <div
@@ -384,19 +382,16 @@ function enviar(): void {
                             }}
                         </p>
                     </div>
-                    <select
+                    <SelectSimple
                         v-model="fila.condicion"
-                        class="border-input bg-background h-9 rounded-md border px-2 text-sm"
+                        :opciones="
+                            condicionesUnidad.map((c) => ({
+                                valor: c.valor,
+                                etiqueta: c.etiqueta,
+                            }))
+                        "
                         :disabled="!fila.incluir"
-                    >
-                        <option
-                            v-for="c in condicionesUnidad"
-                            :key="c.valor"
-                            :value="c.valor"
-                        >
-                            {{ c.etiqueta }}
-                        </option>
-                    </select>
+                    />
                 </div>
 
                 <p

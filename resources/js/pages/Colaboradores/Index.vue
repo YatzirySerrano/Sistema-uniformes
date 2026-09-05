@@ -3,9 +3,11 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,9 +45,36 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar ?? '');
-const empresaId = ref(props.filtros.empresa_id ?? '');
-const sucursalId = ref(props.filtros.sucursal_id ?? '');
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
+);
+const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
+const sucursalSeleccionada = ref<{ id: number; nombre: string } | null>(
+    props.sucursales.find((s) => s.id === props.filtros.sucursal_id) ?? null,
+);
+const sucursalId = computed(() => sucursalSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado ?? 'activos');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+
+async function buscarSucursales(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.sucursales.filter((s) => s.nombre.toLowerCase().includes(t));
+}
+
+// Cambiar de empresa invalida la sucursal elegida (pertenece a la empresa
+// anterior): se limpia en vez de conservarla incompatible.
+watch(empresaId, () => {
+    sucursalSeleccionada.value = null;
+});
 
 let t: ReturnType<typeof setTimeout>;
 watch([buscar, empresaId, sucursalId, estado], () => {
@@ -66,8 +95,8 @@ watch([buscar, empresaId, sucursalId, estado], () => {
 
 function limpiar() {
     buscar.value = '';
-    empresaId.value = '';
-    sucursalId.value = '';
+    empresaSeleccionada.value = null;
+    sucursalSeleccionada.value = null;
     estado.value = 'todos';
 }
 
@@ -117,43 +146,36 @@ const hrefNuevoColaborador = computed(() =>
                     class="pl-8"
                 />
             </div>
-            <select
+            <BuscadorAsync
                 v-if="empresasAutorizadas.length > 1"
-                v-model="empresaId"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                aria-label="Filtrar por empresa"
-            >
-                <option value="">Todas las empresas</option>
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
-            <select
-                v-model="sucursalId"
+                v-model="empresaSeleccionada"
+                :buscar="buscarEmpresas"
+                :etiqueta="(e) => String(e.nombre_comercial)"
+                placeholder="Todas las empresas"
+                placeholder-busqueda="Buscar empresa…"
+                class="w-56"
+            />
+            <BuscadorAsync
+                v-model="sucursalSeleccionada"
+                :buscar="buscarSucursales"
+                :etiqueta="(s) => String(s.nombre)"
                 :disabled="!empresaId"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="">
-                    {{
-                        empresaId ? 'Todas las sucursales' : 'Elige una empresa'
-                    }}
-                </option>
-                <option v-for="s in sucursales" :key="s.id" :value="s.id">
-                    {{ s.nombre }}
-                </option>
-            </select>
-            <select
-                v-model="estado"
-                class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-            >
-                <option value="activos">Activos</option>
-                <option value="inactivos">Inactivos</option>
-                <option value="todos">Todos</option>
-            </select>
+                :placeholder="
+                    empresaId ? 'Todas las sucursales' : 'Elige una empresa'
+                "
+                placeholder-busqueda="Buscar sucursal…"
+                class="w-56"
+            />
+            <div class="w-40">
+                <SelectSimple
+                    v-model="estado"
+                    :opciones="[
+                        { valor: 'activos', etiqueta: 'Activos' },
+                        { valor: 'inactivos', etiqueta: 'Inactivos' },
+                        { valor: 'todos', etiqueta: 'Todos' },
+                    ]"
+                />
+            </div>
         </div>
 
         <EstadoVacio

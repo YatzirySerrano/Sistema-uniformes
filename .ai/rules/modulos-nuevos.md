@@ -217,7 +217,7 @@ varios → `ExcepcionDeNegocioSimple`, nunca 500). `EntregaController` /
   que `GuardarConjuntoRequest` valida `Rule::exists('activos','id')->where('empresa_id', ...)`
   y además, en `withValidator`, la coherencia de variante por fila.
 - **Nunca se persiste un saldo del conjunto.** `Conjunto::disponibilidad(int
-  $almacenId): int` se calcula siempre en vivo: por componente,
+$almacenId): int` se calcula siempre en vivo: por componente,
   `intdiv(existencia, cantidad_requerida)`, y el resultado del conjunto es el
   **mínimo** entre todos los componentes. Existencia real:
     - Control por cantidad: `SaldoInventario` de `empresa + almacén + activo`;

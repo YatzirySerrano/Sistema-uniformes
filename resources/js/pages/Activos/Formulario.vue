@@ -75,12 +75,23 @@ defineOptions({
 const esEdicion = !!props.activo;
 const PESO_MAXIMO_MB = 4;
 
-const empresaId = ref<number | ''>(
+const empresaIdInicial =
     props.activo?.empresa_id ??
-        (props.empresasAutorizadas.length === 1
-            ? props.empresasAutorizadas[0].id
-            : ''),
+    (props.empresasAutorizadas.length === 1
+        ? props.empresasAutorizadas[0].id
+        : '');
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === empresaIdInicial) ?? null,
 );
+const empresaId = computed(() => empresaSel.value?.id ?? '');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
 
 function tallasIniciales(): Variante[] {
     const globales: Variante[] = [...props.tallasGlobales];
@@ -433,9 +444,6 @@ function enviar() {
         form.post('/activos', { forceFormData: true });
     }
 }
-
-const selectClass =
-    'border-input bg-background h-9 min-w-0 rounded-md border px-3 text-sm';
 </script>
 
 <template>
@@ -453,22 +461,15 @@ const selectClass =
                 <div class="grid gap-4 sm:grid-cols-2">
                     <div v-if="!esEdicion" class="grid gap-1.5 sm:col-span-2">
                         <Label for="empresa_id">Empresa / razón social</Label>
-                        <select
+                        <BuscadorAsync
                             id="empresa_id"
-                            v-model="empresaId"
-                            :class="selectClass"
-                        >
-                            <option value="" disabled>
-                                Selecciona una empresa
-                            </option>
-                            <option
-                                v-for="e in empresasAutorizadas"
-                                :key="e.id"
-                                :value="e.id"
-                            >
-                                {{ e.nombre_comercial }}
-                            </option>
-                        </select>
+                            v-model="empresaSel"
+                            :buscar="buscarEmpresas"
+                            :etiqueta="(e) => String(e.nombre_comercial)"
+                            :invalido="!!form.errors.empresa_id"
+                            placeholder="Selecciona una empresa"
+                            placeholder-busqueda="Buscar empresa…"
+                        />
                         <InputError :message="form.errors.empresa_id" />
                     </div>
                     <div class="grid gap-1.5">

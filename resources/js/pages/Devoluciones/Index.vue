@@ -3,6 +3,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -31,9 +32,21 @@ defineOptions({
     layout: { breadcrumbs: [{ title: 'Devoluciones', href: '/devoluciones' }] },
 });
 
-const empresaId = ref(props.filtros.empresa_id ?? '');
-watch(empresaId, (id) => {
-    router.get('/devoluciones', id ? { empresa_id: id } : {}, {
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
+);
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+
+watch(empresaSeleccionada, (e) => {
+    router.get('/devoluciones', e ? { empresa_id: e.id } : {}, {
         preserveState: true,
         replace: true,
         preserveScroll: true,
@@ -67,20 +80,14 @@ watch(empresaId, (id) => {
             class="flex w-fit items-center gap-1.5 text-sm"
         >
             <span class="text-muted-foreground">Empresa</span>
-            <select
-                v-model="empresaId"
-                class="border-input bg-background h-9 rounded-md border px-2.5 text-sm"
-                aria-label="Filtrar por empresa"
-            >
-                <option value="">Todas las empresas</option>
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
+            <BuscadorAsync
+                v-model="empresaSeleccionada"
+                :buscar="buscarEmpresas"
+                :etiqueta="(e) => String(e.nombre_comercial)"
+                placeholder="Todas las empresas"
+                placeholder-busqueda="Buscar empresa…"
+                class="w-56"
+            />
         </label>
 
         <EstadoVacio

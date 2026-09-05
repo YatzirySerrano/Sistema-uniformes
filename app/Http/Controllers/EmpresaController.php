@@ -166,6 +166,9 @@ class EmpresaController extends Controller
         $termino = trim((string) $request->query('q', ''));
 
         $empresas = $this->empresasAutorizadas($request)
+            // Sólo empresas ACTIVAS: no tiene sentido operar (entregas,
+            // colaboradores, altas nuevas…) contra una empresa desactivada.
+            ->filter(fn (Empresa $e): bool => $e->activa)
             ->when($termino !== '', fn ($c) => $c->filter(fn (Empresa $e): bool => str_contains(
                 Str::lower($e->nombre_comercial.' '.$e->codigo.' '.$e->razon_social),
                 Str::lower($termino),

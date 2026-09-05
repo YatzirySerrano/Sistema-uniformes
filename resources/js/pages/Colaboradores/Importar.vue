@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { CheckCircle2, Download, TriangleAlert, XCircle } from '@lucide/vue';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SubidaArchivo from '@/components/sistema/SubidaArchivo.vue';
 import InputError from '@/components/InputError.vue';
@@ -39,12 +40,23 @@ defineOptions({
     },
 });
 
-const empresaId = ref<number | ''>(
+const empresaIdInicial =
     props.empresaSeleccionadaId ??
-        (props.empresasAutorizadas.length === 1
-            ? props.empresasAutorizadas[0].id
-            : ''),
+    (props.empresasAutorizadas.length === 1
+        ? props.empresasAutorizadas[0].id
+        : '');
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === empresaIdInicial) ?? null,
 );
+const empresaId = computed(() => empresaSel.value?.id ?? '');
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
 
 const archivo = ref<File | null>(null);
 const form = useForm<{ empresa_id: number | ''; archivo: File | null }>({
@@ -97,22 +109,16 @@ const urlPlantilla = () =>
                     <label for="imp-empresa" class="text-sm font-medium"
                         >Empresa destino</label
                     >
-                    <select
-                        id="imp-empresa"
-                        v-model="empresaId"
-                        class="border-input bg-background h-9 w-fit rounded-md border px-2.5 text-sm"
-                    >
-                        <option value="" disabled>
-                            Selecciona una empresa
-                        </option>
-                        <option
-                            v-for="e in empresasAutorizadas"
-                            :key="e.id"
-                            :value="e.id"
-                        >
-                            {{ e.nombre_comercial }}
-                        </option>
-                    </select>
+                    <div class="w-64">
+                        <BuscadorAsync
+                            id="imp-empresa"
+                            v-model="empresaSel"
+                            :buscar="buscarEmpresas"
+                            :etiqueta="(e) => String(e.nombre_comercial)"
+                            placeholder="Selecciona una empresa"
+                            placeholder-busqueda="Buscar empresa…"
+                        />
+                    </div>
                     <InputError :message="form.errors.empresa_id" />
                 </div>
                 <p class="text-muted-foreground text-sm">

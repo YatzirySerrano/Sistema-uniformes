@@ -7,9 +7,11 @@ use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Controllers\Concerns\ReactivaSuspendidos;
 use App\Http\Requests\Sucursales\GuardarSucursalRequest;
 use App\Models\Colaborador;
+use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -29,6 +31,7 @@ class SucursalController extends Controller
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
         private readonly ServicioCascadaSuspension $cascada,
+        private readonly ServicioGeneradorCodigos $codigos,
     ) {}
 
     public function index(Request $request): Response
@@ -160,6 +163,9 @@ class SucursalController extends Controller
         $termino = Str::lower(trim((string) $request->query('q', '')));
 
         $sucursales = $this->acceso()->sucursalesAutorizadas($request->user(), $empresa)
+            // Sólo sucursales ACTIVAS: una sucursal desactivada no es un
+            // destino/contexto operativo válido para colaboradores o entregas.
+            ->filter(fn (Sucursal $s): bool => $s->activa)
             ->when($termino !== '', fn ($c) => $c->filter(fn (Sucursal $s): bool => str_contains(Str::lower($s->nombre), $termino)))
             ->take(20)
             ->map(fn (Sucursal $s): array => ['id' => $s->id, 'nombre' => $s->nombre])
@@ -214,7 +220,7 @@ class SucursalController extends Controller
         $empresa = $request->empresaResuelta();
 
         $datos = $request->validated();
-        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa->id);
+        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa);
 
         $sucursal = Sucursal::query()->create([
             ...$datos,
@@ -279,17 +285,12 @@ class SucursalController extends Controller
 
     /**
      * Genera un código interno consecutivo y único dentro de la empresa
-     * (SUC-0001, SUC-0002, …) cuando el usuario no captura uno.
+     * (SUC-0001, SUC-0002, …) cuando el usuario no captura uno. Race-safe:
+     * `ServicioGeneradorCodigos` bloquea el contador dentro de una
+     * transacción (nunca `count() + 1` sin lock).
      */
-    private function generarCodigo(int $empresaId): string
+    private function generarCodigo(Empresa $empresa): string
     {
-        $n = Sucursal::query()->withTrashed()->where('empresa_id', $empresaId)->count() + 1;
-
-        do {
-            $codigo = 'SUC-'.str_pad((string) $n, 4, '0', STR_PAD_LEFT);
-            $n++;
-        } while (Sucursal::query()->withTrashed()->where('empresa_id', $empresaId)->where('codigo', $codigo)->exists());
-
-        return $codigo;
+        return $this->codigos->siguienteConPrefijo($empresa, 'sucursal', 'SUC');
     }
 }

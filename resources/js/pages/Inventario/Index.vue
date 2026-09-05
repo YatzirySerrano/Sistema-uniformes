@@ -6,6 +6,7 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -93,6 +94,40 @@ function alElegirAlmacen(a: AlmacenOpcion | null) {
     filtros.almacen_id = a?.id ?? '';
 }
 
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find(
+        (e) => e.id === Number(props.filtros.empresa_id),
+    ) ?? null,
+);
+async function buscarEmpresas(q: string): Promise<EmpresaAutorizada[]> {
+    const t = q.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+
+const tipoActivoSel = ref<Opcion | null>(
+    props.tiposActivo.find(
+        (t) => t.id === Number(props.filtros.tipo_activo_id),
+    ) ?? null,
+);
+async function buscarTiposActivo(q: string): Promise<Opcion[]> {
+    const t = q.trim().toLowerCase();
+
+    return props.tiposActivo.filter((o) => o.nombre.toLowerCase().includes(t));
+}
+
+const categoriaSel = ref<Opcion | null>(
+    props.categorias.find((c) => c.id === Number(props.filtros.categoria_id)) ??
+        null,
+);
+async function buscarCategorias(q: string): Promise<Opcion[]> {
+    const t = q.trim().toLowerCase();
+
+    return props.categorias.filter((o) => o.nombre.toLowerCase().includes(t));
+}
+
 // Al cambiar la empresa, el almacén elegido puede pertenecer a otra empresa:
 // se limpia para no filtrar por un almacén ajeno.
 watch(
@@ -102,6 +137,15 @@ watch(
         filtros.almacen_id = '';
     },
 );
+watch(empresaSel, (e) => {
+    filtros.empresa_id = e?.id ?? '';
+});
+watch(tipoActivoSel, (t) => {
+    filtros.tipo_activo_id = t?.id ?? '';
+});
+watch(categoriaSel, (c) => {
+    filtros.categoria_id = c?.id ?? '';
+});
 
 const hayFiltros = computed(() =>
     Object.values(filtros).some((v) => v !== '' && v !== undefined),
@@ -131,7 +175,10 @@ function limpiarFiltros() {
     Object.keys(filtros).forEach(
         (k) => (filtros[k as keyof typeof filtros] = ''),
     );
+    empresaSel.value = null;
     almacenSel.value = null;
+    tipoActivoSel.value = null;
+    categoriaSel.value = null;
 }
 
 const dialogo = ref<'ajuste' | 'minimo' | null>(null);
@@ -190,9 +237,6 @@ function guardarMinimo() {
         onSuccess: () => (dialogo.value = null),
     });
 }
-
-const selectClass =
-    'border-input bg-background h-9 min-w-0 rounded-md border px-3 text-sm';
 </script>
 
 <template>
@@ -225,21 +269,15 @@ const selectClass =
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
-            <select
-                v-if="empresasAutorizadas.length > 1"
-                v-model="filtros.empresa_id"
-                :class="selectClass"
-                aria-label="Filtrar por empresa"
-            >
-                <option value="">Todas las empresas</option>
-                <option
-                    v-for="e in empresasAutorizadas"
-                    :key="e.id"
-                    :value="e.id"
-                >
-                    {{ e.nombre_comercial }}
-                </option>
-            </select>
+            <div v-if="empresasAutorizadas.length > 1" class="w-full sm:w-56">
+                <BuscadorAsync
+                    v-model="empresaSel"
+                    :buscar="buscarEmpresas"
+                    :etiqueta="(e) => String(e.nombre_comercial)"
+                    placeholder="Todas las empresas"
+                    placeholder-busqueda="Buscar empresa…"
+                />
+            </div>
             <div class="w-full sm:w-56">
                 <BuscadorAsync
                     :model-value="almacenSel"
@@ -262,34 +300,47 @@ const selectClass =
                     "
                 />
             </div>
-            <select v-model="filtros.tipo_activo_id" :class="selectClass">
-                <option value="">Todos los tipos</option>
-                <option v-for="t in tiposActivo" :key="t.id" :value="t.id">
-                    {{ t.nombre }}
-                </option>
-            </select>
-            <select v-model="filtros.categoria_id" :class="selectClass">
-                <option value="">Todas las categorías</option>
-                <option v-for="c in categorias" :key="c.id" :value="c.id">
-                    {{ c.nombre }}
-                </option>
-            </select>
-            <select v-model="filtros.control" :class="selectClass">
-                <option value="">Cualquier control</option>
-                <option
-                    v-for="c in tiposControl"
-                    :key="c.valor"
-                    :value="c.valor"
-                >
-                    {{ c.etiqueta }}
-                </option>
-            </select>
-            <select v-model="filtros.estado_stock" :class="selectClass">
-                <option value="">Cualquier estado</option>
-                <option value="bajo_minimo">Bajo mínimo</option>
-                <option value="sin_stock">Sin stock</option>
-                <option value="con_stock">Con stock</option>
-            </select>
+            <div class="w-full sm:w-48">
+                <BuscadorAsync
+                    v-model="tipoActivoSel"
+                    :buscar="buscarTiposActivo"
+                    :etiqueta="(t) => String(t.nombre)"
+                    placeholder="Todos los tipos"
+                    placeholder-busqueda="Buscar tipo…"
+                />
+            </div>
+            <div class="w-full sm:w-48">
+                <BuscadorAsync
+                    v-model="categoriaSel"
+                    :buscar="buscarCategorias"
+                    :etiqueta="(c) => String(c.nombre)"
+                    placeholder="Todas las categorías"
+                    placeholder-busqueda="Buscar categoría…"
+                />
+            </div>
+            <div class="w-full sm:w-48">
+                <SelectSimple
+                    v-model="filtros.control"
+                    :opciones="[
+                        { valor: '', etiqueta: 'Cualquier control' },
+                        ...tiposControl.map((c) => ({
+                            valor: c.valor,
+                            etiqueta: c.etiqueta,
+                        })),
+                    ]"
+                />
+            </div>
+            <div class="w-full sm:w-48">
+                <SelectSimple
+                    v-model="filtros.estado_stock"
+                    :opciones="[
+                        { valor: '', etiqueta: 'Cualquier estado' },
+                        { valor: 'bajo_minimo', etiqueta: 'Bajo mínimo' },
+                        { valor: 'sin_stock', etiqueta: 'Sin stock' },
+                        { valor: 'con_stock', etiqueta: 'Con stock' },
+                    ]"
+                />
+            </div>
             <Button
                 v-if="hayFiltros"
                 variant="ghost"

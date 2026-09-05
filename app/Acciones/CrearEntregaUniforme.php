@@ -75,7 +75,7 @@ class CrearEntregaUniforme
 
         return DB::transaction(function () use ($empresaId, $sucursalId, $almacen, $colaborador, $encargadoId, $fechaEntrega, $activosConsolidados, $unidadIds, $conjuntos, $notas): EntregaUniforme {
             $entrega = EntregaUniforme::query()->create([
-                'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA, $empresaId),
+                'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA),
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursalId,
                 'almacen_id' => $almacen->getKey(),
@@ -118,8 +118,8 @@ class CrearEntregaUniforme
 
     private function registrarComponenteCantidad(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, int $activoId, ?int $tallaId, int $cantidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null): void
     {
-        $activo = Activo::query()->where('empresa_id', $empresaId)->where('tipo_control', TipoControlActivo::Cantidad)
-            ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a esta empresa.'));
+        $activo = Activo::query()->where('empresa_id', $empresaId)->where('tipo_control', TipoControlActivo::Cantidad)->where('activo', true)
+            ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a esta empresa o ya no está disponible.'));
 
         $tallaValor = null;
         if ($tallaId !== null) {

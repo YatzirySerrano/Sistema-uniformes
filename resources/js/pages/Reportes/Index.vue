@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
 import { Download } from '@lucide/vue';
-import { reactive } from 'vue';
+import { reactive, ref, watch } from 'vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
@@ -46,11 +48,25 @@ defineOptions({
 const f = reactive({
     tab: props.tab,
     empresa_id: props.filtros.empresa_id ?? '',
-    estado: props.filtros.estado ?? '',
+    estado: String(props.filtros.estado ?? ''),
     firmado: props.filtros.firmado ?? '',
     desde: props.filtros.desde ?? '',
     hasta: props.filtros.hasta ?? '',
     solo_bajo_minimo: !!props.filtros.solo_bajo_minimo,
+});
+
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.catalogos.empresas.find((e) => e.id === Number(f.empresa_id)) ?? null,
+);
+async function buscarEmpresas(q: string): Promise<EmpresaAutorizada[]> {
+    const t = q.trim().toLowerCase();
+
+    return props.catalogos.empresas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+watch(empresaSel, (e) => {
+    f.empresa_id = e?.id ?? '';
 });
 
 function aplicar() {
@@ -113,35 +129,28 @@ function urlExport(formato: string) {
 
         <Card>
             <CardContent class="flex flex-wrap items-end gap-2 pt-6">
-                <select
-                    v-if="catalogos.empresas.length > 1"
-                    v-model="f.empresa_id"
-                    class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                    aria-label="Filtrar por empresa"
-                >
-                    <option value="">Todas las empresas</option>
-                    <option
-                        v-for="e in catalogos.empresas"
-                        :key="e.id"
-                        :value="e.id"
-                    >
-                        {{ e.nombre_comercial }}
-                    </option>
-                </select>
+                <div v-if="catalogos.empresas.length > 1" class="w-56">
+                    <BuscadorAsync
+                        v-model="empresaSel"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        placeholder="Todas las empresas"
+                        placeholder-busqueda="Buscar empresa…"
+                    />
+                </div>
                 <template v-if="f.tab === 'entregas'">
-                    <select
-                        v-model="f.estado"
-                        class="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                    >
-                        <option value="">Todos los estados</option>
-                        <option
-                            v-for="e in catalogos.estados"
-                            :key="e.valor"
-                            :value="e.valor"
-                        >
-                            {{ e.etiqueta }}
-                        </option>
-                    </select>
+                    <div class="w-52">
+                        <SelectSimple
+                            v-model="f.estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todos los estados' },
+                                ...catalogos.estados.map((e) => ({
+                                    valor: e.valor,
+                                    etiqueta: e.etiqueta,
+                                })),
+                            ]"
+                        />
+                    </div>
                     <input
                         v-model="f.desde"
                         type="date"

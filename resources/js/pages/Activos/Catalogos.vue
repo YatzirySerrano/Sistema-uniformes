@@ -4,6 +4,7 @@ import { Pencil, Plus, X } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -257,15 +258,16 @@ function confirmarEstado() {
                         aria-label="Buscar tipo de activo"
                         class="h-8 w-40"
                     />
-                    <select
-                        v-model="fTipo.estado"
-                        class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-                        aria-label="Filtrar por estado"
-                    >
-                        <option value="">Estado: todos</option>
-                        <option value="activos">Activos</option>
-                        <option value="inactivos">Inactivos</option>
-                    </select>
+                    <div class="w-40">
+                        <SelectSimple
+                            v-model="fTipo.estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Estado: todos' },
+                                { valor: 'activos', etiqueta: 'Activos' },
+                                { valor: 'inactivos', etiqueta: 'Inactivos' },
+                            ]"
+                        />
+                    </div>
                     <Button
                         v-if="hayFiltroTipo"
                         variant="ghost"
@@ -475,15 +477,16 @@ function confirmarEstado() {
                             "
                         />
                     </div>
-                    <select
-                        v-model="fCat.estado"
-                        class="border-input bg-background h-8 rounded-md border px-2 text-sm"
-                        aria-label="Filtrar por estado"
-                    >
-                        <option value="">Estado: todas</option>
-                        <option value="activas">Activas</option>
-                        <option value="inactivas">Inactivas</option>
-                    </select>
+                    <div class="w-40">
+                        <SelectSimple
+                            v-model="fCat.estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Estado: todas' },
+                                { valor: 'activas', etiqueta: 'Activas' },
+                                { valor: 'inactivas', etiqueta: 'Inactivas' },
+                            ]"
+                        />
+                    </div>
                     <Button
                         v-if="hayFiltroCat"
                         variant="ghost"

@@ -224,18 +224,38 @@ class UnidadActivoController extends Controller
         $almacenId = $request->filled('almacen_id') ? (int) $request->query('almacen_id') : null;
         $termino = trim((string) $request->query('q', ''));
 
+        // Se devuelven también las NO entregables (asignadas, en reparación,
+        // perdidas…) en vez de ocultarlas sin explicación — el selector las
+        // muestra deshabilitadas con el motivo. Entregables primero.
         $unidades = UnidadActivo::query()
             ->where('activo_id', $activoId)
             ->when($almacenId !== null, fn (Builder $q) => $q->where('almacen_id', $almacenId))
-            ->where('estado', EstadoUnidadActivo::EnAlmacen)
-            ->where('condicion', CondicionUnidadActivo::Funcionando)
             ->when($termino !== '', fn (Builder $q) => $q->where('codigo', 'like', "%{$termino}%"))
+            ->orderByRaw("case when estado = 'en_almacen' and condicion = 'funcionando' then 0 else 1 end")
             ->orderBy('codigo')
             ->limit(30)
-            ->get(['id', 'codigo'])
-            ->map(fn (UnidadActivo $u): array => ['id' => $u->id, 'codigo' => $u->codigo]);
+            ->get(['id', 'codigo', 'estado', 'condicion'])
+            ->map(fn (UnidadActivo $u): array => [
+                'id' => $u->id,
+                'codigo' => $u->codigo,
+                'entregable' => $u->esEntregable(),
+                'motivo_no_entregable' => $u->esEntregable() ? null : $this->motivoNoEntregable($u),
+            ]);
 
         return response()->json(['unidades' => $unidades]);
+    }
+
+    private function motivoNoEntregable(UnidadActivo $unidad): string
+    {
+        return match (true) {
+            $unidad->estado === EstadoUnidadActivo::Baja => 'Dada de baja',
+            $unidad->estado === EstadoUnidadActivo::Asignada => 'Asignada a un colaborador',
+            $unidad->condicion === CondicionUnidadActivo::EnReparacion => 'En reparación',
+            $unidad->condicion === CondicionUnidadActivo::Perdido => 'Perdida',
+            $unidad->condicion === CondicionUnidadActivo::Robado => 'Robada',
+            $unidad->condicion === CondicionUnidadActivo::Inservible => 'Inservible',
+            default => 'No disponible',
+        };
     }
 
     public function darDeBaja(DarDeBajaUnidadRequest $request, UnidadActivo $unidad, DarDeBajaUnidadActivo $accion): RedirectResponse

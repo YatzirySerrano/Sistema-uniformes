@@ -6,6 +6,7 @@ import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -446,25 +447,25 @@ function enviar() {
                         <template
                             v-if="(activosSel[i]?.tallas.length ?? 0) > 0"
                         >
-                            <select
+                            <SelectSimple
                                 :id="`talla-${i}`"
-                                v-model.number="item.talla_id"
-                                class="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-                                :class="
-                                    errFila(i, 'talla_id')
-                                        ? 'border-destructive'
-                                        : ''
+                                :model-value="item.talla_id ?? ''"
+                                :invalido="!!errFila(i, 'talla_id')"
+                                :opciones="[
+                                    { valor: '', etiqueta: 'Selecciona…' },
+                                    ...activosSel[i]!.tallas.map((t) => ({
+                                        valor: t.id,
+                                        etiqueta: t.valor,
+                                    })),
+                                ]"
+                                @update:model-value="
+                                    (v) =>
+                                        (item.talla_id =
+                                            v === '' || v === null
+                                                ? null
+                                                : Number(v))
                                 "
-                            >
-                                <option :value="null">Selecciona…</option>
-                                <option
-                                    v-for="t in activosSel[i]!.tallas"
-                                    :key="t.id"
-                                    :value="t.id"
-                                >
-                                    {{ t.valor }}
-                                </option>
-                            </select>
+                            />
                             <InputError :message="errFila(i, 'talla_id')" />
                         </template>
                         <p

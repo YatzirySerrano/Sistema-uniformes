@@ -66,7 +66,7 @@ class ConfirmarAcuseRecepcion
             }
 
             $acuse = AcuseRecepcion::query()->create([
-                'folio' => $this->folios->siguiente(ServicioFolios::ACUSE, $entrega->empresa_id),
+                'folio' => $this->folios->siguiente(ServicioFolios::ACUSE),
                 'entrega_uniforme_id' => $entrega->getKey(),
                 'empresa_id' => $entrega->empresa_id,
                 'sucursal_id' => $entrega->sucursal_id,

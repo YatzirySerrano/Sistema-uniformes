@@ -225,16 +225,48 @@ class ColaboradorController extends Controller
      * NO exige `empresa_id` — busca entre todas las empresas autorizadas del
      * usuario y devuelve la empresa/sucursal de cada resultado.
      */
+    /**
+     * Búsqueda server-side de colaboradores OPERATIVOS (nunca carga el
+     * catálogo completo: `limit(20)` + término). Acotada SIEMPRE por el
+     * alcance del usuario y, si vienen, por `empresa_id`/`sucursal_id`
+     * (p. ej. el flujo de Entregas: Empresa → Sucursal → Colaborador) —
+     * cualquiera de los dos que no pertenezca al alcance del usuario devuelve
+     * una lista vacía en vez de filtrar silenciosamente.
+     */
     public function buscar(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Colaborador::class);
 
         $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $termino = trim((string) $request->query('q', ''));
+        $usuario = $request->user();
+
+        $empresaId = $request->filled('empresa_id') ? (int) $request->query('empresa_id') : null;
+        $sucursalId = $request->filled('sucursal_id') ? (int) $request->query('sucursal_id') : null;
+
+        if ($empresaId !== null && ! $idsAutorizadas->contains($empresaId)) {
+            return response()->json(['colaboradores' => []]);
+        }
+
+        if ($sucursalId !== null) {
+            $sucursal = Sucursal::query()->find($sucursalId);
+
+            if ($sucursal === null
+                || ! $idsAutorizadas->contains($sucursal->empresa_id)
+                || ($empresaId !== null && $empresaId !== $sucursal->empresa_id)
+                || ! $this->acceso()->sucursalesAutorizadas($usuario, $sucursal->empresa_id)->pluck('id')->contains($sucursalId)
+            ) {
+                return response()->json(['colaboradores' => []]);
+            }
+        }
 
         $colaboradores = Colaborador::query()
             ->whereIn('empresa_id', $idsAutorizadas)
+            ->when($empresaId !== null, fn ($q) => $q->where('empresa_id', $empresaId))
+            ->when($sucursalId !== null, fn ($q) => $q->where('sucursal_id', $sucursalId))
             ->where('activo', true)
+            ->whereHas('empresa', fn ($q) => $q->where('activa', true))
+            ->whereHas('sucursal', fn ($q) => $q->where('activa', true))
             ->when($termino !== '', fn ($q) => $q->where(fn ($sub) => $sub
                 ->where('nombre_completo', 'like', "%{$termino}%")
                 ->orWhere('numero_empleado', 'like', "%{$termino}%")))

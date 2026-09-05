@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +46,20 @@ const form = useForm<{
     codigo: props.sucursal?.codigo ?? '',
     direccion: props.sucursal?.direccion ?? '',
     telefono: props.sucursal?.telefono ?? '',
+});
+
+const empresaSel = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === form.empresa_id) ?? null,
+);
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
+watch(empresaSel, (e) => {
+    form.empresa_id = e?.id ?? null;
 });
 
 const tocado = reactive<Record<string, boolean>>({});
@@ -131,23 +146,17 @@ function enviar(): void {
                         etiqueta="Ayuda sobre la empresa"
                     />
                 </Label>
-                <select
-                    id="sf-empresa"
-                    v-model="form.empresa_id"
-                    class="border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none"
-                    @blur="marcar('empresa_id')"
-                >
-                    <option :value="null" disabled>
-                        Selecciona una empresa
-                    </option>
-                    <option
-                        v-for="e in empresasAutorizadas"
-                        :key="e.id"
-                        :value="e.id"
-                    >
-                        {{ e.nombre_comercial }}
-                    </option>
-                </select>
+                <div @focusout="marcar('empresa_id')">
+                    <BuscadorAsync
+                        id="sf-empresa"
+                        v-model="empresaSel"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        :invalido="!!error('empresa_id')"
+                        placeholder="Selecciona una empresa"
+                        placeholder-busqueda="Buscar empresa…"
+                    />
+                </div>
                 <InputError :message="error('empresa_id')" />
             </div>
 

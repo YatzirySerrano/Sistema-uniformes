@@ -261,6 +261,7 @@ class ConjuntoController extends Controller
         }
 
         $termino = trim((string) $request->query('q', ''));
+        $almacenId = $request->filled('almacen_id') ? (int) $request->query('almacen_id') : null;
 
         $conjuntos = Conjunto::query()
             ->where('empresa_id', $empresa->id)
@@ -296,6 +297,7 @@ class ConjuntoController extends Controller
                 'nombre' => $conjunto->nombre,
                 'codigo' => $conjunto->codigo,
                 'componentes_variante_libre' => $componentesVarianteLibre,
+                'disponible' => $almacenId === null ? null : $conjunto->disponibilidad($almacenId),
             ];
         }
 

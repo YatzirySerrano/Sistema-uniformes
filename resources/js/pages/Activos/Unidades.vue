@@ -3,9 +3,11 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { QrCode, Search, SquareArrowOutUpRight, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,9 +55,21 @@ defineOptions({
 });
 
 const buscar = ref(props.filtros.buscar);
-const empresaId = ref<number | ''>(props.filtros.empresa_id ?? '');
+const empresaSeleccionada = ref<EmpresaAutorizada | null>(
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
+);
+const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado);
 const condicion = ref(props.filtros.condicion);
+
+async function buscarEmpresas(termino: string) {
+    const t = termino.trim().toLowerCase();
+
+    return props.empresasAutorizadas.filter((e) =>
+        e.nombre_comercial.toLowerCase().includes(t),
+    );
+}
 
 const hayFiltros = computed(
     () =>
@@ -89,13 +103,10 @@ watch([buscar, empresaId, estado, condicion], () => {
 
 function limpiarFiltros(): void {
     buscar.value = '';
-    empresaId.value = '';
+    empresaSeleccionada.value = null;
     estado.value = '';
     condicion.value = '';
 }
-
-const claseSelect =
-    'border-input bg-background focus-visible:ring-ring h-9 rounded-md border px-2.5 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none';
 
 const idsSeleccionados = ref<number[]>([]);
 function alternarSeleccion(id: number): void {
@@ -156,50 +167,55 @@ function generarEtiquetas(): void {
                     class="flex items-center gap-1.5 text-sm"
                 >
                     <span class="text-muted-foreground">Empresa</span>
-                    <select
-                        v-model="empresaId"
-                        :class="claseSelect"
-                        aria-label="Filtrar por empresa"
-                    >
-                        <option value="">Todas</option>
-                        <option
-                            v-for="e in empresasAutorizadas"
-                            :key="e.id"
-                            :value="e.id"
-                        >
-                            {{ e.nombre_comercial }}
-                        </option>
-                    </select>
+                    <BuscadorAsync
+                        v-model="empresaSeleccionada"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        placeholder="Todas"
+                        placeholder-busqueda="Buscar empresa…"
+                        class="w-56"
+                    />
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Estado</span>
-                    <select
-                        v-model="estado"
-                        :class="claseSelect"
-                        aria-label="Filtrar por estado"
-                    >
-                        <option value="">Todos</option>
-                        <option value="en_almacen">En almacén</option>
-                        <option value="asignada">Asignada</option>
-                        <option value="baja">Baja</option>
-                    </select>
+                    <div class="w-40">
+                        <SelectSimple
+                            v-model="estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todos' },
+                                { valor: 'en_almacen', etiqueta: 'En almacén' },
+                                { valor: 'asignada', etiqueta: 'Asignada' },
+                                { valor: 'baja', etiqueta: 'Baja' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Condición</span>
-                    <select
-                        v-model="condicion"
-                        :class="claseSelect"
-                        aria-label="Filtrar por condición"
-                    >
-                        <option value="">Todas</option>
-                        <option value="funcionando">Funcionando</option>
-                        <option value="en_reparacion">En reparación</option>
-                        <option value="inservible">Inservible</option>
-                        <option value="perdido">Perdido</option>
-                        <option value="robado">Robado</option>
-                    </select>
+                    <div class="w-44">
+                        <SelectSimple
+                            v-model="condicion"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todas' },
+                                {
+                                    valor: 'funcionando',
+                                    etiqueta: 'Funcionando',
+                                },
+                                {
+                                    valor: 'en_reparacion',
+                                    etiqueta: 'En reparación',
+                                },
+                                {
+                                    valor: 'inservible',
+                                    etiqueta: 'Inservible',
+                                },
+                                { valor: 'perdido', etiqueta: 'Perdido' },
+                                { valor: 'robado', etiqueta: 'Robado' },
+                            ]"
+                        />
+                    </div>
                 </label>
 
                 <Button
