@@ -13,10 +13,12 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Colaboradores por empresa. La empresa llega como filtro (listado) o campo
@@ -40,7 +42,18 @@ class ColaboradorController extends Controller
 
         $colaboradores = $this->consultaColaboradores($request, $filtros)
             ->paginate($this->porPagina())
-            ->withQueryString();
+            ->withQueryString()
+            ->through(fn (Colaborador $c): array => [
+                'id' => $c->id,
+                'numero_empleado' => $c->numero_empleado,
+                'nombre_completo' => $c->nombre_completo,
+                'puesto' => $c->puesto,
+                'area' => $c->area,
+                'activo' => $c->activo,
+                'foto_url' => $c->foto_ruta !== null ? route('colaboradores.foto', $c) : null,
+                'sucursal' => $c->sucursal === null ? null : ['nombre' => $c->sucursal->nombre],
+                'empresa' => $c->empresa === null ? null : ['id' => $c->empresa->id, 'nombre_comercial' => $c->empresa->nombre_comercial],
+            ]);
 
         return Inertia::render('Colaboradores/Index', [
             'colaboradores' => $colaboradores,
@@ -161,9 +174,10 @@ class ColaboradorController extends Controller
         $empresa = $request->empresaResuelta();
 
         $colaborador = Colaborador::query()->create([
-            ...$request->safe()->except(['activo', 'empresa_id']),
+            ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
             'empresa_id' => $empresa->id,
             'area' => $this->nombreAreaEspejo($empresa->id, $request->integer('area_id') ?: null, $request->input('area')),
+            'foto_ruta' => $request->hasFile('foto') ? $request->file('foto')->store("colaboradores/{$empresa->id}", 'local') ?: null : null,
             'activo' => $request->boolean('activo', true),
         ]);
 
@@ -187,9 +201,39 @@ class ColaboradorController extends Controller
                 ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
                 'sucursal' => $colaborador->sucursal === null ? null : ['id' => $colaborador->sucursal->id, 'nombre' => $colaborador->sucursal->nombre],
                 'area_actual' => $colaborador->departamento === null ? null : ['id' => $colaborador->departamento->id, 'nombre' => $colaborador->departamento->nombre],
+                'foto_url' => $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null,
             ],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
         ]);
+    }
+
+    public function show(Request $request, Colaborador $colaborador): Response
+    {
+        $this->authorize('view', $colaborador);
+
+        $colaborador->load(['sucursal:id,nombre', 'departamento:id,nombre', 'empresa:id,nombre_comercial']);
+
+        return Inertia::render('Colaboradores/Detalle', [
+            'colaborador' => [
+                ...$colaborador->only(['id', 'numero_empleado', 'nombre_completo', 'puesto', 'correo', 'activo']),
+                'empresa' => $colaborador->empresa?->nombre_comercial,
+                'sucursal' => $colaborador->sucursal?->nombre,
+                'area' => $colaborador->departamento === null ? $colaborador->area : $colaborador->departamento->nombre,
+                'foto_url' => $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null,
+            ],
+            'puedeEditar' => $request->user()->can('update', $colaborador),
+            'puedeEliminar' => $request->user()->can('desactivar', $colaborador),
+            'puedeVerExpediente' => $request->user()->can('verExpediente', $colaborador),
+        ]);
+    }
+
+    public function foto(Colaborador $colaborador): StreamedResponse
+    {
+        $this->authorize('view', $colaborador);
+
+        abort_unless($colaborador->foto_ruta !== null && Storage::disk('local')->exists($colaborador->foto_ruta), 404);
+
+        return Storage::disk('local')->response($colaborador->foto_ruta);
     }
 
     public function update(GuardarColaboradorRequest $request, Colaborador $colaborador): RedirectResponse
@@ -197,8 +241,9 @@ class ColaboradorController extends Controller
         $anteriores = $colaborador->toArray();
 
         $colaborador->update([
-            ...$request->safe()->except(['activo', 'empresa_id']),
+            ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
             'area' => $this->nombreAreaEspejo($colaborador->empresa_id, $request->integer('area_id') ?: null, $request->input('area')),
+            'foto_ruta' => $request->hasFile('foto') ? $this->reemplazarFoto($colaborador, $request) : $colaborador->foto_ruta,
             'activo' => $request->boolean('activo', $colaborador->activo),
         ]);
 
@@ -308,6 +353,20 @@ class ColaboradorController extends Controller
             ->get(['id', 'nombre'])
             ->map(fn (Area $a): array => ['id' => $a->id, 'nombre' => $a->nombre])
             ->all();
+    }
+
+    /**
+     * Borra la foto anterior del disco privado (si existía) y guarda la
+     * nueva. Devuelve `null` si el `store()` falla, para no dejar una ruta
+     * inválida en la columna.
+     */
+    private function reemplazarFoto(Colaborador $colaborador, GuardarColaboradorRequest $request): ?string
+    {
+        if ($colaborador->foto_ruta !== null) {
+            Storage::disk('local')->delete($colaborador->foto_ruta);
+        }
+
+        return $request->file('foto')->store("colaboradores/{$colaborador->empresa_id}", 'local') ?: null;
     }
 
     /**

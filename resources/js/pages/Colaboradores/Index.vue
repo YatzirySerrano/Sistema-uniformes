@@ -9,9 +9,11 @@ import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useInitials } from '@/composables/useInitials';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
@@ -22,9 +24,12 @@ type Colaborador = {
     puesto: string | null;
     area: string | null;
     activo: boolean;
+    foto_url: string | null;
     sucursal: { nombre: string } | null;
     empresa?: { id: number; nombre_comercial: string | null } | null;
 };
+
+const { getInitials } = useInitials();
 
 const props = defineProps<{
     colaboradores: Paginado<Colaborador>;
@@ -214,13 +219,25 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
             <Link
                 v-for="c in colaboradores.data"
                 :key="c.id"
-                :href="`/colaboradores/${c.id}/editar`"
+                :href="`/colaboradores/${c.id}`"
                 class="hover:border-primary/20 flex flex-col gap-2 rounded-xl border p-4 transition-colors"
             >
                 <div class="flex items-start justify-between gap-2">
-                    <p class="min-w-0 truncate font-medium">
-                        {{ c.nombre_completo }}
-                    </p>
+                    <div class="flex min-w-0 items-center gap-2">
+                        <Avatar class="size-8 shrink-0">
+                            <AvatarImage
+                                v-if="c.foto_url"
+                                :src="c.foto_url"
+                                :alt="c.nombre_completo"
+                            />
+                            <AvatarFallback class="text-xs">
+                                {{ getInitials(c.nombre_completo) }}
+                            </AvatarFallback>
+                        </Avatar>
+                        <p class="min-w-0 truncate font-medium">
+                            {{ c.nombre_completo }}
+                        </p>
+                    </div>
                     <Badge :variant="c.activo ? 'success' : 'secondary'">
                         {{ c.activo ? 'Activo' : 'Eliminado' }}
                     </Badge>
@@ -258,7 +275,24 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                         <td class="px-3 py-2 font-mono">
                             {{ c.numero_empleado }}
                         </td>
-                        <td class="px-3 py-2">{{ c.nombre_completo }}</td>
+                        <td class="px-3 py-2">
+                            <Link
+                                :href="`/colaboradores/${c.id}`"
+                                class="flex items-center gap-2 hover:underline"
+                            >
+                                <Avatar class="size-6 shrink-0">
+                                    <AvatarImage
+                                        v-if="c.foto_url"
+                                        :src="c.foto_url"
+                                        :alt="c.nombre_completo"
+                                    />
+                                    <AvatarFallback class="text-[10px]">
+                                        {{ getInitials(c.nombre_completo) }}
+                                    </AvatarFallback>
+                                </Avatar>
+                                {{ c.nombre_completo }}
+                            </Link>
+                        </td>
                         <td class="px-3 py-2">
                             {{ c.sucursal?.nombre ?? '—' }}
                         </td>

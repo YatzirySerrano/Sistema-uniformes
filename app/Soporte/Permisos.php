@@ -59,6 +59,9 @@ final class Permisos
                 'colaboradores.editar' => 'Editar colaboradores',
                 'colaboradores.desactivar' => 'Activar / desactivar colaboradores',
                 'colaboradores.importar' => 'Importar colaboradores desde Excel',
+                'colaboradores.expediente-ver' => 'Ver el expediente digital del colaborador',
+                'colaboradores.expediente-administrar' => 'Subir, editar y eliminar documentos del expediente',
+                'colaboradores.expediente-descargar' => 'Descargar documentos del expediente',
             ],
         ],
         'areas' => [
@@ -202,6 +205,7 @@ final class Permisos
                 'sucursales.ver',
                 'almacenes.ver',
                 'colaboradores.ver', 'colaboradores.crear', 'colaboradores.editar', 'colaboradores.importar',
+                'colaboradores.expediente-ver', 'colaboradores.expediente-administrar', 'colaboradores.expediente-descargar',
                 'areas.ver', 'areas.crear', 'areas.editar',
                 'activos.ver',
                 'inventario.ver', 'inventario.entrada', 'inventario.minimos',
@@ -214,6 +218,7 @@ final class Permisos
             ],
             RolSistema::Encargado->value => [
                 'colaboradores.ver',
+                'colaboradores.expediente-ver',
                 'areas.ver',
                 'almacenes.ver',
                 'activos.ver',

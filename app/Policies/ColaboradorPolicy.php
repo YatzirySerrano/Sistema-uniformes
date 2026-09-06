@@ -36,4 +36,19 @@ class ColaboradorPolicy
     {
         return $user->can('colaboradores.importar');
     }
+
+    public function verExpediente(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('colaboradores.expediente-ver') && $user->puedeAccederEmpresa($colaborador->empresa_id);
+    }
+
+    public function administrarExpediente(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('colaboradores.expediente-administrar') && $user->puedeAccederEmpresa($colaborador->empresa_id);
+    }
+
+    public function descargarExpediente(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('colaboradores.expediente-descargar') && $user->puedeAccederEmpresa($colaborador->empresa_id);
+    }
 }

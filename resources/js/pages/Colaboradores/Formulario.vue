@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
+import SubidaArchivo from '@/components/sistema/SubidaArchivo.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,6 +24,7 @@ type Colaborador = {
     area_id: number | null;
     area_actual: Opcion | null;
     correo: string | null;
+    foto_url: string | null;
     activo: boolean;
 };
 
@@ -76,6 +78,7 @@ const form = useForm<{
     puesto: string;
     area_id: number | '';
     correo: string;
+    foto: File | null;
     activo: boolean;
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
@@ -85,6 +88,7 @@ const form = useForm<{
     puesto: props.colaborador?.puesto ?? '',
     area_id: areaSel.value?.id ?? '',
     correo: props.colaborador?.correo ?? '',
+    foto: null,
     activo: props.colaborador?.activo ?? true,
 });
 
@@ -131,9 +135,13 @@ async function buscarAreas(q: string, signal?: AbortSignal): Promise<Opcion[]> {
 
 function enviar() {
     if (esEdicion) {
-        form.put(`/colaboradores/${props.colaborador!.id}`);
+        // Inertia convierte automáticamente a POST + `_method=PUT` cuando el
+        // payload trae un `File` (multipart), sin necesidad de transformarlo.
+        form.put(`/colaboradores/${props.colaborador!.id}`, {
+            forceFormData: true,
+        });
     } else {
-        form.post('/colaboradores');
+        form.post('/colaboradores', { forceFormData: true });
     }
 }
 </script>
@@ -252,6 +260,21 @@ function enviar() {
                 <Label for="correo">Correo electrónico (opcional)</Label>
                 <Input id="correo" v-model="form.correo" type="email" />
                 <InputError :message="form.errors.correo" />
+            </div>
+
+            <div class="grid gap-1.5">
+                <Label for="foto">Foto de perfil (opcional)</Label>
+                <SubidaArchivo
+                    id="foto"
+                    v-model="form.foto"
+                    tipo="imagen"
+                    accept="image/jpeg,image/png,image/webp"
+                    formatos-etiqueta="JPG, PNG o WEBP"
+                    :peso-maximo-mb="3"
+                    :archivo-actual-url="colaborador?.foto_url"
+                    :invalido="!!form.errors.foto"
+                />
+                <InputError :message="form.errors.foto" />
             </div>
 
             <label class="flex items-center gap-2 text-sm">

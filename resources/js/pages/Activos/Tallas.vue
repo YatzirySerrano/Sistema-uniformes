@@ -266,7 +266,7 @@ watch(
                                     variant="outline"
                                     class="text-xs"
                                 >
-                                    Inactiva
+                                    Eliminada
                                 </Badge>
                                 <span class="text-muted-foreground text-xs">
                                     Se usa en {{ t.activos_count }}

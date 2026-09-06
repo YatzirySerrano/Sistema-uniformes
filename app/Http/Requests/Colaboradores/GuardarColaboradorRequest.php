@@ -53,6 +53,7 @@ class GuardarColaboradorRequest extends FormRequest
                 Rule::exists('areas', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
             'correo' => ['nullable', 'email', 'max:255'],
+            'foto' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:3072'],
             'activo' => ['boolean'],
         ];
     }

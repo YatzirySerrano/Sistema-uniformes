@@ -4,6 +4,8 @@ use App\Enums\RolSistema;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -159,4 +161,141 @@ it('rechaza registrar un colaborador con una sucursal de otra empresa', function
         ->assertSessionHasErrors('sucursal_id');
 
     expect(Colaborador::query()->where('numero_empleado', 'EMP-100')->exists())->toBeFalse();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Perfil (show)
+|--------------------------------------------------------------------------
+*/
+
+it('rechaza ver el perfil de un colaborador de otra empresa', function () {
+    $empresaA = Empresa::factory()->create();
+    $empresaB = Empresa::factory()->create();
+    $sucursalB = Sucursal::factory()->for($empresaB)->create();
+    $colaboradorB = Colaborador::factory()->for($empresaB)->for($sucursalB)->create();
+
+    $supervisorA = usuarioCon(RolSistema::Supervisor->value, [$empresaA]);
+
+    $this->actingAs($supervisorA)
+        ->get("/colaboradores/{$colaboradorB->id}")
+        ->assertForbidden();
+});
+
+it('muestra el perfil del colaborador con su información de organización', function () {
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get("/colaboradores/{$colaborador->id}")
+        ->assertInertia(fn ($page) => $page
+            ->component('Colaboradores/Detalle')
+            ->where('colaborador.id', $colaborador->id)
+            ->where('colaborador.foto_url', null)
+            ->where('puedeVerExpediente', true),
+        );
+});
+
+/*
+|--------------------------------------------------------------------------
+| Foto de perfil
+|--------------------------------------------------------------------------
+*/
+
+it('sube una foto de perfil válida al registrar un colaborador', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/colaboradores', [
+        'empresa_id' => $empresa->id,
+        'numero_empleado' => 'EMP-200',
+        'nombre_completo' => 'Con Foto',
+        'sucursal_id' => $sucursal->id,
+        'foto' => UploadedFile::fake()->image('perfil.jpg'),
+    ]);
+
+    $colaborador = Colaborador::query()->where('numero_empleado', 'EMP-200')->firstOrFail();
+
+    expect($colaborador->foto_ruta)->not->toBeNull();
+    Storage::disk('local')->assertExists($colaborador->foto_ruta);
+
+    $this->actingAs($admin)
+        ->get("/colaboradores/{$colaborador->id}")
+        ->assertInertia(fn ($page) => $page->where('colaborador.foto_url', route('colaboradores.foto', $colaborador)));
+});
+
+it('reemplazar la foto borra la anterior del disco', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'numero_empleado' => $colaborador->numero_empleado,
+        'nombre_completo' => $colaborador->nombre_completo,
+        'sucursal_id' => $colaborador->sucursal_id,
+        'foto' => UploadedFile::fake()->image('primera.jpg'),
+    ]);
+
+    $rutaAnterior = $colaborador->fresh()->foto_ruta;
+    Storage::disk('local')->assertExists($rutaAnterior);
+
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'numero_empleado' => $colaborador->numero_empleado,
+        'nombre_completo' => $colaborador->nombre_completo,
+        'sucursal_id' => $colaborador->sucursal_id,
+        'foto' => UploadedFile::fake()->image('segunda.jpg'),
+    ]);
+
+    $colaborador->refresh();
+
+    Storage::disk('local')->assertMissing($rutaAnterior);
+    Storage::disk('local')->assertExists($colaborador->foto_ruta);
+});
+
+it('rechaza una foto que no es imagen o que excede el peso máximo', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/colaboradores', [
+        'empresa_id' => $empresa->id,
+        'numero_empleado' => 'EMP-300',
+        'nombre_completo' => 'Foto invalida',
+        'sucursal_id' => $sucursal->id,
+        'foto' => UploadedFile::fake()->create('archivo.pdf', 100, 'application/pdf'),
+    ])->assertSessionHasErrors('foto');
+
+    $this->actingAs($admin)->post('/colaboradores', [
+        'empresa_id' => $empresa->id,
+        'numero_empleado' => 'EMP-301',
+        'nombre_completo' => 'Foto pesada',
+        'sucursal_id' => $sucursal->id,
+        'foto' => UploadedFile::fake()->image('pesada.jpg')->size(4000),
+    ])->assertSessionHasErrors('foto');
+
+    expect(Colaborador::query()->whereIn('numero_empleado', ['EMP-300', 'EMP-301'])->exists())->toBeFalse();
+});
+
+it('la ruta de la foto responde 404 sin foto y 403 fuera de alcance', function () {
+    $empresaA = Empresa::factory()->create();
+    $sucursalA = Sucursal::factory()->for($empresaA)->create();
+    $colaboradorSinFoto = Colaborador::factory()->for($empresaA)->for($sucursalA)->create();
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+    $this->actingAs($admin)
+        ->get("/colaboradores/{$colaboradorSinFoto->id}/foto")
+        ->assertNotFound();
+
+    $empresaB = Empresa::factory()->create();
+    $supervisorB = usuarioCon(RolSistema::Supervisor->value, [$empresaB]);
+    $this->actingAs($supervisorB)
+        ->get("/colaboradores/{$colaboradorSinFoto->id}/foto")
+        ->assertForbidden();
 });

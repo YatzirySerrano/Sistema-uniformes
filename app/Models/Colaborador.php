@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $numero_empleado
  * @property string $nombre_completo
  * @property string|null $area
+ * @property string|null $foto_ruta
  * @property bool $activo
  */
 class Colaborador extends Model
@@ -39,6 +40,7 @@ class Colaborador extends Model
         'area',
         'area_id',
         'correo',
+        'foto_ruta',
         'activo',
     ];
 
@@ -91,6 +93,14 @@ class Colaborador extends Model
     public function devoluciones(): HasMany
     {
         return $this->hasMany(Devolucion::class);
+    }
+
+    /**
+     * @return HasMany<DocumentoExpediente, $this>
+     */
+    public function documentosExpediente(): HasMany
+    {
+        return $this->hasMany(DocumentoExpediente::class);
     }
 
     /**

@@ -264,7 +264,7 @@ function confirmarEstado() {
                             :opciones="[
                                 { valor: '', etiqueta: 'Estado: todos' },
                                 { valor: 'activos', etiqueta: 'Activos' },
-                                { valor: 'inactivos', etiqueta: 'Inactivos' },
+                                { valor: 'inactivos', etiqueta: 'Eliminados' },
                             ]"
                         />
                     </div>
@@ -346,7 +346,9 @@ function confirmarEstado() {
                                             class="text-xs"
                                         >
                                             {{
-                                                t.activo ? 'Activo' : 'Inactivo'
+                                                t.activo
+                                                    ? 'Activo'
+                                                    : 'Eliminado'
                                             }}
                                         </Badge>
                                         <span
@@ -380,7 +382,7 @@ function confirmarEstado() {
                                         "
                                     >
                                         {{
-                                            t.activo ? 'Desactivar' : 'Activar'
+                                            t.activo ? 'Eliminar' : 'Restaurar'
                                         }}
                                     </Button>
                                 </div>
@@ -481,7 +483,7 @@ function confirmarEstado() {
                             :opciones="[
                                 { valor: '', etiqueta: 'Estado: todas' },
                                 { valor: 'activas', etiqueta: 'Activas' },
-                                { valor: 'inactivas', etiqueta: 'Inactivas' },
+                                { valor: 'inactivas', etiqueta: 'Eliminadas' },
                             ]"
                         />
                     </div>
@@ -571,7 +573,9 @@ function confirmarEstado() {
                                             class="text-xs"
                                         >
                                             {{
-                                                c.activa ? 'Activa' : 'Inactiva'
+                                                c.activa
+                                                    ? 'Activa'
+                                                    : 'Eliminada'
                                             }}
                                         </Badge>
                                         <span>Tipo: {{ c.tipo ?? '—' }}</span>
@@ -606,7 +610,7 @@ function confirmarEstado() {
                                         "
                                     >
                                         {{
-                                            c.activa ? 'Desactivar' : 'Activar'
+                                            c.activa ? 'Eliminar' : 'Restaurar'
                                         }}
                                     </Button>
                                 </div>
@@ -625,7 +629,7 @@ function confirmarEstado() {
             <DialogContent v-if="confirmacion">
                 <DialogHeader>
                     <DialogTitle>
-                        {{ confirmacion.activar ? '¿Activar' : '¿Desactivar' }}
+                        {{ confirmacion.activar ? '¿Restaurar' : '¿Eliminar' }}
                         {{
                             confirmacion.recurso === 'tipo'
                                 ? 'tipo de activo'
@@ -658,7 +662,7 @@ function confirmarEstado() {
                         "
                         @click="confirmarEstado"
                     >
-                        {{ confirmacion.activar ? 'Activar' : 'Desactivar' }}
+                        {{ confirmacion.activar ? 'Restaurar' : 'Eliminar' }}
                     </Button>
                 </DialogFooter>
             </DialogContent>

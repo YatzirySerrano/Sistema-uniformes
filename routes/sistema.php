@@ -12,6 +12,7 @@ use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\ConjuntoController;
 use App\Http\Controllers\CorreccionEntregaController;
 use App\Http\Controllers\DevolucionController;
+use App\Http\Controllers\DocumentoExpedienteController;
 use App\Http\Controllers\EmpresaController;
 use App\Http\Controllers\EntregaController;
 use App\Http\Controllers\ImportacionColaboradorController;
@@ -44,9 +45,25 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/exportar', [ColaboradorController::class, 'exportar'])->name('colaboradores.exportar');
     Route::get('colaboradores/crear', [ColaboradorController::class, 'create'])->name('colaboradores.create');
     Route::post('colaboradores', [ColaboradorController::class, 'store'])->name('colaboradores.store');
+    Route::get('colaboradores/{colaborador}/foto', [ColaboradorController::class, 'foto'])->name('colaboradores.foto');
     Route::get('colaboradores/{colaborador}/editar', [ColaboradorController::class, 'edit'])->name('colaboradores.edit');
     Route::put('colaboradores/{colaborador}', [ColaboradorController::class, 'update'])->name('colaboradores.update');
     Route::post('colaboradores/{colaborador}/estado', [ColaboradorController::class, 'toggle'])->name('colaboradores.toggle');
+
+    // Expediente digital del colaborador
+    Route::get('colaboradores/{colaborador}/expediente', [DocumentoExpedienteController::class, 'index'])->name('colaboradores.expediente.index');
+    Route::post('colaboradores/{colaborador}/expediente', [DocumentoExpedienteController::class, 'store'])->name('colaboradores.expediente.store');
+    Route::post('colaboradores/{colaborador}/expediente/{documento}/version', [DocumentoExpedienteController::class, 'nuevaVersion'])->name('colaboradores.expediente.version');
+    Route::put('colaboradores/{colaborador}/expediente/{documento}', [DocumentoExpedienteController::class, 'update'])->name('colaboradores.expediente.update');
+    Route::post('colaboradores/{colaborador}/expediente/{documento}/estado', [DocumentoExpedienteController::class, 'toggle'])->name('colaboradores.expediente.toggle');
+    Route::get('colaboradores/{colaborador}/expediente/{documento}/descargar', [DocumentoExpedienteController::class, 'descargar'])->name('colaboradores.expediente.descargar');
+    Route::get('colaboradores/{colaborador}/expediente/{documento}/ver', [DocumentoExpedienteController::class, 'ver'])->name('colaboradores.expediente.ver');
+    Route::get('colaboradores/{colaborador}/expediente/{documento}/versiones', [DocumentoExpedienteController::class, 'versiones'])->name('colaboradores.expediente.versiones');
+    Route::get('colaboradores/{colaborador}/expediente/{documento}/versiones/{version}/descargar', [DocumentoExpedienteController::class, 'descargarVersion'])->name('colaboradores.expediente.version-descargar');
+
+    // Perfil del colaborador (una sola ruta de un segmento: va después de las
+    // rutas literales de arriba para no capturarlas).
+    Route::get('colaboradores/{colaborador}', [ColaboradorController::class, 'show'])->name('colaboradores.show');
 
     // Áreas / Departamentos
     Route::get('areas', [AreaController::class, 'index'])->name('areas.index');
