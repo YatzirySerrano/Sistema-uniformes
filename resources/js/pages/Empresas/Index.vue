@@ -56,6 +56,7 @@ const props = defineProps<{
     };
     puedeCrear: boolean;
     puedeEditar: boolean;
+    puedeVerEliminadas: boolean;
 }>();
 
 defineOptions({
@@ -108,12 +109,17 @@ function limpiarFiltros(): void {
     orden.value = 'az';
 }
 
-const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
-    [
-        { valor: '', texto: 'Todas' },
-        { valor: 'activas', texto: 'Activas' },
-        { valor: 'inactivas', texto: 'Inactivas' },
-    ];
+// "Eliminadas" (internamente `activa = false`) sólo se ofrece a quien puede
+// editar empresas — el backend además la ignora si se fuerza por URL.
+const filtrosEstado = computed<
+    { valor: '' | 'activas' | 'inactivas'; texto: string }[]
+>(() => [
+    { valor: '', texto: 'Todas' },
+    { valor: 'activas', texto: 'Activas' },
+    ...(props.puedeVerEliminadas
+        ? ([{ valor: 'inactivas', texto: 'Eliminadas' }] as const)
+        : []),
+]);
 
 // --- Modal de alta / edición ---
 const modalAbierto = ref(false);
@@ -291,7 +297,7 @@ const vista = useVistaPreferida('empresas');
                     role="button"
                     tabindex="0"
                     :aria-label="`Ver detalles de ${e.nombre_comercial}`"
-                    class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                     @click="verDetalle(e)"
                     @keydown.enter="verDetalle(e)"
                     @keydown.space.prevent="verDetalle(e)"
@@ -327,10 +333,10 @@ const vista = useVistaPreferida('empresas');
                             <TooltipTrigger as-child>
                                 <Badge
                                     :variant="
-                                        e.activa ? 'default' : 'secondary'
+                                        e.activa ? 'success' : 'secondary'
                                     "
                                 >
-                                    {{ e.activa ? 'Activa' : 'Inactiva' }}
+                                    {{ e.activa ? 'Activa' : 'Eliminada' }}
                                 </Badge>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -418,7 +424,11 @@ const vista = useVistaPreferida('empresas');
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="e in empresas.data" :key="e.id" class="border-t">
+                    <tr
+                        v-for="e in empresas.data"
+                        :key="e.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
                         <td class="px-3 py-2">
                             <p class="font-medium">{{ e.nombre_comercial }}</p>
                             <p class="text-muted-foreground font-mono text-xs">
@@ -432,9 +442,9 @@ const vista = useVistaPreferida('empresas');
                         <td class="px-3 py-2">{{ e.colaboradores_activos }}</td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="e.activa ? 'default' : 'secondary'"
+                                :variant="e.activa ? 'success' : 'secondary'"
                             >
-                                {{ e.activa ? 'Activa' : 'Inactiva' }}
+                                {{ e.activa ? 'Activa' : 'Eliminada' }}
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">

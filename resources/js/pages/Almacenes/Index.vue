@@ -68,7 +68,12 @@ const props = defineProps<{
         orden: 'az' | 'za';
         empresa_id: number | null;
     };
-    permisos: { crear: boolean; editar: boolean; administrar: boolean };
+    permisos: {
+        crear: boolean;
+        editar: boolean;
+        administrar: boolean;
+        verEliminados: boolean;
+    };
 }>();
 
 defineOptions({
@@ -129,12 +134,17 @@ function limpiarFiltros(): void {
     empresaSeleccionada.value = null;
 }
 
-const filtrosEstado: { valor: '' | 'activos' | 'inactivos'; texto: string }[] =
-    [
-        { valor: '', texto: 'Todos' },
-        { valor: 'activos', texto: 'Activos' },
-        { valor: 'inactivos', texto: 'Inactivos' },
-    ];
+// "Eliminados" (internamente `activo = false`) sólo se ofrece a quien puede
+// administrar almacenes — el backend además lo ignora si se fuerza por URL.
+const filtrosEstado = computed<
+    { valor: '' | 'activos' | 'inactivos'; texto: string }[]
+>(() => [
+    { valor: '', texto: 'Todos' },
+    { valor: 'activos', texto: 'Activos' },
+    ...(props.permisos.verEliminados
+        ? ([{ valor: 'inactivos', texto: 'Eliminados' }] as const)
+        : []),
+]);
 
 const modalAbierto = ref(false);
 const enEdicion = ref<AlmacenEditable | null>(null);
@@ -309,7 +319,7 @@ const vista = useVistaPreferida('almacenes');
                     role="button"
                     tabindex="0"
                     :aria-label="`Ver detalles de ${a.nombre}`"
-                    class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                     @click="verDetalle(a)"
                     @keydown.enter="verDetalle(a)"
                     @keydown.space.prevent="verDetalle(a)"
@@ -342,10 +352,10 @@ const vista = useVistaPreferida('almacenes');
                             <TooltipTrigger as-child>
                                 <Badge
                                     :variant="
-                                        a.activo ? 'default' : 'secondary'
+                                        a.activo ? 'success' : 'secondary'
                                     "
                                 >
-                                    {{ a.activo ? 'Activo' : 'Inactivo' }}
+                                    {{ a.activo ? 'Activo' : 'Eliminado' }}
                                 </Badge>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -425,7 +435,7 @@ const vista = useVistaPreferida('almacenes');
                             size="sm"
                             @click.stop="alternarEstado(a)"
                         >
-                            {{ a.activo ? 'Desactivar' : 'Activar' }}
+                            {{ a.activo ? 'Eliminar' : 'Restaurar' }}
                         </Button>
                     </div>
                 </div>
@@ -449,7 +459,7 @@ const vista = useVistaPreferida('almacenes');
                     <tr
                         v-for="a in almacenes.data"
                         :key="a.id"
-                        class="border-t"
+                        class="hover:bg-muted/40 border-t transition-colors"
                     >
                         <td class="px-3 py-2">
                             <p class="font-medium">{{ a.nombre }}</p>
@@ -474,9 +484,9 @@ const vista = useVistaPreferida('almacenes');
                         </td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="a.activo ? 'default' : 'secondary'"
+                                :variant="a.activo ? 'success' : 'secondary'"
                             >
-                                {{ a.activo ? 'Activo' : 'Inactivo' }}
+                                {{ a.activo ? 'Activo' : 'Eliminado' }}
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
@@ -493,7 +503,7 @@ const vista = useVistaPreferida('almacenes');
                                     size="sm"
                                     @click="alternarEstado(a)"
                                 >
-                                    {{ a.activo ? 'Desactivar' : 'Activar' }}
+                                    {{ a.activo ? 'Eliminar' : 'Restaurar' }}
                                 </Button>
                             </div>
                         </td>
@@ -535,15 +545,16 @@ const vista = useVistaPreferida('almacenes');
         >
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>¿Desactivar este almacén?</DialogTitle>
+                    <DialogTitle
+                        >¿Eliminar el almacén
+                        <span v-if="confirmando">{{ confirmando.nombre }}</span
+                        >?</DialogTitle
+                    >
                     <DialogDescription>
-                        <span v-if="confirmando" class="font-medium">{{
-                            confirmando.nombre
-                        }}</span>
-                        dejará de estar disponible para operaciones (para todas
-                        sus empresas). El catálogo de activos y los registros
-                        históricos no se modifican, y podrás reactivarlo cuando
-                        quieras.
+                        Esta acción lo retirará de las operaciones disponibles
+                        (para todas sus empresas). El catálogo de activos y los
+                        registros históricos no se modifican, y podrás
+                        restaurarlo cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
@@ -559,7 +570,7 @@ const vista = useVistaPreferida('almacenes');
                         :disabled="procesandoEstado"
                         @click="confirmarEstado"
                     >
-                        Desactivar
+                        Eliminar
                     </Button>
                 </DialogFooter>
             </DialogContent>

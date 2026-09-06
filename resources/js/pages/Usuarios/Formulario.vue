@@ -60,7 +60,7 @@ function enviar() {
 <template>
     <Head :title="esEdicion ? 'Editar usuario' : 'Nuevo usuario'" />
 
-    <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             :titulo="esEdicion ? 'Editar usuario' : 'Nuevo usuario'"
             :descripcion="

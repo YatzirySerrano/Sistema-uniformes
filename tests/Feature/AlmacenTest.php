@@ -36,6 +36,38 @@ it('un administrador ve todos los almacenes y puede filtrarlos por empresa abast
         ->assertInertia(fn ($page) => $page->where('almacenes.total', 2));
 });
 
+it('sólo quien administra almacenes ve los eliminados, ni forzando el filtro por URL', function () {
+    $empresa = Empresa::factory()->create();
+    Almacen::factory()->paraEmpresa($empresa)->create(['nombre' => 'Vivo', 'activo' => true]);
+    Almacen::factory()->paraEmpresa($empresa)->create(['nombre' => 'Apagado', 'activo' => false]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresa]);
+
+    $this->actingAs($admin)
+        ->get('/almacenes?estado=inactivos')
+        ->assertInertia(fn ($page) => $page
+            ->where('almacenes.total', 1)
+            ->where('almacenes.data.0.nombre', 'Apagado')
+            ->where('permisos.verEliminados', true),
+        );
+
+    $this->actingAs($supervisor)
+        ->get('/almacenes')
+        ->assertInertia(fn ($page) => $page
+            ->where('almacenes.total', 1)
+            ->where('almacenes.data.0.nombre', 'Vivo')
+            ->where('permisos.verEliminados', false),
+        );
+
+    $this->actingAs($supervisor)
+        ->get('/almacenes?estado=inactivos')
+        ->assertInertia(fn ($page) => $page
+            ->where('almacenes.total', 1)
+            ->where('almacenes.data.0.nombre', 'Vivo'),
+        );
+});
+
 it('un administrador crea un almacén con código autogenerado y varias empresas abastecidas', function () {
     $empresaA = Empresa::factory()->create();
     $empresaB = Empresa::factory()->create();

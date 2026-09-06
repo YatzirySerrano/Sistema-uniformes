@@ -53,7 +53,7 @@ function confirmar() {
 <template>
     <Head :title="`Firmar acuse ${entrega.folio}`" />
 
-    <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Acuse de recepción"
             :descripcion="`Entrega ${entrega.folio} · ${entrega.empresa}`"

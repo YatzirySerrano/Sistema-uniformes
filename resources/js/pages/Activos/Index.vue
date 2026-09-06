@@ -19,6 +19,14 @@ import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada } from '@/types/sistema';
@@ -70,6 +78,7 @@ const props = defineProps<{
         editar: boolean;
         administrar: boolean;
         administrar_catalogos: boolean;
+        verEliminados: boolean;
     };
 }>();
 
@@ -97,6 +106,16 @@ const categoriaId = ref<number | ''>(props.filtros.categoria_id);
 const almacenId = ref<number | ''>(props.filtros.almacen_id);
 const control = ref<'' | 'cantidad' | 'individual'>(props.filtros.control);
 const estado = ref<'' | 'activos' | 'inactivos'>(props.filtros.estado);
+
+// "Eliminados" (internamente `activo = false`) sólo se ofrece a quien puede
+// administrar activos — el backend además lo ignora si se fuerza por URL.
+const opcionesEstado = computed(() => [
+    { valor: '', etiqueta: 'Todos' },
+    { valor: 'activos', etiqueta: 'Activos' },
+    ...(props.permisos.verEliminados
+        ? [{ valor: 'inactivos', etiqueta: 'Eliminados' }]
+        : []),
+]);
 const orden = ref<'az' | 'za'>(props.filtros.orden);
 
 // Objeto seleccionado en cada combobox de filtro (el id vive en su ref).
@@ -241,8 +260,32 @@ function limpiarFiltros(): void {
     orden.value = 'az';
 }
 
+const confirmando = ref<Activo | null>(null);
+const procesandoEstado = ref(false);
+
 function alternarEstado(a: Activo): void {
-    router.post(`/activos/${a.id}/estado`, {}, { preserveScroll: true });
+    if (a.activo) {
+        confirmando.value = a; // eliminar => confirmación
+    } else {
+        // restaurar es seguro: sin confirmación
+        router.post(`/activos/${a.id}/estado`, {}, { preserveScroll: true });
+    }
+}
+
+function confirmarEstado(): void {
+    if (!confirmando.value) return;
+    procesandoEstado.value = true;
+    router.post(
+        `/activos/${confirmando.value.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                confirmando.value = null;
+            },
+        },
+    );
 }
 
 const vista = useVistaPreferida('activos');
@@ -392,11 +435,7 @@ const vista = useVistaPreferida('activos');
                     <div class="w-36">
                         <SelectSimple
                             v-model="estado"
-                            :opciones="[
-                                { valor: '', etiqueta: 'Todos' },
-                                { valor: 'activos', etiqueta: 'Activos' },
-                                { valor: 'inactivos', etiqueta: 'Inactivos' },
-                            ]"
+                            :opciones="opcionesEstado"
                         />
                     </div>
                 </label>
@@ -459,7 +498,7 @@ const vista = useVistaPreferida('activos');
                 role="button"
                 tabindex="0"
                 :aria-label="`Ver detalle de ${a.nombre}`"
-                class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 @click="router.visit(`/activos/${a.id}`)"
                 @keydown.enter="router.visit(`/activos/${a.id}`)"
                 @keydown.space.prevent="router.visit(`/activos/${a.id}`)"
@@ -489,8 +528,8 @@ const vista = useVistaPreferida('activos');
                             </p>
                         </div>
                     </div>
-                    <Badge :variant="a.activo ? 'default' : 'secondary'">
-                        {{ a.activo ? 'Activo' : 'Inactivo' }}
+                    <Badge :variant="a.activo ? 'success' : 'secondary'">
+                        {{ a.activo ? 'Activo' : 'Eliminado' }}
                     </Badge>
                 </div>
 
@@ -566,7 +605,7 @@ const vista = useVistaPreferida('activos');
                         size="sm"
                         @click.stop="alternarEstado(a)"
                     >
-                        {{ a.activo ? 'Desactivar' : 'Activar' }}
+                        {{ a.activo ? 'Eliminar' : 'Restaurar' }}
                     </Button>
                 </div>
             </div>
@@ -585,7 +624,11 @@ const vista = useVistaPreferida('activos');
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="a in activos" :key="a.id" class="border-t">
+                    <tr
+                        v-for="a in activos"
+                        :key="a.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
                         <td class="px-3 py-2">
                             <p class="font-medium">{{ a.nombre }}</p>
                             <p class="text-muted-foreground font-mono text-xs">
@@ -614,9 +657,9 @@ const vista = useVistaPreferida('activos');
                         </td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="a.activo ? 'default' : 'secondary'"
+                                :variant="a.activo ? 'success' : 'secondary'"
                             >
-                                {{ a.activo ? 'Activo' : 'Inactivo' }}
+                                {{ a.activo ? 'Activo' : 'Eliminado' }}
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
@@ -640,7 +683,7 @@ const vista = useVistaPreferida('activos');
                                     size="sm"
                                     @click="alternarEstado(a)"
                                 >
-                                    {{ a.activo ? 'Desactivar' : 'Activar' }}
+                                    {{ a.activo ? 'Eliminar' : 'Restaurar' }}
                                 </Button>
                             </div>
                         </td>
@@ -648,5 +691,45 @@ const vista = useVistaPreferida('activos');
                 </tbody>
             </table>
         </div>
+
+        <Dialog
+            :open="confirmando !== null"
+            @update:open="
+                (v) => {
+                    if (!v) confirmando = null;
+                }
+            "
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle
+                        >¿Eliminar el activo
+                        <span v-if="confirmando">{{ confirmando.nombre }}</span
+                        >?</DialogTitle
+                    >
+                    <DialogDescription>
+                        Esta acción lo retirará de los listados y nuevas
+                        operaciones. Los registros históricos no se eliminarán y
+                        podrás restaurarlo cuando quieras.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="confirmando = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEstado"
+                    >
+                        Eliminar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

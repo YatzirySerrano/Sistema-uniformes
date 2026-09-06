@@ -96,4 +96,41 @@ class AccesoEmpresa
             ->orderBy('nombre')
             ->get();
     }
+
+    /**
+     * Sucursales autorizadas a través de TODAS las empresas del usuario (sin
+     * filtro de empresa concreto — p. ej. el Dashboard en modo "todas las
+     * empresas"). Reutiliza `sucursalesAutorizadas()` por empresa para no
+     * duplicar la regla de alcance restringido (`sucursal_usuario`).
+     *
+     * @return Collection<int, Sucursal>
+     */
+    public function sucursalesAutorizadasGlobal(User $usuario): Collection
+    {
+        return $this->empresasAutorizadas($usuario)
+            ->flatMap(fn (Empresa $empresa): Collection => $this->sucursalesAutorizadas($usuario, $empresa))
+            ->values();
+    }
+
+    /**
+     * Almacenes activos que abastecen a CUALQUIERA de las empresas
+     * autorizadas del usuario (sin filtro de empresa concreto). Un almacén
+     * compartido por varias empresas autorizadas aparece una sola vez.
+     *
+     * @return Collection<int, Almacen>
+     */
+    public function almacenesAutorizadosGlobal(User $usuario): Collection
+    {
+        $idsEmpresas = $this->idsAutorizados($usuario);
+
+        if ($idsEmpresas->isEmpty()) {
+            return collect();
+        }
+
+        return Almacen::query()
+            ->where('activo', true)
+            ->paraEmpresas($idsEmpresas)
+            ->orderBy('nombre')
+            ->get();
+    }
 }

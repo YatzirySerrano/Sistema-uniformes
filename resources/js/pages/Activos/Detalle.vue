@@ -102,8 +102,8 @@ const dialogoExistencias = ref(false);
                         <Boxes class="size-3" />
                         {{ activo.tipo_control_etiqueta }}
                     </Badge>
-                    <Badge :variant="activo.activo ? 'default' : 'secondary'">
-                        {{ activo.activo ? 'Activo' : 'Inactivo' }}
+                    <Badge :variant="activo.activo ? 'success' : 'secondary'">
+                        {{ activo.activo ? 'Activo' : 'Eliminado' }}
                     </Badge>
                 </div>
             </div>

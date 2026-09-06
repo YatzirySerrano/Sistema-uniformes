@@ -324,6 +324,26 @@ it('lista las empresas inactivas y permite filtrarlas por estado', function () {
         );
 });
 
+it('un supervisor nunca ve empresas eliminadas, ni forzando el filtro por URL, y no recibe la opción', function () {
+    $propia = Empresa::factory()->create(['nombre_comercial' => 'Viva']);
+    $ajenaEliminada = Empresa::factory()->create(['nombre_comercial' => 'Apagada', 'activa' => false]);
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$propia, $ajenaEliminada]);
+
+    $this->actingAs($supervisor)->get('/empresas')
+        ->assertInertia(fn ($page) => $page
+            ->where('empresas.total', 1)
+            ->where('empresas.data.0.nombre_comercial', 'Viva')
+            ->where('puedeVerEliminadas', false),
+        );
+
+    $this->actingAs($supervisor)->get('/empresas?estado=inactivas')
+        ->assertInertia(fn ($page) => $page
+            ->where('empresas.total', 1)
+            ->where('empresas.data.0.nombre_comercial', 'Viva'),
+        );
+});
+
 it('filtra por con/sin sucursales activas y por con/sin colaboradores activos', function () {
     $conSucursal = Empresa::factory()->create(['nombre_comercial' => 'Con Sucursal']);
     Sucursal::factory()->for($conSucursal)->create(['activa' => true]);

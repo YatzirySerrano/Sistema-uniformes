@@ -60,7 +60,7 @@ function enviar() {
 <template>
     <Head :title="`Corregir entrega ${entrega.folio}`" />
 
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             :titulo="`Corregir entrega ${entrega.folio}`"
             descripcion="La entrega original y su acuse firmado no se modifican. La corrección compensa el inventario y queda en auditoría."

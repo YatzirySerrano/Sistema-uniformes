@@ -49,6 +49,38 @@ it('un administrador ve todos los activos y puede filtrarlos por empresa', funct
         ->assertInertia(fn ($page) => $page->has('activos', 2));
 });
 
+it('sólo quien puede administrar activos ve los eliminados, ni forzando el filtro por URL', function () {
+    $empresa = Empresa::factory()->create();
+    Activo::factory()->for($empresa)->create(['nombre' => 'Vivo', 'activo' => true]);
+    Activo::factory()->for($empresa)->create(['nombre' => 'Apagado', 'activo' => false]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresa]);
+
+    $this->actingAs($admin)
+        ->get('/activos?estado=inactivos')
+        ->assertInertia(fn ($page) => $page
+            ->where('permisos.verEliminados', true)
+            ->has('activos', 1)
+            ->where('activos.0.nombre', 'Apagado'),
+        );
+
+    $this->actingAs($supervisor)
+        ->get('/activos')
+        ->assertInertia(fn ($page) => $page
+            ->where('permisos.verEliminados', false)
+            ->has('activos', 1)
+            ->where('activos.0.nombre', 'Vivo'),
+        );
+
+    $this->actingAs($supervisor)
+        ->get('/activos?estado=inactivos')
+        ->assertInertia(fn ($page) => $page
+            ->has('activos', 1)
+            ->where('activos.0.nombre', 'Vivo'),
+        );
+});
+
 it('un administrador crea un activo por cantidad con tallas y código autogenerado', function () {
     $empresa = Empresa::factory()->create();
     $tallas = Talla::factory()->count(2)->create();

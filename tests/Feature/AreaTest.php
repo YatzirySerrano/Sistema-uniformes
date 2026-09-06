@@ -32,6 +32,38 @@ it('un administrador ve todas las áreas y puede filtrarlas por empresa', functi
         ->assertInertia(fn ($page) => $page->where('areas.total', 3));
 });
 
+it('sólo quien puede desactivar áreas ve las eliminadas, ni forzando el filtro por URL', function () {
+    $empresa = Empresa::factory()->create();
+    Area::factory()->for($empresa)->create(['nombre' => 'Viva', 'activa' => true]);
+    Area::factory()->for($empresa)->create(['nombre' => 'Apagada', 'activa' => false]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+    $encargado = usuarioCon(RolSistema::Encargado->value, [$empresa]);
+
+    $this->actingAs($admin)
+        ->get('/areas?estado=inactivas')
+        ->assertInertia(fn ($page) => $page
+            ->where('areas.total', 1)
+            ->where('areas.data.0.nombre', 'Apagada')
+            ->where('permisos.verEliminadas', true),
+        );
+
+    $this->actingAs($encargado)
+        ->get('/areas')
+        ->assertInertia(fn ($page) => $page
+            ->where('areas.total', 1)
+            ->where('areas.data.0.nombre', 'Viva')
+            ->where('permisos.verEliminadas', false),
+        );
+
+    $this->actingAs($encargado)
+        ->get('/areas?estado=inactivas')
+        ->assertInertia(fn ($page) => $page
+            ->where('areas.total', 1)
+            ->where('areas.data.0.nombre', 'Viva'),
+        );
+});
+
 it('un administrador crea un área en la empresa indicada con código autogenerado', function () {
     $empresa = Empresa::factory()->create();
 

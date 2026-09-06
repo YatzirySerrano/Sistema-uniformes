@@ -61,6 +61,7 @@ class ConjuntoController extends Controller
                 'crear' => $request->user()->can('create', Conjunto::class),
                 'editar' => $request->user()->can('conjuntos.editar'),
                 'administrar' => $request->user()->can('conjuntos.administrar'),
+                'verEliminados' => $request->user()->can('conjuntos.administrar'),
             ],
         ]);
     }
@@ -110,13 +111,19 @@ class ConjuntoController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $idsScope = $empresaFiltro !== null ? collect([$empresaFiltro->id]) : $idsAutorizadas;
 
+        // Sólo quien puede administrar conjuntos puede verlos eliminados en
+        // el listado. Para el resto, "activo" se fuerza sin importar qué
+        // `estado` pida la URL.
+        $puedeVerEliminados = $request->user()->can('conjuntos.administrar');
+
         return Conjunto::query()
             ->whereIn('empresa_id', $idsScope)
             ->withCount('componentes')
             ->with('empresa:id,nombre_comercial')
             ->when($filtros['buscar'] ?? null, fn (Builder $q, string $b) => $q->where(fn (Builder $s) => $s->where('nombre', 'like', "%{$b}%")->orWhere('codigo', 'like', "%{$b}%")))
-            ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
+            ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
             ->orderBy('nombre');
     }
 
@@ -209,7 +216,7 @@ class ConjuntoController extends Controller
 
         return back()->with('toast', [
             'type' => 'success',
-            'message' => $conjunto->activo ? 'Conjunto activado.' : 'Conjunto desactivado.',
+            'message' => $conjunto->activo ? 'Conjunto restaurado.' : 'Conjunto eliminado.',
         ]);
     }
 

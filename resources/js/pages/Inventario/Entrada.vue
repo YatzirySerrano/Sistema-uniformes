@@ -285,7 +285,7 @@ function enviar() {
 <template>
     <Head title="Registrar entrada de inventario" />
 
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar entrada de inventario"
             descripcion="Suma existencias a un almacén: recepción de compra, traspaso o carga inicial. Cada movimiento queda registrado."

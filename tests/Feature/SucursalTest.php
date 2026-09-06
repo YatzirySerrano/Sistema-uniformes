@@ -220,7 +220,7 @@ it('el toast de cambio de estado se muestra una sola vez y no reaparece en la si
 
     $this->actingAs($admin)
         ->get('/sucursales')
-        ->assertInertia(fn ($page) => $page->where('flash.toast.message', 'Sucursal desactivada correctamente.'));
+        ->assertInertia(fn ($page) => $page->where('flash.toast.message', 'Sucursal eliminada correctamente.'));
 
     $this->actingAs($admin)
         ->get('/sucursales')
@@ -262,6 +262,44 @@ it('filtra por estado activas / inactivas', function () {
     $this->actingAs($admin)
         ->get('/sucursales?estado=activas')
         ->assertInertia(fn ($page) => $page->where('sucursales.total', 1)->where('sucursales.data.0.nombre', 'Viva'));
+});
+
+it('un rol sin permiso de eliminar sucursales nunca ve las eliminadas, ni forzando el filtro por URL', function () {
+    $empresa = Empresa::factory()->create();
+    Sucursal::factory()->for($empresa)->create(['nombre' => 'Viva', 'activa' => true]);
+    Sucursal::factory()->for($empresa)->create(['nombre' => 'Apagada', 'activa' => false]);
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresa]);
+
+    // Sin filtro: sólo ve la activa (no "todas" como vería un admin).
+    $this->actingAs($supervisor)
+        ->get('/sucursales')
+        ->assertInertia(fn ($page) => $page
+            ->where('sucursales.total', 1)
+            ->where('sucursales.data.0.nombre', 'Viva')
+            ->where('permisos.verEliminadas', false),
+        );
+
+    // Forzando ?estado=inactivas por URL: el backend IGNORA el filtro (no lo
+    // rechaza con error) y sigue mostrando sólo lo que el usuario puede ver
+    // normalmente — nunca la eliminada.
+    $this->actingAs($supervisor)
+        ->get('/sucursales?estado=inactivas')
+        ->assertInertia(fn ($page) => $page
+            ->where('sucursales.total', 1)
+            ->where('sucursales.data.0.nombre', 'Viva'),
+        );
+});
+
+it('un administrador (con permiso de eliminar) sí ve la opción de eliminadas', function () {
+    $empresa = Empresa::factory()->create();
+    Sucursal::factory()->for($empresa)->create(['activa' => false]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get('/sucursales')
+        ->assertInertia(fn ($page) => $page->where('permisos.verEliminadas', true));
 });
 
 it('busca sucursales por nombre y ordena de forma descendente', function () {
@@ -323,7 +361,7 @@ it('valida el teléfono a 10 dígitos con mensaje en español y no genera un 500
         ->assertSessionHasErrors('nombre');
 });
 
-it('la búsqueda de sucursales requiere empresa_id y respeta el alcance del usuario', function () {
+it('la búsqueda de sucursales sin empresa_id busca en todas las autorizadas; con empresa_id acota y respeta el alcance', function () {
     $miEmpresa = Empresa::factory()->create();
     $ajena = Empresa::factory()->create();
     $miSucursal = Sucursal::factory()->for($miEmpresa)->create(['nombre' => 'Sucursal Visible']);
@@ -331,9 +369,13 @@ it('la búsqueda de sucursales requiere empresa_id y respeta el alcance del usua
 
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$miEmpresa]);
 
+    // Sin empresa_id: universo autorizado completo (aquí, sólo $miEmpresa) —
+    // nunca vacío sólo porque no se eligió una empresa concreta (p. ej. el
+    // Dashboard en modo "todas las empresas").
     $this->actingAs($supervisor)
         ->get('/sucursales/buscar')
-        ->assertJson(['sucursales' => []]);
+        ->assertJsonFragment(['nombre' => 'Sucursal Visible'])
+        ->assertJsonMissing(['nombre' => 'Sucursal Ajena']);
 
     $this->actingAs($supervisor)
         ->get("/sucursales/buscar?empresa_id={$miEmpresa->id}")

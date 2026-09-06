@@ -38,6 +38,7 @@ const props = defineProps<{
     sucursales: { id: number; nombre: string }[];
     puedeCrear: boolean;
     puedeImportar: boolean;
+    puedeVerEliminados: boolean;
 }>();
 
 defineOptions({
@@ -57,6 +58,17 @@ const sucursalSeleccionada = ref<{ id: number; nombre: string } | null>(
 );
 const sucursalId = computed(() => sucursalSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado ?? 'todos');
+
+// "Eliminados" (internamente `activo = false`) sólo se ofrece a quien puede
+// desactivar colaboradores — el backend además lo ignora si se fuerza por
+// URL (ni siquiera dentro de "Todos").
+const opcionesEstado = computed(() => [
+    { valor: 'todos', etiqueta: 'Todos' },
+    { valor: 'activos', etiqueta: 'Activos' },
+    ...(props.puedeVerEliminados
+        ? [{ valor: 'inactivos', etiqueta: 'Eliminados' }]
+        : []),
+]);
 
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
@@ -173,14 +185,7 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                 class="w-full sm:w-auto sm:min-w-[12rem]"
             />
             <div class="w-full sm:w-auto sm:min-w-[9rem]">
-                <SelectSimple
-                    v-model="estado"
-                    :opciones="[
-                        { valor: 'todos', etiqueta: 'Todos' },
-                        { valor: 'activos', etiqueta: 'Activos' },
-                        { valor: 'inactivos', etiqueta: 'Inactivos' },
-                    ]"
-                />
+                <SelectSimple v-model="estado" :opciones="opcionesEstado" />
             </div>
             <SelectorVista v-model="vista" />
         </div>
@@ -210,14 +215,14 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                 v-for="c in colaboradores.data"
                 :key="c.id"
                 :href="`/colaboradores/${c.id}/editar`"
-                class="hover:border-primary/40 flex flex-col gap-2 rounded-xl border p-4 transition-colors"
+                class="hover:border-primary/20 flex flex-col gap-2 rounded-xl border p-4 transition-colors"
             >
                 <div class="flex items-start justify-between gap-2">
                     <p class="min-w-0 truncate font-medium">
                         {{ c.nombre_completo }}
                     </p>
-                    <Badge :variant="c.activo ? 'default' : 'secondary'">
-                        {{ c.activo ? 'Activo' : 'Inactivo' }}
+                    <Badge :variant="c.activo ? 'success' : 'secondary'">
+                        {{ c.activo ? 'Activo' : 'Eliminado' }}
                     </Badge>
                 </div>
                 <p class="text-muted-foreground font-mono text-xs">
@@ -266,9 +271,9 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                         </td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="c.activo ? 'default' : 'secondary'"
+                                :variant="c.activo ? 'success' : 'secondary'"
                             >
-                                {{ c.activo ? 'Activo' : 'Inactivo' }}
+                                {{ c.activo ? 'Activo' : 'Eliminado' }}
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">

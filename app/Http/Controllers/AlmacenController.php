@@ -80,6 +80,7 @@ class AlmacenController extends Controller
                 'crear' => $usuario->can('create', Almacen::class),
                 'editar' => $usuario->can('almacenes.editar'),
                 'administrar' => $usuario->can('almacenes.administrar'),
+                'verEliminados' => $usuario->can('almacenes.administrar'),
             ],
         ]);
     }
@@ -130,6 +131,11 @@ class AlmacenController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
+        // Sólo quien puede administrar almacenes puede verlos eliminados en
+        // el listado. Para el resto, "activo" se fuerza sin importar qué
+        // `estado` pida la URL.
+        $puedeVerEliminados = $request->user()->can('almacenes.administrar');
+
         return Almacen::query()
             ->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $idsAutorizadas))
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->paraEmpresa($empresaFiltro->id))
@@ -142,8 +148,9 @@ class AlmacenController extends Controller
                         ->orWhere('direccion', 'like', "%{$buscar}%");
                 });
             })
-            ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
+            ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
             ->orderBy('nombre', $orden);
     }
 
@@ -274,7 +281,7 @@ class AlmacenController extends Controller
 
         return back()->with('toast', [
             'type' => 'success',
-            'message' => $almacen->activo ? 'Almacén activado correctamente.' : 'Almacén desactivado correctamente.',
+            'message' => $almacen->activo ? 'Almacén restaurado correctamente.' : 'Almacén eliminado correctamente.',
         ]);
     }
 

@@ -59,7 +59,12 @@ const props = defineProps<{
         orden: 'az' | 'za';
         empresa_id: number | null;
     };
-    permisos: { crear: boolean; editar: boolean; desactivar: boolean };
+    permisos: {
+        crear: boolean;
+        editar: boolean;
+        desactivar: boolean;
+        verEliminadas: boolean;
+    };
 }>();
 
 defineOptions({
@@ -121,12 +126,18 @@ function limpiarFiltros(): void {
     empresaSeleccionada.value = null;
 }
 
-const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
-    [
-        { valor: '', texto: 'Todas' },
-        { valor: 'activas', texto: 'Activas' },
-        { valor: 'inactivas', texto: 'Inactivas' },
-    ];
+// La opción "Eliminadas" (internamente sigue siendo `activa = false`) sólo
+// se ofrece a quien puede eliminar/restaurar sucursales — el backend además
+// la ignora si alguien la fuerza por URL sin el permiso.
+const filtrosEstado = computed<
+    { valor: '' | 'activas' | 'inactivas'; texto: string }[]
+>(() => [
+    { valor: '', texto: 'Todas' },
+    { valor: 'activas', texto: 'Activas' },
+    ...(props.permisos.verEliminadas
+        ? ([{ valor: 'inactivas', texto: 'Eliminadas' }] as const)
+        : []),
+]);
 
 // --- Alta / edición ---
 const modalAbierto = ref(false);
@@ -332,7 +343,7 @@ const vista = useVistaPreferida('sucursales');
                     role="button"
                     tabindex="0"
                     :aria-label="`Ver detalles de ${s.nombre}`"
-                    class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                     @click="verDetalle(s)"
                     @keydown.enter="verDetalle(s)"
                     @keydown.space.prevent="verDetalle(s)"
@@ -363,10 +374,10 @@ const vista = useVistaPreferida('sucursales');
                             <TooltipTrigger as-child>
                                 <Badge
                                     :variant="
-                                        s.activa ? 'default' : 'secondary'
+                                        s.activa ? 'success' : 'secondary'
                                     "
                                 >
-                                    {{ s.activa ? 'Activa' : 'Inactiva' }}
+                                    {{ s.activa ? 'Activa' : 'Eliminada' }}
                                 </Badge>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -404,7 +415,7 @@ const vista = useVistaPreferida('sucursales');
                         role="button"
                         tabindex="0"
                         :aria-label="`Ver colaboradores activos de ${s.nombre}`"
-                        class="bg-muted/40 hover:bg-muted/70 hover:border-primary/40 focus-visible:ring-ring w-fit rounded-lg border border-transparent px-3 py-2 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                        class="bg-muted/40 hover:bg-muted/70 hover:border-primary/20 focus-visible:ring-ring w-fit rounded-lg border border-transparent px-3 py-2 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                         @click.stop="irAColaboradores(s)"
                         @keydown.enter.stop="irAColaboradores(s)"
                         @keydown.space.stop.prevent="irAColaboradores(s)"
@@ -451,7 +462,7 @@ const vista = useVistaPreferida('sucursales');
                             size="sm"
                             @click.stop="alternarEstado(s)"
                         >
-                            {{ s.activa ? 'Desactivar' : 'Activar' }}
+                            {{ s.activa ? 'Eliminar' : 'Restaurar' }}
                         </Button>
                     </div>
                 </div>
@@ -478,7 +489,7 @@ const vista = useVistaPreferida('sucursales');
                     <tr
                         v-for="s in sucursales.data"
                         :key="s.id"
-                        class="border-t"
+                        class="hover:bg-muted/40 border-t transition-colors"
                     >
                         <td class="px-3 py-2">
                             <p class="font-medium">{{ s.nombre }}</p>
@@ -506,9 +517,9 @@ const vista = useVistaPreferida('sucursales');
                         </td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="s.activa ? 'default' : 'secondary'"
+                                :variant="s.activa ? 'success' : 'secondary'"
                             >
-                                {{ s.activa ? 'Activa' : 'Inactiva' }}
+                                {{ s.activa ? 'Activa' : 'Eliminada' }}
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
@@ -532,7 +543,7 @@ const vista = useVistaPreferida('sucursales');
                                     size="sm"
                                     @click="alternarEstado(s)"
                                 >
-                                    {{ s.activa ? 'Desactivar' : 'Activar' }}
+                                    {{ s.activa ? 'Eliminar' : 'Restaurar' }}
                                 </Button>
                             </div>
                         </td>
@@ -579,14 +590,15 @@ const vista = useVistaPreferida('sucursales');
         >
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>¿Desactivar esta sucursal?</DialogTitle>
+                    <DialogTitle
+                        >¿Eliminar la sucursal
+                        <span v-if="confirmando">{{ confirmando.nombre }}</span
+                        >?</DialogTitle
+                    >
                     <DialogDescription>
-                        <span v-if="confirmando" class="font-medium">{{
-                            confirmando.nombre
-                        }}</span>
-                        dejará de estar disponible para nuevas operaciones. Los
-                        registros históricos no se eliminarán y podrás
-                        reactivarla cuando quieras.
+                        Esta acción retirará la sucursal de los listados y
+                        operaciones disponibles. Los registros históricos no se
+                        eliminarán y podrás restaurarla cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
@@ -602,7 +614,7 @@ const vista = useVistaPreferida('sucursales');
                         :disabled="procesandoEstado"
                         @click="confirmarEstado"
                     >
-                        Desactivar
+                        Eliminar
                     </Button>
                 </DialogFooter>
             </DialogContent>

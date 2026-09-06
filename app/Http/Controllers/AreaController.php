@@ -63,6 +63,7 @@ class AreaController extends Controller
                 'crear' => $usuario->can('create', Area::class),
                 'editar' => $usuario->can('areas.editar'),
                 'desactivar' => $usuario->can('areas.desactivar'),
+                'verEliminadas' => $usuario->can('areas.desactivar'),
             ],
         ]);
     }
@@ -114,6 +115,11 @@ class AreaController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
+        // Sólo quien puede desactivar áreas puede verlas eliminadas en el
+        // listado. Para el resto, "activa" se fuerza sin importar qué
+        // `estado` pida la URL.
+        $puedeVerEliminadas = $request->user()->can('areas.desactivar');
+
         return Area::query()
             ->whereIn('empresa_id', $idsAutorizadas)
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
@@ -125,8 +131,9 @@ class AreaController extends Controller
                         ->orWhere('codigo', 'like', "%{$buscar}%");
                 });
             })
-            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
+            ->when(! $puedeVerEliminadas, fn (Builder $q) => $q->where('activa', true))
+            ->when($puedeVerEliminadas && ($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
+            ->when($puedeVerEliminadas && ($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
             ->orderBy('nombre', $orden);
     }
 
@@ -229,7 +236,7 @@ class AreaController extends Controller
 
         return back()->with('toast', [
             'type' => 'success',
-            'message' => $area->activa ? 'Área activada correctamente.' : 'Área desactivada correctamente.',
+            'message' => $area->activa ? 'Área restaurada correctamente.' : 'Área eliminada correctamente.',
         ]);
     }
 

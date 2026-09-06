@@ -178,8 +178,8 @@ function confirmarDesactivar(): void {
                         <Building2 class="size-3" />
                         {{ e.nombre_comercial }}
                     </Badge>
-                    <Badge :variant="almacen.activo ? 'default' : 'secondary'">
-                        {{ almacen.activo ? 'Activo' : 'Inactivo' }}
+                    <Badge :variant="almacen.activo ? 'success' : 'secondary'">
+                        {{ almacen.activo ? 'Activo' : 'Eliminado' }}
                     </Badge>
                 </div>
             </div>
@@ -210,7 +210,7 @@ function confirmarDesactivar(): void {
                     @click="alternarEstado"
                 >
                     <Power class="size-3.5" />
-                    {{ almacen.activo ? 'Desactivar' : 'Activar' }}
+                    {{ almacen.activo ? 'Eliminar' : 'Restaurar' }}
                 </Button>
             </div>
         </div>
@@ -239,10 +239,10 @@ function confirmarDesactivar(): void {
                         <dd>
                             <Badge
                                 :variant="
-                                    almacen.activo ? 'default' : 'secondary'
+                                    almacen.activo ? 'success' : 'secondary'
                                 "
                             >
-                                {{ almacen.activo ? 'Activo' : 'Inactivo' }}
+                                {{ almacen.activo ? 'Activo' : 'Eliminado' }}
                             </Badge>
                         </dd>
                     </div>
@@ -418,12 +418,12 @@ function confirmarDesactivar(): void {
         <Dialog v-model:open="modalEstado">
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>¿Desactivar este almacén?</DialogTitle>
+                    <DialogTitle>¿Eliminar este almacén?</DialogTitle>
                     <DialogDescription>
-                        Este almacén dejará de estar disponible para operaciones
+                        Esta acción lo retirará de las operaciones disponibles
                         (para todas sus empresas). El catálogo de activos y los
                         registros históricos no se modifican, y podrás
-                        reactivarlo cuando quieras.
+                        restaurarlo cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
@@ -439,7 +439,7 @@ function confirmarDesactivar(): void {
                         :disabled="procesandoEstado"
                         @click="confirmarDesactivar"
                     >
-                        Desactivar
+                        Eliminar
                     </Button>
                 </DialogFooter>
             </DialogContent>

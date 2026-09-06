@@ -86,7 +86,7 @@ const urlPlantilla = () =>
 <template>
     <Head title="Importar colaboradores" />
 
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Importar colaboradores desde Excel"
             descripcion="Elige la empresa destino. La columna sucursal_codigo debe existir en esa empresa."

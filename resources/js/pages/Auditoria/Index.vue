@@ -325,7 +325,7 @@ const hayJsonTecnico = computed(
                     <tr
                         v-for="r in registros.data"
                         :key="r.id"
-                        class="border-t align-top"
+                        class="hover:bg-muted/40 border-t align-top transition-colors"
                     >
                         <td
                             class="text-muted-foreground px-3 py-2 whitespace-nowrap"

@@ -146,7 +146,7 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                     <tr
                         v-for="d in devoluciones.data"
                         :key="d.id"
-                        class="border-t"
+                        class="hover:bg-muted/40 border-t transition-colors"
                     >
                         <td class="px-3 py-2 font-medium">{{ d.folio }}</td>
                         <td class="px-3 py-2">{{ d.empresa }}</td>

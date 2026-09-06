@@ -343,7 +343,11 @@ const vista = useVistaPreferida('unidades-activo');
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="u in unidades.data" :key="u.id" class="border-t">
+                    <tr
+                        v-for="u in unidades.data"
+                        :key="u.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
                         <td class="px-3 py-2">
                             <input
                                 type="checkbox"

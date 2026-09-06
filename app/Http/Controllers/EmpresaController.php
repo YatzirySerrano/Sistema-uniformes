@@ -73,6 +73,7 @@ class EmpresaController extends Controller
             ],
             'puedeCrear' => $usuario->can('create', Empresa::class),
             'puedeEditar' => $usuario->can('empresas.editar') || $usuario->can('configuracion-empresa.editar'),
+            'puedeVerEliminadas' => $usuario->can('empresas.editar'),
         ]);
     }
 
@@ -129,6 +130,11 @@ class EmpresaController extends Controller
         $usuario = $request->user();
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
+        // Sólo quien puede editar empresas (mismo permiso que habilita
+        // cambiarEstado) puede ver las eliminadas en el listado. Para el
+        // resto, "activa" se fuerza sin importar qué `estado` pida la URL.
+        $puedeVerEliminadas = $usuario->can('empresas.editar');
+
         // Superadministrador y Administrador ven todas las empresas de la
         // plataforma; los roles restringidos, sólo las de `empresa_usuario`.
         $base = $usuario->tieneAlcanceGlobal()
@@ -145,8 +151,9 @@ class EmpresaController extends Controller
                         ->orWhere('rfc', 'like', "%{$buscar}%");
                 });
             })
-            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
+            ->when(! $puedeVerEliminadas, fn (Builder $q) => $q->where('activa', true))
+            ->when($puedeVerEliminadas && ($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
+            ->when($puedeVerEliminadas && ($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
             ->when(($filtros['sucursales'] ?? null) === 'con', fn (Builder $q) => $q->has('sucursalesActivas'))
             ->when(($filtros['sucursales'] ?? null) === 'sin', fn (Builder $q) => $q->doesntHave('sucursalesActivas'))
             ->when(($filtros['colaboradores'] ?? null) === 'con', fn (Builder $q) => $q->has('colaboradoresActivos'))
@@ -279,8 +286,8 @@ class EmpresaController extends Controller
         $empresa->update(['activa' => ! $empresa->activa]);
 
         $mensaje = $empresa->activa
-            ? 'Empresa activada correctamente.'
-            : 'Empresa desactivada correctamente.';
+            ? 'Empresa restaurada correctamente.'
+            : 'Empresa eliminada correctamente.';
 
         if (! $empresa->activa) {
             // Cascada NO destructiva: Sucursales/Colaboradores/Áreas/Activos/

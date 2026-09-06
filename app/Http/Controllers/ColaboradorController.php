@@ -52,6 +52,7 @@ class ColaboradorController extends Controller
             'areas' => $empresaFiltro !== null ? $this->areasDe($empresaFiltro->id) : [],
             'puedeCrear' => $usuario->can('create', Colaborador::class),
             'puedeImportar' => $usuario->can('importar', Colaborador::class),
+            'puedeVerEliminados' => $usuario->can('colaboradores.desactivar'),
         ]);
     }
 
@@ -104,6 +105,11 @@ class ColaboradorController extends Controller
         $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
 
+        // Sólo quien puede desactivar colaboradores puede verlos eliminados
+        // en el listado (ni siquiera dentro de "todos"). Para el resto,
+        // "activo" se fuerza sin importar qué `estado` pida la URL.
+        $puedeVerEliminados = $usuario->can('colaboradores.desactivar');
+
         $sucursalesVisibles = $idsAutorizadas
             ->flatMap(fn (int $id): array => $this->acceso()->sucursalesAutorizadas($usuario, $id)->pluck('id')->all())
             ->unique()->values();
@@ -117,8 +123,9 @@ class ColaboradorController extends Controller
                 ->orWhere('numero_empleado', 'like', "%{$b}%")))
             ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
             ->when($filtros['area_id'] ?? null, fn (Builder $q, $a) => $q->where('area_id', $a))
-            ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
+            ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
             ->with(['sucursal:id,nombre', 'empresa:id,nombre_comercial'])
             ->orderBy('nombre_completo');
     }
@@ -218,7 +225,7 @@ class ColaboradorController extends Controller
             'valores_nuevos' => ['activo' => $colaborador->activo],
         ]);
 
-        return back()->with('toast', ['type' => 'success', 'message' => $colaborador->activo ? 'Colaborador activado.' : 'Colaborador desactivado.']);
+        return back()->with('toast', ['type' => 'success', 'message' => $colaborador->activo ? 'Colaborador restaurado.' : 'Colaborador eliminado.']);
     }
 
     /**

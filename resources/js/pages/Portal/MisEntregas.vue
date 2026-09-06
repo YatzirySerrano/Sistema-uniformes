@@ -32,7 +32,7 @@ defineOptions({
 <template>
     <Head title="Mis entregas" />
 
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4">
+    <div class="flex w-full flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Mis entregas de uniformes"
             descripcion="Consulta tus entregas, firma las pendientes y descarga tus comprobantes."

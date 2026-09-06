@@ -141,7 +141,7 @@ function enviar() {
 <template>
     <Head :title="esEdicion ? 'Editar colaborador' : 'Nuevo colaborador'" />
 
-    <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             :titulo="esEdicion ? 'Editar colaborador' : 'Nuevo colaborador'"
             descripcion="El colaborador pertenece a una empresa / razón social y a una de sus sucursales."

@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
+import { ref } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import type { Paginado } from '@/types/sistema';
 
 type Usuario = {
@@ -16,16 +25,45 @@ type Usuario = {
     roles: string[];
     empresas: string[];
     ultimo_acceso_en: string | null;
+    puedeCambiarEstado: boolean;
 };
 
-defineProps<{ usuarios: Paginado<Usuario>; puedeCrear: boolean }>();
+defineProps<{
+    usuarios: Paginado<Usuario>;
+    puedeCrear: boolean;
+    puedeVerEliminados: boolean;
+}>();
 
 defineOptions({
     layout: { breadcrumbs: [{ title: 'Usuarios', href: '/usuarios' }] },
 });
 
+const confirmando = ref<Usuario | null>(null);
+const procesandoEstado = ref(false);
+
 function toggle(u: Usuario) {
-    router.post(`/usuarios/${u.id}/estado`, {}, { preserveScroll: true });
+    if (u.activo) {
+        confirmando.value = u; // eliminar => confirmación
+    } else {
+        // restaurar es seguro: sin confirmación
+        router.post(`/usuarios/${u.id}/estado`, {}, { preserveScroll: true });
+    }
+}
+
+function confirmarEstado(): void {
+    if (!confirmando.value) return;
+    procesandoEstado.value = true;
+    router.post(
+        `/usuarios/${confirmando.value.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                confirmando.value = null;
+            },
+        },
+    );
 }
 </script>
 
@@ -59,7 +97,11 @@ function toggle(u: Usuario) {
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="u in usuarios.data" :key="u.id" class="border-t">
+                    <tr
+                        v-for="u in usuarios.data"
+                        :key="u.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
                         <td class="px-3 py-2">{{ u.name }}</td>
                         <td class="px-3 py-2">
                             {{ u.email }}
@@ -83,8 +125,8 @@ function toggle(u: Usuario) {
                         </td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="u.activo ? 'default' : 'secondary'"
-                                >{{ u.activo ? 'Activo' : 'Inactivo' }}</Badge
+                                :variant="u.activo ? 'success' : 'secondary'"
+                                >{{ u.activo ? 'Activo' : 'Eliminado' }}</Badge
                             >
                         </td>
                         <td class="px-3 py-2 text-right whitespace-nowrap">
@@ -94,10 +136,12 @@ function toggle(u: Usuario) {
                                 >Editar</Link
                             >
                             <button
+                                v-if="u.puedeCambiarEstado"
+                                type="button"
                                 class="text-primary ml-3 text-xs hover:underline"
                                 @click="toggle(u)"
                             >
-                                {{ u.activo ? 'Desactivar' : 'Activar' }}
+                                {{ u.activo ? 'Eliminar' : 'Restaurar' }}
                             </button>
                         </td>
                     </tr>
@@ -106,5 +150,45 @@ function toggle(u: Usuario) {
         </div>
 
         <Paginacion :links="usuarios.links" :total="usuarios.total" />
+
+        <Dialog
+            :open="confirmando !== null"
+            @update:open="
+                (v) => {
+                    if (!v) confirmando = null;
+                }
+            "
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle
+                        >¿Eliminar el usuario
+                        <span v-if="confirmando">{{ confirmando.name }}</span
+                        >?</DialogTitle
+                    >
+                    <DialogDescription>
+                        Esta acción le impedirá iniciar sesión. Su historial de
+                        acciones no se modifica y podrás restaurar el acceso
+                        cuando quieras.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="confirmando = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEstado"
+                    >
+                        Eliminar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

@@ -17,6 +17,36 @@ beforeEach(function () {
     $this->admin = usuarioCon(RolSistema::Administrador->value, [$this->empresa]);
 });
 
+it('sólo quien administra conjuntos ve los eliminados, ni forzando el filtro por URL', function () {
+    Conjunto::factory()->for($this->empresa)->create(['nombre' => 'Vivo', 'activo' => true]);
+    Conjunto::factory()->for($this->empresa)->create(['nombre' => 'Apagado', 'activo' => false]);
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->empresa]);
+
+    $this->actingAs($this->admin)
+        ->get('/conjuntos?estado=inactivos')
+        ->assertInertia(fn ($page) => $page
+            ->where('permisos.verEliminados', true)
+            ->has('conjuntos', 1)
+            ->where('conjuntos.0.nombre', 'Apagado'),
+        );
+
+    $this->actingAs($supervisor)
+        ->get('/conjuntos')
+        ->assertInertia(fn ($page) => $page
+            ->where('permisos.verEliminados', false)
+            ->has('conjuntos', 1)
+            ->where('conjuntos.0.nombre', 'Vivo'),
+        );
+
+    $this->actingAs($supervisor)
+        ->get('/conjuntos?estado=inactivos')
+        ->assertInertia(fn ($page) => $page
+            ->has('conjuntos', 1)
+            ->where('conjuntos.0.nombre', 'Vivo'),
+        );
+});
+
 it('crea un conjunto con componentes de la misma empresa', function () {
     $activo = Activo::factory()->for($this->empresa)->create();
 

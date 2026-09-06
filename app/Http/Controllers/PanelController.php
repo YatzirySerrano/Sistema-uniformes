@@ -31,24 +31,27 @@ class PanelController extends Controller
             'hasta' => ['nullable', 'date'],
         ]);
 
-        // Sin "empresa activa": el panel muestra una empresa a la vez, elegida
-        // con el selector (por defecto, la primera empresa autorizada).
-        $empresa = $this->empresaDelFiltro($request) ?? $this->empresasAutorizadas($request)->first();
+        // Sin "empresa activa": el filtro de empresa es opcional. Sin él, el
+        // Dashboard agrega TODAS las empresas autorizadas del usuario — nunca
+        // "la primera" ni obliga a elegir una para poder ver algo.
+        $empresaFiltrada = $this->empresaDelFiltro($request);
+        $idsAutorizados = $this->idsEmpresasAutorizadas($request);
+        $empresaIds = $empresaFiltrada !== null ? [$empresaFiltrada->id] : $idsAutorizados->all();
 
         [$desde, $hasta] = $this->resolverRango($datos['desde'] ?? null, $datos['hasta'] ?? null);
 
-        $sucursal = $empresa === null ? null : $this->acceso()
-            ->sucursalesAutorizadas($request->user(), $empresa)
-            ->firstWhere('id', $datos['sucursal_id'] ?? null);
+        $sucursal = $empresaFiltrada !== null
+            ? $this->acceso()->sucursalesAutorizadas($request->user(), $empresaFiltrada)->firstWhere('id', $datos['sucursal_id'] ?? null)
+            : $this->acceso()->sucursalesAutorizadasGlobal($request->user())->firstWhere('id', $datos['sucursal_id'] ?? null);
 
-        $almacen = $empresa === null ? null : $this->acceso()
-            ->almacenesAutorizados($request->user(), $empresa)
-            ->firstWhere('id', $datos['almacen_id'] ?? null);
+        $almacen = $empresaFiltrada !== null
+            ? $this->acceso()->almacenesAutorizados($request->user(), $empresaFiltrada)->firstWhere('id', $datos['almacen_id'] ?? null)
+            : $this->acceso()->almacenesAutorizadosGlobal($request->user())->firstWhere('id', $datos['almacen_id'] ?? null);
 
         return Inertia::render('Panel', [
-            'resumen' => $empresa === null ? null : $dashboard->resumen($empresa, $desde, $hasta, $sucursal?->id, $almacen?->id),
+            'resumen' => $dashboard->resumen($empresaIds, $desde, $hasta, $sucursal?->id, $almacen?->id),
             'filtros' => [
-                'empresa_id' => $empresa?->id,
+                'empresa_id' => $empresaFiltrada?->id,
                 'sucursal_id' => $sucursal?->id,
                 'almacen_id' => $almacen?->id,
                 'desde' => $desde->toDateString(),
@@ -57,7 +60,7 @@ class PanelController extends Controller
             'sucursalSeleccionada' => $sucursal === null ? null : ['id' => $sucursal->id, 'nombre' => $sucursal->nombre],
             'almacenSeleccionado' => $almacen === null ? null : ['id' => $almacen->id, 'nombre' => $almacen->nombre],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'sinEmpresa' => $empresa === null,
+            'totalEmpresasIncluidas' => count($empresaIds),
         ]);
     }
 

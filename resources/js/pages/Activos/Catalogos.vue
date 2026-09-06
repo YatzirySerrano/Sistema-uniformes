@@ -341,9 +341,7 @@ function confirmarEstado() {
                                     >
                                         <Badge
                                             :variant="
-                                                t.activo
-                                                    ? 'secondary'
-                                                    : 'outline'
+                                                t.activo ? 'success' : 'outline'
                                             "
                                             class="text-xs"
                                         >
@@ -568,9 +566,7 @@ function confirmarEstado() {
                                     >
                                         <Badge
                                             :variant="
-                                                c.activa
-                                                    ? 'secondary'
-                                                    : 'outline'
+                                                c.activa ? 'success' : 'outline'
                                             "
                                             class="text-xs"
                                         >

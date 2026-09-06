@@ -68,6 +68,11 @@ class ActivoController extends Controller
 
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
+        // Sólo quien puede administrar activos puede verlos eliminados en el
+        // listado. Para el resto, "activo" se fuerza sin importar qué
+        // `estado` pida la URL.
+        $puedeVerEliminados = $request->user()->can('activos.administrar');
+
         $existencias = SaldoInventario::query()
             ->whereIn('empresa_id', $idsScope)
             ->selectRaw('activo_id, SUM(cantidad) as total, SUM(CASE WHEN minimo > 0 AND cantidad <= minimo THEN 1 ELSE 0 END) as tallas_bajo_minimo')
@@ -91,8 +96,9 @@ class ActivoController extends Controller
                 $q->whereHas('saldos', fn (Builder $s) => $s->where('almacen_id', $almacenId)->where('cantidad', '>', 0));
             })
             ->when($filtros['control'] ?? null, fn (Builder $q, $v) => $q->where('tipo_control', $v))
-            ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
+            ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
             ->orderBy('nombre', $orden)
             ->get()
             ->map(fn (Activo $a): array => [
@@ -140,6 +146,7 @@ class ActivoController extends Controller
                 'editar' => $request->user()->can('activos.editar'),
                 'administrar' => $request->user()->can('activos.administrar'),
                 'administrar_catalogos' => $request->user()->can('administrar', TipoActivo::class),
+                'verEliminados' => $puedeVerEliminados,
             ],
         ]);
     }
@@ -387,7 +394,7 @@ class ActivoController extends Controller
 
         $activo->update(['activo' => ! $activo->activo]);
 
-        $mensaje = $activo->activo ? 'Activo activado.' : 'Activo desactivado.';
+        $mensaje = $activo->activo ? 'Activo restaurado.' : 'Activo eliminado.';
 
         if (! $activo->activo) {
             // Cascada NO destructiva: un conjunto que usa este activo como

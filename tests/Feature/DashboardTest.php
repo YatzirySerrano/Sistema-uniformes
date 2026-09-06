@@ -41,15 +41,21 @@ function escenarioDashboard(): array
     $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
     $sucursal = Sucursal::factory()->for($empresa)->create();
 
-    Colaborador::factory()->for($empresa)->for($sucursal)->count(2)->create(['activo' => true]);
+    $colaboradores = Colaborador::factory()->for($empresa)->for($sucursal)->count(2)->create(['activo' => true]);
     Colaborador::factory()->for($empresa)->for($sucursal)->create(['activo' => false]);
+    $colaborador = $colaboradores->first();
+    $encargado = User::factory()->create();
 
-    Activo::factory()->for($empresa)->create(['activo' => true]);
+    $activo = Activo::factory()->for($empresa)->create(['activo' => true]);
     Activo::factory()->for($empresa)->create(['activo' => false]);
 
     // Bajo mínimo (2 <= 10) y saludable (50 > 5): sólo el primero cuenta.
-    SaldoInventario::factory()->for($empresa)->for($almacen)->create(['cantidad' => 2, 'minimo' => 10]);
-    SaldoInventario::factory()->for($empresa)->for($almacen)->create(['cantidad' => 50, 'minimo' => 5]);
+    // `activo_id` explícito: el default de `SaldoInventarioFactory` es
+    // `Activo::factory()`, que a su vez crea su PROPIA `Empresa::factory()`
+    // si no se le indica — mismo riesgo de empresas "fantasma" que en
+    // `colaborador_id` (ver nota más abajo).
+    SaldoInventario::factory()->for($empresa)->for($almacen)->for($activo)->create(['cantidad' => 2, 'minimo' => 10]);
+    SaldoInventario::factory()->for($empresa)->for($almacen)->for($activo)->create(['cantidad' => 50, 'minimo' => 5]);
 
     $activoIndividual = Activo::factory()->for($empresa)->seguimientoIndividual()->create();
     UnidadActivo::factory()->for($empresa)->for($activoIndividual)->for($almacen)->create(); // disponible
@@ -61,12 +67,23 @@ function escenarioDashboard(): array
     UnidadActivo::factory()->for($empresa)->for($activoIndividual)->for($almacen)
         ->asignada()->conCondicion(CondicionUnidadActivo::Robado)->create(); // robada
 
+    // `colaborador_id`/`encargado_id`/`registrada_por` se pasan explícitos:
+    // los defaults de estos factories son `Colaborador::factory()` /
+    // `User::factory()`, y `ColaboradorFactory` a su vez crea su PROPIA
+    // `Empresa::factory()` si no se le indica — dejarlo implícito sembraría
+    // empresas "fantasma" invisibles para los tests que filtran por una sola
+    // empresa, pero que sí contaminan la agregación multiempresa del
+    // Administrador (alcance global = todas las empresas de la plataforma).
     EntregaUniforme::factory()->for($empresa)->for($sucursal)->create([
         'almacen_id' => $almacen->id,
+        'colaborador_id' => $colaborador->id,
+        'encargado_id' => $encargado->id,
         'fecha_entrega' => now()->toDateString(),
     ]);
     Devolucion::factory()->for($empresa)->for($sucursal)->create([
         'almacen_id' => $almacen->id,
+        'colaborador_id' => $colaborador->id,
+        'registrada_por' => $encargado->id,
         'fecha' => now()->toDateString(),
     ]);
 
@@ -182,8 +199,60 @@ it('un rol restringido nunca ve los datos de una empresa fuera de su alcance, au
     $this->actingAs($supervisor)
         ->get("/dashboard?empresa_id={$empresaAjena->id}")
         ->assertInertia(fn ($page) => $page
-            // empresa_id ajeno se ignora: cae a la primera empresa autorizada del usuario.
-            ->where('filtros.empresa_id', $empresaPropia->id)
+            // empresa_id ajeno se ignora: cae a "todas las autorizadas" (no a
+            // una empresa concreta), que en este caso es sólo la propia.
+            ->where('filtros.empresa_id', null)
+            ->where('resumen.kpis.colaboradores_activos', 2),
+        );
+});
+
+it('sin filtro de empresa, el dashboard agrega todas las empresas autorizadas del usuario', function () {
+    ['empresa' => $empresaA] = escenarioDashboard();
+    ['empresa' => $empresaB] = escenarioDashboard();
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get('/dashboard')
+        ->assertInertia(fn ($page) => $page
+            ->component('Panel')
+            ->where('filtros.empresa_id', null)
+            ->where('totalEmpresasIncluidas', 2)
+            // 2 colaboradores activos por empresa (ver escenarioDashboard) × 2 empresas.
+            ->where('resumen.kpis.colaboradores_activos', 4)
+            ->where('resumen.kpis.entregas_periodo', 2)
+            ->where('resumen.kpis.devoluciones_periodo', 2),
+        );
+
+    expect($empresaA->id)->not->toBe($empresaB->id);
+});
+
+it('un supervisor sin filtro sólo agrega SUS empresas autorizadas, nunca toda la plataforma', function () {
+    ['empresa' => $empresaPropia] = escenarioDashboard();
+    escenarioDashboard(); // otra empresa en la plataforma, ajena al supervisor.
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresaPropia]);
+
+    $this->actingAs($supervisor)
+        ->get('/dashboard')
+        ->assertInertia(fn ($page) => $page
+            ->where('filtros.empresa_id', null)
+            ->where('totalEmpresasIncluidas', 1)
+            ->where('resumen.kpis.colaboradores_activos', 2),
+        );
+});
+
+it('filtrando una empresa concreta, el dashboard sólo agrega esa empresa', function () {
+    ['empresa' => $empresaA] = escenarioDashboard();
+    escenarioDashboard();
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get("/dashboard?empresa_id={$empresaA->id}")
+        ->assertInertia(fn ($page) => $page
+            ->where('filtros.empresa_id', $empresaA->id)
+            ->where('totalEmpresasIncluidas', 1)
             ->where('resumen.kpis.colaboradores_activos', 2),
         );
 });

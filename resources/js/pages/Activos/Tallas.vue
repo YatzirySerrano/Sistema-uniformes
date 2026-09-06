@@ -150,7 +150,7 @@ watch(
 <template>
     <Head title="Variantes / tallas" />
 
-    <div class="mx-auto flex w-full max-w-2xl flex-col gap-5 p-4">
+    <div class="flex w-full flex-col gap-5 p-4">
         <EncabezadoPagina
             titulo="Variantes / tallas"
             descripcion="Catálogo compartido de la plataforma: cada variante (XS, S, M, L; 28, 30; 36R; Unitalla…) existe una sola vez y está disponible para todas las empresas por igual. «Sin variante» no es una fila: un activo que no usa tallas se controla sin variante automáticamente."

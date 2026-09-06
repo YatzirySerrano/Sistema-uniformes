@@ -69,6 +69,7 @@ class SucursalController extends Controller
                 'crear' => $usuario->can('create', Sucursal::class),
                 'editar' => $usuario->can('sucursales.editar'),
                 'desactivar' => $usuario->can('sucursales.desactivar'),
+                'verEliminadas' => $usuario->can('sucursales.desactivar'),
             ],
         ]);
     }
@@ -121,6 +122,11 @@ class SucursalController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
 
+        // Sólo quien puede eliminar/restaurar sucursales puede verlas
+        // eliminadas en el listado. Para el resto, "activa" se fuerza sin
+        // importar qué `estado` pida la URL (no basta con ocultar el botón).
+        $puedeVerEliminadas = $usuario->can('sucursales.desactivar');
+
         // Alcance de sucursales visibles: por empresa autorizada, sólo las del
         // alcance del usuario (todas si es global o no tiene asignación específica).
         $sucursalesVisibles = $idsAutorizadas
@@ -140,29 +146,36 @@ class SucursalController extends Controller
                         ->orWhere('direccion', 'like', "%{$buscar}%");
                 });
             })
-            ->when(($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
-            ->when(($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
+            ->when(! $puedeVerEliminadas, fn (Builder $q) => $q->where('activa', true))
+            ->when($puedeVerEliminadas && ($filtros['estado'] ?? null) === 'activas', fn (Builder $q) => $q->where('activa', true))
+            ->when($puedeVerEliminadas && ($filtros['estado'] ?? null) === 'inactivas', fn (Builder $q) => $q->where('activa', false))
             ->orderBy('nombre', $orden);
     }
 
     /**
-     * Búsqueda con autocompletado de sucursales de UNA empresa (BuscadorAsync,
-     * p. ej. alta de colaborador). Requiere `empresa_id` y respeta el alcance
-     * del usuario dentro de esa empresa.
+     * Búsqueda con autocompletado de sucursales (BuscadorAsync). Con
+     * `empresa_id`, acota a esa empresa (p. ej. alta de colaborador). Sin
+     * `empresa_id`, busca en TODAS las empresas autorizadas del usuario (p.
+     * ej. el Dashboard en modo "todas las empresas": ningún filtro debe
+     * dejar el buscador inutilizable sólo porque no hay una empresa elegida).
+     * En ambos casos respeta el alcance real del usuario.
      */
     public function buscar(Request $request): JsonResponse
     {
         $this->authorize('viewAny', Sucursal::class);
 
-        $empresa = $this->empresaDelFiltro($request);
-
-        if ($empresa === null) {
-            return response()->json(['sucursales' => []]);
+        if ($request->filled('empresa_id')) {
+            $empresa = $this->empresaDelFiltro($request);
+            $sucursalesAutorizadas = $empresa === null
+                ? collect()
+                : $this->acceso()->sucursalesAutorizadas($request->user(), $empresa);
+        } else {
+            $sucursalesAutorizadas = $this->acceso()->sucursalesAutorizadasGlobal($request->user());
         }
 
         $termino = Str::lower(trim((string) $request->query('q', '')));
 
-        $sucursales = $this->acceso()->sucursalesAutorizadas($request->user(), $empresa)
+        $sucursales = $sucursalesAutorizadas
             // Sólo sucursales ACTIVAS: una sucursal desactivada no es un
             // destino/contexto operativo válido para colaboradores o entregas.
             ->filter(fn (Sucursal $s): bool => $s->activa)
@@ -256,7 +269,7 @@ class SucursalController extends Controller
 
         $sucursal->update(['activa' => ! $sucursal->activa]);
 
-        $mensaje = $sucursal->activa ? 'Sucursal activada correctamente.' : 'Sucursal desactivada correctamente.';
+        $mensaje = $sucursal->activa ? 'Sucursal restaurada correctamente.' : 'Sucursal eliminada correctamente.';
 
         if (! $sucursal->activa) {
             // Cascada NO destructiva: los colaboradores de esta sucursal

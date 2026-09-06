@@ -108,6 +108,21 @@ class Almacen extends Model
     }
 
     /**
+     * Almacenes que abastecen a CUALQUIERA de las empresas indicadas (p. ej.
+     * todas las empresas autorizadas de un usuario, sin un filtro concreto).
+     * Un almacén compartido por varias de esas empresas se cuenta una sola
+     * vez (subconsulta `EXISTS`, no `JOIN`).
+     *
+     * @param  Builder<static>  $query
+     * @param  iterable<int, int>  $empresaIds
+     * @return Builder<static>
+     */
+    public function scopeParaEmpresas(Builder $query, iterable $empresaIds): Builder
+    {
+        return $query->whereHas('empresas', fn (Builder $q) => $q->whereIn('empresas.id', $empresaIds));
+    }
+
+    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

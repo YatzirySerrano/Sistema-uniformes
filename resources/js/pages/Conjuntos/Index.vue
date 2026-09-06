@@ -10,6 +10,14 @@ import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada } from '@/types/sistema';
@@ -32,7 +40,12 @@ const props = defineProps<{
         empresa_id: number | null;
         estado: '' | 'activos' | 'inactivos';
     };
-    permisos: { crear: boolean; editar: boolean; administrar: boolean };
+    permisos: {
+        crear: boolean;
+        editar: boolean;
+        administrar: boolean;
+        verEliminados: boolean;
+    };
 }>();
 
 defineOptions({
@@ -86,8 +99,42 @@ function limpiarFiltros(): void {
     estado.value = '';
 }
 
+// "Eliminados" (internamente `activo = false`) sólo se ofrece a quien puede
+// administrar conjuntos — el backend además lo ignora si se fuerza por URL.
+const opcionesEstado = computed(() => [
+    { valor: '', etiqueta: 'Todos' },
+    { valor: 'activos', etiqueta: 'Activos' },
+    ...(props.permisos.verEliminados
+        ? [{ valor: 'inactivos', etiqueta: 'Eliminados' }]
+        : []),
+]);
+
+const confirmando = ref<Conjunto | null>(null);
+const procesandoEstado = ref(false);
+
 function alternarEstado(c: Conjunto): void {
-    router.post(`/conjuntos/${c.id}/estado`, {}, { preserveScroll: true });
+    if (c.activo) {
+        confirmando.value = c; // eliminar => confirmación
+    } else {
+        // restaurar es seguro: sin confirmación
+        router.post(`/conjuntos/${c.id}/estado`, {}, { preserveScroll: true });
+    }
+}
+
+function confirmarEstado(): void {
+    if (!confirmando.value) return;
+    procesandoEstado.value = true;
+    router.post(
+        `/conjuntos/${confirmando.value.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                confirmando.value = null;
+            },
+        },
+    );
 }
 
 const vista = useVistaPreferida('conjuntos');
@@ -148,11 +195,7 @@ const vista = useVistaPreferida('conjuntos');
                     <div class="w-36">
                         <SelectSimple
                             v-model="estado"
-                            :opciones="[
-                                { valor: '', etiqueta: 'Todos' },
-                                { valor: 'activos', etiqueta: 'Activos' },
-                                { valor: 'inactivos', etiqueta: 'Inactivos' },
-                            ]"
+                            :opciones="opcionesEstado"
                         />
                     </div>
                 </label>
@@ -197,7 +240,7 @@ const vista = useVistaPreferida('conjuntos');
                 role="button"
                 tabindex="0"
                 :aria-label="`Ver detalle de ${c.nombre}`"
-                class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 @click="router.visit(`/conjuntos/${c.id}`)"
                 @keydown.enter="router.visit(`/conjuntos/${c.id}`)"
             >
@@ -217,8 +260,8 @@ const vista = useVistaPreferida('conjuntos');
                             </p>
                         </div>
                     </div>
-                    <Badge :variant="c.activo ? 'default' : 'secondary'">
-                        {{ c.activo ? 'Activo' : 'Inactivo' }}
+                    <Badge :variant="c.activo ? 'success' : 'secondary'">
+                        {{ c.activo ? 'Activo' : 'Eliminado' }}
                     </Badge>
                 </div>
 
@@ -254,7 +297,7 @@ const vista = useVistaPreferida('conjuntos');
                         size="sm"
                         @click.stop="alternarEstado(c)"
                     >
-                        {{ c.activo ? 'Desactivar' : 'Activar' }}
+                        {{ c.activo ? 'Eliminar' : 'Restaurar' }}
                     </Button>
                 </div>
             </div>
@@ -272,7 +315,11 @@ const vista = useVistaPreferida('conjuntos');
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="c in conjuntos" :key="c.id" class="border-t">
+                    <tr
+                        v-for="c in conjuntos"
+                        :key="c.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
                         <td class="px-3 py-2">
                             <p class="font-medium">{{ c.nombre }}</p>
                             <p class="text-muted-foreground font-mono text-xs">
@@ -285,9 +332,9 @@ const vista = useVistaPreferida('conjuntos');
                         <td class="px-3 py-2">{{ c.componentes_count }}</td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="c.activo ? 'default' : 'secondary'"
+                                :variant="c.activo ? 'success' : 'secondary'"
                             >
-                                {{ c.activo ? 'Activo' : 'Inactivo' }}
+                                {{ c.activo ? 'Activo' : 'Eliminado' }}
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
@@ -313,7 +360,7 @@ const vista = useVistaPreferida('conjuntos');
                                     size="sm"
                                     @click="alternarEstado(c)"
                                 >
-                                    {{ c.activo ? 'Desactivar' : 'Activar' }}
+                                    {{ c.activo ? 'Eliminar' : 'Restaurar' }}
                                 </Button>
                             </div>
                         </td>
@@ -321,5 +368,45 @@ const vista = useVistaPreferida('conjuntos');
                 </tbody>
             </table>
         </div>
+
+        <Dialog
+            :open="confirmando !== null"
+            @update:open="
+                (v) => {
+                    if (!v) confirmando = null;
+                }
+            "
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle
+                        >¿Eliminar el conjunto
+                        <span v-if="confirmando">{{ confirmando.nombre }}</span
+                        >?</DialogTitle
+                    >
+                    <DialogDescription>
+                        Esta acción lo retirará de los listados y nuevas
+                        entregas. Los registros históricos no se eliminarán y
+                        podrás restaurarlo cuando quieras.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="confirmando = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEstado"
+                    >
+                        Eliminar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

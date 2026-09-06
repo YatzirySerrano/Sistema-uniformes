@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Boxes, Package, Pencil, Warehouse } from '@lucide/vue';
+import { ref } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 
 type Componente = {
     activo: string | null;
@@ -46,11 +55,34 @@ defineOptions({
     },
 });
 
+const modalEstado = ref(false);
+const procesandoEstado = ref(false);
+
 function alternarEstado(): void {
+    if (props.conjunto.activo) {
+        modalEstado.value = true; // eliminar => confirmación
+    } else {
+        // restaurar es seguro: sin confirmación
+        router.post(
+            `/conjuntos/${props.conjunto.id}/estado`,
+            {},
+            { preserveScroll: true },
+        );
+    }
+}
+
+function confirmarEstado(): void {
+    procesandoEstado.value = true;
     router.post(
         `/conjuntos/${props.conjunto.id}/estado`,
         {},
-        { preserveScroll: true },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                modalEstado.value = false;
+            },
+        },
     );
 }
 
@@ -79,14 +111,14 @@ function variantePara(c: Componente): string {
                     variant="outline"
                     @click="alternarEstado"
                 >
-                    {{ conjunto.activo ? 'Desactivar' : 'Activar' }}
+                    {{ conjunto.activo ? 'Eliminar' : 'Restaurar' }}
                 </Button>
             </template>
         </EncabezadoPagina>
 
         <div class="flex flex-wrap items-center gap-2">
-            <Badge :variant="conjunto.activo ? 'default' : 'secondary'">
-                {{ conjunto.activo ? 'Activo' : 'Inactivo' }}
+            <Badge :variant="conjunto.activo ? 'success' : 'secondary'">
+                {{ conjunto.activo ? 'Activo' : 'Eliminado' }}
             </Badge>
             <Badge variant="outline">{{
                 conjunto.empresa.nombre_comercial
@@ -168,7 +200,7 @@ function variantePara(c: Componente): string {
                         <span class="truncate">{{ a.nombre }}</span>
                         <Badge
                             :variant="
-                                a.disponibilidad > 0 ? 'default' : 'secondary'
+                                a.disponibilidad > 0 ? 'success' : 'secondary'
                             "
                         >
                             {{ a.disponibilidad }}
@@ -182,5 +214,34 @@ function variantePara(c: Componente): string {
                 </div>
             </section>
         </div>
+
+        <Dialog v-model:open="modalEstado">
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>¿Eliminar este conjunto?</DialogTitle>
+                    <DialogDescription>
+                        Esta acción lo retirará de los listados y nuevas
+                        entregas. Los registros históricos no se eliminarán y
+                        podrás restaurarlo cuando quieras.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="modalEstado = false"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEstado"
+                    >
+                        Eliminar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

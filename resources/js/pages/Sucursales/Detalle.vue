@@ -144,8 +144,8 @@ function confirmarDesactivar(): void {
                         <Building2 class="size-3" />
                         {{ sucursal.empresa.nombre_comercial }}
                     </Badge>
-                    <Badge :variant="sucursal.activa ? 'default' : 'secondary'">
-                        {{ sucursal.activa ? 'Activa' : 'Inactiva' }}
+                    <Badge :variant="sucursal.activa ? 'success' : 'secondary'">
+                        {{ sucursal.activa ? 'Activa' : 'Eliminada' }}
                     </Badge>
                 </div>
             </div>
@@ -166,7 +166,7 @@ function confirmarDesactivar(): void {
                     @click="alternarEstado"
                 >
                     <Power class="size-3.5" />
-                    {{ sucursal.activa ? 'Desactivar' : 'Activar' }}
+                    {{ sucursal.activa ? 'Eliminar' : 'Restaurar' }}
                 </Button>
             </div>
         </div>
@@ -204,10 +204,10 @@ function confirmarDesactivar(): void {
                         <dd>
                             <Badge
                                 :variant="
-                                    sucursal.activa ? 'default' : 'secondary'
+                                    sucursal.activa ? 'success' : 'secondary'
                                 "
                             >
-                                {{ sucursal.activa ? 'Activa' : 'Inactiva' }}
+                                {{ sucursal.activa ? 'Activa' : 'Eliminada' }}
                             </Badge>
                         </dd>
                     </div>
@@ -325,11 +325,11 @@ function confirmarDesactivar(): void {
         <Dialog v-model:open="modalEstado">
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>¿Desactivar esta sucursal?</DialogTitle>
+                    <DialogTitle>¿Eliminar esta sucursal?</DialogTitle>
                     <DialogDescription>
-                        Esta sucursal dejará de estar disponible para nuevas
-                        operaciones. Los registros históricos no se eliminarán y
-                        podrás reactivarla cuando quieras.
+                        Esta acción retirará la sucursal de los listados y
+                        operaciones disponibles. Los registros históricos no se
+                        eliminarán y podrás restaurarla cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
@@ -345,7 +345,7 @@ function confirmarDesactivar(): void {
                         :disabled="procesandoEstado"
                         @click="confirmarDesactivar"
                     >
-                        Desactivar
+                        Eliminar
                     </Button>
                 </DialogFooter>
             </DialogContent>

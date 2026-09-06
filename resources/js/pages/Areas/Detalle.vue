@@ -127,8 +127,8 @@ function confirmarDesactivar(): void {
                         <Building2 class="size-3" />
                         {{ area.empresa.nombre_comercial }}
                     </Badge>
-                    <Badge :variant="area.activa ? 'default' : 'secondary'">
-                        {{ area.activa ? 'Activa' : 'Inactiva' }}
+                    <Badge :variant="area.activa ? 'success' : 'secondary'">
+                        {{ area.activa ? 'Activa' : 'Eliminada' }}
                     </Badge>
                 </div>
             </div>
@@ -149,7 +149,7 @@ function confirmarDesactivar(): void {
                     @click="alternarEstado"
                 >
                     <Power class="size-3.5" />
-                    {{ area.activa ? 'Desactivar' : 'Activar' }}
+                    {{ area.activa ? 'Eliminar' : 'Restaurar' }}
                 </Button>
             </div>
         </div>
@@ -185,9 +185,9 @@ function confirmarDesactivar(): void {
                         <dt class="text-muted-foreground text-xs">Estado</dt>
                         <dd>
                             <Badge
-                                :variant="area.activa ? 'default' : 'secondary'"
+                                :variant="area.activa ? 'success' : 'secondary'"
                             >
-                                {{ area.activa ? 'Activa' : 'Inactiva' }}
+                                {{ area.activa ? 'Activa' : 'Eliminada' }}
                             </Badge>
                         </dd>
                     </div>
@@ -257,12 +257,12 @@ function confirmarDesactivar(): void {
         <Dialog v-model:open="modalEstado">
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>¿Desactivar esta área?</DialogTitle>
+                    <DialogTitle>¿Eliminar esta área?</DialogTitle>
                     <DialogDescription>
-                        Esta área dejará de estar disponible para nuevas
+                        Esta acción la retirará de los listados y nuevas
                         asignaciones. Los colaboradores ya asignados y los
                         registros históricos no se modifican, y podrás
-                        reactivarla cuando quieras.
+                        restaurarla cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
@@ -278,7 +278,7 @@ function confirmarDesactivar(): void {
                         :disabled="procesandoEstado"
                         @click="confirmarDesactivar"
                     >
-                        Desactivar
+                        Eliminar
                     </Button>
                 </DialogFooter>
             </DialogContent>

@@ -28,6 +28,44 @@ it('sin filtro de estado muestra activos e inactivos (regla: sin filtros = todos
         ->assertInertia(fn ($page) => $page->where('colaboradores.total', 2));
 });
 
+it('un rol sin permiso de eliminar colaboradores nunca ve los eliminados, ni con estado=todos ni forzando la URL', function () {
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    Colaborador::factory()->for($empresa)->for($sucursal)->create(['activo' => true]);
+    Colaborador::factory()->inactivo()->for($empresa)->for($sucursal)->create();
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$empresa]);
+
+    $this->actingAs($supervisor)
+        ->get('/colaboradores')
+        ->assertInertia(fn ($page) => $page
+            ->where('colaboradores.total', 1)
+            ->where('puedeVerEliminados', false),
+        );
+
+    $this->actingAs($supervisor)
+        ->get('/colaboradores?estado=todos')
+        ->assertInertia(fn ($page) => $page->where('colaboradores.total', 1));
+
+    // El backend IGNORA el filtro (no lo rechaza con error): sigue mostrando
+    // sólo lo que el supervisor puede ver normalmente, nunca el eliminado.
+    $this->actingAs($supervisor)
+        ->get('/colaboradores?estado=inactivos')
+        ->assertInertia(fn ($page) => $page->where('colaboradores.total', 1));
+});
+
+it('un administrador (con permiso de eliminar) sí ve la opción de eliminados', function () {
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    Colaborador::factory()->inactivo()->for($empresa)->for($sucursal)->create();
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get('/colaboradores')
+        ->assertInertia(fn ($page) => $page->where('puedeVerEliminados', true));
+});
+
 it('filtra el listado de colaboradores por sucursal_id', function () {
     $empresa = Empresa::factory()->create();
     $sucursalA = Sucursal::factory()->for($empresa)->create();

@@ -29,8 +29,13 @@ class UsuarioController extends Controller
 
         $empresasIds = $this->empresasGestionables($request->user());
 
+        // Sólo quien puede desactivar usuarios puede ver los eliminados en
+        // el listado. Para el resto, "activo" se fuerza sin excepción.
+        $puedeVerEliminados = $request->user()->can('usuarios.desactivar');
+
         $usuarios = User::query()
             ->when(! $request->user()->esSuperadministrador(), fn ($q) => $q->whereHas('empresas', fn ($e) => $e->whereIn('empresas.id', $empresasIds)))
+            ->when(! $puedeVerEliminados, fn ($q) => $q->where('activo', true))
             ->with(['roles:id,name', 'empresas:id,nombre_comercial'])
             ->orderBy('name')
             ->paginate($this->porPagina())
@@ -43,11 +48,13 @@ class UsuarioController extends Controller
                 'roles' => $u->roles->pluck('name'),
                 'empresas' => $u->empresas->pluck('nombre_comercial'),
                 'ultimo_acceso_en' => $u->ultimo_acceso_en?->toIso8601String(),
+                'puedeCambiarEstado' => $request->user()->can('desactivar', $u),
             ]);
 
         return Inertia::render('Usuarios/Index', [
             'usuarios' => $usuarios,
             'puedeCrear' => $request->user()->can('create', User::class),
+            'puedeVerEliminados' => $puedeVerEliminados,
         ]);
     }
 
@@ -159,7 +166,7 @@ class UsuarioController extends Controller
             'valores_nuevos' => ['activo' => $usuario->activo],
         ]);
 
-        return back()->with('toast', ['type' => 'success', 'message' => $usuario->activo ? 'Usuario activado.' : 'Usuario desactivado.']);
+        return back()->with('toast', ['type' => 'success', 'message' => $usuario->activo ? 'Usuario restaurado.' : 'Usuario eliminado.']);
     }
 
     /**

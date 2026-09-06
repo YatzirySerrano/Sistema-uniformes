@@ -5,6 +5,7 @@ import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { varianteBadgeEstadoEntrega } from '@/lib/estadoEntrega';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 
 const props = defineProps<{
@@ -70,13 +71,13 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
 <template>
     <Head :title="`Entrega ${entrega.folio}`" />
 
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             :titulo="`Entrega ${entrega.folio}`"
             :descripcion="`${entrega.colaborador?.nombre_completo} · ${entrega.sucursal}`"
         >
             <template #acciones>
-                <Badge :variant="pendiente ? 'secondary' : 'default'">{{
+                <Badge :variant="varianteBadgeEstadoEntrega(entrega.estado)">{{
                     entrega.estado_etiqueta
                 }}</Badge>
             </template>

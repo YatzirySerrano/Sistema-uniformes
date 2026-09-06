@@ -121,7 +121,7 @@ function irA(ruta: string): void {
 <template>
     <Head :title="empresa.nombre_comercial" />
 
-    <div class="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4">
+    <div class="flex w-full flex-col gap-4 p-4">
         <Button variant="ghost" size="sm" as-child class="w-fit">
             <Link href="/empresas">
                 <ArrowLeft class="size-4" /> Volver a empresas
@@ -153,9 +153,9 @@ function irA(ruta: string): void {
                     </p>
                     <div class="mt-1.5 flex flex-wrap items-center gap-2">
                         <Badge
-                            :variant="empresa.activa ? 'default' : 'secondary'"
+                            :variant="empresa.activa ? 'success' : 'secondary'"
                         >
-                            {{ empresa.activa ? 'Activa' : 'Inactiva' }}
+                            {{ empresa.activa ? 'Activa' : 'Eliminada' }}
                         </Badge>
                     </div>
                 </div>
@@ -177,7 +177,7 @@ function irA(ruta: string): void {
                     @click="modalEstado = true"
                 >
                     <Power class="size-3.5" />
-                    {{ empresa.activa ? 'Desactivar' : 'Activar' }}
+                    {{ empresa.activa ? 'Eliminar' : 'Restaurar' }}
                 </Button>
             </div>
         </div>
@@ -395,14 +395,14 @@ function irA(ruta: string): void {
                     <DialogTitle>
                         {{
                             empresa.activa
-                                ? '¿Desactivar esta empresa?'
-                                : '¿Activar esta empresa?'
+                                ? '¿Eliminar esta empresa?'
+                                : '¿Restaurar esta empresa?'
                         }}
                     </DialogTitle>
                     <DialogDescription>
                         {{
                             empresa.activa
-                                ? 'Los datos históricos se conservarán. Los usuarios y operaciones de esta empresa pueden quedar temporalmente restringidos hasta reactivarla.'
+                                ? 'Esta acción retirará la empresa de los listados y operaciones disponibles. Los datos históricos se conservarán y podrás restaurarla cuando quieras.'
                                 : 'La empresa volverá a estar disponible para operar con normalidad.'
                         }}
                     </DialogDescription>
@@ -420,7 +420,7 @@ function irA(ruta: string): void {
                         :disabled="procesandoEstado"
                         @click="confirmarEstado"
                     >
-                        {{ empresa.activa ? 'Desactivar' : 'Activar' }}
+                        {{ empresa.activa ? 'Eliminar' : 'Restaurar' }}
                     </Button>
                 </DialogFooter>
             </DialogContent>

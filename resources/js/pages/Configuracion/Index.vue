@@ -99,7 +99,7 @@ function guardar() {
 <template>
     <Head title="Configuración" />
 
-    <div class="mx-auto flex max-w-3xl flex-col gap-6">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Personalización del sistema"
             descripcion="Colores globales de la aplicación. Se aplican de inmediato para todos los usuarios y todas las empresas — no existe personalización por empresa."

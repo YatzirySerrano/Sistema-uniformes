@@ -58,7 +58,12 @@ const props = defineProps<{
         orden: 'az' | 'za';
         empresa_id: number | null;
     };
-    permisos: { crear: boolean; editar: boolean; desactivar: boolean };
+    permisos: {
+        crear: boolean;
+        editar: boolean;
+        desactivar: boolean;
+        verEliminadas: boolean;
+    };
 }>();
 
 defineOptions({
@@ -121,12 +126,17 @@ function limpiarFiltros(): void {
     empresaSeleccionada.value = null;
 }
 
-const filtrosEstado: { valor: '' | 'activas' | 'inactivas'; texto: string }[] =
-    [
-        { valor: '', texto: 'Todas' },
-        { valor: 'activas', texto: 'Activas' },
-        { valor: 'inactivas', texto: 'Inactivas' },
-    ];
+// "Eliminadas" (internamente `activa = false`) sólo se ofrece a quien puede
+// desactivar áreas — el backend además la ignora si se fuerza por URL.
+const filtrosEstado = computed<
+    { valor: '' | 'activas' | 'inactivas'; texto: string }[]
+>(() => [
+    { valor: '', texto: 'Todas' },
+    { valor: 'activas', texto: 'Activas' },
+    ...(props.permisos.verEliminadas
+        ? ([{ valor: 'inactivas', texto: 'Eliminadas' }] as const)
+        : []),
+]);
 
 const modalAbierto = ref(false);
 const enEdicion = ref<AreaEditable | null>(null);
@@ -313,7 +323,7 @@ const vista = useVistaPreferida('areas');
                     role="button"
                     tabindex="0"
                     :aria-label="`Ver detalles de ${a.nombre}`"
-                    class="group focus-visible:ring-ring hover:border-primary/40 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                     @click="verDetalle(a)"
                     @keydown.enter="verDetalle(a)"
                     @keydown.space.prevent="verDetalle(a)"
@@ -344,10 +354,10 @@ const vista = useVistaPreferida('areas');
                             <TooltipTrigger as-child>
                                 <Badge
                                     :variant="
-                                        a.activa ? 'default' : 'secondary'
+                                        a.activa ? 'success' : 'secondary'
                                     "
                                 >
-                                    {{ a.activa ? 'Activa' : 'Inactiva' }}
+                                    {{ a.activa ? 'Activa' : 'Eliminada' }}
                                 </Badge>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -378,7 +388,7 @@ const vista = useVistaPreferida('areas');
                         role="button"
                         tabindex="0"
                         :aria-label="`Ver colaboradores del área ${a.nombre}`"
-                        class="bg-muted/40 hover:bg-muted/70 hover:border-primary/40 focus-visible:ring-ring w-fit rounded-lg border border-transparent px-3 py-2 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                        class="bg-muted/40 hover:bg-muted/70 hover:border-primary/20 focus-visible:ring-ring w-fit rounded-lg border border-transparent px-3 py-2 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                         @click.stop="irAColaboradores(a)"
                         @keydown.enter.stop="irAColaboradores(a)"
                         @keydown.space.stop.prevent="irAColaboradores(a)"
@@ -430,7 +440,7 @@ const vista = useVistaPreferida('areas');
                             size="sm"
                             @click.stop="alternarEstado(a)"
                         >
-                            {{ a.activa ? 'Desactivar' : 'Activar' }}
+                            {{ a.activa ? 'Eliminar' : 'Restaurar' }}
                         </Button>
                     </div>
                 </div>
@@ -451,7 +461,11 @@ const vista = useVistaPreferida('areas');
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="a in areas.data" :key="a.id" class="border-t">
+                    <tr
+                        v-for="a in areas.data"
+                        :key="a.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
                         <td class="px-3 py-2">
                             <p class="font-medium">{{ a.nombre }}</p>
                             <p class="text-muted-foreground font-mono text-xs">
@@ -473,9 +487,9 @@ const vista = useVistaPreferida('areas');
                         </td>
                         <td class="px-3 py-2">
                             <Badge
-                                :variant="a.activa ? 'default' : 'secondary'"
+                                :variant="a.activa ? 'success' : 'secondary'"
                             >
-                                {{ a.activa ? 'Activa' : 'Inactiva' }}
+                                {{ a.activa ? 'Activa' : 'Eliminada' }}
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
@@ -499,7 +513,7 @@ const vista = useVistaPreferida('areas');
                                     size="sm"
                                     @click="alternarEstado(a)"
                                 >
-                                    {{ a.activa ? 'Desactivar' : 'Activar' }}
+                                    {{ a.activa ? 'Eliminar' : 'Restaurar' }}
                                 </Button>
                             </div>
                         </td>
@@ -544,14 +558,16 @@ const vista = useVistaPreferida('areas');
         >
             <DialogContent>
                 <DialogHeader>
-                    <DialogTitle>¿Desactivar esta área?</DialogTitle>
+                    <DialogTitle
+                        >¿Eliminar el área
+                        <span v-if="confirmando">{{ confirmando.nombre }}</span
+                        >?</DialogTitle
+                    >
                     <DialogDescription>
-                        <span v-if="confirmando" class="font-medium">{{
-                            confirmando.nombre
-                        }}</span>
-                        dejará de estar disponible para nuevas asignaciones. Los
-                        colaboradores ya asignados y los registros históricos no
-                        se modifican, y podrás reactivarla cuando quieras.
+                        Esta acción la retirará de los listados y nuevas
+                        asignaciones. Los colaboradores ya asignados y los
+                        registros históricos no se modifican, y podrás
+                        restaurarla cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
                 <DialogFooter>
@@ -567,7 +583,7 @@ const vista = useVistaPreferida('areas');
                         :disabled="procesandoEstado"
                         @click="confirmarEstado"
                     >
-                        Desactivar
+                        Eliminar
                     </Button>
                 </DialogFooter>
             </DialogContent>

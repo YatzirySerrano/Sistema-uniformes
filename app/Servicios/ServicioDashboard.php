@@ -9,7 +9,6 @@ use App\Models\Almacen;
 use App\Models\CategoriaActivo;
 use App\Models\Colaborador;
 use App\Models\Devolucion;
-use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
@@ -19,59 +18,66 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 /**
- * Métricas del Dashboard para una empresa (siempre una a la vez: no hay
- * "empresa activa", el Panel elige y valida la empresa como cualquier otro
- * filtro). Todo se agrupa en SQL — nunca se trae el detalle a PHP para
- * contar/sumar ahí.
+ * Métricas del Dashboard, agregadas sobre un CONJUNTO de empresas (siempre:
+ * sin filtro de empresa son "todas las autorizadas del usuario"; con
+ * filtro, es una lista de un solo id). No hay "empresa activa": el Panel
+ * resuelve ese conjunto exactamente igual que cualquier otro filtro. Todo se
+ * agrupa en SQL — nunca se trae el detalle a PHP para contar/sumar ahí.
+ *
+ * Semántica de fechas: los KPIs de ESTADO ACTUAL (colaboradores activos,
+ * existencias, stock bajo, unidades, almacenes activos) nunca se acotan por
+ * `desde`/`hasta` — falsearían la foto del momento. Sólo las métricas
+ * TRANSACCIONALES (entregas, devoluciones, movimientos) respetan el rango.
  */
 class ServicioDashboard
 {
     /**
+     * @param  array<int, int>  $empresaIds
      * @return array<string, mixed>
      */
-    public function resumen(Empresa $empresa, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
+    public function resumen(array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
     {
         return [
             'kpis' => [
                 'colaboradores_activos' => Colaborador::query()
-                    ->where('empresa_id', $empresa->id)->where('activo', true)
+                    ->whereIn('empresa_id', $empresaIds)->where('activo', true)
                     ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
                     ->count(),
                 'activos_activos' => Activo::query()
-                    ->where('empresa_id', $empresa->id)->where('activo', true)->count(),
+                    ->whereIn('empresa_id', $empresaIds)->where('activo', true)->count(),
                 'existencias_disponibles' => (int) SaldoInventario::query()
-                    ->where('empresa_id', $empresa->id)
+                    ->whereIn('empresa_id', $empresaIds)
                     ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
                     ->sum('cantidad'),
-                'entregas_periodo' => $this->consultaEntregas($empresa, $desde, $hasta, $sucursalId, $almacenId)->count(),
-                'devoluciones_periodo' => $this->consultaDevoluciones($empresa, $desde, $hasta, $sucursalId, $almacenId)->count(),
+                'entregas_periodo' => $this->consultaEntregas($empresaIds, $desde, $hasta, $sucursalId, $almacenId)->count(),
+                'devoluciones_periodo' => $this->consultaDevoluciones($empresaIds, $desde, $hasta, $sucursalId, $almacenId)->count(),
                 'activos_stock_bajo' => SaldoInventario::query()
-                    ->where('empresa_id', $empresa->id)
+                    ->whereIn('empresa_id', $empresaIds)
                     ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
                     ->bajoMinimo()
                     ->count(),
-                'almacenes_activos' => Almacen::query()->activos()->paraEmpresa($empresa->id)->count(),
-                ...$this->kpisUnidades($empresa, $almacenId),
+                'almacenes_activos' => Almacen::query()->activos()->paraEmpresas($empresaIds)->count(),
+                ...$this->kpisUnidades($empresaIds, $almacenId),
             ],
             'series' => [
                 'entregas_por_periodo' => $this->serieDiaria(
-                    $this->consultaEntregas($empresa, $desde, $hasta, $sucursalId, $almacenId),
+                    $this->consultaEntregas($empresaIds, $desde, $hasta, $sucursalId, $almacenId),
                     'fecha_entrega', $desde, $hasta,
                 ),
                 'devoluciones_por_periodo' => $this->serieDiaria(
-                    $this->consultaDevoluciones($empresa, $desde, $hasta, $sucursalId, $almacenId),
+                    $this->consultaDevoluciones($empresaIds, $desde, $hasta, $sucursalId, $almacenId),
                     'fecha', $desde, $hasta,
                 ),
-                'movimientos_por_periodo' => $this->movimientosPorPeriodo($empresa, $desde, $hasta, $sucursalId, $almacenId),
-                'unidades_por_estado' => $this->unidadesPorEstado($empresa, $almacenId),
-                'existencias_por_almacen' => $this->existenciasPorAlmacen($empresa, $almacenId),
-                'stock_por_categoria' => $this->stockPorCategoria($empresa, $almacenId),
+                'movimientos_por_periodo' => $this->movimientosPorPeriodo($empresaIds, $desde, $hasta, $sucursalId, $almacenId),
+                'unidades_por_estado' => $this->unidadesPorEstado($empresaIds, $almacenId),
+                'existencias_por_almacen' => $this->existenciasPorAlmacen($empresaIds, $almacenId),
+                'stock_por_categoria' => $this->stockPorCategoria($empresaIds, $almacenId),
             ],
             'entregas_recientes' => EntregaUniforme::query()
-                ->where('empresa_id', $empresa->id)
+                ->whereIn('empresa_id', $empresaIds)
                 ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
                 ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
-                ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre'])
+                ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial'])
                 ->latest()
                 ->limit(6)
                 ->get()
@@ -80,15 +86,16 @@ class ServicioDashboard
                     'folio' => $e->folio,
                     'colaborador' => $e->colaborador?->nombre_completo,
                     'sucursal' => $e->sucursal?->nombre,
+                    'empresa' => $e->empresa?->nombre_comercial,
                     'estado' => $e->estado->value,
                     'estado_etiqueta' => $e->estado->etiqueta(),
                     'fecha_entrega' => $e->fecha_entrega->toDateString(),
                 ])->all(),
             'stock_bajo_detalle' => SaldoInventario::query()
-                ->where('empresa_id', $empresa->id)
+                ->whereIn('empresa_id', $empresaIds)
                 ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
                 ->bajoMinimo()
-                ->with(['activo:id,nombre', 'talla:id,valor', 'almacen:id,nombre'])
+                ->with(['activo:id,nombre', 'talla:id,valor', 'almacen:id,nombre', 'empresa:id,nombre_comercial'])
                 // `minimo` es UNSIGNED; `cantidad - minimo` puede dar negativo y
                 // desborda BIGINT UNSIGNED en MariaDB (SQLSTATE[22003]).
                 // `bajoMinimo()` ya garantiza cantidad <= minimo, así que
@@ -101,6 +108,7 @@ class ServicioDashboard
                     'activo' => $s->activo?->nombre,
                     'talla' => $s->talla?->valor,
                     'almacen' => $s->almacen?->nombre,
+                    'empresa' => $s->empresa?->nombre_comercial,
                     'cantidad' => $s->cantidad,
                     'minimo' => $s->minimo,
                 ])->all(),
@@ -108,12 +116,13 @@ class ServicioDashboard
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return Builder<EntregaUniforme>
      */
-    private function consultaEntregas(Empresa $empresa, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): Builder
+    private function consultaEntregas(array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): Builder
     {
         return EntregaUniforme::query()
-            ->where('empresa_id', $empresa->id)
+            ->whereIn('empresa_id', $empresaIds)
             ->whereDate('fecha_entrega', '>=', $desde->toDateString())
             ->whereDate('fecha_entrega', '<=', $hasta->toDateString())
             ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
@@ -121,12 +130,13 @@ class ServicioDashboard
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return Builder<Devolucion>
      */
-    private function consultaDevoluciones(Empresa $empresa, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): Builder
+    private function consultaDevoluciones(array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): Builder
     {
         return Devolucion::query()
-            ->where('empresa_id', $empresa->id)
+            ->whereIn('empresa_id', $empresaIds)
             ->whereDate('fecha', '>=', $desde->toDateString())
             ->whereDate('fecha', '<=', $hasta->toDateString())
             ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
@@ -138,13 +148,14 @@ class ServicioDashboard
      * en PHP con la MISMA regla de `UnidadActivo::estadoVisible()`
      * (`EstadoVisibleUnidad::resolver()`), nunca una réplica en SQL.
      *
+     * @param  array<int, int>  $empresaIds
      * @return array<string, int>
      */
-    private function kpisUnidades(Empresa $empresa, ?int $almacenId): array
+    private function kpisUnidades(array $empresaIds, ?int $almacenId): array
     {
         $totales = array_fill_keys(array_map(fn (EstadoVisibleUnidad $e) => $e->value, EstadoVisibleUnidad::cases()), 0);
 
-        foreach ($this->unidadesAgrupadas($empresa, $almacenId) as $fila) {
+        foreach ($this->unidadesAgrupadas($empresaIds, $almacenId) as $fila) {
             $totales[$fila['visible']->value] += $fila['total'];
         }
 
@@ -158,13 +169,14 @@ class ServicioDashboard
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return array<int, array{estado: string, etiqueta: string, total: int}>
      */
-    private function unidadesPorEstado(Empresa $empresa, ?int $almacenId): array
+    private function unidadesPorEstado(array $empresaIds, ?int $almacenId): array
     {
         $totales = array_fill_keys(array_map(fn (EstadoVisibleUnidad $e) => $e->value, EstadoVisibleUnidad::cases()), 0);
 
-        foreach ($this->unidadesAgrupadas($empresa, $almacenId) as $fila) {
+        foreach ($this->unidadesAgrupadas($empresaIds, $almacenId) as $fila) {
             $totales[$fila['visible']->value] += $fila['total'];
         }
 
@@ -177,12 +189,13 @@ class ServicioDashboard
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return Collection<int, array{visible: EstadoVisibleUnidad, total: int}>
      */
-    private function unidadesAgrupadas(Empresa $empresa, ?int $almacenId): Collection
+    private function unidadesAgrupadas(array $empresaIds, ?int $almacenId): Collection
     {
         return UnidadActivo::query()
-            ->where('empresa_id', $empresa->id)
+            ->whereIn('empresa_id', $empresaIds)
             ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
             ->selectRaw('estado, condicion, count(*) as total')
             ->groupBy('estado', 'condicion')
@@ -194,12 +207,13 @@ class ServicioDashboard
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return array<int, array{fecha: string, entradas: int, salidas: int}>
      */
-    private function movimientosPorPeriodo(Empresa $empresa, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
+    private function movimientosPorPeriodo(array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
     {
         $filas = MovimientoInventario::query()
-            ->where('empresa_id', $empresa->id)
+            ->whereIn('empresa_id', $empresaIds)
             ->whereBetween('ocurrido_en', [$desde->copy()->startOfDay(), $hasta->copy()->endOfDay()])
             ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
             ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
@@ -259,12 +273,13 @@ class ServicioDashboard
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return array<int, array{almacen: string, total: int}>
      */
-    private function existenciasPorAlmacen(Empresa $empresa, ?int $almacenId): array
+    private function existenciasPorAlmacen(array $empresaIds, ?int $almacenId): array
     {
         $totales = SaldoInventario::query()
-            ->where('saldos_inventario.empresa_id', $empresa->id)
+            ->whereIn('saldos_inventario.empresa_id', $empresaIds)
             ->when($almacenId, fn (Builder $q, int $v) => $q->where('saldos_inventario.almacen_id', $v))
             ->join('almacenes', 'almacenes.id', '=', 'saldos_inventario.almacen_id')
             ->selectRaw('almacenes.id, almacenes.nombre, sum(saldos_inventario.cantidad) as total')
@@ -282,12 +297,13 @@ class ServicioDashboard
     }
 
     /**
+     * @param  array<int, int>  $empresaIds
      * @return array<int, array{categoria: string, total: int}>
      */
-    private function stockPorCategoria(Empresa $empresa, ?int $almacenId): array
+    private function stockPorCategoria(array $empresaIds, ?int $almacenId): array
     {
         $totales = SaldoInventario::query()
-            ->where('saldos_inventario.empresa_id', $empresa->id)
+            ->whereIn('saldos_inventario.empresa_id', $empresaIds)
             ->when($almacenId, fn (Builder $q, int $v) => $q->where('saldos_inventario.almacen_id', $v))
             ->join('activos', 'activos.id', '=', 'saldos_inventario.activo_id')
             ->selectRaw('activos.categoria_id, sum(saldos_inventario.cantidad) as total')

@@ -462,7 +462,7 @@ function enviar(): void {
 <template>
     <Head title="Nueva entrega" />
 
-    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
+    <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar entrega"
             descripcion="Empresa → Sucursal → Colaborador → Almacén de origen → activos. Cada paso acota al siguiente; el inventario se descuenta del almacén elegido."
