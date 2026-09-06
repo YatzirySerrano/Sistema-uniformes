@@ -15,6 +15,19 @@ beforeEach(function () {
 |--------------------------------------------------------------------------
 */
 
+it('sin filtro de estado muestra activos e inactivos (regla: sin filtros = todos)', function () {
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    Colaborador::factory()->for($empresa)->for($sucursal)->create();
+    Colaborador::factory()->inactivo()->for($empresa)->for($sucursal)->create();
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get('/colaboradores')
+        ->assertInertia(fn ($page) => $page->where('colaboradores.total', 2));
+});
+
 it('filtra el listado de colaboradores por sucursal_id', function () {
     $empresa = Empresa::factory()->create();
     $sucursalA = Sucursal::factory()->for($empresa)->create();

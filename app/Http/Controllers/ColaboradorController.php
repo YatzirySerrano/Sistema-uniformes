@@ -117,7 +117,7 @@ class ColaboradorController extends Controller
                 ->orWhere('numero_empleado', 'like', "%{$b}%")))
             ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
             ->when($filtros['area_id'] ?? null, fn (Builder $q, $a) => $q->where('area_id', $a))
-            ->when(($filtros['estado'] ?? 'activos') === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when(($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
             ->when(($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
             ->with(['sucursal:id,nombre', 'empresa:id,nombre_comercial'])
             ->orderBy('nombre_completo');

@@ -56,7 +56,7 @@ const sucursalSeleccionada = ref<{ id: number; nombre: string } | null>(
     props.sucursales.find((s) => s.id === props.filtros.sucursal_id) ?? null,
 );
 const sucursalId = computed(() => sucursalSeleccionada.value?.id ?? '');
-const estado = ref(props.filtros.estado ?? 'activos');
+const estado = ref(props.filtros.estado ?? 'todos');
 
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
@@ -139,8 +139,10 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
             </template>
         </EncabezadoPagina>
 
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div class="relative flex-1">
+        <div
+            class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+        >
+            <div class="relative min-w-0 flex-1">
                 <Search
                     class="text-muted-foreground absolute top-2.5 left-2.5 size-4"
                 />
@@ -157,7 +159,7 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                 :etiqueta="(e) => String(e.nombre_comercial)"
                 placeholder="Todas las empresas"
                 placeholder-busqueda="Buscar empresa…"
-                class="w-56"
+                class="w-full sm:w-auto sm:min-w-[12rem]"
             />
             <BuscadorAsync
                 v-model="sucursalSeleccionada"
@@ -168,15 +170,15 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                     empresaId ? 'Todas las sucursales' : 'Elige una empresa'
                 "
                 placeholder-busqueda="Buscar sucursal…"
-                class="w-56"
+                class="w-full sm:w-auto sm:min-w-[12rem]"
             />
-            <div class="w-40">
+            <div class="w-full sm:w-auto sm:min-w-[9rem]">
                 <SelectSimple
                     v-model="estado"
                     :opciones="[
+                        { valor: 'todos', etiqueta: 'Todos' },
                         { valor: 'activos', etiqueta: 'Activos' },
                         { valor: 'inactivos', etiqueta: 'Inactivos' },
-                        { valor: 'todos', etiqueta: 'Todos' },
                     ]"
                 />
             </div>
@@ -246,7 +248,7 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                     <tr
                         v-for="c in colaboradores.data"
                         :key="c.id"
-                        class="border-t"
+                        class="hover:bg-muted/40 border-t transition-colors"
                     >
                         <td class="px-3 py-2 font-mono">
                             {{ c.numero_empleado }}
