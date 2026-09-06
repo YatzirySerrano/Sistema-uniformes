@@ -7,28 +7,17 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * IDENTIFICACIÓN INDIVIDUAL (redefinición funcional). `unidades_activo` es
-     * la fuente de verdad física de un activo con `tipo_control = individual`
-     * (una laptop, una silla, una herramienta costosa…). A diferencia de la
-     * Etapa 2 descartada, NO se captura número de serie / IMEI / etiqueta /
-     * MAC: `codigo` lo genera el sistema (`ServicioGeneradorCodigos`, único a
-     * nivel plataforma, prefijado por el código de la EMPRESA — nunca por el
-     * almacén, para que sobreviva a una transferencia) y `public_token` (UUID)
-     * es el identificador estable y no enumerable para el QR
-     * (`/activos/unidades/{public_token}`).
+     * IDENTIFICACIÓN INDIVIDUAL: `unidades_activo` es la fuente de verdad
+     * física de un activo con `tipo_control = individual` (una laptop, una
+     * silla, una herramienta costosa…). No se captura número de serie / IMEI /
+     * etiqueta / MAC: `codigo` lo genera el sistema (único a nivel plataforma,
+     * prefijado por el código de la EMPRESA) y `public_token` (UUID) es el
+     * identificador permanente y no enumerable usado en el QR.
      *
-     * `estado` (ciclo de posesión: en_almacen | asignada | baja) y `condicion`
-     * (salud física: funcionando | en_reparacion | inservible | perdido |
-     * robado) son ejes independientes — ver `App\Models\UnidadActivo`.
-     *
-     * `colaborador_id` es sólo la referencia de ESTADO ACTUAL (UX); el
-     * histórico real vive en `entregas`/`devoluciones`/`movimientos_inventario`.
-     *
-     * No hay saldo agregado para estas unidades: cada alta/baja genera un
-     * `MovimientoInventario` con `unidad_activo_id` (ver migración siguiente)
-     * que NO toca `saldos_inventario`.
-     *
-     * Forward-only. En una BD nueva la tabla nace vacía.
+     * `estado` (ciclo de posesión) y `condicion` (salud física) son ejes
+     * independientes. `colaborador_id` es sólo la referencia de ESTADO ACTUAL;
+     * el histórico real vive en movimientos/entregas/devoluciones. No hay
+     * saldo agregado para estas unidades.
      */
     public function up(): void
     {
@@ -45,14 +34,14 @@ return new class extends Migration
             $table->string('condicion', 20)->default('funcionando');
             $table->text('observaciones')->nullable();
 
-            // Referencia SECUNDARIA (UX): el tenedor actual cuando está
-            // Asignada, o el último responsable si se marcó Perdida/Robada.
-            // La historia real vive en entregas/devoluciones/movimientos.
             $table->foreignId('colaborador_id')->nullable()->constrained('colaboradores')->nullOnDelete();
             $table->foreignId('registrado_por')->nullable()->constrained('users')->nullOnDelete();
 
             $table->timestamp('dado_de_baja_en')->nullable();
             $table->string('motivo_baja', 255)->nullable();
+            $table->string('incidencia_motivo', 255)->nullable();
+            $table->timestamp('incidencia_registrada_en')->nullable();
+            $table->foreignId('incidencia_registrada_por')->nullable()->constrained('users')->nullOnDelete();
 
             $table->timestamps();
             $table->softDeletes();

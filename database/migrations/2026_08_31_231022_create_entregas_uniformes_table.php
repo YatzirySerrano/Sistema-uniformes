@@ -13,6 +13,7 @@ return new class extends Migration
             $table->string('folio')->unique();
             $table->foreignId('empresa_id')->constrained('empresas')->cascadeOnUpdate()->restrictOnDelete();
             $table->foreignId('sucursal_id')->constrained('sucursales')->cascadeOnUpdate()->restrictOnDelete();
+            $table->foreignId('almacen_id')->nullable()->constrained('almacenes')->cascadeOnUpdate()->nullOnDelete();
             $table->foreignId('colaborador_id')->constrained('colaboradores')->cascadeOnUpdate()->restrictOnDelete();
             $table->foreignId('encargado_id')->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
             $table->string('estado', 30)->default('pendiente_firma');

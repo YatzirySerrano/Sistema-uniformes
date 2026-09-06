@@ -11,10 +11,8 @@ return new class extends Migration
      * `App\Soporte\ServicioGeneradorCodigos` para generar códigos internos
      * únicos y race-safe (nunca `MAX(id)+1` sin protección): la fila se
      * bloquea con `lockForUpdate()` dentro de una transacción antes de
-     * incrementar. `ambito` permite reutilizar la misma tabla para otros
-     * contadores futuros (hoy sólo `unidad_activo`).
-     *
-     * Forward-only. Nace vacía; se puebla bajo demanda.
+     * incrementar. Ámbitos por empresa: `unidad_activo`, `sucursal`, `area`,
+     * `activo`.
      */
     public function up(): void
     {

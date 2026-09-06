@@ -7,22 +7,22 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Catálogo de tipos/categorías de activo por empresa (Uniforme / Prenda,
-     * Equipo de cómputo, Dispositivo móvil, Accesorio, Otro…). Es extensible: el
-     * administrador podrá gestionarlo desde su propia pantalla en un bloque
-     * posterior.
+     * Catálogo de tipos de activo **de plataforma** (Prenda, Equipo de
+     * cómputo, Dispositivo móvil, Accesorio, Otro…). Global: visible para
+     * todas las empresas por igual, sin habilitación por empresa. Opcional
+     * en el activo.
      */
     public function up(): void
     {
         Schema::create('tipos_activo', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('empresa_id')->constrained('empresas')->cascadeOnUpdate()->restrictOnDelete();
             $table->string('nombre');
+            $table->string('nombre_normalizado')->default('');
             $table->string('codigo', 60)->nullable();
             $table->boolean('activo')->default(true);
             $table->timestamps();
 
-            $table->unique(['empresa_id', 'nombre']);
+            $table->unique('nombre_normalizado');
         });
     }
 

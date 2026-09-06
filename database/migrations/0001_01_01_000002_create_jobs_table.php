@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('jobs', function (Blueprint $table) {
             $table->id();
-            $table->string('queue')->index();
+            $table->string('queue', 191)->index();
             $table->longText('payload');
             $table->unsignedSmallInteger('attempts');
             $table->unsignedInteger('reserved_at')->nullable();
@@ -22,8 +22,8 @@ return new class extends Migration
         });
 
         Schema::create('job_batches', function (Blueprint $table) {
-            $table->string('id')->primary();
-            $table->string('name');
+            $table->string('id', 191)->primary();
+            $table->string('name', 191);
             $table->integer('total_jobs');
             $table->integer('pending_jobs');
             $table->integer('failed_jobs');
@@ -36,14 +36,20 @@ return new class extends Migration
 
         Schema::create('failed_jobs', function (Blueprint $table) {
             $table->id();
-            $table->string('uuid')->unique();
-            $table->string('connection');
-            $table->string('queue');
+            $table->string('uuid', 191)->unique();
+
+            // Reducidos para evitar error 1071 en MySQL/MariaDB antiguos.
+            $table->string('connection', 100);
+            $table->string('queue', 100);
+
             $table->longText('payload');
             $table->longText('exception');
             $table->timestamp('failed_at')->useCurrent();
 
-            $table->index(['connection', 'queue', 'failed_at']);
+            $table->index(
+                ['connection', 'queue', 'failed_at'],
+                'failed_jobs_conn_queue_failed_idx'
+            );
         });
     }
 
@@ -52,8 +58,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('jobs');
-        Schema::dropIfExists('job_batches');
         Schema::dropIfExists('failed_jobs');
+        Schema::dropIfExists('job_batches');
+        Schema::dropIfExists('jobs');
     }
 };

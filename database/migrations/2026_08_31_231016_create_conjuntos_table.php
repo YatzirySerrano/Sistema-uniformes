@@ -10,15 +10,11 @@ return new class extends Migration
      * CONJUNTOS (agrupaciones lógicas de Activos, p. ej. "Traje Hombre" o "Kit
      * Ejecutivo"). Un Conjunto pertenece a UNA empresa y sólo puede incluir
      * Activos de esa misma empresa (validado en backend, no en FK). Es una
-     * PLANTILLA: no tiene stock propio — la disponibilidad se calcula en vivo
-     * a partir del stock real de cada componente (`Conjunto::disponibilidad()`).
+     * PLANTILLA sin stock propio: la disponibilidad se calcula en vivo a
+     * partir del stock real de cada componente.
      *
      * `conjunto_componentes.talla_id` fija la variante del componente; si es
-     * NULL y `talla_libre = true`, la variante se elige durante la entrega. Un
-     * componente sin variantes (activo sin `activo_talla`) deja ambos en su
-     * valor por defecto (NULL / false).
-     *
-     * Forward-only. Nace vacía.
+     * NULL y `talla_libre = true`, la variante se elige durante la entrega.
      */
     public function up(): void
     {

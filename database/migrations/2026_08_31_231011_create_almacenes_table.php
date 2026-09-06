@@ -6,13 +6,17 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    /**
+     * El almacén NO pertenece a una empresa: abastece a una o varias
+     * (N:M vía `almacen_empresa`) y no se relaciona con sucursales. `codigo`
+     * es único a nivel plataforma.
+     */
     public function up(): void
     {
         Schema::create('almacenes', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('empresa_id')->constrained('empresas')->cascadeOnUpdate()->restrictOnDelete();
             $table->string('nombre');
-            $table->string('codigo', 60)->nullable();
+            $table->string('codigo', 60)->nullable()->unique();
             $table->text('descripcion')->nullable();
             $table->string('direccion')->nullable();
             $table->string('telefono', 20)->nullable();
@@ -23,8 +27,7 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            $table->unique(['empresa_id', 'codigo']);
-            $table->index(['empresa_id', 'activo']);
+            $table->index('activo');
         });
     }
 

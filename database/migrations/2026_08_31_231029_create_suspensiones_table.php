@@ -7,18 +7,15 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration
 {
     /**
-     * Fase 7 — cascada de desactivación NO destructiva. Cuando una Empresa,
-     * Sucursal o Activo se desactiva, sus dependientes activos en ese momento
-     * (nunca los que ya estaban inactivos por otra causa) también quedan
-     * inactivos, y aquí queda el rastro: quién los desactivó (`causante_*`),
-     * qué columna de "activo" tocar al reactivar (`columna_activo`, porque no
-     * todos los modelos usan el mismo nombre de columna — Empresa/Sucursal/
+     * Cascada de desactivación NO destructiva. Cuando una Empresa, Sucursal o
+     * Activo se desactiva, sus dependientes activos en ese momento (nunca los
+     * que ya estaban inactivos por otra causa) también quedan inactivos, y
+     * aquí queda el rastro: quién los desactivó (`causante_*`), qué columna
+     * de "activo" tocar al reactivar (`columna_activo` — Empresa/Sucursal/
      * Área usan `activa`, el resto `activo`), y si ya fueron reactivados
      * (`levantada_en`). Reactivar el causante NO reactiva automáticamente sus
-     * dependientes: `App\Servicios\ServicioCascadaSuspension::pendientesDeCausante()`
-     * alimenta un checklist para reactivarlos de forma selectiva. Nunca toca
-     * históricos (movimientos, entregas…), sólo el flag de estado de
-     * catálogo/config.
+     * dependientes: la reactivación es selectiva. Nunca toca históricos
+     * (movimientos, entregas…), sólo el flag de estado de catálogo/config.
      */
     public function up(): void
     {

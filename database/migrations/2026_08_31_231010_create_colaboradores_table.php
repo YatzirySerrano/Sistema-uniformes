@@ -6,6 +6,12 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    /**
+     * `area_id` es la fuente de verdad de la relación Colaborador → Área.
+     * La columna de texto `area` se conserva como espejo temporal para
+     * compatibilidad con el importador, el exportador y el snapshot de acuse,
+     * hasta la reingeniería del módulo Colaboradores.
+     */
     public function up(): void
     {
         Schema::create('colaboradores', function (Blueprint $table): void {
@@ -17,6 +23,7 @@ return new class extends Migration
             $table->string('nombre_completo');
             $table->string('puesto')->nullable();
             $table->string('area')->nullable();
+            $table->foreignId('area_id')->nullable()->constrained('areas')->cascadeOnUpdate()->nullOnDelete();
             $table->string('correo')->nullable();
             $table->boolean('activo')->default(true);
             $table->timestamps();
@@ -24,6 +31,7 @@ return new class extends Migration
 
             $table->unique(['empresa_id', 'numero_empleado']);
             $table->index(['empresa_id', 'sucursal_id', 'activo']);
+            $table->index(['empresa_id', 'area_id']);
             $table->index('nombre_completo');
         });
     }
