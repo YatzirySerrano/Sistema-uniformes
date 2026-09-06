@@ -2,6 +2,7 @@
 paths:
     - 'resources/js/pages/**'
     - 'resources/js/components/**'
+    - 'resources/js/components/AppLogoIcon.vue,public/favicon.svg,public/favicon.ico,public/apple-touch-icon.png'
 ---
 
 # UX — el usuario no debe adivinar
@@ -96,3 +97,7 @@ sucursales, áreas, variantes numerosas, unidades serializadas, uniformes.
   cómputo o Dispositivo móvil."
 - Categoría → "Clasificación específica dentro del tipo. Ejemplo: Camisola,
   Laptop o Teléfono celular."
+
+## Icono/favicon del sistema son placeholder temporal (sustituir cuando exista logo final)
+
+Se retiró el logo de Laravel (branding visible del starter kit) y se reemplazó por un icono neutro "caja + check" (mismo SVG duplicado a mano en `AppLogoIcon.vue` y, rasterizado con GD, en `favicon.svg`/`favicon.ico`/`apple-touch-icon.png`, color `#171717` = `color_principal` por defecto de `ConfiguracionSistema`). Es explícitamente TEMPORAL — cuando exista un logo/isotipo final de Sistema-uniformes, reemplazar estos 4 archivos (mantener el mismo patrón: SVG con `fill="currentColor"` para el componente Vue, PNG-in-ICO de 32x32 para favicon.ico, PNG de 180x180 para apple-touch-icon). También pendiente: `APP_NAME=Laravel` sigue en el `.env` real (no versionado, no se tocó) — el código ya usa `Sistema de Uniformes` como fallback (`config/app.php`, `.env.example`, `resources/js/app.ts`), pero para que el `<title>` de cada página y el texto junto al logo en el sidebar dejen de decir "Laravel" hay que actualizar `APP_NAME` en el `.env` real.

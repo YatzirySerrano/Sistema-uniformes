@@ -10,7 +10,10 @@ import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { store } from '@/routes/login';
 import { request } from '@/routes/password';
-import PasskeyVerify from '@/components/PasskeyVerify.vue';
+// Passkey en Login deliberadamente oculto en frontend (aún no se ofrece al
+// usuario) — backend/Fortify/WebAuthn intactos, ver .ai/rules/ux.md. Para
+// reactivarlo: `<PasskeyVerify />` justo después del bloque de `status`.
+// import PasskeyVerify from '@/components/PasskeyVerify.vue';
 
 defineOptions({
     layout: {
@@ -35,8 +38,6 @@ defineProps<{
     >
         {{ status }}
     </div>
-
-    <PasskeyVerify />
 
     <Form
         v-bind="store.form()"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { Download } from '@lucide/vue';
-import { reactive, ref, watch } from 'vue';
+import { Download, X } from '@lucide/vue';
+import { computed, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -70,21 +70,42 @@ watch(empresaSel, (e) => {
     f.empresa_id = e?.id ?? '';
 });
 
-function aplicar() {
-    router.get(
-        '/reportes',
-        { ...f, solo_bajo_minimo: f.solo_bajo_minimo ? 1 : undefined },
-        {
-            preserveState: true,
-            preserveScroll: true,
-            replace: true,
-        },
-    );
-}
+const hayFiltrosActivos = computed(
+    () =>
+        f.empresa_id !== '' ||
+        (f.tab === 'entregas' &&
+            (f.estado !== '' || f.desde !== '' || f.hasta !== '')) ||
+        (f.tab === 'inventario' && f.solo_bajo_minimo),
+);
+
+let temporizador: ReturnType<typeof setTimeout> | undefined;
+watch(f, () => {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(() => {
+        router.get(
+            '/reportes',
+            { ...f, solo_bajo_minimo: f.solo_bajo_minimo ? 1 : undefined },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                replace: true,
+            },
+        );
+    }, 300);
+});
 
 function cambiarTab(t: 'entregas' | 'inventario') {
     f.tab = t;
-    aplicar();
+}
+
+function limpiarFiltros(): void {
+    empresaSel.value = null;
+    f.empresa_id = '';
+    f.estado = '';
+    f.firmado = '';
+    f.desde = '';
+    f.hasta = '';
+    f.solo_bajo_minimo = false;
 }
 
 function urlExport(formato: string) {
@@ -167,7 +188,15 @@ function urlExport(formato: string) {
                     />
                     Solo bajo mínimo
                 </label>
-                <Button size="sm" @click="aplicar">Aplicar filtros</Button>
+                <Button
+                    v-if="hayFiltrosActivos"
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    @click="limpiarFiltros"
+                >
+                    <X class="size-3.5" /> Limpiar filtros
+                </Button>
                 <template v-if="puedeExportar">
                     <Button size="sm" variant="outline" as-child>
                         <a :href="urlExport('xlsx')"

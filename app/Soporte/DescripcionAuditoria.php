@@ -5,7 +5,13 @@ namespace App\Soporte;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Models\UnidadActivo;
+use BackedEnum;
+use DateTimeInterface;
+use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Stringable;
+use UnitEnum;
 
 /**
  * Transforma el `valores_anteriores` / `valores_nuevos` (JSON técnico) de un
@@ -96,13 +102,23 @@ class DescripcionAuditoria
             || in_array($clave, ['created_at', 'updated_at', 'deleted_at'], true);
     }
 
-    private function normalizar(mixed $valor): mixed
+    /**
+     * Representación canónica sólo para decidir si antes/después cambiaron
+     * (no necesita ser "bonita", sólo estable y nunca lanzar). Reutiliza
+     * `representar()` para que un array/objeto histórico jamás llegue a un
+     * `(string) $valor` sin normalizar antes.
+     */
+    private function normalizar(mixed $valor): ?string
     {
+        if ($valor === null) {
+            return null;
+        }
+
         if (is_bool($valor)) {
             return $valor ? '1' : '0';
         }
 
-        return $valor === null ? null : (string) $valor;
+        return $this->representar($valor);
     }
 
     private function etiquetaCampo(string $clave): string
@@ -112,7 +128,7 @@ class DescripcionAuditoria
 
     private function humanizarValor(?string $tipoEntidad, string $clave, mixed $valor): string
     {
-        if ($valor === null || $valor === '') {
+        if ($valor === null || $valor === '' || $valor === []) {
             return '—';
         }
 
@@ -122,15 +138,103 @@ class DescripcionAuditoria
                 : ($valor ? 'Sí' : 'No');
         }
 
-        if ($tipoEntidad === UnidadActivo::class) {
+        if ($tipoEntidad === UnidadActivo::class && is_string($valor)) {
             if ($clave === 'estado') {
-                return EstadoUnidadActivo::tryFrom((string) $valor)?->etiqueta() ?? (string) $valor;
+                return EstadoUnidadActivo::tryFrom($valor)?->etiqueta() ?? $valor;
             }
             if ($clave === 'condicion') {
-                return CondicionUnidadActivo::tryFrom((string) $valor)?->etiqueta() ?? (string) $valor;
+                return CondicionUnidadActivo::tryFrom($valor)?->etiqueta() ?? $valor;
             }
         }
 
+        return $this->representar($valor);
+    }
+
+    /**
+     * Representación humana best-effort de un valor de tipo arbitrario
+     * proveniente de un snapshot histórico (JSON decodificado): escalar,
+     * enum, fecha, array simple o estructura compleja. Nunca lanza — es la
+     * única puerta por la que un valor no escalar puede llegar a texto, para
+     * que ni `normalizar()` ni `humanizarValor()` hagan un `(string) $valor`
+     * directo sobre un array/objeto ("Array to string conversion").
+     */
+    private function representar(mixed $valor): string
+    {
+        if (is_string($valor)) {
+            return $valor;
+        }
+
+        if (is_int($valor) || is_float($valor)) {
+            return (string) $valor;
+        }
+
+        if (is_bool($valor)) {
+            return $valor ? 'Sí' : 'No';
+        }
+
+        if ($valor instanceof BackedEnum) {
+            return method_exists($valor, 'etiqueta') ? $valor->etiqueta() : (string) $valor->value;
+        }
+
+        if ($valor instanceof UnitEnum) {
+            return $valor->name;
+        }
+
+        if ($valor instanceof DateTimeInterface) {
+            return $valor->format('d/m/Y H:i');
+        }
+
+        if ($valor instanceof Collection) {
+            $valor = $valor->all();
+        } elseif ($valor instanceof Arrayable) {
+            $valor = $valor->toArray();
+        }
+
+        if (is_array($valor)) {
+            return $this->representarArray($valor);
+        }
+
+        if ($valor instanceof Stringable) {
+            return (string) $valor;
+        }
+
+        if (is_object($valor)) {
+            return $this->representarComoJson($valor);
+        }
+
         return (string) $valor;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $valor
+     */
+    private function representarArray(array $valor): string
+    {
+        if ($valor === []) {
+            return '—';
+        }
+
+        $esEscalarPlano = collect($valor)->every(
+            fn (mixed $v): bool => $v === null || is_scalar($v) || $v instanceof BackedEnum || $v instanceof UnitEnum
+        );
+
+        if (! $esEscalarPlano) {
+            return $this->representarComoJson($valor);
+        }
+
+        if (array_is_list($valor)) {
+            return collect($valor)->map(fn (mixed $v): string => $this->representar($v))->implode(', ');
+        }
+
+        return collect($valor)
+            ->map(fn (mixed $v, int|string $clave): string => "{$clave}: {$this->representar($v)}")
+            ->implode('; ');
+    }
+
+    private function representarComoJson(mixed $valor): string
+    {
+        $json = json_encode($valor, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        return $json === false ? '(valor no representable)' : $json;
     }
 }

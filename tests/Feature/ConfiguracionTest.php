@@ -15,6 +15,50 @@ it('un superadministrador puede ver la configuración global', function () {
         ->assertInertia(fn ($page) => $page->component('Configuracion/Index'));
 });
 
+/**
+ * Regla del proyecto (post-Fase 10): Superadmin y Administrador tienen el
+ * MISMO acceso funcional a los módulos administrativos, Configuración
+ * incluida. `Permisos::porRol()` ya le da a Administrador `self::todos()`
+ * (documentado ahí mismo); el backend (`ConfiguracionSistemaPolicy`) y el
+ * sidebar (`AppSidebar.vue`, `puede(['configuracion.ver', ...])`) ya
+ * autorizan por permiso, nunca por rol hardcodeado. Si esto falla en un
+ * entorno real (dev/producción) sin fallar aquí, la causa NO es de código:
+ * es que `php artisan db:seed --class=RolesPermisosSeeder` no se ha vuelto a
+ * correr desde que se agregó el grupo de permisos `configuracion` — el
+ * seeder es estructural e idempotente (`Permission::findOrCreate` +
+ * `Role::syncPermissions()`), así que resincroniza sin tocar roles
+ * personalizados ni borrar nada.
+ */
+it('un administrador tiene el mismo acceso a Configuración que un superadministrador', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get('/configuracion')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Configuracion/Index')
+            ->where('puedeEditar', true)
+        );
+
+    expect($admin->getAllPermissions()->pluck('name')->all())
+        ->toContain('configuracion.ver', 'configuracion.administrar');
+});
+
+it('el permiso de Configuración llega al frontend (auth.user.permisos) para Superadmin y Administrador, y no para un rol sin acceso', function () {
+    $superadmin = usuarioCon(RolSistema::Superadministrador->value);
+    $admin = usuarioCon(RolSistema::Administrador->value);
+    $encargado = usuarioCon(RolSistema::Encargado->value);
+
+    $this->actingAs($superadmin)->get('/dashboard')
+        ->assertInertia(fn ($page) => $page->where('auth.user.permisos', fn ($p) => collect($p)->contains('configuracion.ver')));
+
+    $this->actingAs($admin)->get('/dashboard')
+        ->assertInertia(fn ($page) => $page->where('auth.user.permisos', fn ($p) => collect($p)->contains('configuracion.ver')));
+
+    $this->actingAs($encargado)->get('/dashboard')
+        ->assertInertia(fn ($page) => $page->where('auth.user.permisos', fn ($p) => collect($p)->intersect(['configuracion.ver', 'configuracion.administrar'])->isEmpty()));
+});
+
 it('un usuario sin permisos de configuración NO puede ver ni editar la configuración global', function () {
     $usuario = usuarioCon(RolSistema::Encargado->value);
 

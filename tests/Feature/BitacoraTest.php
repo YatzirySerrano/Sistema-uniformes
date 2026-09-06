@@ -4,6 +4,7 @@ use App\Enums\RolSistema;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Area;
+use App\Models\BitacoraAuditoria;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
@@ -132,4 +133,77 @@ it('pagina la bitácora del lado del servidor respetando el tamaño de página c
     $this->actingAs($admin)
         ->get('/auditoria?page=2')
         ->assertInertia(fn ($page) => $page->has('registros.data', 1));
+});
+
+/**
+ * Regresión: `bitacora_auditoria.valores_anteriores`/`valores_nuevos` son
+ * JSON histórico sin garantía de forma — algunas acciones (p. ej.
+ * `CrearEntregaUniforme` guarda `$entrega->load('detalles')->toArray()`)
+ * guardan arrays anidados, no sólo escalares. `DescripcionAuditoria` hacía
+ * `(string) $valor` directo sobre esos valores y PHP lanzaba
+ * `ErrorException: Array to string conversion`, tumbando TODO `/auditoria`
+ * en cuanto existía un registro así — para cualquier usuario, Superadmin o
+ * Admin, con alcance limitado o no.
+ */
+it('GET /auditoria responde 200 aunque existan registros históricos con arrays y estructuras anidadas', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    BitacoraAuditoria::query()->create([
+        'empresa_id' => $empresa->id,
+        'modulo' => 'entregas',
+        'accion' => 'crear',
+        'descripcion' => 'Entrega histórica con detalles anidados',
+        'valores_anteriores' => null,
+        'valores_nuevos' => [
+            'folio' => 'ENT-0001',
+            'detalles' => [
+                ['activo_nombre_snapshot' => 'Camisa', 'cantidad' => 2],
+                ['activo_nombre_snapshot' => 'Pantalón', 'cantidad' => 1],
+            ],
+        ],
+    ]);
+
+    BitacoraAuditoria::query()->create([
+        'empresa_id' => $empresa->id,
+        'modulo' => 'almacenes',
+        'accion' => 'empresas',
+        'descripcion' => 'Cambio de empresas abastecidas',
+        'valores_anteriores' => ['empresas' => [1, 2]],
+        'valores_nuevos' => ['empresas' => [1, 2, 3]],
+    ]);
+
+    $this->actingAs($admin)
+        ->get('/auditoria')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Auditoria/Index')
+            ->has('registros.data', 2)
+            // El JSON técnico crudo sigue disponible aparte del diff humano.
+            ->has('registros.data.0.valores_nuevos')
+            // `->latest()`: el registro de almacenes (creado después) va primero.
+            ->where('registros.data.0.cambios', fn ($cambios) => collect($cambios)->contains(
+                fn ($c) => $c['campo'] === 'Empresas' && $c['antes'] === '1, 2' && $c['ahora'] === '1, 2, 3',
+            )),
+        );
+});
+
+it('Superadmin también puede abrir /auditoria con registros de estructura compleja', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $superadmin = usuarioCon(RolSistema::Superadministrador->value);
+
+    BitacoraAuditoria::query()->create([
+        'empresa_id' => $empresa->id,
+        'modulo' => 'roles',
+        'accion' => 'permisos',
+        'valores_anteriores' => ['permisos' => ['ver', 'editar']],
+        'valores_nuevos' => ['permisos' => ['ver', 'editar', 'administrar']],
+    ]);
+
+    $this->actingAs($superadmin)
+        ->get('/auditoria')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('Auditoria/Index')->has('registros.data', 1));
 });

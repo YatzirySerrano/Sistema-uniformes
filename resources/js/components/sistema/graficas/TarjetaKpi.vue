@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 
 /**
- * KPI compacto reutilizado en el Dashboard (12 tarjetas con la misma forma:
+ * KPI reutilizado en el Dashboard (4 tarjetas principales, misma forma:
  * título, icono semántico, valor). `colorClase` colorea sólo el icono — el
  * valor siempre usa tinta de texto normal (nunca el color de la serie).
  */
@@ -38,7 +38,7 @@ const formateador = new Intl.NumberFormat('es-MX');
                 :class="colorClase"
             />
         </CardHeader>
-        <CardContent class="text-2xl font-semibold">
+        <CardContent class="text-3xl font-semibold">
             {{ formateador.format(valor) }}
         </CardContent>
     </Card>

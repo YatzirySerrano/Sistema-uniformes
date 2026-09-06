@@ -1,19 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import {
-    AlertTriangle,
-    Boxes,
-    ClipboardList,
-    PackageCheck,
-    PackageSearch,
-    ShieldAlert,
-    ShieldOff,
-    Undo2,
-    UserCheck,
-    Users,
-    Warehouse,
-    Wrench,
-} from '@lucide/vue';
+import { AlertTriangle, Boxes, ClipboardList, Users } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
@@ -297,20 +284,19 @@ const seriesCategoria = computed(
         />
 
         <template v-else>
-            <div
-                class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6"
-            >
+            <!--
+                Sólo 4 KPIs principales (tamaño de operación, inventario,
+                actividad, alertas) — el resto de los datos (unidades por
+                estado, devoluciones, almacenes activos…) sigue disponible en
+                `resumen.kpis`/`resumen.series` para las gráficas de abajo, no
+                se eliminó del backend.
+            -->
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <TarjetaKpi
                     titulo="Colaboradores activos"
                     :valor="resumen.kpis.colaboradores_activos"
                     :icono="Users"
                     color-clase="text-blue-600"
-                />
-                <TarjetaKpi
-                    titulo="Activos activos"
-                    :valor="resumen.kpis.activos_activos"
-                    :icono="PackageSearch"
-                    color-clase="text-violet-600"
                 />
                 <TarjetaKpi
                     titulo="Existencias disponibles"
@@ -320,46 +306,10 @@ const seriesCategoria = computed(
                     ayuda="Suma de cantidades en existencia de activos por cantidad (no incluye unidades identificadas)."
                 />
                 <TarjetaKpi
-                    titulo="Unidades disponibles"
-                    :valor="resumen.kpis.unidades_disponibles"
-                    :icono="PackageCheck"
-                    color-clase="text-emerald-600"
-                />
-                <TarjetaKpi
-                    titulo="Unidades asignadas"
-                    :valor="resumen.kpis.unidades_asignadas"
-                    :icono="UserCheck"
-                    color-clase="text-blue-600"
-                />
-                <TarjetaKpi
-                    titulo="Unidades en reparación"
-                    :valor="resumen.kpis.unidades_en_reparacion"
-                    :icono="Wrench"
-                    color-clase="text-amber-600"
-                />
-                <TarjetaKpi
-                    titulo="Unidades perdidas"
-                    :valor="resumen.kpis.unidades_perdidas"
-                    :icono="ShieldOff"
-                    color-clase="text-red-500"
-                />
-                <TarjetaKpi
-                    titulo="Unidades robadas"
-                    :valor="resumen.kpis.unidades_robadas"
-                    :icono="ShieldAlert"
-                    color-clase="text-red-700"
-                />
-                <TarjetaKpi
                     titulo="Entregas del periodo"
                     :valor="resumen.kpis.entregas_periodo"
                     :icono="ClipboardList"
                     color-clase="text-blue-600"
-                />
-                <TarjetaKpi
-                    titulo="Devoluciones del periodo"
-                    :valor="resumen.kpis.devoluciones_periodo"
-                    :icono="Undo2"
-                    color-clase="text-orange-600"
                 />
                 <TarjetaKpi
                     titulo="Activos con stock bajo"
@@ -370,12 +320,6 @@ const seriesCategoria = computed(
                             ? 'text-amber-500'
                             : 'text-muted-foreground'
                     "
-                />
-                <TarjetaKpi
-                    titulo="Almacenes activos"
-                    :valor="resumen.kpis.almacenes_activos"
-                    :icono="Warehouse"
-                    color-clase="text-slate-600"
                 />
             </div>
 

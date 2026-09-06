@@ -444,7 +444,18 @@ function alElegirConjunto(i: number, o: OpcionConjunto | null): void {
 }
 
 function enviar(): void {
-    form.post('/entregas');
+    // "+ Agregar conjunto/activo/unidad" deja una fila vacía en pantalla para
+    // que el usuario la llene; si la deja sin seleccionar nada, se ignora en
+    // vez de bloquear el envío con "El campo … es obligatorio" — conjunto,
+    // activo y unidad son cada uno opcionales, sólo se exige que la entrega
+    // termine con al menos un elemento entregable en total (lo valida el
+    // backend en `GuardarEntregaRequest`).
+    form.transform((datos) => ({
+        ...datos,
+        activos: datos.activos.filter((fila) => fila.activo_id !== ''),
+        unidades: datos.unidades.filter((fila) => fila.unidad_activo_id !== ''),
+        conjuntos: datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
+    })).post('/entregas');
 }
 </script>
 

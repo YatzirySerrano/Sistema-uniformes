@@ -417,3 +417,109 @@ it('34. un activo de otra empresa es rechazado', function () {
         'activos' => [['activo_id' => $activoB->id, 'cantidad' => 1]],
     ])->assertSessionHasErrors('activos.0.activo_id');
 });
+
+// ------------------------------------------------------------------
+// Combinaciones válidas y "conjunto opcional" (QA post-Fase 10): ningún
+// elemento (activo/unidad/conjunto) es obligatorio por sí mismo — sólo se
+// exige que la entrega termine con AL MENOS UNO en total. El bug reportado
+// ("El campo conjunto es obligatorio" al registrar una entrega sin
+// conjuntos) era del FRONTEND: `Entregas/Crear.vue` dejaba en el payload una
+// fila vacía `{conjunto_id: '', ...}` al pulsar "+ Agregar conjunto" sin
+// seleccionar nada; `Crear.vue::enviar()` ahora la filtra antes de
+// `form.post()`. `GuardarEntregaRequest`/`CrearEntregaUniforme` en sí ya
+// tratan cada tipo como opcional — estos tests lo prueban contra el
+// endpoint HTTP completo y cubren la defensa en profundidad del backend si
+// esa fila vacía llegara de todos modos.
+// ------------------------------------------------------------------
+
+it('35. varios activos en una sola entrega son válidos', function () {
+    $pantalon = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Pantalón']);
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $this->datos['activoA']->id, tallaId: $this->datos['tallaA']->id,
+        tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $pantalon->id, tallaId: null,
+        tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'activos' => [
+            ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1],
+            ['activo_id' => $pantalon->id, 'talla_id' => null, 'cantidad' => 1],
+        ],
+    ])->assertSessionHasNoErrors();
+
+    expect(EntregaUniforme::sole()->detalles)->toHaveCount(2);
+});
+
+it('36. sólo un conjunto (sin activos ni unidades) con disponibilidad suficiente es válido', function () {
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $this->datos['activoA']->id, tallaId: $this->datos['tallaA']->id,
+        tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+    $conjunto = Conjunto::factory()->for($this->datos['empresaA'])->create();
+    $conjunto->componentes()->create(['activo_id' => $this->datos['activoA']->id, 'cantidad_requerida' => 1, 'talla_id' => $this->datos['tallaA']->id]);
+
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1]],
+    ])->assertSessionHasNoErrors();
+
+    expect(EntregaUniforme::count())->toBe(1);
+});
+
+it('37. un activo suelto y un conjunto se pueden combinar en la misma entrega', function () {
+    $pantalon = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Pantalón']);
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $this->datos['activoA']->id, tallaId: $this->datos['tallaA']->id,
+        tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $pantalon->id, tallaId: null,
+        tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+    $conjunto = Conjunto::factory()->for($this->datos['empresaA'])->create();
+    $conjunto->componentes()->create(['activo_id' => $pantalon->id, 'cantidad_requerida' => 1]);
+
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1]],
+    ])->assertSessionHasNoErrors();
+
+    expect(EntregaUniforme::sole()->detalles)->toHaveCount(2);
+});
+
+it('38. una entrega completamente vacía es rechazada con un mensaje humano, no por un campo "obligatorio" suelto', function () {
+    postEntrega($this, payloadBase($this->datos, $this->admin->id))
+        ->assertSessionHasErrors(['items' => 'Agrega al menos un activo, unidad identificada o conjunto a la entrega.']);
+
+    expect(EntregaUniforme::count())->toBe(0);
+});
+
+it('39. una fila de conjunto dejada vacía ("+ Agregar conjunto" sin seleccionar nada) no exige "conjunto obligatorio": el backend responde "Selecciona un conjunto." y no bloquea el activo válido con un error ambiguo', function () {
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $this->datos['activoA']->id, tallaId: $this->datos['tallaA']->id,
+        tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        // Simula un cliente que no filtró la fila vacía de "+ Agregar
+        // conjunto" antes de enviar (el frontend real ya la filtra en
+        // `Crear.vue::enviar()`; esto prueba que el backend, como fuente de
+        // verdad, no depende de ese filtrado para dar un mensaje claro).
+        'conjuntos' => [['conjunto_id' => null, 'cantidad' => 1]],
+    ])->assertSessionHasErrors(['conjuntos.0.conjunto_id' => 'Selecciona un conjunto.']);
+
+    expect(EntregaUniforme::count())->toBe(0);
+});

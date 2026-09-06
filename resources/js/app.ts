@@ -7,7 +7,7 @@ import { initializeFlashEtiquetas } from '@/lib/flashEtiquetas';
 import { initializeFlashToast } from '@/lib/flashToast';
 import { initializeTemaVisual } from '@/lib/temaVisual';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const appName = import.meta.env.VITE_APP_NAME || 'Sistema de Uniformes';
 
 void createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),

@@ -94,7 +94,7 @@ class GuardarEntregaRequest extends FormRequest
             $conjuntos = is_array($this->input('conjuntos')) ? $this->input('conjuntos') : [];
 
             if ($activos === [] && $unidades === [] && $conjuntos === []) {
-                $validator->errors()->add('items', 'Agrega al menos un activo, unidad o conjunto a la entrega.');
+                $validator->errors()->add('items', 'Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
 
                 return;
             }
@@ -229,8 +229,15 @@ class GuardarEntregaRequest extends FormRequest
             'almacen_id.exists' => 'El almacén seleccionado no abastece a la empresa del colaborador.',
             'fecha_entrega.before_or_equal' => 'La fecha de entrega no puede ser futura.',
             'colaborador_id.exists' => 'El colaborador seleccionado no es válido o no tienes acceso a su empresa.',
+            'activos.*.activo_id.required' => 'Selecciona un activo.',
+            'activos.*.cantidad.required' => 'Indica la cantidad.',
+            'activos.*.cantidad.min' => 'La cantidad debe ser mayor a cero.',
+            'unidades.*.unidad_activo_id.required' => 'Selecciona una unidad identificada.',
             'unidades.*.unidad_activo_id.distinct' => 'No puedes elegir la misma unidad dos veces.',
             'unidades.*.unidad_activo_id.exists' => 'Esa unidad ya no está disponible en el almacén de origen (fue asignada, se movió o dejó de ser entregable).',
+            'conjuntos.*.conjunto_id.required' => 'Selecciona un conjunto.',
+            'conjuntos.*.cantidad.required' => 'Indica la cantidad.',
+            'conjuntos.*.cantidad.min' => 'La cantidad debe ser mayor a cero.',
         ];
     }
 

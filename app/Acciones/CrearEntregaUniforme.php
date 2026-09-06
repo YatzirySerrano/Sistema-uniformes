@@ -70,7 +70,7 @@ class CrearEntregaUniforme
         $unidadIds = array_values(array_unique(array_map(fn (array $u): int => (int) $u['unidad_activo_id'], $unidades)));
 
         if ($activosConsolidados === [] && $unidadIds === [] && $conjuntos === []) {
-            throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad o conjunto a la entrega.');
+            throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
         }
 
         return DB::transaction(function () use ($empresaId, $sucursalId, $almacen, $colaborador, $encargadoId, $fechaEntrega, $activosConsolidados, $unidadIds, $conjuntos, $notas): EntregaUniforme {
