@@ -15,10 +15,12 @@ import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
 type OpcionTipo = { id: number; nombre: string };
@@ -242,6 +244,8 @@ function limpiarFiltros(): void {
 function alternarEstado(a: Activo): void {
     router.post(`/activos/${a.id}/estado`, {}, { preserveScroll: true });
 }
+
+const vista = useVistaPreferida('activos');
 </script>
 
 <template>
@@ -419,6 +423,8 @@ function alternarEstado(a: Activo): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
@@ -444,7 +450,7 @@ function alternarEstado(a: Activo): void {
         </EstadoVacio>
 
         <div
-            v-else
+            v-else-if="vista === 'cards'"
             class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
         >
             <div
@@ -564,6 +570,83 @@ function alternarEstado(a: Activo): void {
                     </Button>
                 </div>
             </div>
+        </div>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[760px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Activo</th>
+                        <th class="px-3 py-2 font-medium">Tipo / Categoría</th>
+                        <th class="px-3 py-2 font-medium">Control</th>
+                        <th class="px-3 py-2 font-medium">Existencias</th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="a in activos" :key="a.id" class="border-t">
+                        <td class="px-3 py-2">
+                            <p class="font-medium">{{ a.nombre }}</p>
+                            <p class="text-muted-foreground font-mono text-xs">
+                                {{ a.codigo ?? '—' }}
+                            </p>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{
+                                [a.tipo, a.categoria]
+                                    .filter(Boolean)
+                                    .join(' · ') || '—'
+                            }}
+                        </td>
+                        <td class="px-3 py-2">{{ a.tipo_control_etiqueta }}</td>
+                        <td class="px-3 py-2">
+                            <template v-if="a.tipo_control === 'cantidad'">
+                                {{ a.existencias }}
+                                <span
+                                    v-if="a.tallas_bajo_minimo > 0"
+                                    class="text-destructive block text-xs"
+                                >
+                                    {{ a.tallas_bajo_minimo }} bajo mínimo
+                                </span>
+                            </template>
+                            <span v-else class="text-muted-foreground">—</span>
+                        </td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                :variant="a.activo ? 'default' : 'secondary'"
+                            >
+                                {{ a.activo ? 'Activo' : 'Inactivo' }}
+                            </Badge>
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex justify-end gap-2">
+                                <Button variant="outline" size="sm" as-child>
+                                    <Link :href="`/activos/${a.id}`">Ver</Link>
+                                </Button>
+                                <Button
+                                    v-if="permisos.editar"
+                                    variant="ghost"
+                                    size="sm"
+                                    as-child
+                                >
+                                    <Link :href="`/activos/${a.id}/editar`"
+                                        >Editar</Link
+                                    >
+                                </Button>
+                                <Button
+                                    v-if="permisos.administrar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="alternarEstado(a)"
+                                >
+                                    {{ a.activo ? 'Desactivar' : 'Activar' }}
+                                </Button>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     </div>
 </template>

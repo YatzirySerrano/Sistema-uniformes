@@ -278,6 +278,8 @@ class SucursalController extends Controller
             'tipo_entidad' => Sucursal::class, 'entidad_id' => $sucursal->id,
             'empresa_id' => $sucursal->empresa_id, 'sucursal_id' => $sucursal->id,
             'descripcion' => ($sucursal->activa ? 'Activación' : 'Desactivación').' de sucursal '.$sucursal->nombre,
+            'valores_anteriores' => ['activa' => ! $sucursal->activa],
+            'valores_nuevos' => ['activa' => $sucursal->activa],
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);

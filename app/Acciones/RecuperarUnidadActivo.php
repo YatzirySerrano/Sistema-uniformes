@@ -43,6 +43,8 @@ class RecuperarUnidadActivo
                 throw new ExcepcionDeNegocioSimple('Sólo se pueden recuperar unidades marcadas como pérdida o robo.');
             }
 
+            $antes = ['estado' => $unidad->estado->value, 'condicion' => $unidad->condicion->value];
+
             $unidad->update([
                 'estado' => EstadoUnidadActivo::EnAlmacen,
                 'condicion' => $condicionResultante,
@@ -64,6 +66,7 @@ class RecuperarUnidadActivo
                 'entidad_id' => $unidad->getKey(),
                 'empresa_id' => $unidad->empresa_id,
                 'descripcion' => 'Unidad '.$unidad->codigo.' recuperada al almacén '.$almacenDestino->nombre,
+                'valores_anteriores' => $antes,
                 'valores_nuevos' => ['estado' => $unidad->estado->value, 'condicion' => $condicionResultante->value, 'almacen_id' => $almacenDestino->getKey()],
             ]);
 

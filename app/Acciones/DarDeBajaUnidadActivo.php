@@ -33,6 +33,8 @@ class DarDeBajaUnidadActivo
         }
 
         return DB::transaction(function () use ($unidad, $motivo, $realizadoPor): UnidadActivo {
+            $antes = ['estado' => $unidad->estado->value];
+
             $unidad->update([
                 'estado' => EstadoUnidadActivo::Baja,
                 'dado_de_baja_en' => now(),
@@ -52,6 +54,8 @@ class DarDeBajaUnidadActivo
                 'tipo_entidad' => UnidadActivo::class,
                 'entidad_id' => $unidad->id,
                 'descripcion' => 'Baja de la unidad '.$unidad->codigo.'. Motivo: '.$motivo,
+                'valores_anteriores' => $antes,
+                'valores_nuevos' => ['estado' => EstadoUnidadActivo::Baja->value],
             ]);
 
             return $unidad->fresh();

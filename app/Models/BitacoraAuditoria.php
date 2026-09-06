@@ -16,6 +16,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $accion
  * @property string|null $tipo_entidad
  * @property int|null $entidad_id
+ * @property array<string, mixed>|null $valores_anteriores
+ * @property array<string, mixed>|null $valores_nuevos
  */
 class BitacoraAuditoria extends Model
 {
@@ -63,5 +65,13 @@ class BitacoraAuditoria extends Model
     public function empresa(): BelongsTo
     {
         return $this->belongsTo(Empresa::class);
+    }
+
+    /**
+     * @return BelongsTo<Sucursal, $this>
+     */
+    public function sucursal(): BelongsTo
+    {
+        return $this->belongsTo(Sucursal::class);
     }
 }

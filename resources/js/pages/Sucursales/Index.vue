@@ -22,6 +22,7 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -40,6 +41,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type SucursalFila = SucursalEditable & {
@@ -205,6 +207,8 @@ function alternarEstado(s: SucursalFila): void {
         router.post(`/sucursales/${s.id}/estado`, {}, { preserveScroll: true });
     }
 }
+
+const vista = useVistaPreferida('sucursales');
 </script>
 
 <template>
@@ -294,6 +298,8 @@ function alternarEstado(s: SucursalFila): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
@@ -318,7 +324,7 @@ function alternarEstado(s: SucursalFila): void {
             </template>
         </EstadoVacio>
 
-        <TooltipProvider v-else :delay-duration="150">
+        <TooltipProvider v-else-if="vista === 'cards'" :delay-duration="150">
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div
                     v-for="s in sucursales.data"
@@ -451,6 +457,89 @@ function alternarEstado(s: SucursalFila): void {
                 </div>
             </div>
         </TooltipProvider>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[720px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Sucursal</th>
+                        <th class="px-3 py-2 font-medium">Empresa</th>
+                        <th class="px-3 py-2 font-medium">
+                            Dirección / Teléfono
+                        </th>
+                        <th class="px-3 py-2 font-medium">
+                            Colaboradores activos
+                        </th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="s in sucursales.data"
+                        :key="s.id"
+                        class="border-t"
+                    >
+                        <td class="px-3 py-2">
+                            <p class="font-medium">{{ s.nombre }}</p>
+                            <p class="text-muted-foreground font-mono text-xs">
+                                {{ s.codigo }}
+                            </p>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ s.empresa.nombre_comercial }}
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ s.direccion ?? '—' }}
+                            <span v-if="s.telefono" class="block text-xs">{{
+                                telefonoLegible(s.telefono)
+                            }}</span>
+                        </td>
+                        <td class="px-3 py-2">
+                            <button
+                                type="button"
+                                class="text-primary hover:underline"
+                                @click="irAColaboradores(s)"
+                            >
+                                {{ s.colaboradores_activos }}
+                            </button>
+                        </td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                :variant="s.activa ? 'default' : 'secondary'"
+                            >
+                                {{ s.activa ? 'Activa' : 'Inactiva' }}
+                            </Badge>
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex justify-end gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    @click="verDetalle(s)"
+                                    >Ver</Button
+                                >
+                                <Button
+                                    v-if="permisos.editar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="editar(s)"
+                                    >Editar</Button
+                                >
+                                <Button
+                                    v-if="permisos.desactivar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="alternarEstado(s)"
+                                >
+                                    {{ s.activa ? 'Desactivar' : 'Activar' }}
+                                </Button>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
         <Paginacion :links="sucursales.links" :total="sucursales.total" />
 

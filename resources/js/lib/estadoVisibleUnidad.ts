@@ -28,3 +28,22 @@ const CLASES: Record<EstadoVisibleUnidadValor, string> = {
 export function claseEstadoVisibleUnidad(valor: string): string {
     return CLASES[valor as EstadoVisibleUnidadValor] ?? CLASES.baja;
 }
+
+/**
+ * Mismos tonos semánticos que `CLASES`, en variante de relleno sólido (para
+ * barras de gráfica en vez de badges de texto).
+ */
+const CLASES_RELLENO: Record<EstadoVisibleUnidadValor, string> = {
+    disponible: 'bg-emerald-500',
+    asignado: 'bg-blue-500',
+    reparacion: 'bg-amber-500',
+    perdido: 'bg-red-400',
+    robado: 'bg-red-600',
+    baja: 'bg-muted-foreground/40',
+};
+
+export function claseRellenoEstadoVisibleUnidad(valor: string): string {
+    return (
+        CLASES_RELLENO[valor as EstadoVisibleUnidadValor] ?? CLASES_RELLENO.baja
+    );
+}

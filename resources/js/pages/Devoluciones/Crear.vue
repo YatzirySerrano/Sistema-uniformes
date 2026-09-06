@@ -30,6 +30,8 @@ type Renglon = {
     es_unidad: boolean;
     unidad_codigo: string | null;
     unidad_disponible: boolean;
+    unidad_estado_visible: string | null;
+    unidad_estado_visible_etiqueta: string | null;
 };
 
 type Entrega = {
@@ -403,6 +405,9 @@ function enviar(): void {
                 >
                     {{ r.activo }} ({{ r.unidad_codigo }}) ya no está asignada a
                     este colaborador — no se puede devolver desde aquí.
+                    <span v-if="r.unidad_estado_visible_etiqueta">
+                        Estado actual: {{ r.unidad_estado_visible_etiqueta }}.
+                    </span>
                 </p>
             </section>
 

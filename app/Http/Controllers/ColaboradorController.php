@@ -214,6 +214,8 @@ class ColaboradorController extends Controller
         $this->auditoria->registrar('colaboradores', $colaborador->activo ? 'activar' : 'desactivar', [
             'tipo_entidad' => Colaborador::class, 'entidad_id' => $colaborador->id, 'empresa_id' => $colaborador->empresa_id,
             'descripcion' => ($colaborador->activo ? 'Activación' : 'Desactivación').' de '.$colaborador->nombre_completo,
+            'valores_anteriores' => ['activo' => ! $colaborador->activo],
+            'valores_nuevos' => ['activo' => $colaborador->activo],
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => $colaborador->activo ? 'Colaborador activado.' : 'Colaborador desactivado.']);

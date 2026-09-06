@@ -56,6 +56,7 @@ class CategoriaActivoController extends Controller
             $categoria->activa ? 'categoria_activar' : 'categoria_desactivar',
             $categoria,
             ($categoria->activa ? 'Activación' : 'Desactivación').' global de categoría '.$categoria->nombre,
+            ['valores_anteriores' => ['activa' => ! $categoria->activa], 'valores_nuevos' => ['activa' => $categoria->activa]],
         );
 
         return back()->with('toast', [
@@ -150,11 +151,15 @@ class CategoriaActivoController extends Controller
         return $categoria;
     }
 
-    private function auditar(string $accion, CategoriaActivo $categoria, string $descripcion): void
+    /**
+     * @param  array<string, mixed>  $valores
+     */
+    private function auditar(string $accion, CategoriaActivo $categoria, string $descripcion, array $valores = []): void
     {
         $this->auditoria->registrar('activos', $accion, [
             'tipo_entidad' => CategoriaActivo::class, 'entidad_id' => $categoria->id,
             'descripcion' => $descripcion,
+            ...$valores,
         ]);
     }
 }

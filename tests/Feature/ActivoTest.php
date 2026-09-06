@@ -9,6 +9,7 @@ use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
 use App\Models\TipoActivo;
+use App\Models\UnidadActivo;
 use Illuminate\Http\UploadedFile;
 
 beforeEach(function () {
@@ -285,6 +286,34 @@ it('el detalle muestra las existencias por almacén y talla del activo', functio
         ->assertInertia(fn ($page) => $page
             ->component('Activos/Detalle')
             ->where('saldos.0.cantidad', 12)
+        );
+});
+
+/**
+ * Regresión: `UnidadActivo::estado` está casteado a
+ * `App\Enums\EstadoUnidadActivo` (enum). Usarlo directamente como clave de
+ * `pluck()` (`->pluck('total', 'estado')`) provocaba
+ * `TypeError: Cannot access offset of type App\Enums\EstadoUnidadActivo on
+ * array` al abrir el detalle de cualquier activo de seguimiento individual
+ * con unidades registradas.
+ */
+it('el detalle de un activo de seguimiento individual resume sus unidades por estado sin TypeError', function () {
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    $activo = Activo::factory()->for($empresa)->seguimientoIndividual()->create();
+
+    UnidadActivo::factory()->for($empresa)->for($activo)->for($almacen)->count(2)->create();
+    UnidadActivo::factory()->for($empresa)->for($activo)->for($almacen)->asignada()->create();
+    UnidadActivo::factory()->for($empresa)->for($activo)->for($almacen)->baja()->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->get("/activos/{$activo->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Activos/Detalle')
+            ->where('resumenUnidades.en_almacen', 2)
+            ->where('resumenUnidades.asignada', 1)
+            ->where('resumenUnidades.baja', 1)
         );
 });
 

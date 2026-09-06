@@ -5,6 +5,7 @@ import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 
 const props = defineProps<{
     entrega: {
@@ -28,6 +29,8 @@ const props = defineProps<{
             talla: string | null;
             cantidad: number;
             unidad_codigo: string | null;
+            unidad_estado_visible: string | null;
+            unidad_estado_visible_etiqueta: string | null;
             conjunto: string | null;
         }[];
         correcciones: {
@@ -181,11 +184,23 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                         >
                             <td class="py-1.5">{{ it.activo }}</td>
                             <td class="py-1.5">
-                                <span
-                                    v-if="it.unidad_codigo"
-                                    class="font-mono text-xs"
-                                    >{{ it.unidad_codigo }}</span
-                                >
+                                <template v-if="it.unidad_codigo">
+                                    <span class="font-mono text-xs">{{
+                                        it.unidad_codigo
+                                    }}</span>
+                                    <Badge
+                                        v-if="it.unidad_estado_visible"
+                                        variant="outline"
+                                        class="ml-1.5 text-xs"
+                                        :class="
+                                            claseEstadoVisibleUnidad(
+                                                it.unidad_estado_visible,
+                                            )
+                                        "
+                                    >
+                                        {{ it.unidad_estado_visible_etiqueta }}
+                                    </Badge>
+                                </template>
                                 <span v-else>{{ it.talla ?? '—' }}</span>
                             </td>
                             <td class="text-muted-foreground py-1.5">

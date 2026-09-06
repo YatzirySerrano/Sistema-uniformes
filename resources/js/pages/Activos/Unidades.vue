@@ -7,10 +7,12 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
@@ -130,6 +132,8 @@ function generarEtiquetas(): void {
         '_blank',
     );
 }
+
+const vista = useVistaPreferida('unidades-activo');
 </script>
 
 <template>
@@ -249,6 +253,8 @@ function generarEtiquetas(): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
@@ -263,7 +269,7 @@ function generarEtiquetas(): void {
         />
 
         <div
-            v-else
+            v-else-if="vista === 'cards'"
             class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
         >
             <div
@@ -321,6 +327,72 @@ function generarEtiquetas(): void {
                     </Link>
                 </Button>
             </div>
+        </div>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[720px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="w-8 px-3 py-2"></th>
+                        <th class="px-3 py-2 font-medium">Código / Activo</th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
+                        <th class="px-3 py-2 font-medium">
+                            Almacén / Colaborador
+                        </th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="u in unidades.data" :key="u.id" class="border-t">
+                        <td class="px-3 py-2">
+                            <input
+                                type="checkbox"
+                                class="size-4"
+                                :aria-label="`Seleccionar unidad ${u.codigo}`"
+                                :checked="idsSeleccionados.includes(u.id)"
+                                @change="alternarSeleccion(u.id)"
+                            />
+                        </td>
+                        <td class="px-3 py-2">
+                            <p class="font-mono font-medium">{{ u.codigo }}</p>
+                            <p class="text-muted-foreground text-xs">
+                                {{ u.activo ?? '—' }}
+                            </p>
+                        </td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                variant="outline"
+                                class="text-xs"
+                                :class="
+                                    claseEstadoVisibleUnidad(u.estado_visible)
+                                "
+                            >
+                                {{ u.estado_visible_etiqueta }}
+                            </Badge>
+                            <span
+                                v-if="u.condicion !== 'funcionando'"
+                                class="text-muted-foreground block text-xs"
+                            >
+                                {{ u.condicion_etiqueta }}
+                            </span>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ u.almacen ?? 'Sin almacén' }}
+                            <span v-if="u.colaborador" class="block text-xs">
+                                Con: {{ u.colaborador }}
+                            </span>
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <Button variant="outline" size="sm" as-child>
+                                <Link
+                                    :href="`/activos/unidades/${u.public_token}`"
+                                    >Ver</Link
+                                >
+                            </Button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
 
         <Paginacion :links="unidades.links" :total="unidades.total" />

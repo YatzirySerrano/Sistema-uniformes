@@ -6,10 +6,12 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Entrega = {
@@ -73,6 +75,8 @@ watch([buscar, empresaId, estado], () => {
 function variante(estado: string) {
     return estado === 'pendiente_firma' ? 'secondary' : 'default';
 }
+
+const vista = useVistaPreferida('entregas', 'tabla');
 </script>
 
 <template>
@@ -124,6 +128,8 @@ function variante(estado: string) {
                     ]"
                 />
             </div>
+
+            <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
         <EstadoVacio
@@ -137,6 +143,36 @@ function variante(estado: string) {
                 </Button>
             </template>
         </EstadoVacio>
+
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+            <Link
+                v-for="e in entregas.data"
+                :key="e.id"
+                :href="`/entregas/${e.id}`"
+                class="hover:border-primary/40 flex flex-col gap-2 rounded-xl border p-4 transition-colors"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <p class="font-medium">{{ e.folio }}</p>
+                    <Badge :variant="variante(e.estado)">{{
+                        e.estado_etiqueta
+                    }}</Badge>
+                </div>
+                <p class="text-muted-foreground text-sm">
+                    {{ e.colaborador }}
+                    <span class="text-xs">· {{ e.numero_empleado }}</span>
+                </p>
+                <p class="text-muted-foreground text-sm">{{ e.sucursal }}</p>
+                <div
+                    class="text-muted-foreground mt-auto flex items-center justify-between text-xs"
+                >
+                    <span>{{ e.fecha_entrega }}</span>
+                    <span>{{ e.renglones }} renglón(es)</span>
+                </div>
+            </Link>
+        </div>
 
         <div v-else class="overflow-x-auto rounded-xl border">
             <table class="w-full min-w-[720px] text-sm">

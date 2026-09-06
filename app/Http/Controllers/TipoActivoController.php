@@ -54,6 +54,7 @@ class TipoActivoController extends Controller
             $tipo->activo ? 'tipo_activar' : 'tipo_desactivar',
             $tipo,
             ($tipo->activo ? 'Activación' : 'Desactivación').' global de tipo de activo '.$tipo->nombre,
+            ['valores_anteriores' => ['activo' => ! $tipo->activo], 'valores_nuevos' => ['activo' => $tipo->activo]],
         );
 
         return back()->with('toast', [
@@ -123,11 +124,15 @@ class TipoActivoController extends Controller
         return $tipo;
     }
 
-    private function auditar(string $accion, TipoActivo $tipo, string $descripcion): void
+    /**
+     * @param  array<string, mixed>  $valores
+     */
+    private function auditar(string $accion, TipoActivo $tipo, string $descripcion, array $valores = []): void
     {
         $this->auditoria->registrar('activos', $accion, [
             'tipo_entidad' => TipoActivo::class, 'entidad_id' => $tipo->id,
             'descripcion' => $descripcion,
+            ...$valores,
         ]);
     }
 

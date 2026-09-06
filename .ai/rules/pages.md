@@ -1,6 +1,7 @@
 ---
 paths:
     - 'resources/js/pages/**/Detalle.vue'
+    - 'resources/js/pages/**/Index.vue'
 ---
 
 # Pages
@@ -27,3 +28,12 @@ Requisito global: cada módulo tendrá `[Exportar Excel]` / `[Exportar PDF]`
 respetando los filtros activos. Diseñar el query del `index` de forma que
 pantalla, PDF y Excel usen la misma consulta (ver `ServicioReportes`). No
 implementar la exportación por módulo todavía.
+
+## Cards/Tabla (SelectorVista) rollout — módulos que NO lo llevan y por qué
+
+Fase 10 aplicó `SelectorVista` + `useVistaPreferida` (misma query/paginación/filtros, sólo cambia la representación) a: Empresas, Sucursales, Areas, Almacenes, Activos, Conjuntos, Colaboradores (ya existía), Unidades (Activos/Unidades.vue), Entregas, Devoluciones, Auditoria. Default 'cards' salvo donde ya existía tabla como vista principal (Colaboradores, Entregas, Devoluciones) → default 'tabla' con cards como alternativa nueva.
+
+Deliberadamente SIN el toggle (documentado, no lo fuerces sin pedir confirmación primero):
+
+- `Inventario/Movimientos.vue`: ledger numérico append-only de 7 columnas (fecha/tipo/almacén/activo-variante/±cantidad/antes→después/usuario); cards rompe la comparación lateral de cantidades entre filas y no hay acción por fila más allá de leer el dato.
+- `Activos/Catalogos.vue` y `Activos/Tallas.vue`: regla ya asentada en `.ai/rules/ux.md` ("Presentación en cards / filas apiladas, nunca tabla con scroll horizontal") para catálogos globales de plataforma — no re-litigar.

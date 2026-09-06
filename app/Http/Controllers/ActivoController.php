@@ -408,6 +408,8 @@ class ActivoController extends Controller
         $this->auditoria->registrar('activos', $activo->activo ? 'activar' : 'desactivar', [
             'tipo_entidad' => Activo::class, 'entidad_id' => $activo->id, 'empresa_id' => $activo->empresa_id,
             'descripcion' => ($activo->activo ? 'Activación' : 'Desactivación').' de activo '.$activo->nombre,
+            'valores_anteriores' => ['activo' => ! $activo->activo],
+            'valores_nuevos' => ['activo' => $activo->activo],
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
@@ -437,7 +439,10 @@ class ActivoController extends Controller
         $resumenUnidades = ! $esIndividual ? null : $activo->unidades()
             ->selectRaw('estado, count(*) as total')
             ->groupBy('estado')
-            ->pluck('total', 'estado');
+            ->get()
+            ->mapWithKeys(fn (UnidadActivo $fila): array => [
+                $fila->estado->value => (int) $fila->getAttribute('total'),
+            ]);
 
         return Inertia::render('Activos/Detalle', [
             'activo' => [

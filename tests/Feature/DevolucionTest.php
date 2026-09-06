@@ -107,6 +107,24 @@ it('devuelve una unidad de seguimiento individual funcionando: vuelve al almacé
         ->and($unidad->esEntregable())->toBeTrue();
 });
 
+it('el formulario de creación expone el estado visible de una unidad asignada', function () {
+    $activoIndividual = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
+    $unidad = UnidadActivo::factory()->for($this->datos['empresaA'], 'empresa')->for($activoIndividual)->for($this->datos['almacenA'])->create();
+
+    $entrega = app(CrearEntregaUniforme::class)->ejecutar(
+        $this->datos['colaboradorA']->id, $this->datos['almacenA']->id, $this->admin->id, now()->toDateString(),
+        [], [['unidad_activo_id' => $unidad->id]], [],
+    );
+
+    $this->actingAs($this->admin)
+        ->get("/devoluciones/crear?entrega_id={$entrega->id}")
+        ->assertInertia(fn ($page) => $page
+            ->component('Devoluciones/Crear')
+            ->where('entrega.renglones.0.unidad_estado_visible', 'asignado')
+            ->where('entrega.renglones.0.unidad_estado_visible_etiqueta', 'Asignado'),
+        );
+});
+
 it('devuelve una unidad en reparación: vuelve al almacén pero NO queda entregable', function () {
     $activoIndividual = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
     $unidad = UnidadActivo::factory()->for($this->datos['empresaA'], 'empresa')->for($activoIndividual)->for($this->datos['almacenA'])->create();

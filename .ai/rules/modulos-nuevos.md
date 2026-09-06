@@ -2,11 +2,12 @@
 paths:
     - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,Conjunto}Controller.php'
     - 'app/Http/Requests/{Almacenes,Areas,Activos,Conjuntos}/**'
-    - 'app/Http/Requests/Concerns/ResuelveEmpresa.php'
-    - 'app/Soporte/AccesoEmpresa.php'
+    - app/Http/Requests/Concerns/ResuelveEmpresa.php
+    - app/Soporte/AccesoEmpresa.php
     - 'app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php'
     - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario}.php'
     - 'app/Models/{Conjunto,ConjuntoComponente}.php'
+    - app/Soporte/DescripcionAuditoria.php
 ---
 
 # Módulos Almacenes / Áreas / Activos / Inventario
@@ -237,3 +238,12 @@ $almacenId): int` se calcula siempre en vivo: por componente,
   conjunto (sin históricos que preservar en esa tabla).
 - Agregar un Activo suelto a una Entrega que incluye un Conjunto (Fase 5) NO
   modifica la definición del Conjunto — son conceptos independientes.
+
+## DescripcionAuditoria: diff humano best-effort, nunca resuelve FKs con una consulta aparte
+
+Transforma `valores_anteriores`/`valores_nuevos` de `bitacora_auditoria` en `[{campo, antes, ahora}]` legible. Reglas fijas:
+
+- Oculta `id` y cualquier `*_id` (ruido sin nombre resuelto) + `created_at/updated_at/deleted_at`. Nunca hace un JOIN/consulta extra para resolver el nombre de una FK (evita N+1 y evita inventar datos que no venían en el snapshot).
+- Humaniza booleans: `activo`/`activa` → "Activo"/"Inactivo"; cualquier otro boolean → "Sí"/"No".
+- Para `UnidadActivo`, humaniza `estado`/`condicion` vía `EstadoUnidadActivo`/`CondicionUnidadActivo` (nunca prueba enums a ciegas por valor: distintos enums del dominio comparten valores string y eso daría etiquetas equivocadas).
+- Sólo funciona donde el `registrar()` de origen YA capturó `valores_anteriores`/`valores_nuevos`. La mayoría de acciones (crear/editar en catálogos) sólo registran `descripcion`; ahí `cambios` sale vacío y la card muestra "Sin cambios detallados" — es intencional, no un bug. Los toggles (`activar`/`desactivar`) en Empresa/Sucursal/Area/Activo/Almacen/Conjunto/Usuario/Colaborador y las 3 acciones de `UnidadActivo` (recuperar/incidencia/baja) sí capturan before/after mínimo.

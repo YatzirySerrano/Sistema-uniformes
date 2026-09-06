@@ -146,27 +146,6 @@ class UnidadActivo extends Model
      */
     public function estadoVisible(): EstadoVisibleUnidad
     {
-        if ($this->estado === EstadoUnidadActivo::Baja) {
-            return EstadoVisibleUnidad::Baja;
-        }
-
-        if ($this->condicion === CondicionUnidadActivo::Robado) {
-            return EstadoVisibleUnidad::Robado;
-        }
-
-        if ($this->condicion === CondicionUnidadActivo::Perdido) {
-            return EstadoVisibleUnidad::Perdido;
-        }
-
-        if ($this->condicion === CondicionUnidadActivo::EnReparacion
-            || $this->condicion === CondicionUnidadActivo::Inservible) {
-            return EstadoVisibleUnidad::Reparacion;
-        }
-
-        if ($this->estado === EstadoUnidadActivo::Asignada) {
-            return EstadoVisibleUnidad::Asignado;
-        }
-
-        return EstadoVisibleUnidad::Disponible;
+        return EstadoVisibleUnidad::resolver($this->estado, $this->condicion);
     }
 }

@@ -301,6 +301,8 @@ class EmpresaController extends Controller
         }
 
         $this->auditoria->registrar('empresas', $empresa->activa ? 'activar' : 'desactivar', [
+            'valores_anteriores' => ['activa' => ! $empresa->activa],
+            'valores_nuevos' => ['activa' => $empresa->activa],
             'empresa_id' => $empresa->id,
             'tipo_entidad' => Empresa::class,
             'entidad_id' => $empresa->id,

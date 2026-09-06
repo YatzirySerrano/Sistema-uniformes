@@ -176,7 +176,7 @@ class EntregaController extends Controller
         $entrega->load([
             'detalles.activo:id,nombre',
             'detalles.talla:id,valor',
-            'detalles.unidadActivo:id,codigo,public_token',
+            'detalles.unidadActivo:id,codigo,public_token,estado,condicion',
             'colaborador:id,nombre_completo,numero_empleado,usuario_id',
             'sucursal:id,nombre',
             'empresa:id,nombre_comercial',
@@ -205,6 +205,8 @@ class EntregaController extends Controller
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
                     'unidad_codigo' => $d->unidadActivo?->codigo,
+                    'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
+                    'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
                     'conjunto' => $d->conjunto_nombre_snapshot,
                 ]),
                 'correcciones' => $entrega->correcciones->map(fn ($c): array => [

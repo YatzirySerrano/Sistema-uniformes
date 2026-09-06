@@ -149,6 +149,8 @@ class DevolucionController extends Controller
                     'es_unidad' => $d->unidad_activo_id !== null,
                     'unidad_codigo' => $d->unidadActivo?->codigo,
                     'unidad_disponible' => $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada,
+                    'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
+                    'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
                 ];
             }),
         ];

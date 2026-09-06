@@ -45,4 +45,36 @@ enum EstadoVisibleUnidad: string
             self::Baja => 'Retirado definitivamente, con borrado y destino final documentados.',
         };
     }
+
+    /**
+     * Única fuente de verdad de la regla de resolución (orden de prioridad:
+     * baja > robado > perdido > reparación [incluye inservible] > asignado >
+     * disponible). `UnidadActivo::estadoVisible()` delegan aquí; también la
+     * usa `ServicioDashboard` para colapsar conteos agrupados en SQL
+     * (`estado`+`condicion`) sin traer cada unidad a PHP.
+     */
+    public static function resolver(EstadoUnidadActivo $estado, CondicionUnidadActivo $condicion): self
+    {
+        if ($estado === EstadoUnidadActivo::Baja) {
+            return self::Baja;
+        }
+
+        if ($condicion === CondicionUnidadActivo::Robado) {
+            return self::Robado;
+        }
+
+        if ($condicion === CondicionUnidadActivo::Perdido) {
+            return self::Perdido;
+        }
+
+        if ($condicion === CondicionUnidadActivo::EnReparacion || $condicion === CondicionUnidadActivo::Inservible) {
+            return self::Reparacion;
+        }
+
+        if ($estado === EstadoUnidadActivo::Asignada) {
+            return self::Asignado;
+        }
+
+        return self::Disponible;
+    }
 }

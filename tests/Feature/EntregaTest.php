@@ -107,6 +107,31 @@ it('entrega una unidad de seguimiento individual, la asigna al colaborador y des
         ->and($unidad->esEntregable())->toBeFalse();
 });
 
+it('el detalle HTTP de una entrega con unidad expone su estado visible consolidado', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+    $activoIndividual = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
+    $unidad = UnidadActivo::factory()->for($this->datos['empresaA'], 'empresa')->for($activoIndividual)->for($this->datos['almacenA'])->create();
+
+    $entrega = $this->accion->ejecutar(
+        $this->datos['colaboradorA']->id,
+        $this->datos['almacenA']->id,
+        $this->encargado->id,
+        now()->toDateString(),
+        [],
+        [['unidad_activo_id' => $unidad->id]],
+        [],
+    );
+
+    $this->actingAs($admin)
+        ->get("/entregas/{$entrega->id}")
+        ->assertInertia(fn ($page) => $page
+            ->component('Entregas/Detalle')
+            ->where('entrega.items.0.unidad_codigo', $unidad->codigo)
+            ->where('entrega.items.0.unidad_estado_visible', 'asignado')
+            ->where('entrega.items.0.unidad_estado_visible_etiqueta', 'Asignado'),
+        );
+});
+
 it('rechaza entregar dos veces la misma unidad ya asignada', function () {
     $activoIndividual = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
     $unidad = UnidadActivo::factory()->for($this->datos['empresaA'], 'empresa')->for($activoIndividual)->for($this->datos['almacenA'])->asignada()->create();

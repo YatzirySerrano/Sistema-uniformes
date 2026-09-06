@@ -42,6 +42,8 @@ class MarcarUnidadIncidencia
                 throw new ExcepcionDeNegocioSimple('Sólo se puede reportar pérdida o robo de una unidad que esté asignada a un colaborador.');
             }
 
+            $antes = ['condicion' => $unidad->condicion->value];
+
             $unidad->update([
                 'condicion' => $tipo,
                 'observaciones' => $observacion,
@@ -64,6 +66,7 @@ class MarcarUnidadIncidencia
                 'entidad_id' => $unidad->getKey(),
                 'empresa_id' => $unidad->empresa_id,
                 'descripcion' => 'Unidad '.$unidad->codigo.' reportada como '.$tipo->etiqueta().': '.$motivo,
+                'valores_anteriores' => $antes,
                 'valores_nuevos' => ['condicion' => $tipo->value, 'motivo' => $motivo],
             ]);
 

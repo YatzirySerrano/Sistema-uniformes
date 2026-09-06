@@ -7,7 +7,9 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import { Button } from '@/components/ui/button';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Devolucion = {
@@ -52,6 +54,8 @@ watch(empresaSeleccionada, (e) => {
         preserveScroll: true,
     });
 });
+
+const vista = useVistaPreferida('devoluciones', 'tabla');
 </script>
 
 <template>
@@ -75,26 +79,53 @@ watch(empresaSeleccionada, (e) => {
             </template>
         </EncabezadoPagina>
 
-        <label
-            v-if="empresasAutorizadas.length > 1"
-            class="flex w-fit items-center gap-1.5 text-sm"
-        >
-            <span class="text-muted-foreground">Empresa</span>
-            <BuscadorAsync
-                v-model="empresaSeleccionada"
-                :buscar="buscarEmpresas"
-                :etiqueta="(e) => String(e.nombre_comercial)"
-                placeholder="Todas las empresas"
-                placeholder-busqueda="Buscar empresa…"
-                class="w-56"
-            />
-        </label>
+        <div class="flex flex-wrap items-center gap-2">
+            <label
+                v-if="empresasAutorizadas.length > 1"
+                class="flex w-fit items-center gap-1.5 text-sm"
+            >
+                <span class="text-muted-foreground">Empresa</span>
+                <BuscadorAsync
+                    v-model="empresaSeleccionada"
+                    :buscar="buscarEmpresas"
+                    :etiqueta="(e) => String(e.nombre_comercial)"
+                    placeholder="Todas las empresas"
+                    placeholder-busqueda="Buscar empresa…"
+                    class="w-56"
+                />
+            </label>
+            <SelectorVista v-model="vista" class="ml-auto" />
+        </div>
 
         <EstadoVacio
             v-if="!devoluciones.data.length"
             titulo="No hay devoluciones"
             descripcion="Registra una devolución cuando un colaborador entregue activos."
         />
+
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+            <div
+                v-for="d in devoluciones.data"
+                :key="d.id"
+                class="flex flex-col gap-2 rounded-xl border p-4"
+            >
+                <p class="font-medium">{{ d.folio }}</p>
+                <p class="text-muted-foreground text-sm">{{ d.colaborador }}</p>
+                <p class="text-muted-foreground text-sm">{{ d.sucursal }}</p>
+                <div
+                    class="text-muted-foreground mt-auto flex items-center justify-between text-xs"
+                >
+                    <span>{{ d.fecha }}</span>
+                    <span>{{ d.renglones }} renglón(es)</span>
+                </div>
+                <p class="text-muted-foreground text-xs">
+                    Registró: {{ d.registrada_por }}
+                </p>
+            </div>
+        </div>
 
         <div v-else class="overflow-x-auto rounded-xl border">
             <table class="w-full min-w-[640px] text-sm">

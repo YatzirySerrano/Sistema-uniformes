@@ -203,6 +203,8 @@ class ConjuntoController extends Controller
         $this->auditoria->registrar('activos', $conjunto->activo ? 'conjunto_activar' : 'conjunto_desactivar', [
             'tipo_entidad' => Conjunto::class, 'entidad_id' => $conjunto->id, 'empresa_id' => $conjunto->empresa_id,
             'descripcion' => ($conjunto->activo ? 'Activación' : 'Desactivación').' de conjunto '.$conjunto->nombre,
+            'valores_anteriores' => ['activo' => ! $conjunto->activo],
+            'valores_nuevos' => ['activo' => $conjunto->activo],
         ]);
 
         return back()->with('toast', [

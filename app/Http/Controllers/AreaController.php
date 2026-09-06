@@ -223,6 +223,8 @@ class AreaController extends Controller
         $this->auditoria->registrar('areas', $area->activa ? 'activar' : 'desactivar', [
             'tipo_entidad' => Area::class, 'entidad_id' => $area->id, 'empresa_id' => $area->empresa_id,
             'descripcion' => ($area->activa ? 'Activación' : 'Desactivación').' de área '.$area->nombre,
+            'valores_anteriores' => ['activa' => ! $area->activa],
+            'valores_nuevos' => ['activa' => $area->activa],
         ]);
 
         return back()->with('toast', [

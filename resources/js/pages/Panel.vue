@@ -2,23 +2,63 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     AlertTriangle,
+    Boxes,
     ClipboardList,
-    PenLine,
-    Shirt,
+    PackageCheck,
+    PackageSearch,
+    ShieldAlert,
+    ShieldOff,
+    Undo2,
+    UserCheck,
     Users,
+    Warehouse,
+    Wrench,
 } from '@lucide/vue';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import DatePicker from '@/components/sistema/DatePicker.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import GraficaBarras from '@/components/sistema/graficas/GraficaBarras.vue';
+import GraficaLineas from '@/components/sistema/graficas/GraficaLineas.vue';
+import TarjetaKpi from '@/components/sistema/graficas/TarjetaKpi.vue';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { claseRellenoEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
+type Opcion = { id: number; nombre: string };
+
 type Resumen = {
-    colaboradores_activos: number;
-    entregas_mes: number;
-    pendientes_firma: number;
-    activos_entregados_mes: number;
-    stock_bajo: number;
+    kpis: {
+        colaboradores_activos: number;
+        activos_activos: number;
+        existencias_disponibles: number;
+        entregas_periodo: number;
+        devoluciones_periodo: number;
+        activos_stock_bajo: number;
+        almacenes_activos: number;
+        unidades_disponibles: number;
+        unidades_asignadas: number;
+        unidades_en_reparacion: number;
+        unidades_perdidas: number;
+        unidades_robadas: number;
+    };
+    series: {
+        entregas_por_periodo: { fecha: string; total: number }[];
+        devoluciones_por_periodo: { fecha: string; total: number }[];
+        movimientos_por_periodo: {
+            fecha: string;
+            entradas: number;
+            salidas: number;
+        }[];
+        unidades_por_estado: {
+            estado: string;
+            etiqueta: string;
+            total: number;
+        }[];
+        existencias_por_almacen: { almacen: string; total: number }[];
+        stock_por_categoria: { categoria: string; total: number }[];
+    };
     entregas_recientes: {
         id: number;
         folio: string;
@@ -27,77 +67,228 @@ type Resumen = {
         estado_etiqueta: string;
         fecha_entrega: string;
     }[];
-    movimientos_recientes: {
-        id: number;
-        tipo_etiqueta: string;
-        direccion: string;
-        cantidad: number;
-        activo: string;
-        talla: string;
-        sucursal: string;
-        existencia_resultante: number;
-    }[];
     stock_bajo_detalle: {
         activo: string;
-        talla: string;
+        talla: string | null;
         almacen: string;
         cantidad: number;
         minimo: number;
     }[];
-    distribucion_sucursal: { sucursal: string; total: number }[];
 };
 
 const props = defineProps<{
     resumen: Resumen | null;
-    empresaSeleccionadaId: number | null;
+    filtros: {
+        empresa_id: number | null;
+        sucursal_id: number | null;
+        almacen_id: number | null;
+        desde: string;
+        hasta: string;
+    };
+    sucursalSeleccionada: Opcion | null;
+    almacenSeleccionado: Opcion | null;
     empresasAutorizadas: EmpresaAutorizada[];
     sinEmpresa: boolean;
 }>();
 
+defineOptions({
+    layout: {
+        breadcrumbs: [{ title: 'Dashboard', href: '/dashboard' }],
+    },
+});
+
 const empresaSeleccionada = ref<EmpresaAutorizada | null>(
-    props.empresasAutorizadas.find(
-        (e) => e.id === props.empresaSeleccionadaId,
-    ) ?? null,
+    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
+        null,
 );
+const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
+const sucursalSeleccionada = ref<Opcion | null>(props.sucursalSeleccionada);
+const almacenSeleccionado = ref<Opcion | null>(props.almacenSeleccionado);
+const desde = ref(props.filtros.desde);
+const hasta = ref(props.filtros.hasta);
+
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
-
     return props.empresasAutorizadas.filter((e) =>
         e.nombre_comercial.toLowerCase().includes(t),
     );
 }
-watch(empresaSeleccionada, (e) => {
-    router.get('/dashboard', e ? { empresa_id: e.id } : {}, {
-        preserveScroll: true,
-        preserveState: false,
-    });
+
+async function buscarSucursales(termino: string, signal?: AbortSignal) {
+    if (!empresaId.value) {
+        return [];
+    }
+    const res = await fetch(
+        `/sucursales/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(termino)}`,
+        { signal },
+    );
+    const datos = await res.json();
+    return datos.sucursales as Opcion[];
+}
+
+async function buscarAlmacenes(termino: string, signal?: AbortSignal) {
+    if (!empresaId.value) {
+        return [];
+    }
+    const res = await fetch(
+        `/almacenes/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(termino)}`,
+        { signal },
+    );
+    const datos = await res.json();
+    return datos.almacenes as Opcion[];
+}
+
+// Cambiar de empresa invalida sucursal/almacén elegidos (pertenecen a la
+// empresa anterior): se limpian en vez de conservarlos incompatibles.
+watch(empresaId, () => {
+    sucursalSeleccionada.value = null;
+    almacenSeleccionado.value = null;
 });
 
-defineOptions({
-    layout: {
-        breadcrumbs: [{ title: 'Panel', href: '/dashboard' }],
+let t: ReturnType<typeof setTimeout>;
+watch(
+    [empresaId, sucursalSeleccionada, almacenSeleccionado, desde, hasta],
+    () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+            router.get(
+                '/dashboard',
+                {
+                    empresa_id: empresaId.value || undefined,
+                    sucursal_id: sucursalSeleccionada.value?.id ?? undefined,
+                    almacen_id: almacenSeleccionado.value?.id ?? undefined,
+                    desde: desde.value || undefined,
+                    hasta: hasta.value || undefined,
+                },
+                { preserveState: true, replace: true, preserveScroll: true },
+            );
+        }, 300);
     },
-});
+);
+
+function limpiarFiltros() {
+    sucursalSeleccionada.value = null;
+    almacenSeleccionado.value = null;
+    const hoy = new Date().toISOString().slice(0, 10);
+    const hace30 = new Date(Date.now() - 29 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+    desde.value = hace30;
+    hasta.value = hoy;
+}
+
+function fechaCorta(iso: string) {
+    return new Date(`${iso}T00:00:00`).toLocaleDateString('es-MX', {
+        day: '2-digit',
+        month: 'short',
+    });
+}
+
+const seriesUnidades = computed(
+    () =>
+        props.resumen?.series.unidades_por_estado.map((u) => ({
+            etiqueta: u.etiqueta,
+            valor: u.total,
+            colorClase: claseRellenoEstadoVisibleUnidad(u.estado),
+        })) ?? [],
+);
+
+const seriesAlmacen = computed(
+    () =>
+        props.resumen?.series.existencias_por_almacen.map((a) => ({
+            etiqueta: a.almacen,
+            valor: a.total,
+        })) ?? [],
+);
+
+const seriesCategoria = computed(
+    () =>
+        props.resumen?.series.stock_por_categoria.map((c) => ({
+            etiqueta: c.categoria,
+            valor: c.total,
+        })) ?? [],
+);
 </script>
 
 <template>
-    <Head title="Panel" />
+    <Head title="Dashboard" />
 
     <div class="flex h-full flex-1 flex-col gap-4 p-4">
-        <label
-            v-if="empresasAutorizadas.length > 1"
-            class="flex w-fit items-center gap-1.5 text-sm"
-        >
-            <span class="text-muted-foreground">Empresa</span>
-            <BuscadorAsync
-                v-model="empresaSeleccionada"
-                :buscar="buscarEmpresas"
-                :etiqueta="(e) => String(e.nombre_comercial)"
-                placeholder="Selecciona una empresa"
-                placeholder-busqueda="Buscar empresa…"
-                class="w-56"
-            />
-        </label>
+        <div>
+            <h1 class="text-xl font-semibold tracking-tight">Dashboard</h1>
+            <p class="text-muted-foreground text-sm">
+                Resumen operativo de la empresa: entregas, devoluciones,
+                inventario y unidades identificadas.
+            </p>
+        </div>
+
+        <Card>
+            <CardContent class="flex flex-wrap items-end gap-3 pt-6">
+                <label
+                    v-if="empresasAutorizadas.length > 1"
+                    class="flex flex-col gap-1 text-sm"
+                >
+                    <span class="text-muted-foreground text-xs">Empresa</span>
+                    <BuscadorAsync
+                        v-model="empresaSeleccionada"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        placeholder="Selecciona una empresa"
+                        placeholder-busqueda="Buscar empresa…"
+                        class="w-56"
+                    />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                    <span class="text-muted-foreground text-xs">Desde</span>
+                    <DatePicker v-model="desde" class="w-40" />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                    <span class="text-muted-foreground text-xs">Hasta</span>
+                    <DatePicker v-model="hasta" class="w-40" />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                    <span class="text-muted-foreground text-xs"
+                        >Sucursal (opcional)</span
+                    >
+                    <BuscadorAsync
+                        v-model="sucursalSeleccionada"
+                        :buscar="buscarSucursales"
+                        :etiqueta="(s) => String(s.nombre)"
+                        :disabled="!empresaId"
+                        :dependencia="empresaId"
+                        :placeholder="
+                            empresaId
+                                ? 'Todas las sucursales'
+                                : 'Elige una empresa'
+                        "
+                        placeholder-busqueda="Buscar sucursal…"
+                        class="w-52"
+                    />
+                </label>
+                <label class="flex flex-col gap-1 text-sm">
+                    <span class="text-muted-foreground text-xs"
+                        >Almacén (opcional)</span
+                    >
+                    <BuscadorAsync
+                        v-model="almacenSeleccionado"
+                        :buscar="buscarAlmacenes"
+                        :etiqueta="(a) => String(a.nombre)"
+                        :disabled="!empresaId"
+                        :dependencia="empresaId"
+                        :placeholder="
+                            empresaId
+                                ? 'Todos los almacenes'
+                                : 'Elige una empresa'
+                        "
+                        placeholder-busqueda="Buscar almacén…"
+                        class="w-52"
+                    />
+                </label>
+                <Button variant="outline" size="sm" @click="limpiarFiltros"
+                    >Limpiar filtros</Button
+                >
+            </CardContent>
+        </Card>
 
         <EstadoVacio
             v-if="sinEmpresa || !resumen"
@@ -106,57 +297,187 @@ defineOptions({
         />
 
         <template v-else>
-            <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div
+                class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6"
+            >
+                <TarjetaKpi
+                    titulo="Colaboradores activos"
+                    :valor="resumen.kpis.colaboradores_activos"
+                    :icono="Users"
+                    color-clase="text-blue-600"
+                />
+                <TarjetaKpi
+                    titulo="Activos activos"
+                    :valor="resumen.kpis.activos_activos"
+                    :icono="PackageSearch"
+                    color-clase="text-violet-600"
+                />
+                <TarjetaKpi
+                    titulo="Existencias disponibles"
+                    :valor="resumen.kpis.existencias_disponibles"
+                    :icono="Boxes"
+                    color-clase="text-cyan-600"
+                    ayuda="Suma de cantidades en existencia de activos por cantidad (no incluye unidades identificadas)."
+                />
+                <TarjetaKpi
+                    titulo="Unidades disponibles"
+                    :valor="resumen.kpis.unidades_disponibles"
+                    :icono="PackageCheck"
+                    color-clase="text-emerald-600"
+                />
+                <TarjetaKpi
+                    titulo="Unidades asignadas"
+                    :valor="resumen.kpis.unidades_asignadas"
+                    :icono="UserCheck"
+                    color-clase="text-blue-600"
+                />
+                <TarjetaKpi
+                    titulo="Unidades en reparación"
+                    :valor="resumen.kpis.unidades_en_reparacion"
+                    :icono="Wrench"
+                    color-clase="text-amber-600"
+                />
+                <TarjetaKpi
+                    titulo="Unidades perdidas"
+                    :valor="resumen.kpis.unidades_perdidas"
+                    :icono="ShieldOff"
+                    color-clase="text-red-500"
+                />
+                <TarjetaKpi
+                    titulo="Unidades robadas"
+                    :valor="resumen.kpis.unidades_robadas"
+                    :icono="ShieldAlert"
+                    color-clase="text-red-700"
+                />
+                <TarjetaKpi
+                    titulo="Entregas del periodo"
+                    :valor="resumen.kpis.entregas_periodo"
+                    :icono="ClipboardList"
+                    color-clase="text-blue-600"
+                />
+                <TarjetaKpi
+                    titulo="Devoluciones del periodo"
+                    :valor="resumen.kpis.devoluciones_periodo"
+                    :icono="Undo2"
+                    color-clase="text-orange-600"
+                />
+                <TarjetaKpi
+                    titulo="Activos con stock bajo"
+                    :valor="resumen.kpis.activos_stock_bajo"
+                    :icono="AlertTriangle"
+                    :color-clase="
+                        resumen.kpis.activos_stock_bajo
+                            ? 'text-amber-500'
+                            : 'text-muted-foreground'
+                    "
+                />
+                <TarjetaKpi
+                    titulo="Almacenes activos"
+                    :valor="resumen.kpis.almacenes_activos"
+                    :icono="Warehouse"
+                    color-clase="text-slate-600"
+                />
+            </div>
+
+            <div class="grid gap-4 lg:grid-cols-2">
                 <Card>
-                    <CardHeader
-                        class="flex flex-row items-center justify-between pb-2"
-                    >
-                        <CardTitle class="text-muted-foreground text-sm"
-                            >Colaboradores activos</CardTitle
+                    <CardHeader>
+                        <CardTitle class="text-base"
+                            >Entregas por periodo</CardTitle
                         >
-                        <Users class="text-muted-foreground size-4" />
                     </CardHeader>
-                    <CardContent class="text-2xl font-semibold">
-                        {{ resumen.colaboradores_activos }}
+                    <CardContent>
+                        <GraficaLineas
+                            :puntos="resumen.series.entregas_por_periodo"
+                            :series="[
+                                {
+                                    clave: 'total',
+                                    etiqueta: 'Entregas',
+                                    claseTrazo: 'stroke-chart-1',
+                                },
+                            ]"
+                            :formato-eje="fechaCorta"
+                        />
                     </CardContent>
                 </Card>
+
                 <Card>
-                    <CardHeader
-                        class="flex flex-row items-center justify-between pb-2"
-                    >
-                        <CardTitle class="text-muted-foreground text-sm"
-                            >Entregas del mes</CardTitle
+                    <CardHeader>
+                        <CardTitle class="text-base"
+                            >Devoluciones por periodo</CardTitle
                         >
-                        <ClipboardList class="text-muted-foreground size-4" />
                     </CardHeader>
-                    <CardContent class="text-2xl font-semibold">
-                        {{ resumen.entregas_mes }}
+                    <CardContent>
+                        <GraficaLineas
+                            :puntos="resumen.series.devoluciones_por_periodo"
+                            :series="[
+                                {
+                                    clave: 'total',
+                                    etiqueta: 'Devoluciones',
+                                    claseTrazo: 'stroke-chart-4',
+                                },
+                            ]"
+                            :formato-eje="fechaCorta"
+                        />
                     </CardContent>
                 </Card>
+
                 <Card>
-                    <CardHeader
-                        class="flex flex-row items-center justify-between pb-2"
-                    >
-                        <CardTitle class="text-muted-foreground text-sm"
-                            >Pendientes de firma</CardTitle
+                    <CardHeader>
+                        <CardTitle class="text-base"
+                            >Movimientos de inventario por periodo</CardTitle
                         >
-                        <PenLine class="text-muted-foreground size-4" />
                     </CardHeader>
-                    <CardContent class="text-2xl font-semibold">
-                        {{ resumen.pendientes_firma }}
+                    <CardContent>
+                        <GraficaLineas
+                            :puntos="resumen.series.movimientos_por_periodo"
+                            :series="[
+                                {
+                                    clave: 'entradas',
+                                    etiqueta: 'Entradas',
+                                    claseTrazo: 'stroke-emerald-500',
+                                },
+                                {
+                                    clave: 'salidas',
+                                    etiqueta: 'Salidas',
+                                    claseTrazo: 'stroke-rose-500',
+                                },
+                            ]"
+                            :formato-eje="fechaCorta"
+                        />
                     </CardContent>
                 </Card>
+
                 <Card>
-                    <CardHeader
-                        class="flex flex-row items-center justify-between pb-2"
-                    >
-                        <CardTitle class="text-muted-foreground text-sm"
-                            >Activos entregadas (mes)</CardTitle
+                    <CardHeader>
+                        <CardTitle class="text-base"
+                            >Unidades por estado visible</CardTitle
                         >
-                        <Shirt class="text-muted-foreground size-4" />
                     </CardHeader>
-                    <CardContent class="text-2xl font-semibold">
-                        {{ resumen.activos_entregados_mes }}
+                    <CardContent>
+                        <GraficaBarras :datos="seriesUnidades" />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle class="text-base"
+                            >Existencias por almacén</CardTitle
+                        >
+                    </CardHeader>
+                    <CardContent>
+                        <GraficaBarras :datos="seriesAlmacen" />
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle class="text-base"
+                            >Stock por categoría</CardTitle
+                        >
+                    </CardHeader>
+                    <CardContent>
+                        <GraficaBarras :datos="seriesCategoria" />
                     </CardContent>
                 </Card>
             </div>
@@ -173,7 +494,7 @@ defineOptions({
                             v-if="!resumen.entregas_recientes.length"
                             class="text-muted-foreground text-sm"
                         >
-                            No hay entregas registradas todavía.
+                            No hay entregas registradas en este periodo.
                         </p>
                         <Link
                             v-for="e in resumen.entregas_recientes"
@@ -205,99 +526,55 @@ defineOptions({
                             >Existencias bajas</CardTitle
                         >
                         <AlertTriangle
-                            v-if="resumen.stock_bajo"
+                            v-if="resumen.stock_bajo_detalle.length"
                             class="size-4 text-amber-500"
                         />
                     </CardHeader>
-                    <CardContent>
+                    <CardContent class="space-y-2.5">
                         <p
                             v-if="!resumen.stock_bajo_detalle.length"
                             class="text-muted-foreground text-sm"
                         >
                             Sin alertas de inventario.
                         </p>
-                        <table v-else class="w-full text-sm">
-                            <tbody>
-                                <tr
-                                    v-for="(s, i) in resumen.stock_bajo_detalle"
-                                    :key="i"
-                                    class="border-b last:border-0"
+                        <div
+                            v-for="(s, i) in resumen.stock_bajo_detalle"
+                            :key="i"
+                            class="space-y-1"
+                        >
+                            <div
+                                class="flex items-center justify-between text-sm"
+                            >
+                                <span class="min-w-0 truncate">
+                                    {{ s.activo }}
+                                    <span
+                                        v-if="s.talla"
+                                        class="text-muted-foreground"
+                                        >· {{ s.talla }}</span
+                                    >
+                                    <span
+                                        class="text-muted-foreground block text-xs"
+                                        >{{ s.almacen }}</span
+                                    >
+                                </span>
+                                <span class="shrink-0 font-medium"
+                                    >{{ s.cantidad }} / {{ s.minimo }}</span
                                 >
-                                    <td class="py-1.5">
-                                        {{ s.activo }}
-                                        <span class="text-muted-foreground"
-                                            >· {{ s.talla }}</span
-                                        >
-                                    </td>
-                                    <td class="text-muted-foreground py-1.5">
-                                        {{ s.almacen }}
-                                    </td>
-                                    <td class="py-1.5 text-right font-medium">
-                                        {{ s.cantidad }} / {{ s.minimo }}
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                            </div>
+                            <div
+                                class="bg-muted h-1.5 w-full overflow-hidden rounded-full"
+                            >
+                                <div
+                                    class="h-full rounded-full bg-amber-500"
+                                    :style="{
+                                        width: `${Math.min(100, (s.cantidad / Math.max(1, s.minimo)) * 100)}%`,
+                                    }"
+                                />
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
             </div>
-
-            <Card>
-                <CardHeader>
-                    <CardTitle class="text-base"
-                        >Movimientos de inventario recientes</CardTitle
-                    >
-                </CardHeader>
-                <CardContent class="overflow-x-auto">
-                    <p
-                        v-if="!resumen.movimientos_recientes.length"
-                        class="text-muted-foreground text-sm"
-                    >
-                        Sin movimientos.
-                    </p>
-                    <table v-else class="w-full min-w-[520px] text-sm">
-                        <thead class="text-muted-foreground text-left text-xs">
-                            <tr>
-                                <th class="py-1.5">Tipo</th>
-                                <th class="py-1.5">Activo / Talla</th>
-                                <th class="py-1.5">Sucursal</th>
-                                <th class="py-1.5 text-right">Cantidad</th>
-                                <th class="py-1.5 text-right">Resultante</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="m in resumen.movimientos_recientes"
-                                :key="m.id"
-                                class="border-t"
-                            >
-                                <td class="py-1.5">{{ m.tipo_etiqueta }}</td>
-                                <td class="py-1.5">
-                                    {{ m.activo }}
-                                    <span class="text-muted-foreground"
-                                        >· {{ m.talla }}</span
-                                    >
-                                </td>
-                                <td class="py-1.5">{{ m.sucursal }}</td>
-                                <td
-                                    class="py-1.5 text-right"
-                                    :class="
-                                        m.direccion === 'entrada'
-                                            ? 'text-emerald-600'
-                                            : 'text-rose-600'
-                                    "
-                                >
-                                    {{ m.direccion === 'entrada' ? '+' : '−'
-                                    }}{{ m.cantidad }}
-                                </td>
-                                <td class="py-1.5 text-right font-medium">
-                                    {{ m.existencia_resultante }}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </CardContent>
-            </Card>
         </template>
     </div>
 </template>

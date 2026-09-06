@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Models\BitacoraAuditoria;
+use App\Soporte\DescripcionAuditoria;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -16,6 +17,8 @@ class BitacoraController extends Controller
 {
     use ConEmpresa;
     use ExportaListado;
+
+    public function __construct(private readonly DescripcionAuditoria $descripcionAuditoria) {}
 
     public function index(Request $request): Response
     {
@@ -35,8 +38,11 @@ class BitacoraController extends Controller
                 'accion' => $b->accion,
                 'descripcion' => $b->descripcion,
                 'entidad' => $b->tipo_entidad ? class_basename($b->tipo_entidad).' #'.$b->entidad_id : null,
+                'empresa' => $b->empresa?->nombre_comercial,
+                'sucursal' => $b->sucursal?->nombre,
                 'motivo' => $b->motivo,
                 'ip' => $b->ip,
+                'cambios' => $this->descripcionAuditoria->cambios($b->tipo_entidad, $b->valores_anteriores, $b->valores_nuevos),
                 'valores_anteriores' => $b->valores_anteriores,
                 'valores_nuevos' => $b->valores_nuevos,
             ]);
@@ -101,6 +107,7 @@ class BitacoraController extends Controller
         $superadmin = $request->user()->esSuperadministrador();
 
         return BitacoraAuditoria::query()
+            ->with(['empresa:id,nombre_comercial', 'sucursal:id,nombre'])
             ->when(! $superadmin, fn (Builder $q) => $q->where(fn (Builder $s) => $s->whereIn('empresa_id', $idsAutorizadas)->orWhereNull('empresa_id')))
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
             ->when($filtros['modulo'] ?? null, fn (Builder $q, $v) => $q->where('modulo', $v))

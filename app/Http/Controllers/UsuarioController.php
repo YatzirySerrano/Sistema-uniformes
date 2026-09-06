@@ -155,6 +155,8 @@ class UsuarioController extends Controller
         $this->auditoria->registrar('usuarios', $usuario->activo ? 'activar' : 'desactivar', [
             'tipo_entidad' => User::class, 'entidad_id' => $usuario->id,
             'descripcion' => ($usuario->activo ? 'Activación' : 'Desactivación').' de usuario '.$usuario->email,
+            'valores_anteriores' => ['activo' => ! $usuario->activo],
+            'valores_nuevos' => ['activo' => $usuario->activo],
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => $usuario->activo ? 'Usuario activado.' : 'Usuario desactivado.']);

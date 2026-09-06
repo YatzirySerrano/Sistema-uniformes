@@ -20,6 +20,7 @@ import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type EmpresaChip = { id: number; nombre_comercial: string };
@@ -182,6 +184,8 @@ function alternarEstado(a: AlmacenFila): void {
         router.post(`/almacenes/${a.id}/estado`, {}, { preserveScroll: true });
     }
 }
+
+const vista = useVistaPreferida('almacenes');
 </script>
 
 <template>
@@ -271,6 +275,8 @@ function alternarEstado(a: AlmacenFila): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
@@ -295,7 +301,7 @@ function alternarEstado(a: AlmacenFila): void {
             </template>
         </EstadoVacio>
 
-        <TooltipProvider v-else :delay-duration="150">
+        <TooltipProvider v-else-if="vista === 'cards'" :delay-duration="150">
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div
                     v-for="a in almacenes.data"
@@ -425,6 +431,76 @@ function alternarEstado(a: AlmacenFila): void {
                 </div>
             </div>
         </TooltipProvider>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[720px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Almacén</th>
+                        <th class="px-3 py-2 font-medium">Responsable</th>
+                        <th class="px-3 py-2 font-medium">
+                            Empresas abastecidas
+                        </th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="a in almacenes.data"
+                        :key="a.id"
+                        class="border-t"
+                    >
+                        <td class="px-3 py-2">
+                            <p class="font-medium">{{ a.nombre }}</p>
+                            <p class="text-muted-foreground font-mono text-xs">
+                                {{ a.codigo ?? '—' }}
+                            </p>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ a.responsable?.nombre_completo ?? '—' }}
+                        </td>
+                        <td class="px-3 py-2">
+                            <div class="flex flex-wrap gap-1">
+                                <Badge
+                                    v-for="e in a.empresas"
+                                    :key="e.id"
+                                    variant="outline"
+                                    class="text-xs"
+                                >
+                                    {{ e.nombre_comercial }}
+                                </Badge>
+                            </div>
+                        </td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                :variant="a.activo ? 'default' : 'secondary'"
+                            >
+                                {{ a.activo ? 'Activo' : 'Inactivo' }}
+                            </Badge>
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex justify-end gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    @click="verDetalle(a)"
+                                    >Ver</Button
+                                >
+                                <Button
+                                    v-if="permisos.administrar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="alternarEstado(a)"
+                                >
+                                    {{ a.activo ? 'Desactivar' : 'Activar' }}
+                                </Button>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
         <Paginacion :links="almacenes.links" :total="almacenes.total" />
 

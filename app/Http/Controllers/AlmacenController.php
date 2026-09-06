@@ -268,6 +268,8 @@ class AlmacenController extends Controller
 
         $this->auditar($almacen->activo ? 'activar' : 'desactivar', $almacen, $almacen->empresas()->pluck('empresas.id')->all(), [
             'descripcion' => ($almacen->activo ? 'Activación' : 'Desactivación').' de almacén '.$almacen->nombre,
+            'valores_anteriores' => ['activo' => ! $almacen->activo],
+            'valores_nuevos' => ['activo' => $almacen->activo],
         ]);
 
         return back()->with('toast', [

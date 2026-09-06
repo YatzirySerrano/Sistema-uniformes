@@ -16,6 +16,7 @@ import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { Paginado } from '@/types/sistema';
 
 type EmpresaTarjeta = EmpresaEditable & {
@@ -149,6 +151,8 @@ function alGuardar(): void {
 function verDetalle(empresa: EmpresaTarjeta): void {
     router.visit(`/empresas/${empresa.id}`);
 }
+
+const vista = useVistaPreferida('empresas');
 </script>
 
 <template>
@@ -251,6 +255,8 @@ function verDetalle(empresa: EmpresaTarjeta): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
@@ -277,7 +283,7 @@ function verDetalle(empresa: EmpresaTarjeta): void {
             </template>
         </EstadoVacio>
 
-        <TooltipProvider v-else :delay-duration="150">
+        <TooltipProvider v-else-if="vista === 'cards'" :delay-duration="150">
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div
                     v-for="e in empresas.data"
@@ -394,6 +400,64 @@ function verDetalle(empresa: EmpresaTarjeta): void {
                 </div>
             </div>
         </TooltipProvider>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[720px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Empresa</th>
+                        <th class="px-3 py-2 font-medium">Razón social</th>
+                        <th class="px-3 py-2 font-medium">
+                            Sucursales activas
+                        </th>
+                        <th class="px-3 py-2 font-medium">
+                            Colaboradores activos
+                        </th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="e in empresas.data" :key="e.id" class="border-t">
+                        <td class="px-3 py-2">
+                            <p class="font-medium">{{ e.nombre_comercial }}</p>
+                            <p class="text-muted-foreground font-mono text-xs">
+                                {{ e.codigo }}
+                            </p>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ e.razon_social ?? '—' }}
+                        </td>
+                        <td class="px-3 py-2">{{ e.sucursales_activas }}</td>
+                        <td class="px-3 py-2">{{ e.colaboradores_activos }}</td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                :variant="e.activa ? 'default' : 'secondary'"
+                            >
+                                {{ e.activa ? 'Activa' : 'Inactiva' }}
+                            </Badge>
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex justify-end gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    @click="verDetalle(e)"
+                                    >Ver</Button
+                                >
+                                <Button
+                                    v-if="puedeEditar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="editarEmpresa(e)"
+                                    >Editar</Button
+                                >
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
         <Paginacion :links="empresas.links" :total="empresas.total" />
 
