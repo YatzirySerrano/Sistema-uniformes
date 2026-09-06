@@ -23,6 +23,12 @@ use Illuminate\Support\Carbon;
  * @property string $numero_empleado_snapshot
  * @property Carbon $firmado_en
  * @property string $ruta_firma
+ * @property string|null $nombre_firmante_operador_snapshot
+ * @property string|null $ruta_firma_operador
+ * @property string|null $hash_firma_operador
+ * @property bool $aceptacion_titular
+ * @property string|null $texto_aceptado_snapshot
+ * @property Carbon|null $aceptado_en
  * @property string|null $ruta_pdf
  * @property array<string, mixed> $snapshot_entrega
  * @property string $hash_documento
@@ -48,6 +54,12 @@ class AcuseRecepcion extends Model
         'ip_firma',
         'user_agent_firma',
         'ruta_firma',
+        'nombre_firmante_operador_snapshot',
+        'ruta_firma_operador',
+        'hash_firma_operador',
+        'aceptacion_titular',
+        'texto_aceptado_snapshot',
+        'aceptado_en',
         'ruta_pdf',
         'snapshot_entrega',
         'hash_documento',
@@ -58,6 +70,8 @@ class AcuseRecepcion extends Model
     {
         return [
             'firmado_en' => 'datetime',
+            'aceptado_en' => 'datetime',
+            'aceptacion_titular' => 'boolean',
             'snapshot_entrega' => 'array',
         ];
     }

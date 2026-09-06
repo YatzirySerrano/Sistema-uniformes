@@ -10,8 +10,10 @@ use App\Models\VersionDocumentoExpediente;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * Crea un documento nuevo del expediente (primera versión). El archivo se
@@ -38,36 +40,42 @@ class SubirDocumentoExpediente
             throw new RuntimeException('No fue posible calcular el hash del archivo.');
         }
 
-        return DB::transaction(function () use ($colaborador, $categoria, $nombre, $descripcion, $archivo, $usuario, $ruta, $hash, $extension): DocumentoExpediente {
-            $documento = DocumentoExpediente::query()->create([
-                'colaborador_id' => $colaborador->getKey(),
-                'categoria' => $categoria,
-                'nombre' => $nombre,
-                'descripcion' => $descripcion,
-                'creado_por' => $usuario->getKey(),
-            ]);
+        try {
+            return DB::transaction(function () use ($colaborador, $categoria, $nombre, $descripcion, $archivo, $usuario, $ruta, $hash, $extension): DocumentoExpediente {
+                $documento = DocumentoExpediente::query()->create([
+                    'colaborador_id' => $colaborador->getKey(),
+                    'categoria' => $categoria,
+                    'nombre' => $nombre,
+                    'descripcion' => $descripcion,
+                    'creado_por' => $usuario->getKey(),
+                ]);
 
-            VersionDocumentoExpediente::query()->create([
-                'documento_expediente_id' => $documento->getKey(),
-                'version' => 1,
-                'ruta' => $ruta,
-                'nombre_archivo_original' => $archivo->getClientOriginalName(),
-                'mime' => $archivo->getMimeType() ?? $archivo->getClientMimeType(),
-                'extension' => $extension,
-                'peso_bytes' => $archivo->getSize() ?: 0,
-                'hash_sha256' => $hash,
-                'subido_por' => $usuario->getKey(),
-            ]);
+                VersionDocumentoExpediente::query()->create([
+                    'documento_expediente_id' => $documento->getKey(),
+                    'version' => 1,
+                    'ruta' => $ruta,
+                    'nombre_archivo_original' => $archivo->getClientOriginalName(),
+                    'mime' => $archivo->getMimeType() ?? $archivo->getClientMimeType(),
+                    'extension' => $extension,
+                    'peso_bytes' => $archivo->getSize() ?: 0,
+                    'hash_sha256' => $hash,
+                    'subido_por' => $usuario->getKey(),
+                ]);
 
-            $this->auditoria->registrar('colaboradores', 'expediente-subir', [
-                'tipo_entidad' => DocumentoExpediente::class,
-                'entidad_id' => $documento->getKey(),
-                'empresa_id' => $colaborador->empresa_id,
-                'descripcion' => 'Documento "'.$nombre.'" subido al expediente de '.$colaborador->nombre_completo.' ('.$categoria->etiqueta().')',
-            ]);
+                $this->auditoria->registrar('colaboradores', 'expediente-subir', [
+                    'tipo_entidad' => DocumentoExpediente::class,
+                    'entidad_id' => $documento->getKey(),
+                    'empresa_id' => $colaborador->empresa_id,
+                    'descripcion' => 'Documento "'.$nombre.'" subido al expediente de '.$colaborador->nombre_completo.' ('.$categoria->etiqueta().')',
+                ]);
 
-            return $documento;
-        });
+                return $documento;
+            });
+        } catch (Throwable $e) {
+            Storage::disk('local')->delete($ruta);
+
+            throw $e;
+        }
     }
 
     private function guardarArchivo(Colaborador $colaborador, CategoriaDocumentoExpediente $categoria, UploadedFile $archivo, string $extension): string

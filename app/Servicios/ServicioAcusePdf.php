@@ -28,6 +28,12 @@ class ServicioAcusePdf
             $firmaDataUri = 'data:image/png;base64,'.base64_encode($contenido);
         }
 
+        $firmaOperadorDataUri = null;
+        if ($acuse->ruta_firma_operador !== null && Storage::disk(self::DISCO)->exists($acuse->ruta_firma_operador)) {
+            $contenidoOperador = Storage::disk(self::DISCO)->get($acuse->ruta_firma_operador);
+            $firmaOperadorDataUri = 'data:image/png;base64,'.base64_encode($contenidoOperador);
+        }
+
         $logoDataUri = null;
         $logoRuta = $snapshot['empresa']['logo_ruta'] ?? null;
         if ($logoRuta !== null && Storage::disk('public')->exists($logoRuta)) {
@@ -39,6 +45,7 @@ class ServicioAcusePdf
             'acuse' => $acuse,
             'snapshot' => $snapshot,
             'firmaDataUri' => $firmaDataUri,
+            'firmaOperadorDataUri' => $firmaOperadorDataUri,
             'logoDataUri' => $logoDataUri,
         ])->setPaper('letter');
 

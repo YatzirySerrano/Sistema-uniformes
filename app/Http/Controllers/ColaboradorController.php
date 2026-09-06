@@ -4,21 +4,26 @@ namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Requests\Colaboradores\ActualizarFotoColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Area;
 use App\Models\Colaborador;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioExpediente;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 /**
  * Colaboradores por empresa. La empresa llega como filtro (listado) o campo
@@ -172,14 +177,23 @@ class ColaboradorController extends Controller
     public function store(GuardarColaboradorRequest $request): RedirectResponse
     {
         $empresa = $request->empresaResuelta();
+        $rutaFoto = $request->hasFile('foto') ? $this->guardarFotoSegura($request->file('foto'), $empresa->id) : null;
 
-        $colaborador = Colaborador::query()->create([
-            ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
-            'empresa_id' => $empresa->id,
-            'area' => $this->nombreAreaEspejo($empresa->id, $request->integer('area_id') ?: null, $request->input('area')),
-            'foto_ruta' => $request->hasFile('foto') ? $request->file('foto')->store("colaboradores/{$empresa->id}", 'local') ?: null : null,
-            'activo' => $request->boolean('activo', true),
-        ]);
+        try {
+            $colaborador = Colaborador::query()->create([
+                ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
+                'empresa_id' => $empresa->id,
+                'area' => $this->nombreAreaEspejo($empresa->id, $request->integer('area_id') ?: null, $request->input('area')),
+                'foto_ruta' => $rutaFoto,
+                'activo' => $request->boolean('activo', true),
+            ]);
+        } catch (Throwable $e) {
+            if ($rutaFoto !== null) {
+                Storage::disk('local')->delete($rutaFoto);
+            }
+
+            throw $e;
+        }
 
         $this->auditoria->registrar('colaboradores', 'crear', [
             'tipo_entidad' => Colaborador::class, 'entidad_id' => $colaborador->id, 'empresa_id' => $empresa->id,
@@ -207,23 +221,46 @@ class ColaboradorController extends Controller
         ]);
     }
 
-    public function show(Request $request, Colaborador $colaborador): Response
+    /**
+     * Perfil del colaborador: información general, KPIs rápidos y (si el
+     * usuario tiene permiso) el expediente digital embebido como pestaña —
+     * misma página, sin navegar a otro módulo.
+     */
+    public function show(Request $request, Colaborador $colaborador, ServicioExpediente $servicioExpediente): Response
     {
         $this->authorize('view', $colaborador);
 
         $colaborador->load(['sucursal:id,nombre', 'departamento:id,nombre', 'empresa:id,nombre_comercial']);
+        $colaborador->loadCount(['entregas', 'devoluciones', 'documentosExpediente', 'unidadesActivo']);
+
+        $usuario = $request->user();
+        $puedeVerExpediente = $usuario->can('verExpediente', $colaborador);
+        $fotoUrl = $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null;
 
         return Inertia::render('Colaboradores/Detalle', [
             'colaborador' => [
-                ...$colaborador->only(['id', 'numero_empleado', 'nombre_completo', 'puesto', 'correo', 'activo']),
-                'empresa' => $colaborador->empresa?->nombre_comercial,
-                'sucursal' => $colaborador->sucursal?->nombre,
-                'area' => $colaborador->departamento === null ? $colaborador->area : $colaborador->departamento->nombre,
-                'foto_url' => $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null,
+                ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
+                'empresa_nombre' => $colaborador->empresa?->nombre_comercial,
+                'sucursal' => $colaborador->sucursal === null ? null : ['id' => $colaborador->sucursal->id, 'nombre' => $colaborador->sucursal->nombre],
+                'area_actual' => $colaborador->departamento === null ? null : ['id' => $colaborador->departamento->id, 'nombre' => $colaborador->departamento->nombre],
+                'foto_url' => $fotoUrl,
             ],
-            'puedeEditar' => $request->user()->can('update', $colaborador),
-            'puedeEliminar' => $request->user()->can('desactivar', $colaborador),
-            'puedeVerExpediente' => $request->user()->can('verExpediente', $colaborador),
+            'kpis' => [
+                'documentos' => $colaborador->documentos_expediente_count,
+                'entregas' => $colaborador->entregas_count,
+                'devoluciones' => $colaborador->devoluciones_count,
+                'activos_asignados' => $colaborador->unidades_activo_count,
+            ],
+            'puedeEditar' => $usuario->can('update', $colaborador),
+            'puedeEliminar' => $usuario->can('desactivar', $colaborador),
+            'puedeVerExpediente' => $puedeVerExpediente,
+            'expediente' => $puedeVerExpediente ? [
+                'id' => $colaborador->id,
+                'nombre_completo' => $colaborador->nombre_completo,
+                'numero_empleado' => $colaborador->numero_empleado,
+                'foto_url' => $fotoUrl,
+                ...$servicioExpediente->payload($colaborador, $usuario),
+            ] : null,
         ]);
     }
 
@@ -239,13 +276,30 @@ class ColaboradorController extends Controller
     public function update(GuardarColaboradorRequest $request, Colaborador $colaborador): RedirectResponse
     {
         $anteriores = $colaborador->toArray();
+        $rutaFotoAnterior = $colaborador->foto_ruta;
+        $rutaFotoNueva = $request->hasFile('foto') ? $this->guardarFotoSegura($request->file('foto'), $colaborador->empresa_id) : null;
 
-        $colaborador->update([
-            ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
-            'area' => $this->nombreAreaEspejo($colaborador->empresa_id, $request->integer('area_id') ?: null, $request->input('area')),
-            'foto_ruta' => $request->hasFile('foto') ? $this->reemplazarFoto($colaborador, $request) : $colaborador->foto_ruta,
-            'activo' => $request->boolean('activo', $colaborador->activo),
-        ]);
+        try {
+            $colaborador->update([
+                ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
+                'area' => $this->nombreAreaEspejo($colaborador->empresa_id, $request->integer('area_id') ?: null, $request->input('area')),
+                'foto_ruta' => $rutaFotoNueva ?? $colaborador->foto_ruta,
+                'activo' => $request->boolean('activo', $colaborador->activo),
+            ]);
+        } catch (Throwable $e) {
+            if ($rutaFotoNueva !== null) {
+                Storage::disk('local')->delete($rutaFotoNueva);
+            }
+
+            throw $e;
+        }
+
+        // La foto anterior sólo se borra DESPUÉS de que la nueva quedó
+        // guardada en BD con éxito — si algo falla antes, el colaborador
+        // conserva su foto original en vez de quedarse sin ninguna.
+        if ($rutaFotoNueva !== null && $rutaFotoAnterior !== null) {
+            Storage::disk('local')->delete($rutaFotoAnterior);
+        }
 
         $this->auditoria->registrar('colaboradores', 'editar', [
             'tipo_entidad' => Colaborador::class, 'entidad_id' => $colaborador->id, 'empresa_id' => $colaborador->empresa_id,
@@ -254,7 +308,36 @@ class ColaboradorController extends Controller
             'valores_nuevos' => $colaborador->toArray(),
         ]);
 
-        return to_route('colaboradores.index')->with('toast', ['type' => 'success', 'message' => 'Colaborador actualizado.']);
+        return back()->with('toast', ['type' => 'success', 'message' => 'Colaborador actualizado.']);
+    }
+
+    /**
+     * Cambia sólo la foto de perfil desde el modal dedicado del perfil, sin
+     * pasar por el formulario completo de edición.
+     */
+    public function actualizarFoto(ActualizarFotoColaboradorRequest $request, Colaborador $colaborador): RedirectResponse
+    {
+        $rutaAnterior = $colaborador->foto_ruta;
+        $rutaNueva = $this->guardarFotoSegura($request->file('foto'), $colaborador->empresa_id);
+
+        try {
+            $colaborador->update(['foto_ruta' => $rutaNueva]);
+        } catch (Throwable $e) {
+            Storage::disk('local')->delete($rutaNueva);
+
+            throw $e;
+        }
+
+        if ($rutaAnterior !== null) {
+            Storage::disk('local')->delete($rutaAnterior);
+        }
+
+        $this->auditoria->registrar('colaboradores', 'foto-actualizar', [
+            'tipo_entidad' => Colaborador::class, 'entidad_id' => $colaborador->id, 'empresa_id' => $colaborador->empresa_id,
+            'descripcion' => 'Foto de perfil actualizada para '.$colaborador->nombre_completo,
+        ]);
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Foto actualizada.']);
     }
 
     public function toggle(Colaborador $colaborador): RedirectResponse
@@ -356,17 +439,20 @@ class ColaboradorController extends Controller
     }
 
     /**
-     * Borra la foto anterior del disco privado (si existía) y guarda la
-     * nueva. Devuelve `null` si el `store()` falla, para no dejar una ruta
-     * inválida en la columna.
+     * Guarda una foto nueva en el disco privado y devuelve su ruta. Nunca
+     * borra la foto anterior aquí — eso lo decide el llamador sólo después de
+     * confirmar que la escritura en BD tuvo éxito (evita quedarse sin foto si
+     * algo falla a medio camino).
      */
-    private function reemplazarFoto(Colaborador $colaborador, GuardarColaboradorRequest $request): ?string
+    private function guardarFotoSegura(UploadedFile $archivo, int $empresaId): string
     {
-        if ($colaborador->foto_ruta !== null) {
-            Storage::disk('local')->delete($colaborador->foto_ruta);
+        $ruta = $archivo->store("colaboradores/{$empresaId}", 'local');
+
+        if ($ruta === false) {
+            throw new RuntimeException('No fue posible guardar la foto del colaborador.');
         }
 
-        return $request->file('foto')->store("colaboradores/{$colaborador->empresa_id}", 'local') ?: null;
+        return $ruta;
     }
 
     /**

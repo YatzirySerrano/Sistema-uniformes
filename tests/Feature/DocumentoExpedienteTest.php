@@ -1,10 +1,13 @@
 <?php
 
+use App\Acciones\SubirDocumentoExpediente;
+use App\Acciones\SubirVersionDocumentoExpediente;
 use App\Enums\CategoriaDocumentoExpediente;
 use App\Enums\RolSistema;
 use App\Models\Colaborador;
 use App\Models\DocumentoExpediente;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
@@ -222,4 +225,91 @@ it('devuelve 404 si el documento no pertenece al colaborador de la URL', functio
     $this->actingAs($this->admin)
         ->get("/colaboradores/{$colaboradorB->id}/expediente/{$documento->id}/descargar")
         ->assertNotFound();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Sin archivos huérfanos si falla la base de datos
+|--------------------------------------------------------------------------
+*/
+
+it('borra el archivo huérfano si falla la base de datos al subir el primer documento', function () {
+    // colaborador_id inexistente para forzar una violación de FK dentro de la transacción.
+    $colaboradorFalso = Colaborador::factory()->make(['id' => 999999]);
+
+    $accion = app(SubirDocumentoExpediente::class);
+
+    expect(fn () => $accion->ejecutar(
+        $colaboradorFalso,
+        CategoriaDocumentoExpediente::Otros,
+        'Documento fantasma',
+        null,
+        UploadedFile::fake()->create('doc.pdf', 50, 'application/pdf'),
+        $this->admin,
+    ))->toThrow(Exception::class);
+
+    expect(Storage::disk('local')->allFiles('expedientes/999999'))->toBeEmpty();
+});
+
+it('borra el archivo huérfano si falla la base de datos al subir una nueva versión', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Documento',
+        'archivo' => UploadedFile::fake()->create('doc.pdf', 50, 'application/pdf'),
+    ]);
+    $documento = DocumentoExpediente::query()->where('nombre', 'Documento')->firstOrFail();
+
+    // Se borran las filas directamente (sin pasar por el modelo, versión
+    // primero por la FK) para dejar el objeto en memoria "vivo" pero
+    // inexistente en BD, y así forzar que `firstOrFail()` falle dentro de la
+    // transacción.
+    DB::table('documento_expediente_versiones')->where('documento_expediente_id', $documento->id)->delete();
+    DB::table('documentos_expediente')->where('id', $documento->id)->delete();
+
+    $accion = app(SubirVersionDocumentoExpediente::class);
+
+    expect(fn () => $accion->ejecutar(
+        $documento,
+        UploadedFile::fake()->create('nueva.pdf', 50, 'application/pdf'),
+        null,
+        $this->admin,
+    ))->toThrow(Exception::class);
+
+    // Sólo debe quedar el archivo de la versión 1 original; el de la versión
+    // fallida no debe persistir en disco.
+    expect(Storage::disk('local')->allFiles("expedientes/{$colaborador->id}/otros"))->toHaveCount(1);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Preview: mimes ampliados (texto/CSV) sin abrir la puerta a Office
+|--------------------------------------------------------------------------
+*/
+
+it('permite previsualizar texto plano inline pero sigue rechazando Excel', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Notas',
+        'archivo' => UploadedFile::fake()->create('notas.txt', 5, 'text/plain'),
+    ]);
+    $documentoTexto = DocumentoExpediente::query()->where('nombre', 'Notas')->firstOrFail();
+
+    $this->actingAs($this->admin)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documentoTexto->id}/ver")
+        ->assertOk();
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Hoja de cálculo',
+        'archivo' => UploadedFile::fake()->create('datos.xlsx', 20, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    ]);
+    $documentoExcel = DocumentoExpediente::query()->where('nombre', 'Hoja de cálculo')->firstOrFail();
+
+    $this->actingAs($this->admin)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documentoExcel->id}/ver")
+        ->assertStatus(415);
 });

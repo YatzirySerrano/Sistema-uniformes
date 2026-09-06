@@ -195,6 +195,12 @@ const hayJsonTecnico = computed(
         !!registroSeleccionado.value?.valores_anteriores ||
         !!registroSeleccionado.value?.valores_nuevos,
 );
+
+function jsonLegible(valor: Record<string, unknown> | null): string {
+    return valor === null
+        ? 'No se registraron datos en este momento.'
+        : JSON.stringify(valor, null, 2);
+}
 </script>
 
 <template>
@@ -509,10 +515,8 @@ const hayJsonTecnico = computed(
                                 <pre
                                     class="bg-muted max-h-48 overflow-auto rounded-md p-2 text-xs"
                                     >{{
-                                        JSON.stringify(
+                                        jsonLegible(
                                             registroSeleccionado.valores_anteriores,
-                                            null,
-                                            2,
                                         )
                                     }}</pre>
                             </div>
@@ -523,10 +527,8 @@ const hayJsonTecnico = computed(
                                 <pre
                                     class="bg-muted max-h-48 overflow-auto rounded-md p-2 text-xs"
                                     >{{
-                                        JSON.stringify(
+                                        jsonLegible(
                                             registroSeleccionado.valores_nuevos,
-                                            null,
-                                            2,
                                         )
                                     }}</pre>
                             </div>

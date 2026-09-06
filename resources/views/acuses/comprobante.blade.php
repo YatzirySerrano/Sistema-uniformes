@@ -18,7 +18,7 @@
         table.items th, table.items td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; }
         table.items th { background: #f1f5f9; }
         .firma-caja { margin-top: 24px; }
-        .firma-img { border: 1px solid #cbd5e1; height: 120px; width: 320px; object-fit: contain; }
+        .firma-img { border: 1px solid #cbd5e1; height: 110px; width: 100%; max-width: 260px; object-fit: contain; }
         .pie { margin-top: 28px; font-size: 9px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 8px; }
         .folio { font-size: 12px; font-weight: bold; }
     </style>
@@ -98,15 +98,39 @@
         </tfoot>
     </table>
 
-    <div class="firma-caja">
-        <h2>Firma de recepción</h2>
-        @if ($firmaDataUri)
-            <img class="firma-img" src="{{ $firmaDataUri }}" alt="Firma">
-        @else
-            <div class="firma-img"></div>
-        @endif
-        <div class="muted" style="margin-top:6px">{{ $acuse->nombre_firmante_snapshot }} — N.º {{ $acuse->numero_empleado_snapshot }}</div>
-    </div>
+    @if ($acuse->aceptacion_titular && $acuse->texto_aceptado_snapshot)
+        <div class="caja">
+            <strong>Consentimiento aceptado:</strong> "{{ $acuse->texto_aceptado_snapshot }}"
+            <div class="muted">Aceptado el {{ optional($acuse->aceptado_en)->format('d/m/Y H:i') }}</div>
+        </div>
+    @endif
+
+    <table style="width:100%">
+        <tr>
+            <td style="width:50%; padding-right:8px">
+                <div class="firma-caja">
+                    <h2>Firma de quien recibe</h2>
+                    @if ($firmaDataUri)
+                        <img class="firma-img" src="{{ $firmaDataUri }}" alt="Firma de quien recibe">
+                    @else
+                        <div class="firma-img"></div>
+                    @endif
+                    <div class="muted" style="margin-top:6px">{{ $acuse->nombre_firmante_snapshot }} — N.º {{ $acuse->numero_empleado_snapshot }}</div>
+                </div>
+            </td>
+            <td style="width:50%; padding-left:8px">
+                <div class="firma-caja">
+                    <h2>Firma de quien entrega</h2>
+                    @if ($firmaOperadorDataUri)
+                        <img class="firma-img" src="{{ $firmaOperadorDataUri }}" alt="Firma de quien entrega">
+                    @else
+                        <div class="firma-img"></div>
+                    @endif
+                    <div class="muted" style="margin-top:6px">{{ $acuse->nombre_firmante_operador_snapshot ?? $snapshot['encargado']['name'] ?? '' }}</div>
+                </div>
+            </td>
+        </tr>
+    </table>
 
     <div class="pie">
         <div>Folio de acuse: {{ $acuse->folio }} · Documento generado por el Sistema de Control y Gestión de Uniformes.</div>

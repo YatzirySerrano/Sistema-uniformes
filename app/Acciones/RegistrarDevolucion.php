@@ -4,6 +4,7 @@ namespace App\Acciones;
 
 use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
+use App\Enums\EstadoDevolucion;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\DetalleDevolucion;
@@ -73,6 +74,7 @@ class RegistrarDevolucion
                 'fecha' => $fecha,
                 'motivo' => $motivo,
                 'notas' => $notas,
+                'estado' => EstadoDevolucion::PendienteFirma,
             ]);
 
             foreach ($activos as $item) {

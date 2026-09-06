@@ -53,11 +53,19 @@ class AcuseController extends Controller
 
         $datos = $request->validate([
             'firma' => ['required', 'string', 'max:3000000'],
-        ], ['firma.required' => 'La firma de recepción es obligatoria.']);
+            'firma_operador' => ['required', 'string', 'max:3000000'],
+            'aceptacion' => ['accepted'],
+        ], [
+            'firma.required' => 'La firma de quien recibe es obligatoria.',
+            'firma_operador.required' => 'La firma de quien entrega es obligatoria.',
+            'aceptacion.accepted' => 'Debes confirmar que aceptas la responsabilidad antes de firmar.',
+        ]);
 
         $acuse = $accion->ejecutar(
             $entrega,
             $datos['firma'],
+            $datos['firma_operador'],
+            true,
             $request->user()->id,
             $request->ip(),
             $request->userAgent(),
@@ -97,6 +105,17 @@ class AcuseController extends Controller
         abort_unless(Storage::disk('local')->exists($acuse->ruta_firma), 404);
 
         return Storage::disk('local')->response($acuse->ruta_firma, 'firma-'.$acuse->folio.'.png', [
+            'Content-Type' => 'image/png',
+        ]);
+    }
+
+    public function firmaOperador(AcuseRecepcion $acuse): StreamedResponse
+    {
+        $this->authorize('verFirma', $acuse);
+
+        abort_unless($acuse->ruta_firma_operador !== null && Storage::disk('local')->exists($acuse->ruta_firma_operador), 404);
+
+        return Storage::disk('local')->response($acuse->ruta_firma_operador, 'firma-encargado-'.$acuse->folio.'.png', [
             'Content-Type' => 'image/png',
         ]);
     }

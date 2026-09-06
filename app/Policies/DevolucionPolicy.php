@@ -21,4 +21,19 @@ class DevolucionPolicy
     {
         return $user->can('devoluciones.crear');
     }
+
+    /**
+     * Firma de doble conformidad: el operador con permiso, o el propio
+     * colaborador titular (si tiene cuenta) confirmando su devolución.
+     */
+    public function confirmar(User $user, Devolucion $devolucion): bool
+    {
+        if (! $user->puedeAccederEmpresa($devolucion->empresa_id)) {
+            return false;
+        }
+
+        $esTitular = $devolucion->colaborador?->usuario_id === $user->getKey();
+
+        return $user->can('devoluciones.confirmar') || $esTitular;
+    }
 }

@@ -104,6 +104,14 @@ class Colaborador extends Model
     }
 
     /**
+     * @return HasMany<UnidadActivo, $this>
+     */
+    public function unidadesActivo(): HasMany
+    {
+        return $this->hasMany(UnidadActivo::class);
+    }
+
+    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

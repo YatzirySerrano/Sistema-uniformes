@@ -14,23 +14,20 @@ defineProps<{
 }>();
 
 /**
- * Sin assets fotográficos externos (política del proyecto: no descargar de
- * fuentes no verificadas ni depender de una imagen externa que pueda dejar
- * de estar disponible). En su lugar, un fondo "mesh gradient" hecho sólo con
- * CSS (varios radial-gradient en capas) sobre los tokens de marca globales
- * (`--primary` / `--primary-hover` / `--primary-foreground`): se ve como una
- * imagen abstracta moderna, respeta el tema claro/oscuro y no depende de red.
- * Se reutiliza tanto en el panel izquierdo (escritorio) como en la banda
- * decorativa superior (móvil/tablet) para que ningún breakpoint quede plano.
+ * Foto propia del proyecto (`public/images/loginBg.jpg`, subida por el
+ * equipo — no es un asset externo de terceros). Se atenúa con un degradado
+ * oscuro para que el logo y el texto en blanco mantengan contraste sobre
+ * cualquier zona de la imagen, en cualquier tema. Se reutiliza tanto en el
+ * panel izquierdo (escritorio) como en la banda decorativa superior
+ * (móvil/tablet) para que ningún breakpoint quede plano.
  */
 const fondoDecorativo = {
     backgroundImage: [
-        'radial-gradient(at 15% 20%, color-mix(in srgb, var(--primary-foreground) 40%, transparent) 0px, transparent 55%)',
-        'radial-gradient(at 85% 10%, color-mix(in srgb, var(--primary-foreground) 22%, transparent) 0px, transparent 50%)',
-        'radial-gradient(at 0% 85%, color-mix(in srgb, var(--primary-hover) 70%, transparent) 0px, transparent 55%)',
-        'radial-gradient(at 85% 95%, color-mix(in srgb, var(--primary-foreground) 18%, transparent) 0px, transparent 50%)',
-        'linear-gradient(135deg, var(--primary), var(--primary-hover))',
+        'linear-gradient(180deg, rgba(15,23,42,0.55) 0%, rgba(15,23,42,0.35) 45%, rgba(15,23,42,0.75) 100%)',
+        "url('/images/loginBg.jpg')",
     ].join(', '),
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
 };
 
 const beneficios = [
@@ -59,26 +56,14 @@ const beneficios = [
              pantalla no quede plana antes de llegar al panel completo de escritorio. -->
         <div
             :style="fondoDecorativo"
-            class="relative flex shrink-0 items-center justify-center overflow-hidden bg-cover py-8 lg:hidden"
+            class="relative flex shrink-0 items-center justify-center overflow-hidden py-10 lg:hidden"
         >
-            <div
-                aria-hidden="true"
-                class="absolute inset-0 opacity-[0.1]"
-                style="
-                    background-image: radial-gradient(
-                        currentColor 1.5px,
-                        transparent 1.5px
-                    );
-                    background-size: 18px 18px;
-                    color: var(--primary-foreground);
-                "
-            />
             <Link
                 :href="home()"
-                class="text-primary-foreground relative z-10 flex items-center gap-2 text-lg font-medium"
+                class="relative z-10 flex items-center gap-2 text-lg font-medium text-white"
             >
                 <span
-                    class="bg-primary-foreground/10 ring-primary-foreground/15 flex size-10 items-center justify-center rounded-xl ring-1 backdrop-blur-sm"
+                    class="flex size-10 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20 backdrop-blur-sm"
                 >
                     <AppLogoIcon class="size-6 fill-current" />
                 </span>
@@ -89,44 +74,21 @@ const beneficios = [
         <!-- Panel completo: sólo escritorio (lg+). -->
         <div
             :style="fondoDecorativo"
-            class="relative hidden flex-col justify-between overflow-hidden bg-cover p-10 lg:flex"
+            class="relative hidden flex-col justify-between overflow-hidden p-10 lg:flex"
         >
-            <div
-                aria-hidden="true"
-                class="pointer-events-none absolute -top-24 -right-24 size-96 rounded-full opacity-20 blur-3xl"
-                style="background: var(--primary-foreground)"
-            />
-            <div
-                aria-hidden="true"
-                class="pointer-events-none absolute -bottom-32 -left-16 size-80 rounded-full opacity-10 blur-3xl"
-                style="background: var(--primary-foreground)"
-            />
-            <div
-                aria-hidden="true"
-                class="absolute inset-0 opacity-[0.08]"
-                style="
-                    background-image: radial-gradient(
-                        currentColor 1.5px,
-                        transparent 1.5px
-                    );
-                    background-size: 22px 22px;
-                    color: var(--primary-foreground);
-                "
-            />
-
             <Link
                 :href="home()"
-                class="text-primary-foreground relative z-10 flex items-center gap-2 text-lg font-medium"
+                class="relative z-10 flex items-center gap-2 text-lg font-medium text-white"
             >
                 <span
-                    class="bg-primary-foreground/10 ring-primary-foreground/15 flex size-10 items-center justify-center rounded-xl ring-1 backdrop-blur-sm"
+                    class="flex size-10 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/20 backdrop-blur-sm"
                 >
                     <AppLogoIcon class="size-6 fill-current" />
                 </span>
                 {{ name }}
             </Link>
 
-            <div class="text-primary-foreground relative z-10 space-y-7">
+            <div class="relative z-10 space-y-7 text-white">
                 <p class="max-w-sm text-3xl font-semibold text-balance">
                     Control total de uniformes y activos, de punta a punta.
                 </p>
@@ -137,7 +99,7 @@ const beneficios = [
                         class="flex items-center gap-3 text-sm"
                     >
                         <span
-                            class="bg-primary-foreground/10 ring-primary-foreground/15 flex size-8 shrink-0 items-center justify-center rounded-lg ring-1"
+                            class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/20"
                         >
                             <component :is="beneficio.icono" class="size-4" />
                         </span>
@@ -146,7 +108,7 @@ const beneficios = [
                 </ul>
             </div>
 
-            <p class="text-primary-foreground relative z-10 text-xs opacity-70">
+            <p class="relative z-10 text-xs text-white opacity-70">
                 © {{ new Date().getFullYear() }} {{ name }}
             </p>
         </div>

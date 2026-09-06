@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { Link, router } from '@inertiajs/vue3';
 import { LogOut, Settings } from '@lucide/vue';
+import { ref } from 'vue';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import {
     DropdownMenuGroup,
     DropdownMenuItem,
@@ -16,11 +26,16 @@ type Props = {
     user: User;
 };
 
-const handleLogout = () => {
-    router.flushAll();
-};
-
 defineProps<Props>();
+
+// Cerrar sesión pide confirmación explícita: nunca se cierra la sesión de
+// inmediato al primer clic.
+const modalCerrarSesion = ref(false);
+
+function confirmarCerrarSesion(): void {
+    router.flushAll();
+    router.post(logout.url());
+}
 </script>
 
 <template>
@@ -34,21 +49,36 @@ defineProps<Props>();
         <DropdownMenuItem :as-child="true">
             <Link class="block w-full cursor-pointer" :href="edit()" prefetch>
                 <Settings class="mr-2 h-4 w-4" />
-                Settings
+                Configuración
             </Link>
         </DropdownMenuItem>
     </DropdownMenuGroup>
     <DropdownMenuSeparator />
-    <DropdownMenuItem :as-child="true">
-        <Link
-            class="block w-full cursor-pointer"
-            :href="logout()"
-            @click="handleLogout"
-            as="button"
-            data-test="logout-button"
-        >
-            <LogOut class="mr-2 h-4 w-4" />
-            Log out
-        </Link>
+    <DropdownMenuItem
+        class="cursor-pointer"
+        data-test="logout-button"
+        @click="modalCerrarSesion = true"
+    >
+        <LogOut class="mr-2 h-4 w-4" />
+        Cerrar sesión
     </DropdownMenuItem>
+
+    <Dialog v-model:open="modalCerrarSesion">
+        <DialogContent class="sm:max-w-sm">
+            <DialogHeader>
+                <DialogTitle>¿Cerrar sesión?</DialogTitle>
+                <DialogDescription>
+                    ¿Seguro que deseas cerrar tu sesión?
+                </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+                <Button variant="ghost" @click="modalCerrarSesion = false">
+                    Cancelar
+                </Button>
+                <Button variant="destructive" @click="confirmarCerrarSesion">
+                    Cerrar sesión
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
 </template>

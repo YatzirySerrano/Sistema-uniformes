@@ -104,7 +104,16 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                 as-child
             >
                 <a :href="`/acuses/${acuse.id}/firma`" target="_blank">
-                    <FileSignature class="size-4" /> Ver firma
+                    <FileSignature class="size-4" /> Firma de quien recibe
+                </a>
+            </Button>
+            <Button
+                v-if="acuse && permisos.ver_firma"
+                variant="outline"
+                as-child
+            >
+                <a :href="`/acuses/${acuse.id}/firma-operador`" target="_blank">
+                    <FileSignature class="size-4" /> Firma de quien entrega
                 </a>
             </Button>
             <Button

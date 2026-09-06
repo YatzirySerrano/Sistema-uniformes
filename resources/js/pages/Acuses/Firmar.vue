@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { ref } from 'vue';
-import PadFirma from '@/components/entregas/PadFirma.vue';
+import { computed, ref } from 'vue';
+import PadFirma from '@/components/sistema/PadFirma.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -31,17 +31,36 @@ defineOptions({
     },
 });
 
-const pad = ref<InstanceType<typeof PadFirma> | null>(null);
-const vacio = ref(true);
-const form = useForm({ firma: '' });
+const TEXTO_CONSENTIMIENTO =
+    'He leído la información anterior y confirmo que la recibo bajo mi responsabilidad.';
+
+const padColaborador = ref<InstanceType<typeof PadFirma> | null>(null);
+const padOperador = ref<InstanceType<typeof PadFirma> | null>(null);
+const vacioColaborador = ref(true);
+const vacioOperador = ref(true);
+const aceptacion = ref(false);
+
+const form = useForm({ firma: '', firma_operador: '', aceptacion: false });
+
+const puedeConfirmar = computed(
+    () =>
+        !vacioColaborador.value &&
+        !vacioOperador.value &&
+        aceptacion.value &&
+        !form.processing,
+);
 
 function confirmar() {
-    const data = pad.value?.obtenerDataUrl();
-    if (!data) {
-        vacio.value = true;
+    const firmaColaborador = padColaborador.value?.obtenerDataUrl();
+    const firmaOperador = padOperador.value?.obtenerDataUrl();
+
+    if (!firmaColaborador || !firmaOperador || !aceptacion.value) {
         return;
     }
-    form.firma = data;
+
+    form.firma = firmaColaborador;
+    form.firma_operador = firmaOperador;
+    form.aceptacion = aceptacion.value;
     form.post(`/entregas/${props.entrega.id}/firmar`, {
         onError: () => {
             /* los errores se muestran vía toast/InputError */
@@ -110,29 +129,64 @@ function confirmar() {
 
         <Card>
             <CardHeader>
-                <CardTitle class="text-base">Firma de conformidad</CardTitle>
+                <CardTitle class="text-base">Firma de quien recibe</CardTitle>
             </CardHeader>
             <CardContent class="space-y-3">
-                <p class="text-muted-foreground text-sm">
-                    Declaro haber recibido a mi entera satisfacción los activos
-                    descritas.
-                </p>
-                <PadFirma ref="pad" @cambio="(v: boolean) => (vacio = v)" />
+                <label
+                    class="bg-muted/40 flex items-start gap-2 rounded-lg border p-3 text-sm"
+                >
+                    <input
+                        v-model="aceptacion"
+                        type="checkbox"
+                        class="mt-0.5 size-4 shrink-0"
+                    />
+                    <span>{{ TEXTO_CONSENTIMIENTO }}</span>
+                </label>
+                <PadFirma
+                    ref="padColaborador"
+                    @cambio="(v: boolean) => (vacioColaborador = v)"
+                />
                 <p v-if="form.errors.firma" class="text-destructive text-sm">
                     {{ form.errors.firma }}
                 </p>
-                <div class="flex items-center gap-3">
-                    <Button
-                        :disabled="vacio || form.processing"
-                        @click="confirmar"
-                    >
-                        Firmar y confirmar recepción
-                    </Button>
-                    <Button variant="ghost" as-child>
-                        <Link :href="`/entregas/${entrega.id}`">Cancelar</Link>
-                    </Button>
-                </div>
+                <p
+                    v-if="form.errors.aceptacion"
+                    class="text-destructive text-sm"
+                >
+                    {{ form.errors.aceptacion }}
+                </p>
             </CardContent>
         </Card>
+
+        <Card>
+            <CardHeader>
+                <CardTitle class="text-base">Firma de quien entrega</CardTitle>
+            </CardHeader>
+            <CardContent class="space-y-3">
+                <p class="text-muted-foreground text-sm">
+                    Firma del encargado ({{ entrega.encargado }}) que hace
+                    entrega de los activos descritos.
+                </p>
+                <PadFirma
+                    ref="padOperador"
+                    @cambio="(v: boolean) => (vacioOperador = v)"
+                />
+                <p
+                    v-if="form.errors.firma_operador"
+                    class="text-destructive text-sm"
+                >
+                    {{ form.errors.firma_operador }}
+                </p>
+            </CardContent>
+        </Card>
+
+        <div class="flex items-center gap-3">
+            <Button :disabled="!puedeConfirmar" @click="confirmar">
+                Firmar y confirmar recepción
+            </Button>
+            <Button variant="ghost" as-child>
+                <Link :href="`/entregas/${entrega.id}`">Cancelar</Link>
+            </Button>
+        </div>
     </div>
 </template>

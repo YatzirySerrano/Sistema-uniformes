@@ -3,7 +3,11 @@
 namespace App\Soporte;
 
 use App\Enums\CondicionUnidadActivo;
+use App\Enums\EstadoDevolucion;
+use App\Enums\EstadoEntrega;
 use App\Enums\EstadoUnidadActivo;
+use App\Models\Devolucion;
+use App\Models\EntregaUniforme;
 use App\Models\UnidadActivo;
 use BackedEnum;
 use DateTimeInterface;
@@ -147,6 +151,14 @@ class DescripcionAuditoria
             }
         }
 
+        if ($tipoEntidad === EntregaUniforme::class && $clave === 'estado' && is_string($valor)) {
+            return EstadoEntrega::tryFrom($valor)?->etiqueta() ?? $valor;
+        }
+
+        if ($tipoEntidad === Devolucion::class && $clave === 'estado' && is_string($valor)) {
+            return EstadoDevolucion::tryFrom($valor)?->etiqueta() ?? $valor;
+        }
+
         return $this->representar($valor);
     }
 
@@ -212,6 +224,17 @@ class DescripcionAuditoria
     {
         if ($valor === []) {
             return '—';
+        }
+
+        // Una lista de registros anidados (p. ej. `detalles` de una entrega:
+        // cada elemento es a su vez un array con sus propias columnas) no es
+        // legible como JSON crudo en un diff pensado para no-técnicos. Como
+        // el conteo es todo lo que aporta valor aquí (el detalle completo
+        // sigue disponible en "JSON técnico"), se resume en vez de volcarse.
+        if (array_is_list($valor) && collect($valor)->every(fn (mixed $v): bool => is_array($v))) {
+            $total = count($valor);
+
+            return $total === 1 ? '1 elemento' : "{$total} elementos";
         }
 
         $esEscalarPlano = collect($valor)->every(

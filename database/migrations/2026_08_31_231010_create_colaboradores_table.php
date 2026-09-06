@@ -25,6 +25,7 @@ return new class extends Migration
             $table->string('area')->nullable();
             $table->foreignId('area_id')->nullable()->constrained('areas')->cascadeOnUpdate()->nullOnDelete();
             $table->string('correo')->nullable();
+            $table->string('foto_ruta')->nullable();
             $table->boolean('activo')->default(true);
             $table->timestamps();
             $table->softDeletes();

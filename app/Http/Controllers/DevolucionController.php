@@ -174,8 +174,8 @@ class DevolucionController extends Controller
             $datos['notas'] ?? null,
         );
 
-        return to_route('devoluciones.index')->with('toast', [
-            'type' => 'success', 'message' => "Devolución {$devolucion->folio} registrada.",
+        return to_route('devoluciones.firmar', $devolucion)->with('toast', [
+            'type' => 'success', 'message' => "Devolución {$devolucion->folio} registrada. Falta la firma de ambas partes para concretarla.",
         ]);
     }
 }

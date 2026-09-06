@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Enums\EstadoDevolucion;
 use App\Models\Concerns\PerteneceAEmpresa;
 use Database\Factories\DevolucionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
@@ -20,6 +22,8 @@ use Illuminate\Support\Carbon;
  * @property int|null $entrega_uniforme_id
  * @property int $registrada_por
  * @property Carbon $fecha
+ * @property EstadoDevolucion $estado
+ * @property Carbon|null $confirmada_en
  */
 class Devolucion extends Model
 {
@@ -39,12 +43,16 @@ class Devolucion extends Model
         'fecha',
         'motivo',
         'notas',
+        'estado',
+        'confirmada_en',
     ];
 
     protected function casts(): array
     {
         return [
             'fecha' => 'date',
+            'estado' => EstadoDevolucion::class,
+            'confirmada_en' => 'datetime',
         ];
     }
 
@@ -94,5 +102,18 @@ class Devolucion extends Model
     public function detalles(): HasMany
     {
         return $this->hasMany(DetalleDevolucion::class);
+    }
+
+    /**
+     * @return HasOne<AcuseDevolucion, $this>
+     */
+    public function acuse(): HasOne
+    {
+        return $this->hasOne(AcuseDevolucion::class);
+    }
+
+    public function estaConfirmada(): bool
+    {
+        return $this->estado->estaConfirmada();
     }
 }

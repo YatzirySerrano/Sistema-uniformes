@@ -22,6 +22,15 @@ return new class extends Migration
             $table->string('ip_firma', 45)->nullable();
             $table->text('user_agent_firma')->nullable();
             $table->string('ruta_firma');
+            // Segunda firma: quien entrega (el encargado). La primera
+            // (columnas de arriba) siempre es del colaborador titular.
+            $table->string('nombre_firmante_operador_snapshot')->nullable();
+            $table->string('ruta_firma_operador')->nullable();
+            $table->string('hash_firma_operador', 64)->nullable();
+            // Consentimiento explícito del colaborador antes de firmar.
+            $table->boolean('aceptacion_titular')->default(false);
+            $table->text('texto_aceptado_snapshot')->nullable();
+            $table->timestamp('aceptado_en')->nullable();
             $table->string('ruta_pdf')->nullable();
             $table->json('snapshot_entrega');
             $table->string('hash_documento', 64);

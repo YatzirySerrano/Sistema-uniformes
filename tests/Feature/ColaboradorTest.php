@@ -299,3 +299,101 @@ it('la ruta de la foto responde 404 sin foto y 403 fuera de alcance', function (
         ->get("/colaboradores/{$colaboradorSinFoto->id}/foto")
         ->assertForbidden();
 });
+
+/*
+|--------------------------------------------------------------------------
+| Cambiar sólo la foto desde el perfil (endpoint dedicado)
+|--------------------------------------------------------------------------
+*/
+
+it('actualiza la foto desde el endpoint dedicado y borra la anterior sólo tras guardar la nueva', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->post("/colaboradores/{$colaborador->id}/foto", [
+            'foto' => UploadedFile::fake()->image('primera.jpg'),
+        ])
+        ->assertRedirect();
+
+    $rutaAnterior = $colaborador->fresh()->foto_ruta;
+    expect($rutaAnterior)->not->toBeNull();
+    Storage::disk('local')->assertExists($rutaAnterior);
+
+    $this->actingAs($admin)
+        ->post("/colaboradores/{$colaborador->id}/foto", [
+            'foto' => UploadedFile::fake()->image('segunda.jpg'),
+        ])
+        ->assertRedirect();
+
+    $colaborador->refresh();
+    Storage::disk('local')->assertMissing($rutaAnterior);
+    Storage::disk('local')->assertExists($colaborador->foto_ruta);
+});
+
+it('rechaza actualizar la foto con un archivo inválido o fuera de alcance', function () {
+    Storage::fake('local');
+    $empresaA = Empresa::factory()->create();
+    $sucursalA = Sucursal::factory()->for($empresaA)->create();
+    $colaborador = Colaborador::factory()->for($empresaA)->for($sucursalA)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->post("/colaboradores/{$colaborador->id}/foto", [
+            'foto' => UploadedFile::fake()->create('archivo.pdf', 100, 'application/pdf'),
+        ])
+        ->assertSessionHasErrors('foto');
+
+    $empresaB = Empresa::factory()->create();
+    $supervisorAjeno = usuarioCon(RolSistema::Supervisor->value, [$empresaB]);
+
+    $this->actingAs($supervisorAjeno)
+        ->post("/colaboradores/{$colaborador->id}/foto", [
+            'foto' => UploadedFile::fake()->image('nueva.jpg'),
+        ])
+        ->assertForbidden();
+
+    expect($colaborador->fresh()->foto_ruta)->toBeNull();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Perfil: el expediente sólo viaja si el usuario tiene permiso de verlo
+|--------------------------------------------------------------------------
+*/
+
+it('incluye el expediente en el perfil cuando el usuario tiene permiso de verlo', function () {
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get("/colaboradores/{$colaborador->id}")
+        ->assertInertia(fn ($page) => $page
+            ->where('puedeVerExpediente', true)
+            ->where('expediente.id', $colaborador->id)
+            ->has('expediente.categorias')
+            ->has('kpis.documentos'),
+        );
+});
+
+it('omite el expediente del perfil cuando el usuario no tiene permiso de verlo', function () {
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create();
+
+    $encargado = usuarioCon(RolSistema::Encargado->value, [$empresa]);
+    $encargado->revokePermissionTo('colaboradores.expediente-ver');
+    $encargado->roles->first()->revokePermissionTo('colaboradores.expediente-ver');
+
+    $this->actingAs($encargado)
+        ->get("/colaboradores/{$colaborador->id}")
+        ->assertInertia(fn ($page) => $page
+            ->where('puedeVerExpediente', false)
+            ->where('expediente', null),
+        );
+});

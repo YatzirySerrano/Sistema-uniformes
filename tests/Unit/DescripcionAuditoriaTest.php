@@ -1,5 +1,9 @@
 <?php
 
+use App\Enums\EstadoDevolucion;
+use App\Enums\EstadoEntrega;
+use App\Models\Devolucion;
+use App\Models\EntregaUniforme;
 use App\Models\UnidadActivo;
 use App\Soporte\DescripcionAuditoria;
 
@@ -84,7 +88,7 @@ it('no lanza y humaniza un array asociativo simple como pares campo: valor', fun
         ->and($fila['ahora'])->toBe('ver: Sí; editar: Sí');
 });
 
-it('no lanza y humaniza un array anidado como JSON legible', function () {
+it('resume una lista de registros anidados (p. ej. detalles de una entrega) en vez de volcar JSON crudo', function () {
     $servicio = new DescripcionAuditoria;
 
     $cambios = $servicio->cambios(null, null, [
@@ -98,10 +102,49 @@ it('no lanza y humaniza un array anidado como JSON legible', function () {
 
     expect($fila)->not->toBeNull()
         ->and($fila['antes'])->toBe('—')
-        ->and(json_decode($fila['ahora'], true))->toBe([
-            ['activo' => 'Camisa', 'cantidad' => 2],
-            ['activo' => 'Pantalón', 'cantidad' => 1],
-        ]);
+        ->and($fila['ahora'])->toBe('2 elementos');
+});
+
+it('humaniza un array de un solo registro anidado en singular', function () {
+    $servicio = new DescripcionAuditoria;
+
+    $cambios = $servicio->cambios(null, null, [
+        'detalles' => [['activo' => 'Camisa', 'cantidad' => 2]],
+    ]);
+
+    expect(cambio($cambios, 'Detalles')['ahora'])->toBe('1 elemento');
+});
+
+it('humaniza el estado de una EntregaUniforme usando su etiqueta', function () {
+    $servicio = new DescripcionAuditoria;
+
+    $cambios = $servicio->cambios(EntregaUniforme::class, [
+        'estado' => EstadoEntrega::PendienteFirma->value,
+    ], [
+        'estado' => EstadoEntrega::Firmada->value,
+    ]);
+
+    expect(cambio($cambios, 'Estado'))->toBe([
+        'campo' => 'Estado',
+        'antes' => 'Pendiente de firma',
+        'ahora' => 'Firmada',
+    ]);
+});
+
+it('humaniza el estado de una Devolución usando su etiqueta', function () {
+    $servicio = new DescripcionAuditoria;
+
+    $cambios = $servicio->cambios(Devolucion::class, [
+        'estado' => EstadoDevolucion::PendienteFirma->value,
+    ], [
+        'estado' => EstadoDevolucion::Confirmada->value,
+    ]);
+
+    expect(cambio($cambios, 'Estado'))->toBe([
+        'campo' => 'Estado',
+        'antes' => 'Pendiente de firma',
+        'ahora' => 'Confirmada',
+    ]);
 });
 
 it('no lanza cuando antes y después traen estructuras completamente distintas para la misma clave', function () {

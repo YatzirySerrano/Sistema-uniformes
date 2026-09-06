@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ActivoController;
 use App\Http\Controllers\AcuseController;
+use App\Http\Controllers\AcuseDevolucionController;
 use App\Http\Controllers\AlmacenController;
 use App\Http\Controllers\AreaController;
 use App\Http\Controllers\BitacoraController;
@@ -46,6 +47,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/crear', [ColaboradorController::class, 'create'])->name('colaboradores.create');
     Route::post('colaboradores', [ColaboradorController::class, 'store'])->name('colaboradores.store');
     Route::get('colaboradores/{colaborador}/foto', [ColaboradorController::class, 'foto'])->name('colaboradores.foto');
+    Route::post('colaboradores/{colaborador}/foto', [ColaboradorController::class, 'actualizarFoto'])->name('colaboradores.foto.actualizar');
     Route::get('colaboradores/{colaborador}/editar', [ColaboradorController::class, 'edit'])->name('colaboradores.edit');
     Route::put('colaboradores/{colaborador}', [ColaboradorController::class, 'update'])->name('colaboradores.update');
     Route::post('colaboradores/{colaborador}/estado', [ColaboradorController::class, 'toggle'])->name('colaboradores.toggle');
@@ -156,6 +158,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('entregas/{entrega}/firmar', [AcuseController::class, 'confirmar'])->name('acuses.confirmar');
     Route::get('acuses/{acuse}/pdf', [AcuseController::class, 'pdf'])->name('acuses.pdf');
     Route::get('acuses/{acuse}/firma', [AcuseController::class, 'firma'])->name('acuses.firma');
+    Route::get('acuses/{acuse}/firma-operador', [AcuseController::class, 'firmaOperador'])->name('acuses.firma-operador');
     Route::post('acuses/{acuse}/regenerar-pdf', [AcuseController::class, 'regenerarPdf'])->name('acuses.regenerar-pdf');
 
     // Devoluciones
@@ -163,6 +166,12 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('devoluciones/crear', [DevolucionController::class, 'create'])->name('devoluciones.create');
     Route::get('devoluciones/exportar', [DevolucionController::class, 'exportar'])->name('devoluciones.exportar');
     Route::post('devoluciones', [DevolucionController::class, 'store'])->name('devoluciones.store');
+    Route::get('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'firmar'])->name('devoluciones.firmar');
+    Route::post('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'confirmar'])->name('devoluciones.confirmar');
+    Route::get('acuses-devolucion/{acuse}/pdf', [AcuseDevolucionController::class, 'pdf'])->name('acuses-devolucion.pdf');
+    Route::get('acuses-devolucion/{acuse}/firma', [AcuseDevolucionController::class, 'firma'])->name('acuses-devolucion.firma');
+    Route::get('acuses-devolucion/{acuse}/firma-operador', [AcuseDevolucionController::class, 'firmaOperador'])->name('acuses-devolucion.firma-operador');
+    Route::post('acuses-devolucion/{acuse}/regenerar-pdf', [AcuseDevolucionController::class, 'regenerarPdf'])->name('acuses-devolucion.regenerar-pdf');
 
     // Reportes
     Route::get('reportes', [ReporteController::class, 'index'])->name('reportes.index');

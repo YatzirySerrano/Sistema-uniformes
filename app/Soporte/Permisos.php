@@ -142,6 +142,9 @@ final class Permisos
             'permisos' => [
                 'devoluciones.ver' => 'Ver devoluciones',
                 'devoluciones.crear' => 'Registrar devoluciones',
+                'devoluciones.confirmar' => 'Capturar la firma de doble conformidad de una devolución',
+                'devoluciones.ver-pdf' => 'Ver y descargar comprobantes de devolución en PDF',
+                'devoluciones.ver-firma' => 'Ver la imagen de las firmas de devolución',
             ],
         ],
         'reportes' => [
@@ -213,7 +216,7 @@ final class Permisos
                 'conjuntos.ver', 'conjuntos.crear', 'conjuntos.editar',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf', 'acuses.ver-firma',
-                'devoluciones.ver', 'devoluciones.crear',
+                'devoluciones.ver', 'devoluciones.crear', 'devoluciones.confirmar', 'devoluciones.ver-pdf', 'devoluciones.ver-firma',
                 'reportes.ver', 'reportes.exportar',
             ],
             RolSistema::Encargado->value => [
@@ -227,10 +230,11 @@ final class Permisos
                 'conjuntos.ver',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf',
-                'devoluciones.ver', 'devoluciones.crear',
+                'devoluciones.ver', 'devoluciones.crear', 'devoluciones.confirmar', 'devoluciones.ver-pdf',
             ],
             RolSistema::Colaborador->value => [
                 'acuses.firmar',
+                'devoluciones.confirmar',
             ],
         ];
     }

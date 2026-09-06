@@ -2,6 +2,7 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import FormularioColaborador from '@/components/colaboradores/FormularioColaborador.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -12,6 +13,13 @@ import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useInitials } from '@/composables/useInitials';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
@@ -120,12 +128,23 @@ function limpiar() {
 }
 
 // Registrar colaborador conserva la sucursal filtrada actual (llegada desde
-// una sucursal específica o elegida en el filtro) como preselección.
-const hrefNuevoColaborador = computed(() =>
-    sucursalId.value
-        ? `/colaboradores/crear?sucursal_id=${sucursalId.value}`
-        : '/colaboradores/crear',
+// una sucursal específica o elegida en el filtro) como preselección — ahora
+// vía diálogo, ya no navega a una página aparte.
+const sucursalPreseleccionadaNuevo = computed(() =>
+    sucursalSeleccionada.value ? { ...sucursalSeleccionada.value } : null,
 );
+
+const modalNuevo = ref(false);
+const claveFormularioNuevo = ref(0);
+
+function abrirNuevoColaborador(): void {
+    claveFormularioNuevo.value++;
+    modalNuevo.value = true;
+}
+
+function alGuardarNuevo(): void {
+    modalNuevo.value = false;
+}
 
 const vista = useVistaPreferida('colaboradores', 'tabla');
 </script>
@@ -148,10 +167,8 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                         <FileSpreadsheet class="size-4" /> Importar desde Excel
                     </Link>
                 </Button>
-                <Button v-if="puedeCrear" as-child>
-                    <Link :href="hrefNuevoColaborador">
-                        <Plus class="size-4" /> Nuevo colaborador
-                    </Link>
+                <Button v-if="puedeCrear" @click="abrirNuevoColaborador">
+                    <Plus class="size-4" /> Nuevo colaborador
                 </Button>
             </template>
         </EncabezadoPagina>
@@ -204,10 +221,12 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                 <Button variant="outline" size="sm" @click="limpiar"
                     >Limpiar filtros</Button
                 >
-                <Button v-if="puedeCrear" size="sm" as-child>
-                    <Link :href="hrefNuevoColaborador"
-                        >Registrar colaborador</Link
-                    >
+                <Button
+                    v-if="puedeCrear"
+                    size="sm"
+                    @click="abrirNuevoColaborador"
+                >
+                    Registrar colaborador
                 </Button>
             </template>
         </EstadoVacio>
@@ -323,5 +342,26 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
         </div>
 
         <Paginacion :links="colaboradores.links" :total="colaboradores.total" />
+
+        <Dialog v-model:open="modalNuevo">
+            <DialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+                <DialogHeader>
+                    <DialogTitle>Nuevo colaborador</DialogTitle>
+                    <DialogDescription>
+                        El colaborador pertenece a una empresa / razón social y
+                        a una de sus sucursales.
+                    </DialogDescription>
+                </DialogHeader>
+                <FormularioColaborador
+                    :key="claveFormularioNuevo"
+                    :colaborador="null"
+                    :empresas-autorizadas="empresasAutorizadas"
+                    :sucursal-preseleccionada="sucursalPreseleccionadaNuevo"
+                    :empresa-preseleccionada-id="empresaId || null"
+                    @guardado="alGuardarNuevo"
+                    @cancelar="modalNuevo = false"
+                />
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

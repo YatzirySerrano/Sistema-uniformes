@@ -20,6 +20,11 @@ return new class extends Migration
             $table->date('fecha');
             $table->string('motivo')->nullable();
             $table->text('notas')->nullable();
+            // Igual que las entregas: el inventario se restaura al registrar,
+            // pero la devolución no queda "concretada" hasta que ambas partes
+            // firman el acuse (ver `acuses_devolucion`).
+            $table->string('estado', 20)->default('pendiente_firma');
+            $table->timestamp('confirmada_en')->nullable();
             $table->timestamps();
             $table->softDeletes();
 

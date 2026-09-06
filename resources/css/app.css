@@ -192,3 +192,46 @@
         @apply bg-background text-foreground;
     }
 }
+
+/*
+ * Scrollbar delgada y moderna (Firefox + WebKit), basada en los tokens del
+ * sidebar para que se vea correcta en claro/oscuro y con cualquier paleta
+ * configurada por el administrador. Reutilizable en cualquier contenedor con
+ * scroll propio, no sólo el sidebar.
+ */
+@layer utilities {
+    .scrollbar-moderna {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(
+                in srgb,
+                var(--sidebar-foreground) 25%,
+                transparent
+            )
+            transparent;
+    }
+    .scrollbar-moderna::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    .scrollbar-moderna::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    .scrollbar-moderna::-webkit-scrollbar-thumb {
+        background-color: color-mix(
+            in srgb,
+            var(--sidebar-foreground) 20%,
+            transparent
+        );
+        border-radius: 9999px;
+        border: 2px solid transparent;
+        background-clip: padding-box;
+        transition: background-color 0.15s ease;
+    }
+    .scrollbar-moderna::-webkit-scrollbar-thumb:hover {
+        background-color: color-mix(
+            in srgb,
+            var(--sidebar-foreground) 40%,
+            transparent
+        );
+    }
+}

@@ -23,6 +23,8 @@ class ServicioFolios
 
     public const DEVOLUCION = 'devolucion';
 
+    public const ACUSE_DEVOLUCION = 'acuse_devolucion';
+
     /**
      * @var array<string, string>
      */
@@ -30,6 +32,7 @@ class ServicioFolios
         self::ENTREGA => 'ENT',
         self::ACUSE => 'ACU',
         self::DEVOLUCION => 'DEV',
+        self::ACUSE_DEVOLUCION => 'ACD',
     ];
 
     public function siguiente(string $tipo, ?int $anio = null): string

@@ -8,8 +8,10 @@ use App\Models\VersionDocumentoExpediente;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * Sube una nueva versión de un documento existente. Nunca borra ni
@@ -47,35 +49,41 @@ class SubirVersionDocumentoExpediente
             throw new RuntimeException('No fue posible calcular el hash del archivo.');
         }
 
-        return DB::transaction(function () use ($documento, $archivo, $comentario, $usuario, $ruta, $hash, $extension): VersionDocumentoExpediente {
-            $bloqueado = DocumentoExpediente::query()->whereKey($documento->getKey())->lockForUpdate()->firstOrFail();
+        try {
+            return DB::transaction(function () use ($documento, $archivo, $comentario, $usuario, $ruta, $hash, $extension): VersionDocumentoExpediente {
+                $bloqueado = DocumentoExpediente::query()->whereKey($documento->getKey())->lockForUpdate()->firstOrFail();
 
-            $siguienteVersion = (int) VersionDocumentoExpediente::query()
-                ->where('documento_expediente_id', $bloqueado->getKey())
-                ->lockForUpdate()
-                ->max('version') + 1;
+                $siguienteVersion = (int) VersionDocumentoExpediente::query()
+                    ->where('documento_expediente_id', $bloqueado->getKey())
+                    ->lockForUpdate()
+                    ->max('version') + 1;
 
-            $version = VersionDocumentoExpediente::query()->create([
-                'documento_expediente_id' => $bloqueado->getKey(),
-                'version' => $siguienteVersion,
-                'ruta' => $ruta,
-                'nombre_archivo_original' => $archivo->getClientOriginalName(),
-                'mime' => $archivo->getMimeType() ?? $archivo->getClientMimeType(),
-                'extension' => $extension,
-                'peso_bytes' => $archivo->getSize() ?: 0,
-                'hash_sha256' => $hash,
-                'comentario' => $comentario,
-                'subido_por' => $usuario->getKey(),
-            ]);
+                $version = VersionDocumentoExpediente::query()->create([
+                    'documento_expediente_id' => $bloqueado->getKey(),
+                    'version' => $siguienteVersion,
+                    'ruta' => $ruta,
+                    'nombre_archivo_original' => $archivo->getClientOriginalName(),
+                    'mime' => $archivo->getMimeType() ?? $archivo->getClientMimeType(),
+                    'extension' => $extension,
+                    'peso_bytes' => $archivo->getSize() ?: 0,
+                    'hash_sha256' => $hash,
+                    'comentario' => $comentario,
+                    'subido_por' => $usuario->getKey(),
+                ]);
 
-            $this->auditoria->registrar('colaboradores', 'expediente-nueva-version', [
-                'tipo_entidad' => DocumentoExpediente::class,
-                'entidad_id' => $bloqueado->getKey(),
-                'empresa_id' => $documento->colaborador->empresa_id,
-                'descripcion' => 'Nueva versión (v'.$siguienteVersion.') del documento "'.$bloqueado->nombre.'" en el expediente de '.$documento->colaborador->nombre_completo,
-            ]);
+                $this->auditoria->registrar('colaboradores', 'expediente-nueva-version', [
+                    'tipo_entidad' => DocumentoExpediente::class,
+                    'entidad_id' => $bloqueado->getKey(),
+                    'empresa_id' => $documento->colaborador->empresa_id,
+                    'descripcion' => 'Nueva versión (v'.$siguienteVersion.') del documento "'.$bloqueado->nombre.'" en el expediente de '.$documento->colaborador->nombre_completo,
+                ]);
 
-            return $version;
-        });
+                return $version;
+            });
+        } catch (Throwable $e) {
+            Storage::disk('local')->delete($ruta);
+
+            throw $e;
+        }
     }
 }

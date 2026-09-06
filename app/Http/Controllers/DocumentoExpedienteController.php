@@ -12,6 +12,7 @@ use App\Models\Colaborador;
 use App\Models\DocumentoExpediente;
 use App\Models\VersionDocumentoExpediente;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioExpediente;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,17 +29,14 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class DocumentoExpedienteController extends Controller
 {
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioExpediente $expediente,
+    ) {}
 
     public function index(Colaborador $colaborador, Request $request): Response
     {
         $this->authorize('verExpediente', $colaborador);
-
-        $documentos = $colaborador->documentosExpediente()
-            ->with(['versionActual', 'creadoPor:id,name'])
-            ->withCount('versiones')
-            ->orderBy('nombre')
-            ->get();
 
         return Inertia::render('Colaboradores/Expediente', [
             'colaborador' => [
@@ -47,12 +45,7 @@ class DocumentoExpedienteController extends Controller
                 'numero_empleado' => $colaborador->numero_empleado,
                 'foto_url' => $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null,
             ],
-            'categorias' => collect(CategoriaDocumentoExpediente::cases())
-                ->map(fn (CategoriaDocumentoExpediente $c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()])
-                ->all(),
-            'documentos' => $documentos->map(fn (DocumentoExpediente $d): array => $this->documentoPayload($d))->all(),
-            'puedeAdministrar' => $request->user()->can('administrarExpediente', $colaborador),
-            'puedeDescargar' => $request->user()->can('descargarExpediente', $colaborador),
+            ...$this->expediente->payload($colaborador, $request->user()),
         ]);
     }
 
@@ -131,7 +124,9 @@ class DocumentoExpedienteController extends Controller
         abort_if($version === null, 404);
         abort_unless(Storage::disk('local')->exists($version->ruta), 404);
 
-        return Storage::disk('local')->download($version->ruta, $version->nombre_archivo_original);
+        return Storage::disk('local')->download($version->ruta, $version->nombre_archivo_original, [
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     public function ver(Colaborador $colaborador, DocumentoExpediente $documento): StreamedResponse
@@ -141,11 +136,12 @@ class DocumentoExpedienteController extends Controller
 
         $version = $documento->versionActual;
         abort_if($version === null, 404);
-        abort_unless(in_array($version->mime, ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'], true), 415);
+        abort_unless(ServicioExpediente::esPrevisualizable($version->mime), 415);
         abort_unless(Storage::disk('local')->exists($version->ruta), 404);
 
         return Storage::disk('local')->response($version->ruta, $version->nombre_archivo_original, [
             'Content-Type' => $version->mime,
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 
@@ -179,34 +175,9 @@ class DocumentoExpedienteController extends Controller
         abort_unless($version->documento_expediente_id === $documento->id, 404);
         abort_unless(Storage::disk('local')->exists($version->ruta), 404);
 
-        return Storage::disk('local')->download($version->ruta, 'v'.$version->version.'-'.$version->nombre_archivo_original);
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function documentoPayload(DocumentoExpediente $documento): array
-    {
-        $actual = $documento->versionActual;
-
-        return [
-            'id' => $documento->id,
-            'categoria' => $documento->categoria->value,
-            'nombre' => $documento->nombre,
-            'descripcion' => $documento->descripcion,
-            'activo' => $documento->activo,
-            'creado_por' => $documento->creadoPor?->name,
-            'total_versiones' => $documento->versiones_count,
-            'version_actual' => $actual === null ? null : [
-                'version' => $actual->version,
-                'nombre_archivo_original' => $actual->nombre_archivo_original,
-                'mime' => $actual->mime,
-                'extension' => $actual->extension,
-                'peso_bytes' => $actual->peso_bytes,
-                'subido_en' => $actual->created_at?->toIso8601String(),
-                'puede_previsualizar' => str_starts_with($actual->mime, 'image/') || $actual->mime === 'application/pdf',
-            ],
-        ];
+        return Storage::disk('local')->download($version->ruta, 'v'.$version->version.'-'.$version->nombre_archivo_original, [
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     private function verificarPertenece(Colaborador $colaborador, DocumentoExpediente $documento): void

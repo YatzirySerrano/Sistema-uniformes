@@ -4,6 +4,7 @@ namespace App\Acciones;
 
 use App\Enums\EstadoEntrega;
 use App\Excepciones\EntregaYaFirmadaException;
+use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\AcuseRecepcion;
 use App\Models\EntregaUniforme;
 use App\Servicios\ServicioAcusePdf;
@@ -14,16 +15,26 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Throwable;
 
 /**
- * Confirma la recepción de una entrega: valida la firma manuscrita, congela un
- * snapshot inmutable del contenido, almacena la firma en disco privado, crea el
- * acuse con huellas SHA-256 y marca la entrega como firmada. El PDF se
- * materializa tras confirmar la transacción; si su generación falla, el acuse
- * queda válido sin PDF y puede regenerarse.
+ * Confirma la recepción de una entrega: valida AMBAS firmas manuscritas (la
+ * del colaborador que recibe y la del encargado que entrega), exige que el
+ * colaborador haya aceptado explícitamente el texto de responsabilidad,
+ * congela un snapshot inmutable del contenido, almacena las firmas en disco
+ * privado, crea el acuse con huellas SHA-256 y marca la entrega como
+ * firmada. El PDF se materializa tras confirmar la transacción; si su
+ * generación falla, el acuse queda válido sin PDF y puede regenerarse.
  */
 class ConfirmarAcuseRecepcion
 {
+    /**
+     * Texto de responsabilidad vigente. Se congela en `texto_aceptado_snapshot`
+     * en el momento de la firma — cambiar este texto a futuro NO reescribe
+     * acuses ya firmados.
+     */
+    public const TEXTO_CONSENTIMIENTO = 'He leído la información anterior y confirmo que la recibo bajo mi responsabilidad.';
+
     public function __construct(
         private readonly ValidadorFirma $validadorFirma,
         private readonly ServicioFolios $folios,
@@ -33,7 +44,9 @@ class ConfirmarAcuseRecepcion
 
     public function ejecutar(
         EntregaUniforme $entrega,
-        string $firmaBase64,
+        string $firmaColaboradorBase64,
+        string $firmaOperadorBase64,
+        bool $aceptacionTitular,
         ?int $usuarioOperadorId,
         ?string $ip,
         ?string $userAgent,
@@ -46,59 +59,82 @@ class ConfirmarAcuseRecepcion
             throw EntregaYaFirmadaException::yaTieneAcuse();
         }
 
-        $firma = $this->validadorFirma->validar($firmaBase64);
+        if (! $aceptacionTitular) {
+            throw new ExcepcionDeNegocioSimple('Debes confirmar que aceptas la responsabilidad antes de firmar.');
+        }
+
+        $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
+        $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
         $entrega->loadMissing(['detalles', 'colaborador', 'sucursal', 'encargado', 'empresa']);
 
         $snapshot = $this->construirSnapshot($entrega);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-        $hashFirma = hash('sha256', $firma['binario']);
+        $hashFirmaColaborador = hash('sha256', $firmaColaborador['binario']);
+        $hashFirmaOperador = hash('sha256', $firmaOperador['binario']);
 
-        $rutaFirma = sprintf('firmas/%d/%s.png', $entrega->empresa_id, Str::uuid());
-        Storage::disk('local')->put($rutaFirma, $firma['binario']);
+        $rutaFirmaColaborador = sprintf('firmas/%d/%s.png', $entrega->empresa_id, Str::uuid());
+        $rutaFirmaOperador = sprintf('firmas/%d/%s.png', $entrega->empresa_id, Str::uuid());
+        Storage::disk('local')->put($rutaFirmaColaborador, $firmaColaborador['binario']);
+        Storage::disk('local')->put($rutaFirmaOperador, $firmaOperador['binario']);
 
-        $acuse = DB::transaction(function () use ($entrega, $snapshot, $hashDocumento, $hashFirma, $rutaFirma, $usuarioOperadorId, $ip, $userAgent): AcuseRecepcion {
-            // Recarga con bloqueo para evitar doble firma concurrente.
-            $bloqueada = EntregaUniforme::query()->whereKey($entrega->getKey())->lockForUpdate()->first();
+        try {
+            $acuse = DB::transaction(function () use (
+                $entrega, $snapshot, $hashDocumento, $hashFirmaColaborador, $hashFirmaOperador,
+                $rutaFirmaColaborador, $rutaFirmaOperador, $usuarioOperadorId, $ip, $userAgent,
+            ): AcuseRecepcion {
+                // Recarga con bloqueo para evitar doble firma concurrente.
+                $bloqueada = EntregaUniforme::query()->whereKey($entrega->getKey())->lockForUpdate()->first();
 
-            if ($bloqueada === null || $bloqueada->estado !== EstadoEntrega::PendienteFirma) {
-                throw EntregaYaFirmadaException::crear();
-            }
+                if ($bloqueada === null || $bloqueada->estado !== EstadoEntrega::PendienteFirma) {
+                    throw EntregaYaFirmadaException::crear();
+                }
 
-            $acuse = AcuseRecepcion::query()->create([
-                'folio' => $this->folios->siguiente(ServicioFolios::ACUSE),
-                'entrega_uniforme_id' => $entrega->getKey(),
-                'empresa_id' => $entrega->empresa_id,
-                'sucursal_id' => $entrega->sucursal_id,
-                'colaborador_id' => $entrega->colaborador_id,
-                'usuario_id' => $usuarioOperadorId,
-                'nombre_firmante_snapshot' => $entrega->colaborador->nombre_completo,
-                'numero_empleado_snapshot' => $entrega->colaborador->numero_empleado,
-                'firmado_en' => now(),
-                'ip_firma' => $ip,
-                'user_agent_firma' => $userAgent !== null ? substr($userAgent, 0, 1000) : null,
-                'ruta_firma' => $rutaFirma,
-                'ruta_pdf' => null,
-                'snapshot_entrega' => $snapshot,
-                'hash_documento' => $hashDocumento,
-                'hash_firma' => $hashFirma,
-            ]);
+                $acuse = AcuseRecepcion::query()->create([
+                    'folio' => $this->folios->siguiente(ServicioFolios::ACUSE),
+                    'entrega_uniforme_id' => $entrega->getKey(),
+                    'empresa_id' => $entrega->empresa_id,
+                    'sucursal_id' => $entrega->sucursal_id,
+                    'colaborador_id' => $entrega->colaborador_id,
+                    'usuario_id' => $usuarioOperadorId,
+                    'nombre_firmante_snapshot' => $entrega->colaborador->nombre_completo,
+                    'numero_empleado_snapshot' => $entrega->colaborador->numero_empleado,
+                    'firmado_en' => now(),
+                    'ip_firma' => $ip,
+                    'user_agent_firma' => $userAgent !== null ? substr($userAgent, 0, 1000) : null,
+                    'ruta_firma' => $rutaFirmaColaborador,
+                    'nombre_firmante_operador_snapshot' => $entrega->encargado?->name,
+                    'ruta_firma_operador' => $rutaFirmaOperador,
+                    'hash_firma_operador' => $hashFirmaOperador,
+                    'aceptacion_titular' => true,
+                    'texto_aceptado_snapshot' => self::TEXTO_CONSENTIMIENTO,
+                    'aceptado_en' => now(),
+                    'ruta_pdf' => null,
+                    'snapshot_entrega' => $snapshot,
+                    'hash_documento' => $hashDocumento,
+                    'hash_firma' => $hashFirmaColaborador,
+                ]);
 
-            $bloqueada->update([
-                'estado' => EstadoEntrega::Firmada,
-                'confirmada_en' => now(),
-            ]);
+                $bloqueada->update([
+                    'estado' => EstadoEntrega::Firmada,
+                    'confirmada_en' => now(),
+                ]);
 
-            $this->auditoria->registrar('acuses', 'firmar', [
-                'tipo_entidad' => AcuseRecepcion::class,
-                'entidad_id' => $acuse->getKey(),
-                'empresa_id' => $entrega->empresa_id,
-                'sucursal_id' => $entrega->sucursal_id,
-                'descripcion' => 'Acuse '.$acuse->folio.' firmado para la entrega '.$entrega->folio,
-            ]);
+                $this->auditoria->registrar('acuses', 'firmar', [
+                    'tipo_entidad' => AcuseRecepcion::class,
+                    'entidad_id' => $acuse->getKey(),
+                    'empresa_id' => $entrega->empresa_id,
+                    'sucursal_id' => $entrega->sucursal_id,
+                    'descripcion' => 'Acuse '.$acuse->folio.' firmado (colaborador y encargado) para la entrega '.$entrega->folio,
+                ]);
 
-            return $acuse;
-        });
+                return $acuse;
+            });
+        } catch (Throwable $e) {
+            Storage::disk('local')->delete([$rutaFirmaColaborador, $rutaFirmaOperador]);
+
+            throw $e;
+        }
 
         $this->materializarPdf($acuse);
 
@@ -117,7 +153,7 @@ class ConfirmarAcuseRecepcion
         try {
             $ruta = $this->pdf->generar($acuse);
             $acuse->update(['ruta_pdf' => $ruta]);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::error('No se pudo generar el PDF del acuse '.$acuse->folio, ['excepcion' => $e->getMessage()]);
         }
     }
