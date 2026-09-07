@@ -22,6 +22,7 @@ const opciones: { valor: VistaListado; etiqueta: string; icono: unknown }[] = [
         class="bg-muted inline-flex items-center gap-0.5 rounded-md p-0.5"
         role="group"
         aria-label="Cambiar tipo de vista del listado"
+        data-tour="selector-vista"
     >
         <button
             v-for="opcion in opciones"

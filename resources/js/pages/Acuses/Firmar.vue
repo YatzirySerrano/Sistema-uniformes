@@ -78,7 +78,7 @@ function confirmar() {
             :descripcion="`Entrega ${entrega.folio} · ${entrega.empresa}`"
         />
 
-        <Card>
+        <Card data-tour="resumen-firma">
             <CardHeader>
                 <CardTitle class="text-base"
                     >Revisa el contenido antes de firmar</CardTitle
@@ -127,7 +127,7 @@ function confirmar() {
             </CardContent>
         </Card>
 
-        <Card>
+        <Card data-tour="firma-colaborador">
             <CardHeader>
                 <CardTitle class="text-base">Firma de quien recibe</CardTitle>
             </CardHeader>
@@ -158,7 +158,7 @@ function confirmar() {
             </CardContent>
         </Card>
 
-        <Card>
+        <Card data-tour="firma-operador">
             <CardHeader>
                 <CardTitle class="text-base">Firma de quien entrega</CardTitle>
             </CardHeader>
@@ -181,7 +181,14 @@ function confirmar() {
         </Card>
 
         <div class="flex items-center gap-3">
-            <Button :disabled="!puedeConfirmar" @click="confirmar">
+            <Button
+                :disabled="!puedeConfirmar"
+                :class="
+                    puedeConfirmar &&
+                    'shadow-success/30 shadow-lg transition-shadow duration-300'
+                "
+                @click="confirmar"
+            >
                 Firmar y confirmar recepción
             </Button>
             <Button variant="ghost" as-child>

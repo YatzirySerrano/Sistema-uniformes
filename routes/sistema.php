@@ -29,9 +29,14 @@ use App\Http\Controllers\TipoActivoController;
 use App\Http\Controllers\UnidadActivoController;
 use App\Http\Controllers\UsuarioController;
 use Illuminate\Support\Facades\Route;
+use Inertia\Inertia;
 
 Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): void {
     Route::get('dashboard', [PanelController::class, 'index'])->name('dashboard');
+
+    // Guía ilustrada del sistema: estática, sin datos de negocio, disponible
+    // para cualquier usuario autenticado sin importar su rol.
+    Route::get('ayuda', fn () => Inertia::render('Ayuda/Index'))->name('ayuda');
 
     // Portal del colaborador
     Route::get('portal/mis-entregas', [PortalController::class, 'index'])->name('portal.mis-entregas');

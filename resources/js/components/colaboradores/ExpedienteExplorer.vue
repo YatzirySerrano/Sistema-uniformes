@@ -51,6 +51,7 @@ export type VersionActual = {
     extension: string;
     peso_bytes: number;
     subido_en: string;
+    subido_por: string | null;
     puede_previsualizar: boolean;
 };
 
@@ -78,6 +79,10 @@ const props = defineProps<{
     documentos: Documento[];
     puedeAdministrar: boolean;
     puedeDescargar: boolean;
+    /** Sólo quien puede administrar el expediente puede ver documentos eliminados. */
+    puedeVerEliminados?: boolean;
+    /** Filtro de estado aplicado por el backend: 'activos' | 'eliminados' | 'todos'. */
+    filtroEstado?: string;
     /** Permite ocultar el encabezado con foto/nombre cuando ya se muestra en la página contenedora (perfil). */
     mostrarEncabezado?: boolean;
 }>();
@@ -88,6 +93,20 @@ const carpetaActiva = ref<string | null>(null);
 const buscar = ref('');
 const orden = ref<string>('reciente');
 const vista = useVistaPreferida('expediente-documentos', 'cards');
+
+const opcionesEstado = [
+    { valor: 'activos', etiqueta: 'Activos' },
+    { valor: 'eliminados', etiqueta: 'Eliminados' },
+    { valor: 'todos', etiqueta: 'Todos' },
+];
+const filtroEstadoActual = ref(props.filtroEstado ?? 'activos');
+
+function cambiarFiltroEstado(valor: string | number | null): void {
+    if (typeof valor !== 'string') return;
+
+    filtroEstadoActual.value = valor;
+    router.reload({ data: { estado: valor } });
+}
 
 const opcionesOrden = [
     { valor: 'reciente', etiqueta: 'Más reciente' },
@@ -112,7 +131,7 @@ function coincide(d: Documento, termino: string): boolean {
     return (
         d.nombre.toLowerCase().includes(termino) ||
         (d.descripcion ?? '').toLowerCase().includes(termino) ||
-        (d.creado_por ?? '').toLowerCase().includes(termino) ||
+        (d.version_actual?.subido_por ?? '').toLowerCase().includes(termino) ||
         (d.version_actual?.nombre_archivo_original ?? '')
             .toLowerCase()
             .includes(termino)
@@ -363,6 +382,13 @@ function abrirHistorial(documento: Documento): void {
             <div v-if="!mostrandoCarpetas" class="w-full sm:w-48">
                 <SelectSimple v-model="orden" :opciones="opcionesOrden" />
             </div>
+            <div v-if="puedeVerEliminados" class="w-full sm:w-40">
+                <SelectSimple
+                    :model-value="filtroEstadoActual"
+                    :opciones="opcionesEstado"
+                    @update:model-value="cambiarFiltroEstado"
+                />
+            </div>
             <SelectorVista v-model="vista" />
             <Button v-if="puedeAdministrar" size="sm" @click="abrirSubir">
                 <Plus class="size-4" /> Subir documento
@@ -510,7 +536,7 @@ function abrirHistorial(documento: Documento): void {
                         Sin archivo disponible.
                     </p>
                     <p class="text-muted-foreground text-xs">
-                        Subido por: {{ d.creado_por ?? '—' }}
+                        Subido por: {{ d.version_actual?.subido_por ?? '—' }}
                     </p>
 
                     <div class="mt-1 flex flex-wrap items-center gap-1.5">
@@ -609,7 +635,8 @@ function abrirHistorial(documento: Documento): void {
                                     ? formatoFecha(d.version_actual.subido_en)
                                     : '—'
                             }}
-                            · Subido por {{ d.creado_por ?? '—' }}
+                            · Subido por
+                            {{ d.version_actual?.subido_por ?? '—' }}
                         </p>
                     </div>
                     <Badge v-if="!d.activo" variant="secondary"

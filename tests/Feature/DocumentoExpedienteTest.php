@@ -45,6 +45,33 @@ it('sube el primer documento del expediente y crea la versión 1', function () {
     Storage::disk('local')->assertExists($documento->versionActual->ruta);
 });
 
+it('"Subido por" refleja a quien subió la VERSIÓN ACTUAL, no a quien creó el documento originalmente', function () {
+    $colaborador = $this->datos['colaboradorA'];
+    $usuarioA = usuarioCon(RolSistema::Administrador->value);
+    $usuarioA->update(['name' => 'Ana Administradora']);
+    $usuarioB = usuarioCon(RolSistema::Administrador->value);
+    $usuarioB->update(['name' => 'Carlos Directivo']);
+
+    $this->actingAs($usuarioA)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Identificacion->value,
+        'nombre' => 'INE',
+        'archivo' => UploadedFile::fake()->create('ine-v1.pdf', 100, 'application/pdf'),
+    ]);
+    $documento = DocumentoExpediente::query()->where('nombre', 'INE')->firstOrFail();
+
+    $this->actingAs($usuarioB)->post("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/version", [
+        'archivo' => UploadedFile::fake()->create('ine-v2.pdf', 100, 'application/pdf'),
+    ]);
+
+    $respuesta = $this->actingAs($usuarioA)->get("/colaboradores/{$colaborador->id}/expediente");
+
+    $respuesta->assertInertia(fn ($page) => $page
+        ->component('Colaboradores/Expediente')
+        ->where('documentos.0.creado_por', 'Ana Administradora')
+        ->where('documentos.0.version_actual.subido_por', 'Carlos Directivo')
+    );
+});
+
 it('sube una nueva versión, incrementa el número y conserva la anterior', function () {
     $colaborador = $this->datos['colaboradorA'];
 
@@ -280,6 +307,156 @@ it('borra el archivo huérfano si falla la base de datos al subir una nueva vers
     // Sólo debe quedar el archivo de la versión 1 original; el de la versión
     // fallida no debe persistir en disco.
     expect(Storage::disk('local')->allFiles("expedientes/{$colaborador->id}/otros"))->toHaveCount(1);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Documentos eliminados: no viajan a un usuario sin permiso de administrar
+|--------------------------------------------------------------------------
+*/
+
+it('el payload del expediente NO incluye documentos eliminados para un usuario sin permiso de administrar', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Documento visible',
+        'archivo' => UploadedFile::fake()->create('a.pdf', 50, 'application/pdf'),
+    ]);
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Documento eliminado',
+        'archivo' => UploadedFile::fake()->create('b.pdf', 50, 'application/pdf'),
+    ]);
+    DocumentoExpediente::query()->where('nombre', 'Documento eliminado')->firstOrFail()->update(['activo' => false]);
+
+    $normal = usuarioCon(RolSistema::Encargado->value, [$this->datos['empresaA']]);
+    $normal->givePermissionTo('colaboradores.expediente-descargar');
+
+    // Aunque intente forzar el filtro por querystring, sin el permiso se ignora.
+    $this->actingAs($normal)
+        ->get("/colaboradores/{$colaborador->id}/expediente?estado=eliminados")
+        ->assertInertia(fn ($page) => $page
+            ->component('Colaboradores/Expediente')
+            ->where('puedeVerEliminados', false)
+            ->where('filtroEstado', 'activos')
+            ->where('documentos', fn ($documentos) => collect($documentos)->pluck('nombre')->all() === ['Documento visible'])
+        );
+});
+
+it('el payload del expediente SÍ puede incluir documentos eliminados para un usuario que puede administrar', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Documento eliminado',
+        'archivo' => UploadedFile::fake()->create('b.pdf', 50, 'application/pdf'),
+    ]);
+    DocumentoExpediente::query()->where('nombre', 'Documento eliminado')->firstOrFail()->update(['activo' => false]);
+
+    $this->actingAs($this->admin)
+        ->get("/colaboradores/{$colaborador->id}/expediente?estado=eliminados")
+        ->assertInertia(fn ($page) => $page
+            ->component('Colaboradores/Expediente')
+            ->where('puedeVerEliminados', true)
+            ->where('filtroEstado', 'eliminados')
+            ->where('documentos', fn ($documentos) => collect($documentos)->pluck('nombre')->all() === ['Documento eliminado'])
+        );
+});
+
+it('un usuario normal recibe 404 al intentar previsualizar o descargar un documento eliminado por URL directa', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Notas',
+        'archivo' => UploadedFile::fake()->create('notas.txt', 5, 'text/plain'),
+    ]);
+    $documento = DocumentoExpediente::query()->where('nombre', 'Notas')->firstOrFail();
+    $documento->update(['activo' => false]);
+
+    $normal = usuarioCon(RolSistema::Encargado->value, [$this->datos['empresaA']]);
+    $normal->givePermissionTo('colaboradores.expediente-descargar');
+
+    $this->actingAs($normal)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/ver")
+        ->assertNotFound();
+
+    $this->actingAs($normal)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/descargar")
+        ->assertNotFound();
+});
+
+it('un administrador SÍ puede previsualizar y descargar un documento eliminado', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Notas',
+        'archivo' => UploadedFile::fake()->create('notas.txt', 5, 'text/plain'),
+    ]);
+    $documento = DocumentoExpediente::query()->where('nombre', 'Notas')->firstOrFail();
+    $documento->update(['activo' => false]);
+
+    $this->actingAs($this->admin)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/ver")
+        ->assertOk();
+
+    $this->actingAs($this->admin)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/descargar")
+        ->assertOk();
+});
+
+it('descargarVersion respeta la misma regla de visibilidad para documentos eliminados', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Con versiones',
+        'archivo' => UploadedFile::fake()->create('a.pdf', 50, 'application/pdf'),
+    ]);
+    $documento = DocumentoExpediente::query()->where('nombre', 'Con versiones')->firstOrFail();
+    $version = $documento->versionActual;
+    $documento->update(['activo' => false]);
+
+    $normal = usuarioCon(RolSistema::Encargado->value, [$this->datos['empresaA']]);
+    $normal->givePermissionTo('colaboradores.expediente-descargar');
+
+    $this->actingAs($normal)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/versiones/{$version->id}/descargar")
+        ->assertNotFound();
+
+    $this->actingAs($this->admin)
+        ->get("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/versiones/{$version->id}/descargar")
+        ->assertOk();
+});
+
+it('al restaurar un documento vuelve a aparecer en el payload normal (activos)', function () {
+    $colaborador = $this->datos['colaboradorA'];
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Otros->value,
+        'nombre' => 'Documento restaurable',
+        'archivo' => UploadedFile::fake()->create('c.pdf', 50, 'application/pdf'),
+    ]);
+    $documento = DocumentoExpediente::query()->where('nombre', 'Documento restaurable')->firstOrFail();
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/estado"); // elimina
+
+    $normal = usuarioCon(RolSistema::Encargado->value, [$this->datos['empresaA']]);
+    $normal->givePermissionTo('colaboradores.expediente-descargar');
+
+    $this->actingAs($normal)
+        ->get("/colaboradores/{$colaborador->id}/expediente")
+        ->assertInertia(fn ($page) => $page->where('documentos', []));
+
+    $this->actingAs($this->admin)->post("/colaboradores/{$colaborador->id}/expediente/{$documento->id}/estado"); // restaura
+
+    $this->actingAs($normal)
+        ->get("/colaboradores/{$colaborador->id}/expediente")
+        ->assertInertia(fn ($page) => $page
+            ->where('documentos', fn ($documentos) => collect($documentos)->pluck('nombre')->all() === ['Documento restaurable'])
+        );
 });
 
 /*

@@ -259,7 +259,7 @@ class ColaboradorController extends Controller
                 'nombre_completo' => $colaborador->nombre_completo,
                 'numero_empleado' => $colaborador->numero_empleado,
                 'foto_url' => $fotoUrl,
-                ...$servicioExpediente->payload($colaborador, $usuario),
+                ...$servicioExpediente->payload($colaborador, $usuario, (string) $request->query('estado', 'activos')),
             ] : null,
         ]);
     }

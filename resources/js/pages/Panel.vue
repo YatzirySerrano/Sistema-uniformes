@@ -74,6 +74,7 @@ type Resumen = {
         colaborador: string;
         sucursal: string;
         empresa: string | null;
+        estado: string;
         estado_etiqueta: string;
         fecha_entrega: string;
     }[];
@@ -371,6 +372,72 @@ const seriesAlmacen = computed(() => [
     },
 ]);
 
+function varianteEstadoEntrega(
+    estado: string,
+): 'warning' | 'success' | 'destructive' | 'outline' {
+    switch (estado) {
+        case 'pendiente_firma':
+            return 'warning';
+        case 'firmada':
+            return 'success';
+        case 'anulada':
+            return 'destructive';
+        default:
+            return 'outline';
+    }
+}
+
+type SeveridadStock = {
+    variante: 'destructive' | 'warning';
+    etiqueta: string;
+    colorBarra: string;
+    porcentaje: number;
+};
+
+function severidadStock(cantidad: number, minimo: number): SeveridadStock {
+    const base = Math.max(1, minimo);
+    const ratio = cantidad / base;
+    const porcentaje = Math.min(100, Math.max(0, ratio * 100));
+
+    if (cantidad <= 0) {
+        return {
+            variante: 'destructive',
+            etiqueta: 'Sin existencias',
+            colorBarra: 'bg-destructive',
+            porcentaje,
+        };
+    }
+    if (ratio <= 0.34) {
+        return {
+            variante: 'destructive',
+            etiqueta: 'Stock crítico',
+            colorBarra: 'bg-destructive',
+            porcentaje,
+        };
+    }
+    if (ratio <= 0.7) {
+        return {
+            variante: 'warning',
+            etiqueta: 'Stock bajo',
+            colorBarra: 'bg-warning',
+            porcentaje,
+        };
+    }
+    return {
+        variante: 'warning',
+        etiqueta: 'Cerca del mínimo',
+        colorBarra: 'bg-warning/60',
+        porcentaje,
+    };
+}
+
+const stockBajoConSeveridad = computed(() =>
+    props.resumen.stock_bajo_detalle.map((s) => ({
+        ...s,
+        severidad: severidadStock(s.cantidad, s.minimo),
+    })),
+);
+
 const categoriaEsDonut = computed(
     () =>
         props.resumen.series.stock_por_categoria.length > 0 &&
@@ -407,14 +474,17 @@ const seriesCategoria = computed(() =>
         class="flex h-full flex-1 flex-col gap-4 p-4 transition-opacity duration-150"
         :class="cargando && 'opacity-60'"
     >
-        <div class="flex flex-wrap items-center gap-2">
+        <div
+            class="flex flex-wrap items-center gap-2"
+            data-tour="titulo-dashboard"
+        >
             <div>
                 <h1 class="text-xl font-semibold tracking-tight">Dashboard</h1>
                 <p class="text-muted-foreground text-sm">{{ subtitulo }}</p>
             </div>
         </div>
 
-        <Card>
+        <Card data-tour="filtros-dashboard">
             <CardContent class="pt-6">
                 <div
                     class="grid grid-cols-1 items-end gap-3 md:grid-cols-2 xl:grid-cols-5"
@@ -497,7 +567,10 @@ const seriesCategoria = computed(() =>
             (unidades por estado, existencias por almacén…) sigue disponible
             en `resumen.series` para las gráficas de abajo.
         -->
-        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+            data-tour="kpis-dashboard"
+        >
             <TarjetaKpi
                 titulo="Colaboradores activos"
                 :valor="resumen.kpis.colaboradores_activos"
@@ -571,7 +644,7 @@ const seriesCategoria = computed(() =>
             />
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-2">
+        <div class="grid gap-4 lg:grid-cols-2" data-tour="graficas-dashboard">
             <Card
                 class="hover:border-primary/20 transition-[border-color,box-shadow] duration-200 hover:shadow-sm"
             >
@@ -710,75 +783,151 @@ const seriesCategoria = computed(() =>
         </div>
 
         <div class="grid gap-4 lg:grid-cols-2">
-            <Card>
-                <CardHeader>
-                    <CardTitle class="text-base">Entregas recientes</CardTitle>
+            <Card data-tour="entregas-recientes-dashboard">
+                <CardHeader
+                    class="flex flex-row items-start justify-between gap-2"
+                >
+                    <div>
+                        <CardTitle class="text-base"
+                            >Entregas recientes</CardTitle
+                        >
+                        <CardDescription
+                            >Últimos movimientos de entrega</CardDescription
+                        >
+                    </div>
+                    <Badge
+                        v-if="resumen.entregas_recientes.length"
+                        variant="secondary"
+                        class="shrink-0 font-normal"
+                        >{{ resumen.entregas_recientes.length }}
+                        {{
+                            resumen.entregas_recientes.length === 1
+                                ? 'entrega'
+                                : 'entregas'
+                        }}</Badge
+                    >
                 </CardHeader>
-                <CardContent class="space-y-1.5">
+                <CardContent class="space-y-1">
                     <EstadoVacio
                         v-if="!resumen.entregas_recientes.length"
                         titulo="Sin entregas recientes"
-                        descripcion="No hay entregas registradas en este periodo."
+                        descripcion="No hubo entregas recientes para los filtros seleccionados."
                         class="py-6"
                     />
                     <Link
                         v-for="e in resumen.entregas_recientes"
                         :key="e.id"
                         :href="`/entregas/${e.id}`"
-                        class="hover:bg-muted/40 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm transition-colors"
+                        class="hover:bg-muted/30 hover:border-primary/15 flex items-start gap-3 rounded-lg border border-transparent px-3 py-2.5 transition-colors duration-150 hover:shadow-sm"
                     >
-                        <span class="min-w-0">
-                            <span class="font-medium">{{ e.folio }}</span>
+                        <span
+                            class="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-full"
+                        >
+                            <ClipboardList class="size-4" />
+                        </span>
+                        <span class="min-w-0 flex-1 space-y-0.5">
+                            <span
+                                class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
+                            >
+                                <span class="truncate text-sm font-medium">{{
+                                    e.folio
+                                }}</span>
+                                <Badge
+                                    :variant="varianteEstadoEntrega(e.estado)"
+                                    class="shrink-0 font-normal"
+                                    >{{ e.estado_etiqueta }}</Badge
+                                >
+                            </span>
+                            <span
+                                class="text-muted-foreground block truncate text-xs"
+                                >{{ e.colaborador }}</span
+                            >
                             <span
                                 class="text-muted-foreground block truncate text-xs"
                             >
-                                {{ e.colaborador }} · {{ e.sucursal }}
+                                {{ e.sucursal }}
                                 <template
                                     v-if="!filtros.empresa_id && e.empresa"
                                 >
                                     · {{ e.empresa }}</template
                                 >
+                                · {{ formatoFechaCorta(e.fecha_entrega) }}
                             </span>
                         </span>
-                        <Badge variant="secondary" class="shrink-0">{{
-                            e.estado_etiqueta
-                        }}</Badge>
                     </Link>
                 </CardContent>
             </Card>
 
-            <Card>
-                <CardHeader class="flex flex-row items-center justify-between">
-                    <CardTitle class="text-base">Existencias bajas</CardTitle>
-                    <AlertTriangle
-                        v-if="resumen.stock_bajo_detalle.length"
-                        class="size-4 text-amber-500"
-                    />
-                </CardHeader>
-                <CardContent class="space-y-3">
-                    <EstadoVacio
-                        v-if="!resumen.stock_bajo_detalle.length"
-                        titulo="Sin alertas de inventario"
-                        descripcion="Ningún activo está por debajo de su mínimo en este alcance."
-                        class="py-6"
-                    />
-                    <div
-                        v-for="(s, i) in resumen.stock_bajo_detalle"
-                        :key="i"
-                        class="hover:bg-muted/40 -mx-1 space-y-1.5 rounded-md px-1 py-1.5 transition-colors"
-                    >
-                        <div
-                            class="flex items-center justify-between gap-2 text-sm"
+            <Card data-tour="existencias-bajas-dashboard">
+                <CardHeader
+                    class="flex flex-row items-start justify-between gap-2"
+                >
+                    <div>
+                        <CardTitle class="text-base"
+                            >Existencias bajas</CardTitle
                         >
-                            <span class="min-w-0 truncate">
-                                {{ s.activo }}
+                        <CardDescription
+                            >Activos que requieren reposición</CardDescription
+                        >
+                    </div>
+                    <Badge
+                        v-if="stockBajoConSeveridad.length"
+                        variant="secondary"
+                        class="shrink-0 font-normal"
+                        >{{ stockBajoConSeveridad.length }} con stock
+                        bajo</Badge
+                    >
+                </CardHeader>
+                <CardContent class="space-y-1">
+                    <EstadoVacio
+                        v-if="!stockBajoConSeveridad.length"
+                        titulo="Todo el inventario está por encima de sus mínimos"
+                        descripcion="Ningún activo requiere reposición en este alcance."
+                        class="py-6"
+                    >
+                        <template #icono>
+                            <CheckCircle2 class="text-success size-6" />
+                        </template>
+                    </EstadoVacio>
+                    <div
+                        v-for="(s, i) in stockBajoConSeveridad"
+                        :key="i"
+                        class="hover:bg-muted/30 hover:border-primary/15 flex flex-col gap-2 rounded-lg border border-transparent px-3 py-2.5 transition-colors duration-150 hover:shadow-sm"
+                    >
+                        <div class="flex items-start gap-3">
+                            <span
+                                class="flex size-9 shrink-0 items-center justify-center rounded-full"
+                                :class="
+                                    s.severidad.variante === 'destructive'
+                                        ? 'bg-destructive/10 text-destructive'
+                                        : 'bg-warning/10 text-warning'
+                                "
+                            >
+                                <AlertTriangle class="size-4" />
+                            </span>
+                            <div class="min-w-0 flex-1 space-y-0.5">
                                 <span
-                                    v-if="s.talla"
-                                    class="text-muted-foreground"
-                                    >· {{ s.talla }}</span
+                                    class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
                                 >
-                                <span
-                                    class="text-muted-foreground block truncate text-xs"
+                                    <span
+                                        class="truncate text-sm font-medium"
+                                        >{{ s.activo }}</span
+                                    >
+                                    <span
+                                        class="shrink-0 text-sm font-medium tabular-nums"
+                                        >{{ formatoNumero(s.cantidad) }}/{{
+                                            formatoNumero(s.minimo)
+                                        }}</span
+                                    >
+                                </span>
+                                <p
+                                    v-if="s.talla"
+                                    class="text-muted-foreground truncate text-xs"
+                                >
+                                    Variante {{ s.talla }}
+                                </p>
+                                <p
+                                    class="text-muted-foreground truncate text-xs"
                                 >
                                     {{ s.almacen }}
                                     <template
@@ -786,22 +935,26 @@ const seriesCategoria = computed(() =>
                                     >
                                         · {{ s.empresa }}</template
                                     >
-                                </span>
-                            </span>
-                            <span class="shrink-0 font-medium tabular-nums"
-                                >{{ formatoNumero(s.cantidad) }} /
-                                {{ formatoNumero(s.minimo) }}</span
-                            >
+                                </p>
+                            </div>
                         </div>
-                        <div
-                            class="bg-muted h-1.5 w-full overflow-hidden rounded-full"
-                        >
+                        <div class="min-w-0 space-y-1 pl-12">
                             <div
-                                class="h-full rounded-full bg-amber-500"
-                                :style="{
-                                    width: `${Math.min(100, (s.cantidad / Math.max(1, s.minimo)) * 100)}%`,
-                                }"
-                            />
+                                class="bg-muted h-1.5 w-full overflow-hidden rounded-full"
+                            >
+                                <div
+                                    class="h-full rounded-full transition-all"
+                                    :class="s.severidad.colorBarra"
+                                    :style="{
+                                        width: `${s.severidad.porcentaje}%`,
+                                    }"
+                                />
+                            </div>
+                            <Badge
+                                :variant="s.severidad.variante"
+                                class="font-normal"
+                                >{{ s.severidad.etiqueta }}</Badge
+                            >
                         </div>
                     </div>
                 </CardContent>

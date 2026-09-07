@@ -21,6 +21,8 @@ defineProps<{
     documentos: Documento[];
     puedeAdministrar: boolean;
     puedeDescargar: boolean;
+    puedeVerEliminados: boolean;
+    filtroEstado: string;
 }>();
 
 defineOptions({
@@ -49,6 +51,8 @@ defineOptions({
             :documentos="documentos"
             :puede-administrar="puedeAdministrar"
             :puede-descargar="puedeDescargar"
+            :puede-ver-eliminados="puedeVerEliminados"
+            :filtro-estado="filtroEstado"
             mostrar-encabezado
         />
     </div>

@@ -5,7 +5,7 @@ namespace App\Acciones;
 use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
-use App\Enums\TipoMovimiento;
+use App\Enums\EstadoUnidadActivo;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
@@ -13,28 +13,27 @@ use App\Models\Devolucion;
 use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\UnidadActivo;
-use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
-use App\Servicios\ServicioInventario;
-use App\Servicios\ServicioUnidadesActivo;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Registra la devolución de activos, SIEMPRE originada desde una entrega
- * concreta. Cada renglón referencia el renglón real de esa entrega
- * (`DetalleEntrega`) — nunca activo/talla sueltos — así se deriva la
- * cantidad ya devuelta y se rechaza devolver más de lo pendiente. Las
- * unidades de seguimiento individual vuelven a almacén según la condición
- * resultante (`ServicioUnidadesActivo::devolver`); Perdido/Robado nunca pasa
- * por aquí (son incidencias, `App\Acciones\MarcarUnidadIncidencia`).
+ * Registra la SOLICITUD de devolución (`estado=pendiente_firma`), SIEMPRE
+ * originada desde una entrega concreta. Cada renglón referencia el renglón
+ * real de esa entrega (`DetalleEntrega`) — nunca activo/talla sueltos — así se
+ * deriva la cantidad ya devuelta y se rechaza devolver más de lo pendiente.
+ *
+ * IMPORTANTE: esta acción NO mueve inventario ni cambia el estado de ninguna
+ * `UnidadActivo` — sólo dejaría el activo "disponible" antes de que la
+ * devolución quede jurídicamente concretada (ambas firmas + consentimiento).
+ * El reingreso real (saldo o unidad) se aplica en `ConfirmarAcuseDevolucion`,
+ * dentro de la misma transacción protegida que crea el acuse. Perdido/Robado
+ * nunca pasa por aquí (son incidencias, `App\Acciones\MarcarUnidadIncidencia`).
  */
 class RegistrarDevolucion
 {
     public function __construct(
-        private readonly ServicioInventario $inventario,
-        private readonly ServicioUnidadesActivo $unidadesActivo,
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
         private readonly ResolverAlmacenOperativo $resolverAlmacen,
@@ -78,11 +77,11 @@ class RegistrarDevolucion
             ]);
 
             foreach ($activos as $item) {
-                $this->procesarLineaCantidad($devolucion, $entrega, $almacen->getKey(), $registradaPor, $item);
+                $this->procesarLineaCantidad($devolucion, $entrega, $item);
             }
 
             foreach ($unidades as $item) {
-                $this->procesarLineaUnidad($devolucion, $entrega, $almacen->getKey(), $registradaPor, $item);
+                $this->procesarLineaUnidad($devolucion, $entrega, $item);
             }
 
             $this->auditoria->registrar('devoluciones', 'crear', [
@@ -90,7 +89,7 @@ class RegistrarDevolucion
                 'entidad_id' => $devolucion->getKey(),
                 'empresa_id' => $entrega->empresa_id,
                 'sucursal_id' => $entrega->sucursal_id,
-                'descripcion' => 'Devolución '.$devolucion->folio.' registrada para la entrega '.$entrega->folio,
+                'descripcion' => 'Devolución '.$devolucion->folio.' registrada para la entrega '.$entrega->folio.'; pendiente de firma para concretarse.',
             ]);
 
             return $devolucion->load('detalles');
@@ -100,7 +99,7 @@ class RegistrarDevolucion
     /**
      * @param  array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}  $item
      */
-    private function procesarLineaCantidad(Devolucion $devolucion, EntregaUniforme $entrega, int $almacenId, ?int $registradaPor, array $item): void
+    private function procesarLineaCantidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): void
     {
         $detalleOriginal = DetalleEntrega::query()
             ->where('entrega_uniforme_id', $entrega->getKey())
@@ -129,38 +128,24 @@ class RegistrarDevolucion
         }
 
         $condicion = CondicionDevolucion::from($item['condicion']);
-        $reingresa = $condicion->reingresaInventario();
 
+        // El reingreso real al saldo se aplica al confirmar el acuse
+        // (`ConfirmarAcuseDevolucion`); aquí sólo se deja constancia de que
+        // esta línea reingresará cuando eso ocurra.
         $devolucion->detalles()->create([
             'detalle_entrega_id' => $detalleOriginal->getKey(),
             'activo_id' => $detalleOriginal->activo_id,
             'talla_id' => $detalleOriginal->talla_id,
             'cantidad' => $cantidad,
             'condicion' => $condicion,
-            'reingresa_inventario' => $reingresa,
+            'reingresa_inventario' => $condicion->reingresaInventario(),
         ]);
-
-        if ($reingresa) {
-            $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-                empresaId: $entrega->empresa_id,
-                almacenId: $almacenId,
-                activoId: $detalleOriginal->activo_id,
-                tallaId: $detalleOriginal->talla_id,
-                tipo: TipoMovimiento::Devolucion,
-                cantidad: $cantidad,
-                realizadoPor: $registradaPor,
-                referenciaTipo: Devolucion::class,
-                referenciaId: $devolucion->getKey(),
-                motivo: 'Devolución '.$devolucion->folio,
-                sucursalId: $entrega->sucursal_id,
-            ));
-        }
     }
 
     /**
      * @param  array{detalle_entrega_id: int|string, condicion: string}  $item
      */
-    private function procesarLineaUnidad(Devolucion $devolucion, EntregaUniforme $entrega, int $almacenId, ?int $registradaPor, array $item): void
+    private function procesarLineaUnidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): void
     {
         $detalleOriginal = DetalleEntrega::query()
             ->where('entrega_uniforme_id', $entrega->getKey())
@@ -168,8 +153,24 @@ class RegistrarDevolucion
             ->findOr((int) $item['detalle_entrega_id'], fn () => throw new ExcepcionDeNegocioSimple('Esa unidad no pertenece a esta entrega.'));
 
         $unidad = UnidadActivo::query()->whereKey($detalleOriginal->unidad_activo_id)->lockForUpdate()->firstOrFail();
+
+        if ($unidad->estado !== EstadoUnidadActivo::Asignada) {
+            throw new ExcepcionDeNegocioSimple('Esta unidad no está asignada actualmente; no se puede devolver.');
+        }
+
         $condicion = CondicionUnidadActivo::from($item['condicion']);
 
+        if ($condicion->esIncidencia()) {
+            throw new ExcepcionDeNegocioSimple('Pérdida o robo no se registra como devolución. Usa "Reportar incidencia" desde la unidad.');
+        }
+
+        if ($this->unidadTieneDevolucionPendiente($unidad->getKey())) {
+            throw new ExcepcionDeNegocioSimple('Esta unidad ya tiene una devolución pendiente de firma.');
+        }
+
+        // La unidad permanece "Asignada" (no disponible para reasignación)
+        // hasta que la devolución se confirme con ambas firmas: el cambio de
+        // estado/almacén real ocurre en `ConfirmarAcuseDevolucion`.
         $devolucion->detalles()->create([
             'detalle_entrega_id' => $detalleOriginal->getKey(),
             'activo_id' => $detalleOriginal->activo_id,
@@ -179,16 +180,13 @@ class RegistrarDevolucion
             'condicion_unidad' => $condicion,
             'reingresa_inventario' => false,
         ]);
+    }
 
-        $this->unidadesActivo->devolver(
-            $unidad,
-            $condicion,
-            $almacenId,
-            $registradaPor,
-            Devolucion::class,
-            $devolucion->getKey(),
-            'Devolución '.$devolucion->folio,
-            $entrega->sucursal_id,
-        );
+    private function unidadTieneDevolucionPendiente(int $unidadId): bool
+    {
+        return DetalleDevolucion::query()
+            ->where('unidad_activo_id', $unidadId)
+            ->whereHas('devolucion', fn ($q) => $q->where('estado', EstadoDevolucion::PendienteFirma))
+            ->exists();
     }
 }

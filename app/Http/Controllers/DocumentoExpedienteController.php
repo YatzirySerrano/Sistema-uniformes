@@ -10,6 +10,7 @@ use App\Http\Requests\Colaboradores\GuardarDocumentoExpedienteRequest;
 use App\Http\Requests\Colaboradores\SubirVersionDocumentoRequest;
 use App\Models\Colaborador;
 use App\Models\DocumentoExpediente;
+use App\Models\User;
 use App\Models\VersionDocumentoExpediente;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioExpediente;
@@ -45,7 +46,7 @@ class DocumentoExpedienteController extends Controller
                 'numero_empleado' => $colaborador->numero_empleado,
                 'foto_url' => $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null,
             ],
-            ...$this->expediente->payload($colaborador, $request->user()),
+            ...$this->expediente->payload($colaborador, $request->user(), (string) $request->query('estado', 'activos')),
         ]);
     }
 
@@ -115,10 +116,11 @@ class DocumentoExpedienteController extends Controller
         return back()->with('toast', ['type' => 'success', 'message' => $documento->activo ? 'Documento restaurado.' : 'Documento eliminado.']);
     }
 
-    public function descargar(Colaborador $colaborador, DocumentoExpediente $documento): StreamedResponse
+    public function descargar(Request $request, Colaborador $colaborador, DocumentoExpediente $documento): StreamedResponse
     {
         $this->authorize('descargarExpediente', $colaborador);
         $this->verificarPertenece($colaborador, $documento);
+        $this->verificarVisible($colaborador, $documento, $request->user());
 
         $version = $documento->versionActual;
         abort_if($version === null, 404);
@@ -129,10 +131,11 @@ class DocumentoExpedienteController extends Controller
         ]);
     }
 
-    public function ver(Colaborador $colaborador, DocumentoExpediente $documento): StreamedResponse
+    public function ver(Request $request, Colaborador $colaborador, DocumentoExpediente $documento): StreamedResponse
     {
         $this->authorize('descargarExpediente', $colaborador);
         $this->verificarPertenece($colaborador, $documento);
+        $this->verificarVisible($colaborador, $documento, $request->user());
 
         $version = $documento->versionActual;
         abort_if($version === null, 404);
@@ -168,10 +171,11 @@ class DocumentoExpedienteController extends Controller
         return response()->json(['versiones' => $versiones]);
     }
 
-    public function descargarVersion(Colaborador $colaborador, DocumentoExpediente $documento, VersionDocumentoExpediente $version): StreamedResponse
+    public function descargarVersion(Request $request, Colaborador $colaborador, DocumentoExpediente $documento, VersionDocumentoExpediente $version): StreamedResponse
     {
         $this->authorize('descargarExpediente', $colaborador);
         $this->verificarPertenece($colaborador, $documento);
+        $this->verificarVisible($colaborador, $documento, $request->user());
         abort_unless($version->documento_expediente_id === $documento->id, 404);
         abort_unless(Storage::disk('local')->exists($version->ruta), 404);
 
@@ -183,5 +187,16 @@ class DocumentoExpedienteController extends Controller
     private function verificarPertenece(Colaborador $colaborador, DocumentoExpediente $documento): void
     {
         abort_unless($documento->colaborador_id === $colaborador->id, 404);
+    }
+
+    /**
+     * Un documento eliminado (`activo = false`) es contenido archivado: sólo
+     * quien puede administrar el expediente (y por tanto restaurarlo) puede
+     * seguir viéndolo/descargándolo. Para cualquier otro usuario se comporta
+     * como si no existiera (404), igual que `verificarPertenece()`.
+     */
+    private function verificarVisible(Colaborador $colaborador, DocumentoExpediente $documento, User $usuario): void
+    {
+        abort_if(! $documento->activo && ! $usuario->can('administrarExpediente', $colaborador), 404);
     }
 }

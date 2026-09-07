@@ -6,6 +6,7 @@ import {
     Building,
     QrCode,
     ClipboardList,
+    Compass,
     FileBarChart2,
     LayoutGrid,
     Network,
@@ -210,6 +211,12 @@ const grupos = computed<Grupo[]>(() =>
                     icono: Package,
                     visible: true,
                 },
+                {
+                    titulo: 'Ayuda',
+                    href: '/ayuda',
+                    icono: Compass,
+                    visible: true,
+                },
             ],
         },
     ]
@@ -219,7 +226,7 @@ const grupos = computed<Grupo[]>(() =>
 </script>
 
 <template>
-    <Sidebar collapsible="icon" variant="inset">
+    <Sidebar collapsible="icon" variant="inset" data-tour="menu-lateral">
         <SidebarHeader>
             <SidebarMenu>
                 <SidebarMenuItem>
@@ -261,7 +268,7 @@ const grupos = computed<Grupo[]>(() =>
             </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter>
+        <SidebarFooter data-tour="menu-usuario">
             <NavUser />
         </SidebarFooter>
     </Sidebar>

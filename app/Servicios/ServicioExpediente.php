@@ -32,15 +32,38 @@ class ServicioExpediente
     }
 
     /**
+     * Estados de filtro válidos para un usuario que SÍ puede ver eliminados.
+     * Cualquier otro valor (incluyendo el de un usuario sin ese permiso) cae
+     * en "activos" — los documentos eliminados son contenido archivado, nunca
+     * el default.
+     *
+     * @var list<string>
+     */
+    private const FILTROS_CON_ELIMINADOS = ['eliminados', 'todos'];
+
+    /**
      * @return array<string, mixed>
      */
-    public function payload(Colaborador $colaborador, User $usuario): array
+    public function payload(Colaborador $colaborador, User $usuario, string $filtroEstado = 'activos'): array
     {
-        $documentos = $colaborador->documentosExpediente()
-            ->with(['versionActual', 'creadoPor:id,name'])
+        $puedeVerEliminados = $usuario->can('administrarExpediente', $colaborador);
+        $filtroAplicado = $puedeVerEliminados && in_array($filtroEstado, self::FILTROS_CON_ELIMINADOS, true)
+            ? $filtroEstado
+            : 'activos';
+
+        $consulta = $colaborador->documentosExpediente()
+            ->with(['versionActual.subidoPor:id,name', 'creadoPor:id,name'])
             ->withCount('versiones')
-            ->orderBy('nombre')
-            ->get();
+            ->orderBy('nombre');
+
+        if ($filtroAplicado === 'activos') {
+            $consulta->activos();
+        } elseif ($filtroAplicado === 'eliminados') {
+            $consulta->where('activo', false);
+        }
+        // 'todos': sin filtro adicional por estado.
+
+        $documentos = $consulta->get();
 
         return [
             'categorias' => collect(CategoriaDocumentoExpediente::cases())
@@ -49,6 +72,8 @@ class ServicioExpediente
             'documentos' => $documentos->map(fn (DocumentoExpediente $d): array => $this->documentoPayload($d))->all(),
             'puedeAdministrar' => $usuario->can('administrarExpediente', $colaborador),
             'puedeDescargar' => $usuario->can('descargarExpediente', $colaborador),
+            'puedeVerEliminados' => $puedeVerEliminados,
+            'filtroEstado' => $filtroAplicado,
         ];
     }
 
@@ -74,6 +99,7 @@ class ServicioExpediente
                 'extension' => $actual->extension,
                 'peso_bytes' => $actual->peso_bytes,
                 'subido_en' => $actual->created_at?->toIso8601String(),
+                'subido_por' => $actual->subidoPor?->name,
                 'puede_previsualizar' => self::esPrevisualizable($actual->mime),
             ],
         ];

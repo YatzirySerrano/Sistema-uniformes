@@ -3,12 +3,18 @@
 namespace App\Acciones;
 
 use App\Enums\EstadoDevolucion;
+use App\Enums\EstadoUnidadActivo;
+use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\AcuseDevolucion;
 use App\Models\Devolucion;
+use App\Models\UnidadActivo;
+use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioAcuseDevolucionPdf;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
+use App\Servicios\ServicioInventario;
+use App\Servicios\ServicioUnidadesActivo;
 use App\Soporte\ValidadorFirma;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -21,10 +27,14 @@ use Throwable;
  * el encargado que recibe la devolución), exige que el encargado haya
  * aceptado explícitamente el texto de responsabilidad, congela un snapshot
  * inmutable, almacena las firmas en disco privado, crea el acuse con huellas
- * SHA-256 y marca la devolución como confirmada. El inventario YA se
- * restauró al registrar la devolución (`RegistrarDevolucion`) — confirmar no
- * mueve stock, sólo cierra el ciclo documental/legal, igual criterio que
- * usan las Entregas.
+ * SHA-256 y marca la devolución como confirmada.
+ *
+ * IMPORTANTE: el inventario NO se toca al registrar la devolución
+ * (`RegistrarDevolucion` sólo deja constancia de lo que se devolverá). El
+ * reingreso real (saldo por cantidad o `UnidadActivo` individual) se aplica
+ * AQUÍ, dentro de la misma transacción protegida que crea el acuse — la
+ * devolución sólo se considera concretada cuando ambas firmas, el
+ * consentimiento y el movimiento de inventario existen atómicamente.
  */
 class ConfirmarAcuseDevolucion
 {
@@ -39,6 +49,8 @@ class ConfirmarAcuseDevolucion
         private readonly ServicioFolios $folios,
         private readonly ServicioAcuseDevolucionPdf $pdf,
         private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioInventario $inventario,
+        private readonly ServicioUnidadesActivo $unidadesActivo,
     ) {}
 
     public function ejecutar(
@@ -87,6 +99,66 @@ class ConfirmarAcuseDevolucion
 
                 if ($bloqueada === null || $bloqueada->estado !== EstadoDevolucion::PendienteFirma) {
                     throw new ExcepcionDeNegocioSimple('Esta devolución ya fue confirmada.');
+                }
+
+                $detalles = $bloqueada->detalles()->get();
+
+                // Revalida que la devolución siga siendo coherente: una unidad
+                // pudo haber sido reportada como pérdida/robo (incidencia)
+                // mientras la devolución esperaba firma. Se bloquean todas las
+                // unidades ANTES de aplicar cualquier movimiento para que, si
+                // alguna ya no es válida, no quede ningún reingreso a medias.
+                $unidadesBloqueadas = [];
+                foreach ($detalles as $detalle) {
+                    if ($detalle->unidad_activo_id === null) {
+                        continue;
+                    }
+
+                    $unidad = UnidadActivo::query()->whereKey($detalle->unidad_activo_id)->lockForUpdate()->first();
+
+                    if (! $unidad instanceof UnidadActivo || $unidad->estado !== EstadoUnidadActivo::Asignada) {
+                        throw new ExcepcionDeNegocioSimple('Una de las unidades de esta devolución ya no está asignada (pudo reportarse como pérdida/robo); no se puede confirmar.');
+                    }
+
+                    $unidadesBloqueadas[$detalle->getKey()] = $unidad;
+                }
+
+                // Reingreso real al inventario: sólo hasta este punto, con
+                // ambas firmas y el consentimiento ya validados, el activo
+                // vuelve a estar disponible.
+                foreach ($detalles as $detalle) {
+                    if ($detalle->unidad_activo_id !== null) {
+                        $this->unidadesActivo->devolver(
+                            $unidadesBloqueadas[$detalle->getKey()],
+                            $detalle->condicion_unidad,
+                            $bloqueada->almacen_id,
+                            $usuarioOperadorId,
+                            Devolucion::class,
+                            $bloqueada->getKey(),
+                            'Devolución '.$bloqueada->folio.' confirmada',
+                            $bloqueada->sucursal_id,
+                        );
+
+                        continue;
+                    }
+
+                    if (! $detalle->reingresa_inventario) {
+                        continue;
+                    }
+
+                    $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
+                        empresaId: $bloqueada->empresa_id,
+                        almacenId: $bloqueada->almacen_id,
+                        activoId: $detalle->activo_id,
+                        tallaId: $detalle->talla_id,
+                        tipo: TipoMovimiento::Devolucion,
+                        cantidad: $detalle->cantidad,
+                        realizadoPor: $usuarioOperadorId,
+                        referenciaTipo: Devolucion::class,
+                        referenciaId: $bloqueada->getKey(),
+                        motivo: 'Devolución '.$bloqueada->folio.' confirmada',
+                        sucursalId: $bloqueada->sucursal_id,
+                    ));
                 }
 
                 $acuse = AcuseDevolucion::query()->create([

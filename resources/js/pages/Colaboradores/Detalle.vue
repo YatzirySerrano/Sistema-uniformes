@@ -50,6 +50,8 @@ type ExpedientePayload = {
     documentos: Documento[];
     puedeAdministrar: boolean;
     puedeDescargar: boolean;
+    puedeVerEliminados: boolean;
+    filtroEstado: string;
 };
 
 const props = defineProps<{
@@ -354,6 +356,8 @@ const modalFoto = ref(false);
                 :documentos="expediente.documentos"
                 :puede-administrar="expediente.puedeAdministrar"
                 :puede-descargar="expediente.puedeDescargar"
+                :puede-ver-eliminados="expediente.puedeVerEliminados"
+                :filtro-estado="expediente.filtroEstado"
             />
         </section>
 
