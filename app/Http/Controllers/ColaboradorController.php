@@ -8,9 +8,12 @@ use App\Http\Requests\Colaboradores\ActualizarFotoColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Area;
 use App\Models\Colaborador;
+use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioExpediente;
+use App\Soporte\ContextoExportacion;
+use App\Soporte\GeneradorNumeroEmpleado;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -35,7 +38,10 @@ class ColaboradorController extends Controller
     use ConEmpresa;
     use ExportaListado;
 
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly GeneradorNumeroEmpleado $generadorNumeroEmpleado,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -82,6 +88,7 @@ class ColaboradorController extends Controller
         $this->authorize('viewAny', Colaborador::class);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $colaboradores = $this->consultaColaboradores($request, $filtros)->get();
 
         $filas = $colaboradores->map(fn (Colaborador $c): array => [
@@ -95,9 +102,22 @@ class ColaboradorController extends Controller
             $c->activo ? 'Activo' : 'Inactivo',
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Sucursal' => ($filtros['sucursal_id'] ?? null) ? Sucursal::query()->find((int) $filtros['sucursal_id'])?->nombre : null,
+            'Área' => ($filtros['area_id'] ?? null) ? Area::query()->find((int) $filtros['area_id'])?->nombre : null,
+            'Estado' => match ($filtros['estado'] ?? null) {
+                'activos' => 'Activos',
+                'inactivos' => 'Eliminados',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Colaboradores', $empresaFiltro, $filtrosHumanos, $colaboradores->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'N.º empleado', 'Nombre completo', 'Puesto', 'Área', 'Correo', 'Empresa', 'Sucursal', 'Estado',
-        ], 'Colaboradores');
+        ], $contexto);
     }
 
     /**
@@ -180,9 +200,15 @@ class ColaboradorController extends Controller
         $rutaFoto = $request->hasFile('foto') ? $this->guardarFotoSegura($request->file('foto'), $empresa->id) : null;
 
         try {
+            // El número de empleado NUNCA lo manda el cliente: se reserva
+            // atómicamente aquí, dentro del alta real (la previsualización
+            // del formulario no es autoritativa).
+            $numeroEmpleado = $this->generadorNumeroEmpleado->generar($empresa, (string) $request->validated('nombre_completo'));
+
             $colaborador = Colaborador::query()->create([
                 ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
                 'empresa_id' => $empresa->id,
+                'numero_empleado' => $numeroEmpleado,
                 'area' => $this->nombreAreaEspejo($empresa->id, $request->integer('area_id') ?: null, $request->input('area')),
                 'foto_ruta' => $rutaFoto,
                 'activo' => $request->boolean('activo', true),
@@ -201,7 +227,10 @@ class ColaboradorController extends Controller
             'valores_nuevos' => $colaborador->toArray(),
         ]);
 
-        return to_route('colaboradores.index')->with('toast', ['type' => 'success', 'message' => 'Colaborador registrado.']);
+        return to_route('colaboradores.index')->with('toast', [
+            'type' => 'success',
+            'message' => "Colaborador registrado correctamente. Número de empleado: {$colaborador->numero_empleado}.",
+        ]);
     }
 
     public function edit(Request $request, Colaborador $colaborador): Response
@@ -422,6 +451,36 @@ class ColaboradorController extends Controller
             ]);
 
         return response()->json(['colaboradores' => $colaboradores]);
+    }
+
+    /**
+     * Previsualización NO autoritativa del número de empleado que se
+     * asignaría al guardar (iniciales del nombre + siguiente consecutivo
+     * aproximado, sin reservarlo). El backend vuelve a calcular y reservar
+     * el valor definitivo, atómicamente, dentro de `store()` — si otro
+     * usuario se adelanta, el consecutivo real puede diferir de esta vista
+     * previa.
+     */
+    public function siguienteNumeroEmpleado(Request $request): JsonResponse
+    {
+        $this->authorize('create', Colaborador::class);
+
+        $empresaId = (int) $request->query('empresa_id');
+        $nombreCompleto = trim((string) $request->query('nombre_completo', ''));
+
+        if ($empresaId <= 0 || $nombreCompleto === '') {
+            return response()->json(['numero_empleado' => null]);
+        }
+
+        $empresa = Empresa::query()->find($empresaId);
+
+        if ($empresa === null || ! $request->user()->puedeAccederEmpresa($empresa)) {
+            return response()->json(['numero_empleado' => null]);
+        }
+
+        return response()->json([
+            'numero_empleado' => $this->generadorNumeroEmpleado->previsualizar($empresa, $nombreCompleto),
+        ]);
     }
 
     /**

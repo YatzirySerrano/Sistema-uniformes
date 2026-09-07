@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Controllers\Concerns\ReactivaSuspendidos;
+use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Empresas\GuardarEmpresaRequest;
 use App\Models\Activo;
 use App\Models\Area;
@@ -14,6 +16,8 @@ use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Soporte\ContextoExportacion;
+use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -29,12 +33,15 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 class EmpresaController extends Controller
 {
     use ConEmpresa;
+    use CreaConCodigoUnico;
     use ExportaListado;
     use ReactivaSuspendidos;
+    use ReconciliaSecuenciaCodigo;
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
         private readonly ServicioCascadaSuspension $cascada,
+        private readonly ServicioGeneradorCodigosGlobal $codigosGlobales,
     ) {}
 
     public function index(Request $request): Response
@@ -101,10 +108,33 @@ class EmpresaController extends Controller
             (int) $e->colaboradores_activos_count,
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Estado' => match ($filtros['estado'] ?? null) {
+                'activas' => 'Activas',
+                'inactivas' => 'Eliminadas',
+                default => null,
+            },
+            'Sucursales' => match ($filtros['sucursales'] ?? null) {
+                'con' => 'Con sucursales activas',
+                'sin' => 'Sin sucursales activas',
+                default => null,
+            },
+            'Colaboradores' => match ($filtros['colaboradores'] ?? null) {
+                'con' => 'Con colaboradores activos',
+                'sin' => 'Sin colaboradores activos',
+                default => null,
+            },
+        ]);
+
+        // El listado de Empresas nunca está acotado a UNA empresa: siempre
+        // es "Todas las empresas" (con o sin filtros de estado/relaciones).
+        $contexto = new ContextoExportacion('Empresas', null, $filtrosHumanos, $empresas->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Nombre comercial', 'Razón social', 'RFC', 'Teléfono', 'Correo',
             'Dirección', 'Estado', 'Sucursales activas', 'Colaboradores activos',
-        ], 'Empresas');
+        ], $contexto);
     }
 
     /**
@@ -236,10 +266,20 @@ class EmpresaController extends Controller
 
     public function store(GuardarEmpresaRequest $request): RedirectResponse
     {
-        $datos = $request->validated();
-        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($datos['nombre_comercial']);
+        $datos = $request->safe()->except('logo');
 
-        $empresa = Empresa::query()->create($datos);
+        $empresa = $this->crearConCodigoUnico(fn () => Empresa::query()->create([
+            ...$datos,
+            'codigo' => $this->generarCodigo($datos['nombre_comercial']),
+        ]));
+
+        if ($request->hasFile('logo')) {
+            $rutaLogo = $request->file('logo')->store("empresas/{$empresa->id}", 'public');
+
+            if ($rutaLogo !== false) {
+                $empresa->update(['logo_ruta' => $rutaLogo]);
+            }
+        }
 
         $this->auditoria->registrar('empresas', 'crear', [
             'empresa_id' => $empresa->id,
@@ -259,10 +299,19 @@ class EmpresaController extends Controller
         $empresa->fill($request->safe()->except('logo'));
 
         if ($request->hasFile('logo')) {
-            if ($empresa->logo_ruta) {
-                Storage::disk('public')->delete($empresa->logo_ruta);
+            $rutaAnterior = $empresa->logo_ruta;
+            $rutaNueva = $request->file('logo')->store("empresas/{$empresa->id}", 'public');
+
+            // Guarda primero el archivo nuevo y sólo borra el anterior si el
+            // nuevo se almacenó correctamente: evita perder el logo vigente
+            // si el disco falla a mitad de la subida.
+            if ($rutaNueva !== false) {
+                $empresa->logo_ruta = $rutaNueva;
+
+                if ($rutaAnterior) {
+                    Storage::disk('public')->delete($rutaAnterior);
+                }
             }
-            $empresa->logo_ruta = $request->file('logo')->store("empresas/{$empresa->id}", 'public') ?: null;
         }
 
         $empresa->save();
@@ -326,16 +375,60 @@ class EmpresaController extends Controller
             : null;
     }
 
+    /**
+     * Genera un código legible a partir del nombre comercial ("ALIMEN01").
+     * Cada prefijo derivado del nombre tiene su propio contador dentro de
+     * `secuencias_codigo_globales` (ámbito "empresa:{base}"), reutilizando
+     * la misma arquitectura race-safe que Almacén/Sucursal/Área/Activo —
+     * nunca el `while (...exists())` anterior, que dos altas concurrentes
+     * con nombres parecidos podían calcular igual. Reconcilia contra el
+     * mayor sufijo REALMENTE existente con ese prefijo en cada llamada.
+     */
     private function generarCodigo(string $nombre): string
+    {
+        [$base, $ambito] = $this->baseYAmbitoCodigo($nombre);
+
+        $siguiente = $this->codigosGlobales->siguienteNumero($ambito, fn (): int => $this->maximoSufijo(
+            Empresa::query()->where('codigo', 'like', $base.'%')->pluck('codigo'),
+            $base,
+        ));
+
+        return $base.str_pad((string) $siguiente, 2, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Previsualización NO autoritativa del siguiente código de empresa para
+     * el nombre comercial indicado — no reserva el consecutivo. El valor
+     * definitivo se calcula de nuevo, atómicamente, en `store()`.
+     */
+    public function siguienteCodigo(Request $request): JsonResponse
+    {
+        $this->authorize('create', Empresa::class);
+
+        $nombre = trim((string) $request->query('nombre_comercial', ''));
+
+        if ($nombre === '') {
+            return response()->json(['codigo' => null]);
+        }
+
+        [$base, $ambito] = $this->baseYAmbitoCodigo($nombre);
+
+        $siguiente = $this->codigosGlobales->siguienteNumeroAproximado($ambito, fn (): int => $this->maximoSufijo(
+            Empresa::query()->where('codigo', 'like', $base.'%')->pluck('codigo'),
+            $base,
+        ));
+
+        return response()->json(['codigo' => $base.str_pad((string) $siguiente, 2, '0', STR_PAD_LEFT)]);
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function baseYAmbitoCodigo(string $nombre): array
     {
         $base = Str::upper(Str::slug(Str::substr($nombre, 0, 6), ''));
         $base = $base !== '' ? $base : 'EMP';
-        $n = 1;
-        do {
-            $codigo = $base.str_pad((string) $n, 2, '0', STR_PAD_LEFT);
-            $n++;
-        } while (Empresa::query()->where('codigo', $codigo)->exists());
 
-        return $codigo;
+        return [$base, 'empresa:'.$base];
     }
 }

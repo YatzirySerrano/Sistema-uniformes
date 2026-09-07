@@ -6,7 +6,6 @@ use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Models\Almacen;
 use App\Soporte\AccesoEmpresa;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -30,11 +29,8 @@ class GuardarAlmacenRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $codigo = $this->limpiar($this->input('codigo'));
-
         $this->merge([
             'nombre' => $this->limpiar($this->input('nombre')),
-            'codigo' => $codigo === null ? null : Str::upper($codigo),
             'descripcion' => $this->limpiar($this->input('descripcion')),
             'direccion' => $this->limpiar($this->input('direccion')),
             'telefono' => $this->soloDigitos($this->input('telefono')),
@@ -47,19 +43,15 @@ class GuardarAlmacenRequest extends FormRequest
      */
     public function rules(): array
     {
-        $almacen = $this->route('almacen');
-        $almacenId = $almacen instanceof Almacen ? $almacen->getKey() : null;
-
         $empresasAutorizadas = $this->user() === null
             ? []
             : app(AccesoEmpresa::class)->idsAutorizados($this->user())->all();
 
         return [
             'nombre' => ['required', 'string', 'max:255'],
-            'codigo' => [
-                'nullable', 'string', 'max:60', 'alpha_dash',
-                Rule::unique('almacenes', 'codigo')->ignore($almacenId),
-            ],
+            // `codigo` NUNCA se valida como entrada del usuario: lo genera
+            // el backend (autogenerado, ALM-0001…) en el alta y es
+            // inmutable en edición.
             'descripcion' => ['nullable', 'string', 'max:1000'],
             'direccion' => ['nullable', 'string', 'max:255'],
             'telefono' => ['nullable', 'string', 'digits:10'],
@@ -83,9 +75,6 @@ class GuardarAlmacenRequest extends FormRequest
         return [
             'nombre.required' => 'El nombre del almacén es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
-            'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',
-            'codigo.unique' => 'Ese código de almacén ya existe.',
-            'codigo.max' => 'El código no puede superar los 60 caracteres.',
             'direccion.max' => 'La dirección no puede superar los 255 caracteres.',
             'telefono.digits' => 'El teléfono debe contener 10 dígitos.',
             'correo.email' => 'El correo no tiene un formato válido.',

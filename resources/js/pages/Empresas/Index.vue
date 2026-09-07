@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import {
+    ArrowUpRight,
     Building2,
     Pencil,
     Plus,
     Search,
     SquareArrowOutUpRight,
+    Store,
+    Users,
     X,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
@@ -34,6 +37,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { usePermisos } from '@/composables/usePermisos';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { Paginado } from '@/types/sistema';
 
@@ -124,11 +128,13 @@ const filtrosEstado = computed<
 // --- Modal de alta / edición ---
 const modalAbierto = ref(false);
 const empresaEnEdicion = ref<EmpresaEditable | null>(null);
+const logoUrlEnEdicion = ref<string | null>(null);
 // Fuerza el remontaje del formulario para reiniciar su estado en cada apertura.
 const claveFormulario = ref(0);
 
 function nuevaEmpresa(): void {
     empresaEnEdicion.value = null;
+    logoUrlEnEdicion.value = null;
     claveFormulario.value++;
     modalAbierto.value = true;
 }
@@ -145,6 +151,7 @@ function editarEmpresa(empresa: EmpresaTarjeta): void {
         direccion: empresa.direccion,
         activa: empresa.activa,
     };
+    logoUrlEnEdicion.value = empresa.logo_url;
     claveFormulario.value++;
     modalAbierto.value = true;
 }
@@ -159,6 +166,19 @@ function verDetalle(empresa: EmpresaTarjeta): void {
 }
 
 const vista = useVistaPreferida('empresas');
+
+// --- KPIs clicables (Sucursales activas / Colaboradores activos) ---
+const { puede } = usePermisos();
+const puedeVerSucursales = computed(() => puede('sucursales.ver'));
+const puedeVerColaboradores = computed(() => puede('colaboradores.ver'));
+
+function hrefSucursalesDe(empresa: EmpresaTarjeta): string {
+    return `/sucursales?empresa_id=${empresa.id}`;
+}
+
+function hrefColaboradoresDe(empresa: EmpresaTarjeta): string {
+    return `/colaboradores?empresa_id=${empresa.id}`;
+}
 </script>
 
 <template>
@@ -354,10 +374,44 @@ const vista = useVistaPreferida('empresas');
                     </p>
 
                     <div class="grid grid-cols-2 gap-2 text-sm">
-                        <div class="bg-muted/40 rounded-lg px-3 py-2">
+                        <div
+                            v-if="puedeVerSucursales"
+                            role="button"
+                            tabindex="0"
+                            :aria-label="`Ver sucursales activas de ${e.nombre_comercial} en el módulo Sucursales`"
+                            class="bg-muted/40 hover:bg-muted/70 hover:border-primary/20 focus-visible:ring-ring rounded-lg border border-transparent px-3 py-2 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                            @click.stop="router.visit(hrefSucursalesDe(e))"
+                            @keydown.enter.stop="
+                                router.visit(hrefSucursalesDe(e))
+                            "
+                            @keydown.space.stop.prevent="
+                                router.visit(hrefSucursalesDe(e))
+                            "
+                        >
                             <p
                                 class="text-muted-foreground flex items-center gap-1 text-xs"
                             >
+                                <Store class="size-3" />
+                                Sucursales activas
+                                <span @click.stop>
+                                    <AyudaTooltip
+                                        texto="Número de sucursales de esta empresa marcadas como activas. Las sucursales inactivas no se cuentan."
+                                        etiqueta="Ayuda sobre sucursales activas"
+                                    />
+                                </span>
+                                <ArrowUpRight
+                                    class="text-muted-foreground/70 ml-auto size-3.5"
+                                />
+                            </p>
+                            <p class="text-lg font-semibold">
+                                {{ e.sucursales_activas }}
+                            </p>
+                        </div>
+                        <div v-else class="bg-muted/40 rounded-lg px-3 py-2">
+                            <p
+                                class="text-muted-foreground flex items-center gap-1 text-xs"
+                            >
+                                <Store class="size-3" />
                                 Sucursales activas
                                 <AyudaTooltip
                                     texto="Número de sucursales de esta empresa marcadas como activas. Las sucursales inactivas no se cuentan."
@@ -368,10 +422,45 @@ const vista = useVistaPreferida('empresas');
                                 {{ e.sucursales_activas }}
                             </p>
                         </div>
-                        <div class="bg-muted/40 rounded-lg px-3 py-2">
+
+                        <div
+                            v-if="puedeVerColaboradores"
+                            role="button"
+                            tabindex="0"
+                            :aria-label="`Ver colaboradores activos de ${e.nombre_comercial} en el módulo Colaboradores`"
+                            class="bg-muted/40 hover:bg-muted/70 hover:border-primary/20 focus-visible:ring-ring rounded-lg border border-transparent px-3 py-2 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                            @click.stop="router.visit(hrefColaboradoresDe(e))"
+                            @keydown.enter.stop="
+                                router.visit(hrefColaboradoresDe(e))
+                            "
+                            @keydown.space.stop.prevent="
+                                router.visit(hrefColaboradoresDe(e))
+                            "
+                        >
                             <p
                                 class="text-muted-foreground flex items-center gap-1 text-xs"
                             >
+                                <Users class="size-3" />
+                                Colaboradores activos
+                                <span @click.stop>
+                                    <AyudaTooltip
+                                        texto="Número de colaboradores con estado activo. No incluye colaboradores inactivos ni dados de baja."
+                                        etiqueta="Ayuda sobre colaboradores activos"
+                                    />
+                                </span>
+                                <ArrowUpRight
+                                    class="text-muted-foreground/70 ml-auto size-3.5"
+                                />
+                            </p>
+                            <p class="text-lg font-semibold">
+                                {{ e.colaboradores_activos }}
+                            </p>
+                        </div>
+                        <div v-else class="bg-muted/40 rounded-lg px-3 py-2">
+                            <p
+                                class="text-muted-foreground flex items-center gap-1 text-xs"
+                            >
+                                <Users class="size-3" />
                                 Colaboradores activos
                                 <AyudaTooltip
                                     texto="Número de colaboradores con estado activo. No incluye colaboradores inactivos ni dados de baja."
@@ -438,8 +527,32 @@ const vista = useVistaPreferida('empresas');
                         <td class="text-muted-foreground px-3 py-2">
                             {{ e.razon_social ?? '—' }}
                         </td>
-                        <td class="px-3 py-2">{{ e.sucursales_activas }}</td>
-                        <td class="px-3 py-2">{{ e.colaboradores_activos }}</td>
+                        <td class="px-3 py-2">
+                            <Link
+                                v-if="puedeVerSucursales"
+                                :href="hrefSucursalesDe(e)"
+                                class="focus-visible:ring-ring rounded underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                                :aria-label="`Ver sucursales activas de ${e.nombre_comercial} en el módulo Sucursales`"
+                            >
+                                {{ e.sucursales_activas }}
+                            </Link>
+                            <template v-else>{{
+                                e.sucursales_activas
+                            }}</template>
+                        </td>
+                        <td class="px-3 py-2">
+                            <Link
+                                v-if="puedeVerColaboradores"
+                                :href="hrefColaboradoresDe(e)"
+                                class="focus-visible:ring-ring rounded underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                                :aria-label="`Ver colaboradores activos de ${e.nombre_comercial} en el módulo Colaboradores`"
+                            >
+                                {{ e.colaboradores_activos }}
+                            </Link>
+                            <template v-else>{{
+                                e.colaboradores_activos
+                            }}</template>
+                        </td>
                         <td class="px-3 py-2">
                             <Badge
                                 :variant="e.activa ? 'success' : 'secondary'"
@@ -484,14 +597,15 @@ const vista = useVistaPreferida('empresas');
                     <DialogDescription>
                         {{
                             empresaEnEdicion
-                                ? 'Actualiza los datos generales y de contacto de la empresa.'
-                                : 'Registra una nueva organización en la plataforma. El logotipo y los colores se configuran después en Personalización.'
+                                ? 'Actualiza los datos generales, de contacto y el logotipo de la empresa.'
+                                : 'Registra una nueva organización en la plataforma.'
                         }}
                     </DialogDescription>
                 </DialogHeader>
                 <FormularioEmpresa
                     :key="claveFormulario"
                     :empresa="empresaEnEdicion"
+                    :logo-url-actual="logoUrlEnEdicion"
                     @guardado="alGuardar"
                     @cancelar="modalAbierto = false"
                 />

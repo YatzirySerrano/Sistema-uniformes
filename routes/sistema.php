@@ -48,6 +48,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('colaboradores/importar/analizar', [ImportacionColaboradorController::class, 'analizar'])->name('colaboradores.importar.analizar');
     Route::post('colaboradores/importar/confirmar', [ImportacionColaboradorController::class, 'confirmar'])->name('colaboradores.importar.confirmar');
     Route::get('colaboradores/buscar', [ColaboradorController::class, 'buscar'])->name('colaboradores.buscar');
+    Route::get('colaboradores/siguiente-numero', [ColaboradorController::class, 'siguienteNumeroEmpleado'])->name('colaboradores.siguiente-numero');
     Route::get('colaboradores/exportar', [ColaboradorController::class, 'exportar'])->name('colaboradores.exportar');
     Route::get('colaboradores/crear', [ColaboradorController::class, 'create'])->name('colaboradores.create');
     Route::post('colaboradores', [ColaboradorController::class, 'store'])->name('colaboradores.store');
@@ -75,6 +76,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Áreas / Departamentos
     Route::get('areas', [AreaController::class, 'index'])->name('areas.index');
     Route::get('areas/buscar', [AreaController::class, 'buscar'])->name('areas.buscar');
+    Route::get('areas/siguiente-codigo', [AreaController::class, 'siguienteCodigo'])->name('areas.siguiente-codigo');
     Route::get('areas/exportar', [AreaController::class, 'exportar'])->name('areas.exportar');
     Route::post('areas', [AreaController::class, 'store'])->name('areas.store');
     Route::get('areas/{area}', [AreaController::class, 'show'])->name('areas.show');
@@ -85,6 +87,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::redirect('prendas', 'activos');
     Route::get('activos', [ActivoController::class, 'index'])->name('activos.index');
     Route::get('activos/buscar', [ActivoController::class, 'buscar'])->name('activos.buscar');
+    Route::get('activos/siguiente-codigo', [ActivoController::class, 'siguienteCodigo'])->name('activos.siguiente-codigo');
     Route::get('activos/crear', [ActivoController::class, 'create'])->name('activos.create');
     Route::post('activos', [ActivoController::class, 'store'])->name('activos.store');
 
@@ -186,6 +189,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Administración
     Route::get('empresas', [EmpresaController::class, 'index'])->name('empresas.index');
     Route::get('empresas/buscar', [EmpresaController::class, 'buscar'])->name('empresas.buscar');
+    Route::get('empresas/siguiente-codigo', [EmpresaController::class, 'siguienteCodigo'])->name('empresas.siguiente-codigo');
     Route::get('empresas/exportar', [EmpresaController::class, 'exportar'])->name('empresas.exportar');
     Route::post('empresas', [EmpresaController::class, 'store'])->name('empresas.store');
     Route::get('empresas/{empresa}', [EmpresaController::class, 'show'])->name('empresas.show');
@@ -201,6 +205,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('almacenes', [AlmacenController::class, 'index'])->name('almacenes.index');
     Route::get('almacenes/buscar', [AlmacenController::class, 'buscar'])->name('almacenes.buscar');
     Route::get('almacenes/colaboradores-buscar', [AlmacenController::class, 'colaboradoresBuscar'])->name('almacenes.colaboradores-buscar');
+    Route::get('almacenes/siguiente-codigo', [AlmacenController::class, 'siguienteCodigo'])->name('almacenes.siguiente-codigo');
     Route::get('almacenes/exportar', [AlmacenController::class, 'exportar'])->name('almacenes.exportar');
     Route::post('almacenes', [AlmacenController::class, 'store'])->name('almacenes.store');
     Route::get('almacenes/{almacen}', [AlmacenController::class, 'show'])->name('almacenes.show');
@@ -209,6 +214,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     Route::get('sucursales', [SucursalController::class, 'index'])->name('sucursales.index');
     Route::get('sucursales/buscar', [SucursalController::class, 'buscar'])->name('sucursales.buscar');
+    Route::get('sucursales/siguiente-codigo', [SucursalController::class, 'siguienteCodigo'])->name('sucursales.siguiente-codigo');
     Route::get('sucursales/exportar', [SucursalController::class, 'exportar'])->name('sucursales.exportar');
     Route::post('sucursales', [SucursalController::class, 'store'])->name('sucursales.store');
     Route::get('sucursales/{sucursal}', [SucursalController::class, 'show'])->name('sucursales.show');

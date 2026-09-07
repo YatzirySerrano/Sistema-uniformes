@@ -6,8 +6,6 @@ use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Sucursal;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Str;
-use Illuminate\Validation\Rule;
 
 /**
  * Validación de alta y edición de sucursales. En alta la empresa llega en
@@ -29,11 +27,8 @@ class GuardarSucursalRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $codigo = $this->limpiar($this->input('codigo'));
-
         $this->merge([
             'nombre' => $this->limpiar($this->input('nombre')),
-            'codigo' => $codigo === null ? null : Str::upper($codigo),
             'direccion' => $this->limpiar($this->input('direccion')),
             'telefono' => $this->soloDigitos($this->input('telefono')),
         ]);
@@ -44,19 +39,18 @@ class GuardarSucursalRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = $this->empresaResuelta('sucursal')->getKey();
+        // Valida el acceso a la empresa (alta) o al registro (edición) aquí
+        // mismo, aunque el id ya no se use para la unicidad de `codigo`.
+        $this->empresaResuelta('sucursal');
         $sucursal = $this->route('sucursal');
         $sucursalId = $sucursal instanceof Sucursal ? $sucursal->getKey() : null;
 
         return [
             ...($sucursalId === null ? ['empresa_id' => ['required', 'integer']] : []),
             'nombre' => ['required', 'string', 'max:255'],
-            'codigo' => [
-                'nullable', 'string', 'max:60', 'alpha_dash',
-                Rule::unique('sucursales', 'codigo')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($sucursalId),
-            ],
+            // `codigo` NUNCA se valida como entrada del usuario: lo genera
+            // el backend (autogenerado, SUC-0001…) en el alta y es
+            // inmutable en edición.
             'direccion' => ['nullable', 'string', 'max:255'],
             'telefono' => ['nullable', 'string', 'digits:10'],
         ];
@@ -71,9 +65,6 @@ class GuardarSucursalRequest extends FormRequest
             'empresa_id.required' => 'Selecciona la empresa de la sucursal.',
             'nombre.required' => 'El nombre de la sucursal es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
-            'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',
-            'codigo.unique' => 'Ese código de sucursal ya existe en esta empresa.',
-            'codigo.max' => 'El código no puede superar los 60 caracteres.',
             'direccion.max' => 'La dirección no puede superar los 255 caracteres.',
             'telefono.digits' => 'El teléfono debe contener 10 dígitos.',
         ];

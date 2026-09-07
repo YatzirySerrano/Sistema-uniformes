@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import InputError from '@/components/InputError.vue';
@@ -33,7 +33,6 @@ const esEdicion = computed(() => props.sucursal !== null);
 const form = useForm<{
     empresa_id: number | null;
     nombre: string;
-    codigo: string;
     direccion: string;
     telefono: string;
 }>({
@@ -43,7 +42,6 @@ const form = useForm<{
             ? props.empresasAutorizadas[0].id
             : null),
     nombre: props.sucursal?.nombre ?? '',
-    codigo: props.sucursal?.codigo ?? '',
     direccion: props.sucursal?.direccion ?? '',
     telefono: props.sucursal?.telefono ?? '',
 });
@@ -87,14 +85,6 @@ const erroresLocales = computed<Record<string, string>>(() => {
         e.nombre = 'Máximo 255 caracteres.';
     }
 
-    if (
-        tocado.codigo &&
-        form.codigo.trim() !== '' &&
-        !/^[A-Za-z0-9_-]+$/.test(form.codigo.trim())
-    ) {
-        e.codigo = 'Sólo letras, números, guiones y guiones bajos.';
-    }
-
     if (tocado.telefono && form.telefono.trim() !== '') {
         if (form.telefono.replace(/\D+/g, '').length !== 10) {
             e.telefono = 'El teléfono debe contener 10 dígitos.';
@@ -114,6 +104,59 @@ function error(campo: string): string | undefined {
 const hayErroresLocales = computed(
     () => Object.keys(erroresLocales.value).length > 0,
 );
+
+// --- Código de sucursal: lo genera el backend, nunca lo escribe el usuario.
+// Esto sólo previsualiza (no reserva) el código; el valor definitivo se
+// calcula y reserva atómicamente al guardar.
+const codigoPreview = ref<string | null>(props.sucursal?.codigo ?? null);
+const cargandoPreview = ref(false);
+let controladorPreview: AbortController | undefined;
+let temporizadorPreview: ReturnType<typeof setTimeout> | undefined;
+
+async function actualizarPreview(): Promise<void> {
+    if (form.empresa_id === null) {
+        codigoPreview.value = null;
+        cargandoPreview.value = false;
+        return;
+    }
+
+    controladorPreview?.abort();
+    controladorPreview = new AbortController();
+    cargandoPreview.value = true;
+
+    try {
+        const res = await fetch(
+            `/sucursales/siguiente-codigo?empresa_id=${form.empresa_id}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal: controladorPreview.signal,
+            },
+        );
+        if (!res.ok) return;
+        codigoPreview.value = (await res.json()).codigo ?? null;
+    } catch {
+        // Petición abortada o de red: se ignora.
+    } finally {
+        cargandoPreview.value = false;
+    }
+}
+
+if (!esEdicion.value) {
+    watch(
+        () => form.empresa_id,
+        () => {
+            clearTimeout(temporizadorPreview);
+            temporizadorPreview = setTimeout(actualizarPreview, 300);
+        },
+        { immediate: true },
+    );
+}
+
+onBeforeUnmount(() => {
+    clearTimeout(temporizadorPreview);
+    controladorPreview?.abort();
+});
 
 function enviar(): void {
     tocado.nombre = true;
@@ -182,19 +225,29 @@ function enviar(): void {
                 <Label for="sf-codigo" class="flex items-center gap-1.5">
                     Código
                     <AyudaTooltip
-                        texto="Identificador interno de la sucursal dentro de la empresa. Si lo dejas vacío se genera automáticamente (SUC-0001)."
+                        texto="Lo genera el sistema automáticamente (SUC-0001). No se puede escribir ni editar."
                         etiqueta="Ayuda sobre el código"
                     />
                 </Label>
-                <Input
+                <div
                     id="sf-codigo"
-                    v-model="form.codigo"
-                    class="uppercase"
-                    placeholder="Se genera automáticamente"
-                    maxlength="60"
-                    @blur="marcar('codigo')"
-                />
-                <InputError :message="error('codigo')" />
+                    class="bg-muted/50 text-muted-foreground flex h-9 items-center rounded-md border px-3 font-mono text-sm"
+                >
+                    <span v-if="codigoPreview" class="text-foreground">{{
+                        codigoPreview
+                    }}</span>
+                    <span v-else-if="cargandoPreview">Calculando…</span>
+                    <span v-else class="italic"
+                        >Se generará automáticamente</span
+                    >
+                </div>
+                <p class="text-muted-foreground text-xs">
+                    {{
+                        esEdicion
+                            ? 'Asignado al crear la sucursal; no se puede modificar.'
+                            : 'Selecciona la empresa para ver el código que se asignará al guardar.'
+                    }}
+                </p>
             </div>
 
             <div class="grid gap-1.5">

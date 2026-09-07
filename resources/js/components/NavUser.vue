@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { usePage } from '@inertiajs/vue3';
 import { ChevronsUpDown } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -13,12 +13,16 @@ import {
     SidebarMenuItem,
     useSidebar,
 } from '@/components/ui/sidebar';
+import ModalCerrarSesion from '@/components/ModalCerrarSesion.vue';
 import UserInfo from '@/components/UserInfo.vue';
 import UserMenuContent from '@/components/UserMenuContent.vue';
 
 const page = usePage();
 const user = computed(() => page.props.auth.user);
 const { isMobile, state } = useSidebar();
+
+// Fuera del DropdownMenu a propósito — ver nota en UserMenuContent.vue.
+const modalCerrarSesion = ref(false);
 </script>
 
 <template>
@@ -47,9 +51,14 @@ const { isMobile, state } = useSidebar();
                     align="end"
                     :side-offset="4"
                 >
-                    <UserMenuContent :user="user" />
+                    <UserMenuContent
+                        :user="user"
+                        @pedir-cerrar-sesion="modalCerrarSesion = true"
+                    />
                 </DropdownMenuContent>
             </DropdownMenu>
         </SidebarMenuItem>
     </SidebarMenu>
+
+    <ModalCerrarSesion v-model:open="modalCerrarSesion" />
 </template>

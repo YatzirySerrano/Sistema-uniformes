@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Link, usePage } from '@inertiajs/vue3';
 import { BookOpen, Folder, LayoutGrid, Menu, Search } from '@lucide/vue';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
@@ -31,6 +31,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import ModalCerrarSesion from '@/components/ModalCerrarSesion.vue';
 import UserMenuContent from '@/components/UserMenuContent.vue';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { getInitials } from '@/composables/useInitials';
@@ -49,6 +50,9 @@ const props = withDefaults(defineProps<Props>(), {
 const page = usePage();
 const auth = computed(() => page.props.auth);
 const { isCurrentUrl, whenCurrentUrl } = useCurrentUrl();
+
+// Fuera del DropdownMenu a propósito — ver nota en UserMenuContent.vue.
+const modalCerrarSesion = ref(false);
 
 const activeItemStyles =
     'text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100';
@@ -262,7 +266,10 @@ const rightNavItems: NavItem[] = [
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" class="w-56">
-                            <UserMenuContent :user="auth.user" />
+                            <UserMenuContent
+                                :user="auth.user"
+                                @pedir-cerrar-sesion="modalCerrarSesion = true"
+                            />
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
@@ -279,5 +286,7 @@ const rightNavItems: NavItem[] = [
                 <Breadcrumbs :breadcrumbs="breadcrumbs" />
             </div>
         </div>
+
+        <ModalCerrarSesion v-model:open="modalCerrarSesion" />
     </div>
 </template>

@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Models\BitacoraAuditoria;
+use App\Soporte\ContextoExportacion;
 use App\Soporte\DescripcionAuditoria;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -63,6 +65,7 @@ class BitacoraController extends Controller
         abort_unless($request->user()->can('auditoria.ver'), 403);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $registros = $this->consultaBitacora($request, $filtros)->get();
 
         $filas = $registros->map(fn (BitacoraAuditoria $b): array => [
@@ -76,9 +79,19 @@ class BitacoraController extends Controller
             $b->ip,
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Módulo' => $filtros['modulo'] ?? null,
+            'Acción' => $filtros['accion'] ?? null,
+            'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
+            'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
+        ]);
+
+        $contexto = new ContextoExportacion('Auditoría', $empresaFiltro, $filtrosHumanos, $registros->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Fecha', 'Usuario', 'Módulo', 'Acción', 'Descripción', 'Entidad', 'Motivo', 'IP',
-        ], 'Auditoría');
+        ], $contexto);
     }
 
     /**

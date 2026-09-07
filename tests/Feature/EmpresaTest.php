@@ -4,6 +4,8 @@ use App\Enums\RolSistema;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -185,7 +187,6 @@ it('las empresas autorizadas se comparten a todas las vistas para los combobox',
 
 it('rechaza entradas inválidas con errores de validación en español', function () {
     $super = usuarioCon(RolSistema::Superadministrador->value);
-    Empresa::factory()->create(['codigo' => 'DUP1']);
 
     $this->actingAs($super)->from('/empresas')
         ->post('/empresas', [
@@ -193,10 +194,9 @@ it('rechaza entradas inválidas con errores de validación en español', functio
             'correo' => 'no-es-correo',
             'telefono' => '123',
             'rfc' => '12345',
-            'codigo' => 'DUP1',
         ])
         ->assertRedirect('/empresas')
-        ->assertSessionHasErrors(['nombre_comercial', 'correo', 'telefono', 'rfc', 'codigo']);
+        ->assertSessionHasErrors(['nombre_comercial', 'correo', 'telefono', 'rfc']);
 });
 
 it('el mensaje de teléfono inválido indica que deben ser 10 dígitos', function () {
@@ -386,4 +386,166 @@ it('respeta el orden alfabético descendente', function () {
             ->where('empresas.data.0.nombre_comercial', 'Zeta')
             ->where('empresas.data.1.nombre_comercial', 'Alfa')
         );
+});
+
+/*
+|--------------------------------------------------------------------------
+| Logo: alta, edición, mensajes de error (bug de QA final)
+|--------------------------------------------------------------------------
+*/
+
+it('registra una empresa sin logo correctamente', function () {
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->post('/empresas', ['nombre_comercial' => 'Sin Logo'])
+        ->assertRedirect('/empresas')
+        ->assertSessionHasNoErrors();
+
+    expect(Empresa::query()->where('nombre_comercial', 'Sin Logo')->first()->logo_ruta)->toBeNull();
+});
+
+it('registra una empresa con logo PNG y lo persiste en storage', function () {
+    Storage::fake('public');
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->post('/empresas', [
+            'nombre_comercial' => 'Con Logo PNG',
+            'logo' => UploadedFile::fake()->image('logo.png', 200, 200),
+        ])
+        ->assertRedirect('/empresas')
+        ->assertSessionHasNoErrors();
+
+    $empresa = Empresa::query()->where('nombre_comercial', 'Con Logo PNG')->first();
+    expect($empresa->logo_ruta)->not->toBeNull();
+    Storage::disk('public')->assertExists($empresa->logo_ruta);
+});
+
+it('registra una empresa con logo JPG y lo persiste en storage', function () {
+    Storage::fake('public');
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->post('/empresas', [
+            'nombre_comercial' => 'Con Logo JPG',
+            'logo' => UploadedFile::fake()->image('logo.jpg', 200, 200),
+        ])
+        ->assertRedirect('/empresas')
+        ->assertSessionHasNoErrors();
+
+    $empresa = Empresa::query()->where('nombre_comercial', 'Con Logo JPG')->first();
+    expect($empresa->logo_ruta)->not->toBeNull();
+    Storage::disk('public')->assertExists($empresa->logo_ruta);
+});
+
+it('el detalle de una empresa con logo expone logo_url', function () {
+    Storage::fake('public');
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/empresas', [
+        'nombre_comercial' => 'Con Logo Detalle',
+        'logo' => UploadedFile::fake()->image('logo.png'),
+    ]);
+
+    $empresa = Empresa::query()->where('nombre_comercial', 'Con Logo Detalle')->first();
+
+    $this->actingAs($admin)->get("/empresas/{$empresa->id}")
+        ->assertInertia(fn ($page) => $page->where('empresa.logo_url', fn (?string $url) => filled($url)));
+});
+
+it('editar una empresa sin subir un logo nuevo conserva el logo previamente cargado', function () {
+    Storage::fake('public');
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/empresas', [
+        'nombre_comercial' => 'Editar Conserva Logo',
+        'logo' => UploadedFile::fake()->image('logo.png'),
+    ]);
+    $empresa = Empresa::query()->where('nombre_comercial', 'Editar Conserva Logo')->first();
+    $rutaOriginal = $empresa->logo_ruta;
+
+    $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
+        'nombre_comercial' => 'Editar Conserva Logo Actualizada',
+        'codigo' => $empresa->codigo,
+    ])->assertSessionHasNoErrors();
+
+    expect($empresa->fresh()->logo_ruta)->toBe($rutaOriginal);
+    Storage::disk('public')->assertExists($rutaOriginal);
+});
+
+it('reemplazar el logo en edición guarda el nuevo archivo y borra el anterior', function () {
+    Storage::fake('public');
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/empresas', [
+        'nombre_comercial' => 'Reemplazo Logo',
+        'logo' => UploadedFile::fake()->image('logo.png'),
+    ]);
+    $empresa = Empresa::query()->where('nombre_comercial', 'Reemplazo Logo')->first();
+    $rutaOriginal = $empresa->logo_ruta;
+
+    $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
+        'nombre_comercial' => 'Reemplazo Logo',
+        'codigo' => $empresa->codigo,
+        'logo' => UploadedFile::fake()->image('logo-nuevo.png'),
+    ])->assertSessionHasNoErrors();
+
+    $rutaNueva = $empresa->fresh()->logo_ruta;
+    expect($rutaNueva)->not->toBe($rutaOriginal);
+    Storage::disk('public')->assertMissing($rutaOriginal);
+    Storage::disk('public')->assertExists($rutaNueva);
+});
+
+it('rechaza un logo que supera los 2 MB con un mensaje claro de peso', function () {
+    Storage::fake('public');
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->from('/empresas')
+        ->post('/empresas', [
+            'nombre_comercial' => 'Logo Pesado',
+            'logo' => UploadedFile::fake()->image('logo.png')->size(3000),
+        ])
+        ->assertSessionHasErrors(['logo' => 'El logotipo no puede superar los 2 MB.']);
+});
+
+it('rechaza un formato de logo no permitido con un mensaje claro de formato', function () {
+    Storage::fake('public');
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->from('/empresas')
+        ->post('/empresas', [
+            'nombre_comercial' => 'Logo Formato Invalido',
+            // .webp es una imagen válida mimes:image pero no está en la lista permitida.
+            'logo' => UploadedFile::fake()->image('logo.webp'),
+        ])
+        ->assertSessionHasErrors(['logo' => 'El logotipo debe ser un archivo PNG, JPG, JPEG o SVG.']);
+});
+
+it('rechaza un archivo que no es una imagen válida con un mensaje claro', function () {
+    Storage::fake('public');
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->from('/empresas')
+        ->post('/empresas', [
+            'nombre_comercial' => 'Logo No Es Imagen',
+            'logo' => UploadedFile::fake()->create('logo.png', 10, 'application/pdf'),
+        ])
+        ->assertSessionHasErrors(['logo' => 'El archivo seleccionado no es una imagen válida.']);
+});
+
+it('muestra un mensaje claro cuando PHP rechaza la subida del logo antes de validar', function () {
+    Storage::fake('public');
+    $archivo = UploadedFile::fake()->image('logo.png');
+    $archivoRechazado = new UploadedFile(
+        $archivo->getPathname(),
+        'logo.png',
+        'image/png',
+        UPLOAD_ERR_INI_SIZE,
+        true,
+    );
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->from('/empresas')
+        ->post('/empresas', [
+            'nombre_comercial' => 'Logo Rechazado Por PHP',
+            'logo' => $archivoRechazado,
+        ])
+        ->assertSessionHasErrors(['logo' => 'El logotipo no pudo cargarse. Verifica que el archivo no supere los 2 MB.']);
 });

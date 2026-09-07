@@ -3,13 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Almacenes\GuardarAlmacenRequest;
 use App\Models\Almacen;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ContextoExportacion;
 use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -32,7 +35,9 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 class AlmacenController extends Controller
 {
     use ConEmpresa;
+    use CreaConCodigoUnico;
     use ExportaListado;
+    use ReconciliaSecuenciaCodigo;
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
@@ -93,6 +98,7 @@ class AlmacenController extends Controller
         $this->authorize('viewAny', Almacen::class);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $almacenes = $this->consultaAlmacenes($request, $filtros)->get();
 
         $filas = $almacenes->map(fn (Almacen $a): array => [
@@ -104,9 +110,20 @@ class AlmacenController extends Controller
             $a->responsable?->nombre_completo,
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Estado' => match ($filtros['estado'] ?? null) {
+                'activos' => 'Activos',
+                'inactivos' => 'Eliminados',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Almacenes', $empresaFiltro, $filtrosHumanos, $almacenes->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Dirección', 'Estado', 'Empresas abastecidas', 'Responsable',
-        ], 'Almacenes');
+        ], $contexto);
     }
 
     /**
@@ -203,9 +220,12 @@ class AlmacenController extends Controller
     {
         $datos = $request->safe()->except(['empresa_ids']);
         $empresaIds = $request->collect('empresa_ids')->map(fn ($id): int => (int) $id)->all();
-        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo();
 
-        $almacen = Almacen::query()->create([...$datos, 'activo' => true]);
+        $almacen = $this->crearConCodigoUnico(fn () => Almacen::query()->create([
+            ...$datos,
+            'codigo' => $this->generarCodigo(),
+            'activo' => true,
+        ]));
         $almacen->empresas()->sync($empresaIds);
 
         $this->auditar('crear', $almacen, $empresaIds, ['descripcion' => 'Alta de almacén '.$almacen->nombre]);
@@ -401,13 +421,36 @@ class AlmacenController extends Controller
     }
 
     /**
-     * Genera un código consecutivo y único a nivel plataforma (ALM-0001, …)
-     * cuando el usuario no captura uno. El almacén ya no pertenece a una
-     * empresa. Race-safe: `ServicioGeneradorCodigosGlobal` bloquea el
-     * contador dentro de una transacción (nunca `count() + 1` sin lock).
+     * Genera un código consecutivo y único a nivel plataforma (ALM-0001, …).
+     * El almacén ya no pertenece a una empresa. Race-safe:
+     * `ServicioGeneradorCodigosGlobal` bloquea el contador dentro de una
+     * transacción (nunca `count() + 1` sin lock) y reconcilia contra el
+     * mayor código "ALM-XXXX" REALMENTE existente en cada llamada — nunca
+     * repite un código ya usado aunque el contador haya quedado atrasado
+     * (seeders, restauraciones, capturas manuales históricas).
      */
     private function generarCodigo(): string
     {
-        return $this->codigos->siguiente('almacen', 'ALM');
+        return $this->codigos->siguiente('almacen', 'ALM', semilla: fn (): int => $this->maximoSufijo(
+            Almacen::query()->where('codigo', 'like', 'ALM-%')->pluck('codigo'),
+            'ALM-',
+        ));
+    }
+
+    /**
+     * Previsualización NO autoritativa del siguiente código de almacén — no
+     * reserva el consecutivo. El valor definitivo se calcula de nuevo,
+     * atómicamente, en `store()`.
+     */
+    public function siguienteCodigo(Request $request): JsonResponse
+    {
+        $this->authorize('create', Almacen::class);
+
+        $codigo = $this->codigos->siguienteAproximado('almacen', 'ALM', semilla: fn (): int => $this->maximoSufijo(
+            Almacen::query()->where('codigo', 'like', 'ALM-%')->pluck('codigo'),
+            'ALM-',
+        ));
+
+        return response()->json(['codigo' => $codigo]);
     }
 }

@@ -9,6 +9,7 @@ use App\Models\Almacen;
 use App\Models\Conjunto;
 use App\Models\ConjuntoComponente;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -74,6 +75,7 @@ class ConjuntoController extends Controller
         $this->authorize('viewAny', Conjunto::class);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $conjuntos = $this->consultaConjuntos($request, $filtros)->get();
 
         $filas = $conjuntos->map(fn (Conjunto $c): array => [
@@ -85,9 +87,20 @@ class ConjuntoController extends Controller
             (int) $c->componentes_count,
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Estado' => match ($filtros['estado'] ?? null) {
+                'activos' => 'Activos',
+                'inactivos' => 'Eliminados',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Conjuntos', $empresaFiltro, $filtrosHumanos, $conjuntos->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Descripción', 'Estado', 'Empresa', 'Componentes',
-        ], 'Conjuntos');
+        ], $contexto);
     }
 
     /**

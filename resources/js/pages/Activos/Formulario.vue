@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -137,7 +137,6 @@ const form = useForm<{
     nombre: string;
     descripcion: string;
     categoria_id: number | '';
-    codigo: string;
     tipo_activo_id: number | '';
     tipo_control: string;
     activo: boolean;
@@ -157,7 +156,6 @@ const form = useForm<{
     nombre: props.activo?.nombre ?? '',
     descripcion: props.activo?.descripcion ?? '',
     categoria_id: props.activo?.categoria_id ?? '',
-    codigo: props.activo?.codigo ?? '',
     tipo_activo_id: props.activo?.tipo_activo_id ?? '',
     tipo_control: props.activo?.tipo_control ?? 'cantidad',
     activo: props.activo?.activo ?? true,
@@ -167,6 +165,62 @@ const form = useForm<{
     cantidad_inicial: 0,
     existencias: [],
     generar_qr: false,
+});
+
+// --- Código de activo: lo genera el backend, nunca lo escribe el usuario.
+// Esto sólo previsualiza (no reserva) el código; el valor definitivo se
+// calcula y reserva atómicamente al guardar.
+const codigoPreview = ref<string | null>(props.activo?.codigo ?? null);
+const cargandoPreviewCodigo = ref(false);
+let controladorPreviewCodigo: AbortController | undefined;
+let temporizadorPreviewCodigo: ReturnType<typeof setTimeout> | undefined;
+
+async function actualizarPreviewCodigo(): Promise<void> {
+    if (empresaId.value === '') {
+        codigoPreview.value = null;
+        cargandoPreviewCodigo.value = false;
+        return;
+    }
+
+    controladorPreviewCodigo?.abort();
+    controladorPreviewCodigo = new AbortController();
+    cargandoPreviewCodigo.value = true;
+
+    try {
+        const res = await fetch(
+            `/activos/siguiente-codigo?empresa_id=${empresaId.value}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal: controladorPreviewCodigo.signal,
+            },
+        );
+        if (!res.ok) return;
+        codigoPreview.value = (await res.json()).codigo ?? null;
+    } catch {
+        // Petición abortada o de red: se ignora.
+    } finally {
+        cargandoPreviewCodigo.value = false;
+    }
+}
+
+if (!esEdicion) {
+    watch(
+        empresaId,
+        () => {
+            clearTimeout(temporizadorPreviewCodigo);
+            temporizadorPreviewCodigo = setTimeout(
+                actualizarPreviewCodigo,
+                300,
+            );
+        },
+        { immediate: true },
+    );
+}
+
+onBeforeUnmount(() => {
+    clearTimeout(temporizadorPreviewCodigo);
+    controladorPreviewCodigo?.abort();
 });
 
 const esSeguimientoIndividual = computed(
@@ -481,17 +535,33 @@ function enviar() {
                         <Label for="codigo" class="flex items-center gap-1.5">
                             Código
                             <AyudaTooltip
-                                texto="Identificador interno del activo dentro de la empresa. Si lo dejas vacío se genera automáticamente (ACT-0001)."
+                                texto="Lo genera el sistema automáticamente (ACT-0001). No se puede escribir ni editar."
                                 etiqueta="Ayuda sobre el código"
                             />
                         </Label>
-                        <Input
+                        <div
                             id="codigo"
-                            v-model="form.codigo"
-                            class="uppercase"
-                            placeholder="Se genera automáticamente"
-                        />
-                        <InputError :message="form.errors.codigo" />
+                            class="bg-muted/50 text-muted-foreground flex h-9 items-center rounded-md border px-3 font-mono text-sm"
+                        >
+                            <span
+                                v-if="codigoPreview"
+                                class="text-foreground"
+                                >{{ codigoPreview }}</span
+                            >
+                            <span v-else-if="cargandoPreviewCodigo"
+                                >Calculando…</span
+                            >
+                            <span v-else class="italic"
+                                >Se generará automáticamente</span
+                            >
+                        </div>
+                        <p class="text-muted-foreground text-xs">
+                            {{
+                                esEdicion
+                                    ? 'Asignado al crear el activo; no se puede modificar.'
+                                    : 'Selecciona la empresa para ver el código que se asignará al guardar.'
+                            }}
+                        </p>
                     </div>
                     <div class="grid gap-1.5 sm:col-span-2">
                         <Label

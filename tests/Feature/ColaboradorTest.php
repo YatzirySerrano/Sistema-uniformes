@@ -154,13 +154,12 @@ it('rechaza registrar un colaborador con una sucursal de otra empresa', function
     $this->actingAs($admin)
         ->post('/colaboradores', [
             'empresa_id' => $empresaA->id,
-            'numero_empleado' => 'EMP-100',
             'nombre_completo' => 'Colaborador de prueba',
             'sucursal_id' => $sucursalB->id,
         ])
         ->assertSessionHasErrors('sucursal_id');
 
-    expect(Colaborador::query()->where('numero_empleado', 'EMP-100')->exists())->toBeFalse();
+    expect(Colaborador::query()->where('nombre_completo', 'Colaborador de prueba')->exists())->toBeFalse();
 });
 
 /*
@@ -212,13 +211,12 @@ it('sube una foto de perfil válida al registrar un colaborador', function () {
 
     $this->actingAs($admin)->post('/colaboradores', [
         'empresa_id' => $empresa->id,
-        'numero_empleado' => 'EMP-200',
         'nombre_completo' => 'Con Foto',
         'sucursal_id' => $sucursal->id,
         'foto' => UploadedFile::fake()->image('perfil.jpg'),
     ]);
 
-    $colaborador = Colaborador::query()->where('numero_empleado', 'EMP-200')->firstOrFail();
+    $colaborador = Colaborador::query()->where('nombre_completo', 'Con Foto')->firstOrFail();
 
     expect($colaborador->foto_ruta)->not->toBeNull();
     Storage::disk('local')->assertExists($colaborador->foto_ruta);
@@ -236,7 +234,6 @@ it('reemplazar la foto borra la anterior del disco', function () {
     $admin = usuarioCon(RolSistema::Administrador->value);
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
-        'numero_empleado' => $colaborador->numero_empleado,
         'nombre_completo' => $colaborador->nombre_completo,
         'sucursal_id' => $colaborador->sucursal_id,
         'foto' => UploadedFile::fake()->image('primera.jpg'),
@@ -246,7 +243,6 @@ it('reemplazar la foto borra la anterior del disco', function () {
     Storage::disk('local')->assertExists($rutaAnterior);
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
-        'numero_empleado' => $colaborador->numero_empleado,
         'nombre_completo' => $colaborador->nombre_completo,
         'sucursal_id' => $colaborador->sucursal_id,
         'foto' => UploadedFile::fake()->image('segunda.jpg'),
@@ -266,7 +262,6 @@ it('rechaza una foto que no es imagen o que excede el peso máximo', function ()
 
     $this->actingAs($admin)->post('/colaboradores', [
         'empresa_id' => $empresa->id,
-        'numero_empleado' => 'EMP-300',
         'nombre_completo' => 'Foto invalida',
         'sucursal_id' => $sucursal->id,
         'foto' => UploadedFile::fake()->create('archivo.pdf', 100, 'application/pdf'),
@@ -274,13 +269,12 @@ it('rechaza una foto que no es imagen o que excede el peso máximo', function ()
 
     $this->actingAs($admin)->post('/colaboradores', [
         'empresa_id' => $empresa->id,
-        'numero_empleado' => 'EMP-301',
         'nombre_completo' => 'Foto pesada',
         'sucursal_id' => $sucursal->id,
         'foto' => UploadedFile::fake()->image('pesada.jpg')->size(4000),
     ])->assertSessionHasErrors('foto');
 
-    expect(Colaborador::query()->whereIn('numero_empleado', ['EMP-300', 'EMP-301'])->exists())->toBeFalse();
+    expect(Colaborador::query()->whereIn('nombre_completo', ['Foto invalida', 'Foto pesada'])->exists())->toBeFalse();
 });
 
 it('la ruta de la foto responde 404 sin foto y 403 fuera de alcance', function () {

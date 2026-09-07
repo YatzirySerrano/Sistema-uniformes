@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
 import { Search } from '@lucide/vue';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import InputError from '@/components/InputError.vue';
@@ -41,7 +41,6 @@ const responsable = ref<Colaborador | null>(props.almacen?.responsable ?? null);
 
 const form = useForm<{
     nombre: string;
-    codigo: string;
     descripcion: string;
     direccion: string;
     telefono: string;
@@ -50,7 +49,6 @@ const form = useForm<{
     empresa_ids: number[];
 }>({
     nombre: props.almacen?.nombre ?? '',
-    codigo: props.almacen?.codigo ?? '',
     descripcion: props.almacen?.descripcion ?? '',
     direccion: props.almacen?.direccion ?? '',
     telefono: props.almacen?.telefono ?? '',
@@ -123,13 +121,6 @@ const erroresLocales = computed<Record<string, string>>(() => {
         e.empresa_ids = 'Selecciona al menos una empresa abastecida.';
     }
     if (
-        tocado.codigo &&
-        form.codigo.trim() !== '' &&
-        !/^[A-Za-z0-9_-]+$/.test(form.codigo.trim())
-    ) {
-        e.codigo = 'Sólo letras, números, guiones y guiones bajos.';
-    }
-    if (
         tocado.telefono &&
         form.telefono.trim() !== '' &&
         form.telefono.replace(/\D+/g, '').length !== 10
@@ -156,6 +147,30 @@ function error(campo: string): string | undefined {
 const hayErroresLocales = computed(
     () => Object.keys(erroresLocales.value).length > 0,
 );
+
+// --- Código de almacén: lo genera el backend, nunca lo escribe el usuario.
+// Es global a la plataforma (no depende de empresa), así que se
+// previsualiza una sola vez al abrir el formulario de alta. Esto sólo
+// previsualiza (no reserva) el código; el valor definitivo se calcula y
+// reserva atómicamente al guardar.
+const codigoPreview = ref<string | null>(props.almacen?.codigo ?? null);
+const cargandoPreview = ref(!esEdicion.value);
+
+onMounted(async () => {
+    if (esEdicion.value) return;
+
+    try {
+        const res = await fetch('/almacenes/siguiente-codigo', {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+        });
+        if (res.ok) {
+            codigoPreview.value = (await res.json()).codigo ?? null;
+        }
+    } finally {
+        cargandoPreview.value = false;
+    }
+});
 
 function enviar(): void {
     tocado.nombre = true;
@@ -201,19 +216,29 @@ function enviar(): void {
                 <Label for="alm-codigo" class="flex items-center gap-1.5">
                     Código
                     <AyudaTooltip
-                        texto="Identificador interno del almacén (único a nivel plataforma). Si lo dejas vacío se genera automáticamente (ALM-0001)."
+                        texto="Lo genera el sistema automáticamente (único a nivel plataforma, ALM-0001). No se puede escribir ni editar."
                         etiqueta="Ayuda sobre el código"
                     />
                 </Label>
-                <Input
+                <div
                     id="alm-codigo"
-                    v-model="form.codigo"
-                    class="uppercase"
-                    placeholder="Se genera automáticamente"
-                    maxlength="60"
-                    @blur="marcar('codigo')"
-                />
-                <InputError :message="error('codigo')" />
+                    class="bg-muted/50 text-muted-foreground flex h-9 items-center rounded-md border px-3 font-mono text-sm"
+                >
+                    <span v-if="codigoPreview" class="text-foreground">{{
+                        codigoPreview
+                    }}</span>
+                    <span v-else-if="cargandoPreview">Calculando…</span>
+                    <span v-else class="italic"
+                        >Se generará automáticamente</span
+                    >
+                </div>
+                <p class="text-muted-foreground text-xs">
+                    {{
+                        esEdicion
+                            ? 'Asignado al crear el almacén; no se puede modificar.'
+                            : 'Se asignará automáticamente al guardar.'
+                    }}
+                </p>
             </div>
 
             <div class="grid gap-1.5">

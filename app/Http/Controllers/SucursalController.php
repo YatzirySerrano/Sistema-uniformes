@@ -3,14 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Controllers\Concerns\ReactivaSuspendidos;
+use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Sucursales\GuardarSucursalRequest;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Soporte\ContextoExportacion;
 use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -25,8 +28,10 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 class SucursalController extends Controller
 {
     use ConEmpresa;
+    use CreaConCodigoUnico;
     use ExportaListado;
     use ReactivaSuspendidos;
+    use ReconciliaSecuenciaCodigo;
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
@@ -82,6 +87,7 @@ class SucursalController extends Controller
         $this->authorize('viewAny', Sucursal::class);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $sucursales = $this->consultaSucursales($request, $filtros)->get();
 
         $filas = $sucursales->map(fn (Sucursal $s): array => [
@@ -94,9 +100,20 @@ class SucursalController extends Controller
             (int) $s->colaboradores_activos_count,
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Estado' => match ($filtros['estado'] ?? null) {
+                'activas' => 'Activas',
+                'inactivas' => 'Eliminadas',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Sucursales', $empresaFiltro, $filtrosHumanos, $sucursales->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Nombre', 'Dirección', 'Teléfono', 'Estado', 'Empresa', 'Colaboradores activos',
-        ], 'Sucursales');
+        ], $contexto);
     }
 
     /**
@@ -231,15 +248,14 @@ class SucursalController extends Controller
     public function store(GuardarSucursalRequest $request): RedirectResponse
     {
         $empresa = $request->empresaResuelta();
-
         $datos = $request->validated();
-        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa);
 
-        $sucursal = Sucursal::query()->create([
+        $sucursal = $this->crearConCodigoUnico(fn () => Sucursal::query()->create([
             ...$datos,
             'empresa_id' => $empresa->id,
+            'codigo' => $this->generarCodigo($empresa),
             'activa' => true,
-        ]);
+        ]));
 
         $this->auditoria->registrar('sucursales', 'crear', [
             'tipo_entidad' => Sucursal::class, 'entidad_id' => $sucursal->id,
@@ -300,12 +316,36 @@ class SucursalController extends Controller
 
     /**
      * Genera un código interno consecutivo y único dentro de la empresa
-     * (SUC-0001, SUC-0002, …) cuando el usuario no captura uno. Race-safe:
-     * `ServicioGeneradorCodigos` bloquea el contador dentro de una
-     * transacción (nunca `count() + 1` sin lock).
+     * (SUC-0001, SUC-0002, …). Race-safe: `ServicioGeneradorCodigos` bloquea
+     * el contador dentro de una transacción (nunca `count() + 1` sin lock) y
+     * reconcilia contra el mayor código "SUC-XXXX" REALMENTE existente en
+     * esa empresa en cada llamada — nunca repite un código ya usado aunque
+     * el contador haya quedado atrasado.
      */
     private function generarCodigo(Empresa $empresa): string
     {
-        return $this->codigos->siguienteConPrefijo($empresa, 'sucursal', 'SUC');
+        return $this->codigos->siguienteConPrefijo($empresa, 'sucursal', 'SUC', semilla: fn (): int => $this->maximoSufijo(
+            Sucursal::query()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'SUC-%')->pluck('codigo'),
+            'SUC-',
+        ));
+    }
+
+    /**
+     * Previsualización NO autoritativa del siguiente código de sucursal para
+     * la empresa indicada — no reserva el consecutivo. El valor definitivo
+     * se calcula de nuevo, atómicamente, en `store()`.
+     */
+    public function siguienteCodigo(Request $request): JsonResponse
+    {
+        $this->authorize('create', Sucursal::class);
+
+        $empresa = $this->resolverEmpresa($request);
+
+        $codigo = $this->codigos->siguienteConPrefijoAproximado($empresa, 'sucursal', 'SUC', semilla: fn (): int => $this->maximoSufijo(
+            Sucursal::query()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'SUC-%')->pluck('codigo'),
+            'SUC-',
+        ));
+
+        return response()->json(['codigo' => $codigo]);
     }
 }

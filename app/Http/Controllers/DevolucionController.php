@@ -12,6 +12,7 @@ use App\Http\Requests\Devoluciones\GuardarDevolucionRequest;
 use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
+use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -67,6 +68,7 @@ class DevolucionController extends Controller
     {
         $this->authorize('viewAny', Devolucion::class);
 
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $devoluciones = $this->consultaDevoluciones($request)->get();
 
         $filas = $devoluciones->map(fn (Devolucion $d): array => [
@@ -80,9 +82,11 @@ class DevolucionController extends Controller
             (int) $d->detalles_count,
         ])->all();
 
+        $contexto = new ContextoExportacion('Devoluciones', $empresaFiltro, [], $devoluciones->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Folio', 'Empresa', 'Colaborador', 'Entrega', 'Sucursal', 'Registró', 'Fecha', 'Renglones',
-        ], 'Devoluciones');
+        ], $contexto);
     }
 
     /**

@@ -18,6 +18,7 @@ use App\Models\Almacen;
 use App\Models\MovimientoInventario;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioEtiquetasQr;
+use App\Soporte\ContextoExportacion;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -95,6 +96,7 @@ class UnidadActivoController extends Controller
         $this->authorize('viewAny', UnidadActivo::class);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $unidades = $this->consultaUnidades($request, $filtros)->get();
 
         $filas = $unidades->map(fn (UnidadActivo $u): array => [
@@ -107,9 +109,20 @@ class UnidadActivoController extends Controller
             $u->condicion->etiqueta(),
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Activo' => ($filtros['activo_id'] ?? null) ? Activo::query()->find((int) $filtros['activo_id'])?->nombre : null,
+            'Almacén' => ($filtros['almacen_id'] ?? null) ? Almacen::query()->find((int) $filtros['almacen_id'])?->nombre : null,
+            'Estado' => ($filtros['estado'] ?? null) ? EstadoUnidadActivo::from($filtros['estado'])->etiqueta() : null,
+            'Condición' => ($filtros['condicion'] ?? null) ? CondicionUnidadActivo::from($filtros['condicion'])->etiqueta() : null,
+            'Posesión' => ($filtros['estado_visible'] ?? null) ? EstadoVisibleUnidad::from($filtros['estado_visible'])->etiqueta() : null,
+        ]);
+
+        $contexto = new ContextoExportacion('Unidades identificadas', $empresaFiltro, $filtrosHumanos, $unidades->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Activo', 'Almacén', 'Colaborador', 'Estado', 'Posesión', 'Condición',
-        ], 'Unidades identificadas');
+        ], $contexto);
     }
 
     /**

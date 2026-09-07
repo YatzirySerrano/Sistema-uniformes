@@ -3,11 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Areas\GuardarAreaRequest;
 use App\Models\Area;
 use App\Models\Empresa;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ContextoExportacion;
 use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -21,7 +24,9 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 class AreaController extends Controller
 {
     use ConEmpresa;
+    use CreaConCodigoUnico;
     use ExportaListado;
+    use ReconciliaSecuenciaCodigo;
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
@@ -76,6 +81,7 @@ class AreaController extends Controller
         $this->authorize('viewAny', Area::class);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $areas = $this->consultaAreas($request, $filtros)->get();
 
         $filas = $areas->map(fn (Area $a): array => [
@@ -88,9 +94,20 @@ class AreaController extends Controller
             (int) $a->colaboradores_activos_count,
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Estado' => match ($filtros['estado'] ?? null) {
+                'activas' => 'Activas',
+                'inactivas' => 'Eliminadas',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Áreas', $empresaFiltro, $filtrosHumanos, $areas->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Descripción', 'Estado', 'Empresa', 'Colaboradores (total)', 'Colaboradores activos',
-        ], 'Áreas');
+        ], $contexto);
     }
 
     /**
@@ -191,15 +208,14 @@ class AreaController extends Controller
     public function store(GuardarAreaRequest $request): RedirectResponse
     {
         $empresa = $request->empresaResuelta();
-
         $datos = $request->validated();
-        $datos['codigo'] = ($datos['codigo'] ?? null) ?: $this->generarCodigo($empresa);
 
-        $area = Area::query()->create([
+        $area = $this->crearConCodigoUnico(fn () => Area::query()->create([
             ...$datos,
             'empresa_id' => $empresa->id,
+            'codigo' => $this->generarCodigo($empresa),
             'activa' => true,
-        ]);
+        ]));
 
         $this->auditoria->registrar('areas', 'crear', [
             'tipo_entidad' => Area::class, 'entidad_id' => $area->id, 'empresa_id' => $empresa->id,
@@ -242,12 +258,36 @@ class AreaController extends Controller
 
     /**
      * Genera un código consecutivo y único dentro de la empresa (ARE-0001,
-     * ARE-0002, …) cuando el usuario no captura uno. Race-safe:
-     * `ServicioGeneradorCodigos` bloquea el contador dentro de una
-     * transacción (nunca `count() + 1` sin lock).
+     * ARE-0002, …). Race-safe: `ServicioGeneradorCodigos` bloquea el
+     * contador dentro de una transacción (nunca `count() + 1` sin lock) y
+     * reconcilia contra el mayor código "ARE-XXXX" REALMENTE existente en
+     * esa empresa en cada llamada — nunca repite un código ya usado aunque
+     * el contador haya quedado atrasado.
      */
     private function generarCodigo(Empresa $empresa): string
     {
-        return $this->codigos->siguienteConPrefijo($empresa, 'area', 'ARE');
+        return $this->codigos->siguienteConPrefijo($empresa, 'area', 'ARE', semilla: fn (): int => $this->maximoSufijo(
+            Area::query()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'ARE-%')->pluck('codigo'),
+            'ARE-',
+        ));
+    }
+
+    /**
+     * Previsualización NO autoritativa del siguiente código de área para la
+     * empresa indicada — no reserva el consecutivo. El valor definitivo se
+     * calcula de nuevo, atómicamente, en `store()`.
+     */
+    public function siguienteCodigo(Request $request): JsonResponse
+    {
+        $this->authorize('create', Area::class);
+
+        $empresa = $this->resolverEmpresa($request);
+
+        $codigo = $this->codigos->siguienteConPrefijoAproximado($empresa, 'area', 'ARE', semilla: fn (): int => $this->maximoSufijo(
+            Area::query()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'ARE-%')->pluck('codigo'),
+            'ARE-',
+        ));
+
+        return response()->json(['codigo' => $codigo]);
     }
 }

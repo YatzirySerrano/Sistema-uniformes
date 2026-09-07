@@ -71,6 +71,28 @@ const sucursalSeleccionada = ref<{ id: number; nombre: string } | null>(
 );
 const sucursalId = computed(() => sucursalSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado ?? 'todos');
+// Resincroniza los filtros si el backend resuelve una empresa/sucursal
+// distinta a la que ya tenía este ref local (p. ej. al llegar desde el
+// acceso directo de Empresas u otra página sin remontar el componente) —
+// nunca se queda con un valor obsoleto ni "inventa" la primera empresa.
+watch(
+    () => props.filtros.empresa_id,
+    (nuevoId) => {
+        if (nuevoId !== (empresaSeleccionada.value?.id ?? null)) {
+            empresaSeleccionada.value =
+                props.empresasAutorizadas.find((e) => e.id === nuevoId) ?? null;
+        }
+    },
+);
+watch(
+    () => props.filtros.sucursal_id,
+    (nuevoId) => {
+        if (nuevoId !== (sucursalSeleccionada.value?.id ?? null)) {
+            sucursalSeleccionada.value =
+                props.sucursales.find((s) => s.id === nuevoId) ?? null;
+        }
+    },
+);
 
 // "Eliminados" (internamente `activo = false`) sólo se ofrece a quien puede
 // desactivar colaboradores — el backend además lo ignora si se fuerza por

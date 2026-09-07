@@ -6,9 +6,13 @@ use App\Enums\EstadoEntrega;
 use App\Exports\EntregasExport;
 use App\Exports\InventarioExport;
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Models\Almacen;
+use App\Models\Sucursal;
 use App\Servicios\ServicioReportes;
+use App\Soporte\ContextoExportacion;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -78,21 +82,28 @@ class ReporteController extends Controller
         $formato = $request->input('formato', 'xlsx');
 
         $entregas = $this->reportes->consultaEntregas($empresaIds, $sucursales, $filtros)->get();
-        $sello = now()->toDateString();
+
+        $contexto = new ContextoExportacion(
+            'Entregas',
+            $this->empresaDelFiltro($request),
+            $this->filtrosHumanosEntregas($filtros),
+            $entregas->count(),
+        );
 
         if ($formato === 'pdf') {
             $pdf = Pdf::loadView('reportes.entregas', [
                 'entregas' => $entregas,
                 'filtros' => $filtros,
+                'contexto' => $contexto,
             ])->setPaper('letter', 'landscape');
 
             return response($pdf->output(), 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="reporte-entregas-'.$sello.'.pdf"',
+                'Content-Disposition' => 'attachment; filename="'.$contexto->nombreArchivo().'.pdf"',
             ]);
         }
 
-        return Excel::download(new EntregasExport($entregas), 'reporte-entregas-'.$sello.'.xlsx');
+        return Excel::download(new EntregasExport($entregas, $contexto), $contexto->nombreArchivo().'.xlsx');
     }
 
     public function exportarInventario(Request $request): BinaryFileResponse
@@ -105,7 +116,45 @@ class ReporteController extends Controller
 
         $saldos = $this->reportes->consultaInventario($empresaIds, $almacenes, $filtros)->get();
 
-        return Excel::download(new InventarioExport($saldos), 'reporte-inventario-'.now()->toDateString().'.xlsx');
+        $contexto = new ContextoExportacion(
+            'Inventario',
+            $this->empresaDelFiltro($request),
+            $this->filtrosHumanosInventario($filtros),
+            $saldos->count(),
+        );
+
+        return Excel::download(new InventarioExport($saldos, $contexto), $contexto->nombreArchivo().'.xlsx');
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     * @return array<string, string>
+     */
+    private function filtrosHumanosEntregas(array $filtros): array
+    {
+        return array_filter([
+            'Sucursal' => ($filtros['sucursal_id'] ?? null) ? Sucursal::query()->find((int) $filtros['sucursal_id'])?->nombre : null,
+            'Estado' => ($filtros['estado'] ?? null) ? (EstadoEntrega::tryFrom($filtros['estado'])?->etiqueta() ?? $filtros['estado']) : null,
+            'Firmado' => match ($filtros['firmado'] ?? null) {
+                'si' => 'Sí',
+                'no' => 'No',
+                default => null,
+            },
+            'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
+            'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     * @return array<string, string>
+     */
+    private function filtrosHumanosInventario(array $filtros): array
+    {
+        return array_filter([
+            'Almacén' => ($filtros['almacen_id'] ?? null) ? Almacen::query()->find((int) $filtros['almacen_id'])?->nombre : null,
+            'Estado' => filter_var($filtros['solo_bajo_minimo'] ?? false, FILTER_VALIDATE_BOOL) ? 'Sólo bajo mínimo' : null,
+        ]);
     }
 
     /**

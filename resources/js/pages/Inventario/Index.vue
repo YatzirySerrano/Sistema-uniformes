@@ -107,6 +107,20 @@ async function buscarEmpresas(q: string): Promise<EmpresaAutorizada[]> {
     );
 }
 
+// Resincroniza el filtro si el backend resuelve una empresa distinta a la
+// que ya tenía este ref local — nunca se queda con un valor obsoleto ni
+// "inventa" la primera empresa de la lista.
+watch(
+    () => props.filtros.empresa_id,
+    (nuevoId) => {
+        const id = nuevoId ? Number(nuevoId) : null;
+        if (id !== (empresaSel.value?.id ?? null)) {
+            empresaSel.value =
+                props.empresasAutorizadas.find((e) => e.id === id) ?? null;
+        }
+    },
+);
+
 const tipoActivoSel = ref<Opcion | null>(
     props.tiposActivo.find(
         (t) => t.id === Number(props.filtros.tipo_activo_id),

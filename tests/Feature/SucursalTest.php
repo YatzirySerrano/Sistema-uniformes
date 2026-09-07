@@ -325,7 +325,7 @@ it('busca sucursales por nombre y ordena de forma descendente', function () {
 |--------------------------------------------------------------------------
 */
 
-it('rechaza un código de sucursal duplicado dentro de la misma empresa', function () {
+it('el código de sucursal lo genera siempre el backend, ignorando cualquier valor manipulado', function () {
     $empresa = Empresa::factory()->create();
     Sucursal::factory()->for($empresa)->create(['codigo' => 'MATRIZ']);
 
@@ -333,17 +333,11 @@ it('rechaza un código de sucursal duplicado dentro de la misma empresa', functi
         ->from('/sucursales')
         ->post('/sucursales', ['nombre' => 'Otra', 'codigo' => 'MATRIZ', 'empresa_id' => $empresa->id])
         ->assertRedirect('/sucursales')
-        ->assertSessionHasErrors('codigo');
-});
-
-it('permite el mismo código de sucursal en empresas distintas', function () {
-    $empresaA = Empresa::factory()->create();
-    $empresaB = Empresa::factory()->create();
-    Sucursal::factory()->for($empresaA)->create(['codigo' => 'MATRIZ']);
-
-    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
-        ->post('/sucursales', ['nombre' => 'Matriz B', 'codigo' => 'MATRIZ', 'empresa_id' => $empresaB->id])
         ->assertSessionHasNoErrors();
+
+    $sucursal = Sucursal::query()->where('nombre', 'Otra')->firstOrFail();
+    expect($sucursal->codigo)->not->toBe('MATRIZ');
+    expect($sucursal->codigo)->toMatch('/^SUC-\d{4,}$/');
 });
 
 it('valida el teléfono a 10 dígitos con mensaje en español y no genera un 500 con tipos raros', function () {
@@ -385,4 +379,42 @@ it('la búsqueda de sucursales sin empresa_id busca en todas las autorizadas; co
     $this->actingAs($supervisor)
         ->get("/sucursales/buscar?empresa_id={$ajena->id}")
         ->assertJson(['sucursales' => []]);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Filtro de empresa tras crear: nunca "inventa" la primera empresa (QA final)
+|--------------------------------------------------------------------------
+*/
+
+it('crear una sucursal sin filtro de empresa activo regresa al listado sin filtro', function () {
+    $empresaB = Empresa::factory()->create(['nombre_comercial' => 'Empresa B']);
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    // El usuario estaba viendo el listado SIN filtro de empresa y crea una
+    // sucursal para la empresa B (no la primera alfabéticamente).
+    $this->actingAs($admin)
+        ->from('/sucursales')
+        ->post('/sucursales', ['nombre' => 'Nueva Sucursal', 'empresa_id' => $empresaB->id])
+        ->assertRedirect('/sucursales');
+});
+
+it('crear una sucursal con un filtro de empresa explícito lo conserva al volver al listado', function () {
+    $empresaA = Empresa::factory()->create();
+    $empresaB = Empresa::factory()->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->from("/sucursales?empresa_id={$empresaA->id}")
+        ->post('/sucursales', ['nombre' => 'Otra Sucursal', 'empresa_id' => $empresaB->id])
+        ->assertRedirect("/sucursales?empresa_id={$empresaA->id}");
+});
+
+it('el listado nunca preselecciona la primera empresa autorizada cuando no se pide un filtro', function () {
+    Empresa::factory()->create(['nombre_comercial' => 'Alfa']);
+    Empresa::factory()->create(['nombre_comercial' => 'Beta']);
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->get('/sucursales')
+        ->assertInertia(fn ($page) => $page->where('filtros.empresa_id', null));
 });

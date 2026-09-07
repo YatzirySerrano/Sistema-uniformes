@@ -2,18 +2,27 @@
 
 namespace App\Exports;
 
+use App\Exports\Concerns\DecoraConContexto;
 use App\Models\EntregaUniforme;
+use App\Soporte\ContextoExportacion;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithTitle;
 
-class EntregasExport implements FromCollection, WithHeadings, WithTitle
+class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, WithHeadings, WithTitle
 {
+    use DecoraConContexto;
+
     /**
      * @param  Collection<int, EntregaUniforme>  $entregas
      */
-    public function __construct(private readonly Collection $entregas) {}
+    public function __construct(
+        private readonly Collection $entregas,
+        private readonly ContextoExportacion $contexto,
+    ) {}
 
     /**
      * @return Collection<int, array<int, string|int>>
@@ -54,5 +63,19 @@ class EntregasExport implements FromCollection, WithHeadings, WithTitle
     public function title(): string
     {
         return 'Entregas';
+    }
+
+    protected function contextoExportacion(): ContextoExportacion
+    {
+        return $this->contexto;
+    }
+
+    /**
+     * No es `count($this->entregas)`: cada entrega se explota en una fila
+     * por renglón (ver `collection()`).
+     */
+    protected function totalFilas(): int
+    {
+        return (int) $this->entregas->sum(fn (EntregaUniforme $e): int => $e->detalles->count());
     }
 }

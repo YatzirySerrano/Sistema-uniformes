@@ -6,7 +6,6 @@ use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Area;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -30,12 +29,10 @@ class GuardarAreaRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $codigo = $this->limpiar($this->input('codigo'));
         $nombre = $this->limpiar($this->input('nombre'));
 
         $this->merge([
             'nombre' => $nombre === null ? null : (string) preg_replace('/\s+/u', ' ', $nombre),
-            'codigo' => $codigo === null ? null : Str::upper($codigo),
             'descripcion' => $this->limpiar($this->input('descripcion')),
         ]);
     }
@@ -58,12 +55,9 @@ class GuardarAreaRequest extends FormRequest
                     ->where(fn ($q) => $q->where('empresa_id', $empresaId))
                     ->ignore($areaId),
             ],
-            'codigo' => [
-                'nullable', 'string', 'max:60', 'alpha_dash',
-                Rule::unique('areas', 'codigo')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($areaId),
-            ],
+            // `codigo` NUNCA se valida como entrada del usuario: lo genera
+            // el backend (autogenerado, ARE-0001…) en el alta y es
+            // inmutable en edición.
             'descripcion' => ['nullable', 'string', 'max:1000'],
         ];
     }
@@ -78,9 +72,6 @@ class GuardarAreaRequest extends FormRequest
             'nombre.required' => 'El nombre del área es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
             'nombre.unique' => 'Ya existe un área con ese nombre en esta empresa.',
-            'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',
-            'codigo.unique' => 'Ese código de área ya existe en esta empresa.',
-            'codigo.max' => 'El código no puede superar los 60 caracteres.',
             'descripcion.max' => 'La descripción no puede superar los 1000 caracteres.',
         ];
     }

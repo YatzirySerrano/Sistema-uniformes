@@ -35,12 +35,11 @@ class GuardarColaboradorRequest extends FormRequest
 
         return [
             ...($colaboradorId === null ? ['empresa_id' => ['required', 'integer']] : []),
-            'numero_empleado' => [
-                'required', 'string', 'max:60',
-                Rule::unique('colaboradores', 'numero_empleado')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($colaboradorId),
-            ],
+            // `numero_empleado` NUNCA se valida como entrada del usuario: lo
+            // genera el backend (App\Soporte\GeneradorNumeroEmpleado) en el
+            // alta y es inmutable en edición. Cualquier valor que mande el
+            // cliente para este campo se ignora (no está en las reglas, así
+            // que `validated()`/`safe()` nunca lo incluyen).
             'nombre_completo' => ['required', 'string', 'max:255'],
             'sucursal_id' => [
                 'required', 'integer',
@@ -65,7 +64,6 @@ class GuardarColaboradorRequest extends FormRequest
     {
         return [
             'empresa_id.required' => 'Selecciona la empresa del colaborador.',
-            'numero_empleado.unique' => 'El número de empleado ya se encuentra registrado en esta empresa.',
             'sucursal_id.exists' => 'La sucursal seleccionada no pertenece a esta empresa.',
             'area_id.exists' => 'El área seleccionada no pertenece a esta empresa.',
         ];

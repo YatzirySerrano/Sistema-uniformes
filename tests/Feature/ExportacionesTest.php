@@ -7,12 +7,18 @@ use App\Models\Almacen;
 use App\Models\Area;
 use App\Models\Conjunto;
 use App\Models\Devolucion;
+use App\Models\Empresa;
 use App\Models\MovimientoInventario;
 use App\Models\UnidadActivo;
 use App\Models\User;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ContextoExportacion;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Maatwebsite\Excel\Excel as ExcelFormatos;
 use Maatwebsite\Excel\Facades\Excel;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 /**
@@ -44,7 +50,10 @@ function assertFilasExportadas(TestCase $test, string $url, User $usuario, strin
 
     $test->actingAs($usuario)->get($url)->assertOk();
 
-    $archivo = Str::slug($titulo).'-'.now()->toDateString().'.xlsx';
+    // Sin `empresa_id` en la URL el reporte queda acotado a "Todas las
+    // empresas" (nunca a la primera empresa autorizada): el nombre de
+    // archivo incluye ese segmento (ver `ContextoExportacion::nombreArchivo()`).
+    $archivo = Str::slug($titulo).'-todas-las-empresas-'.now()->toDateString().'.xlsx';
     Excel::assertDownloaded($archivo, function (ListadoExport $export) use ($verificarFilas): bool {
         $verificarFilas($export->array());
 
@@ -181,6 +190,57 @@ it('exporta la Auditoría a Excel y PDF, respetando el alcance del usuario', fun
         expect($descripciones)->toContain('Alta de area visible para A')
             ->not->toContain('Alta de area oculta de B');
     });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Encabezado corporativo real (logo, empresa, filtros, estilos) — QA final
+|--------------------------------------------------------------------------
+| Excel::fake() (arriba) nunca ejecuta el AfterSheet que arma la metadata y
+| el logo: aquí se genera el .xlsx REAL una sola vez (con logo y sin logo)
+| para confirmar que ese código corre sin fallar y produce lo esperado.
+*/
+
+it('el Excel real incluye el bloque de metadata (reporte/empresa/filtros/registros) y el logo', function () {
+    Storage::fake('public');
+    $empresa = Empresa::factory()->create(['nombre_comercial' => 'Con Logo Real']);
+    $ruta = UploadedFile::fake()->image('logo.png', 100, 100)->store("empresas/{$empresa->id}", 'public');
+    $empresa->update(['logo_ruta' => $ruta]);
+
+    $contexto = new ContextoExportacion('Sucursales', $empresa, ['Estado' => 'Activas'], 2);
+    $export = new ListadoExport([[1, 'Uno'], [2, 'Dos']], ['Código', 'Nombre'], $contexto);
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+
+    $hoja = IOFactory::load($temporal)->getActiveSheet();
+
+    expect($hoja->getCell('A1')->getValue())->toBe('Reporte:');
+    expect($hoja->getCell('B1')->getValue())->toBe('Sucursales');
+    expect($hoja->getCell('A2')->getValue())->toBe('Empresa:');
+    expect($hoja->getCell('B2')->getValue())->toBe('Con Logo Real');
+    expect($hoja->getCell('A3')->getValue())->toBe('Estado:');
+    expect($hoja->getCell('B3')->getValue())->toBe('Activas');
+    expect($hoja->getCell('A7')->getValue())->toBe('Código');
+    expect((int) $hoja->getCell('A8')->getValue())->toBe(1);
+    expect(count($hoja->getDrawingCollection()))->toBe(1);
+
+    @unlink($temporal);
+});
+
+it('el Excel real sin empresa ni filtros no falla y omite el logo', function () {
+    $contexto = new ContextoExportacion('Empresas', null, [], 0);
+    $export = new ListadoExport([], ['Código', 'Nombre'], $contexto);
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+
+    $hoja = IOFactory::load($temporal)->getActiveSheet();
+
+    expect($hoja->getCell('B2')->getValue())->toBe('Todas las empresas');
+    expect(count($hoja->getDrawingCollection()))->toBe(0);
+
+    @unlink($temporal);
 });
 
 it('un usuario sin el permiso del módulo no puede exportarlo', function () {

@@ -128,6 +128,19 @@ const empresaSeleccionada = ref<EmpresaAutorizada | null>(
         null,
 );
 const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
+// Resincroniza el filtro si el backend resuelve una empresa distinta a la
+// que ya tenía este ref local (p. ej. tras crear/editar un registro en otra
+// página y volver aquí sin remontar el componente) — nunca se queda con un
+// valor obsoleto ni "inventa" la primera empresa de la lista.
+watch(
+    () => props.filtros.empresa_id,
+    (nuevoId) => {
+        if (nuevoId !== (empresaSeleccionada.value?.id ?? null)) {
+            empresaSeleccionada.value =
+                props.empresasAutorizadas.find((e) => e.id === nuevoId) ?? null;
+        }
+    },
+);
 const sucursalSeleccionada = ref<Opcion | null>(props.sucursalSeleccionada);
 const almacenSeleccionado = ref<Opcion | null>(props.almacenSeleccionado);
 const desde = ref(props.filtros.desde);

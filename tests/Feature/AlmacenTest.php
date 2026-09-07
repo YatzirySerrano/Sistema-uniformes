@@ -110,7 +110,7 @@ it('rechaza una empresa abastecida fuera del alcance del usuario', function () {
         ->assertSessionHasErrors('empresa_ids.1');
 });
 
-it('el código de almacén es único a nivel plataforma', function () {
+it('el código de almacén lo genera siempre el backend, ignorando cualquier valor manipulado', function () {
     $empresaA = Empresa::factory()->create();
     $empresaB = Empresa::factory()->create();
     Almacen::factory()->paraEmpresa($empresaA)->create(['codigo' => 'CENTRAL']);
@@ -118,7 +118,11 @@ it('el código de almacén es único a nivel plataforma', function () {
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->from('/almacenes')
         ->post('/almacenes', ['nombre' => 'Otro', 'codigo' => 'CENTRAL', 'empresa_ids' => [$empresaB->id]])
-        ->assertSessionHasErrors('codigo');
+        ->assertSessionHasNoErrors();
+
+    $almacen = Almacen::query()->where('nombre', 'Otro')->firstOrFail();
+    expect($almacen->codigo)->not->toBe('CENTRAL');
+    expect($almacen->codigo)->toMatch('/^ALM-\d{4,}$/');
 });
 
 it('un administrador puede editar un almacén y cambiar sus empresas abastecidas', function () {

@@ -8,7 +8,6 @@ use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Activo;
 use App\Models\CategoriaActivo;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
 use Illuminate\Validation\Validator;
@@ -33,11 +32,8 @@ class GuardarActivoRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $codigo = $this->limpiar($this->input('codigo'));
-
         $this->merge([
             'nombre' => $this->limpiar($this->input('nombre')),
-            'codigo' => $codigo === null ? null : Str::upper($codigo),
             'descripcion' => $this->limpiar($this->input('descripcion')),
         ]);
     }
@@ -77,12 +73,9 @@ class GuardarActivoRequest extends FormRequest
                 'nullable', 'integer',
                 Rule::exists('categorias_activo', 'id')->where(fn ($q) => $q->where('activa', true)),
             ],
-            'codigo' => [
-                'nullable', 'string', 'max:60', 'alpha_dash',
-                Rule::unique('activos', 'codigo')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($activoId),
-            ],
+            // `codigo` NUNCA se valida como entrada del usuario: lo genera
+            // el backend (autogenerado, ACT-0001…) en el alta y es
+            // inmutable en edición.
             'tipo_activo_id' => [
                 'nullable', 'integer',
                 Rule::exists('tipos_activo', 'id')->where(fn ($q) => $q->where('activo', true)),
@@ -200,8 +193,6 @@ class GuardarActivoRequest extends FormRequest
             'existencias.*.cantidad.min' => 'La cantidad no puede ser negativa.',
             'nombre.required' => 'El nombre del activo es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
-            'codigo.alpha_dash' => 'El código sólo admite letras, números, guiones y guiones bajos.',
-            'codigo.unique' => 'Ese código de activo ya existe en esta empresa.',
             'tipo_activo_id.exists' => 'El tipo de activo seleccionado no existe o está desactivado.',
             'categoria_id.exists' => 'La categoría seleccionada no existe o está desactivada.',
             'tipo_control.enum' => 'El tipo de control debe ser "por cantidad" o "seguimiento individual".',

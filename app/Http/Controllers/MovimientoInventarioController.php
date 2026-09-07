@@ -5,9 +5,12 @@ namespace App\Http\Controllers;
 use App\Enums\TipoMovimiento;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Models\Almacen;
 use App\Models\MovimientoInventario;
+use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -72,6 +75,7 @@ class MovimientoInventarioController extends Controller
         abort_unless($request->user()->can('inventario.ver'), 403);
 
         $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
         $movimientos = $this->consultaMovimientos($request, $filtros)->get();
 
         $filas = $movimientos->map(fn (MovimientoInventario $m): array => [
@@ -90,10 +94,19 @@ class MovimientoInventarioController extends Controller
             $m->realizadoPor?->name,
         ])->all();
 
+        $filtrosHumanos = array_filter([
+            'Almacén' => ($filtros['almacen_id'] ?? null) ? Almacen::query()->find((int) $filtros['almacen_id'])?->nombre : null,
+            'Tipo' => ($filtros['tipo'] ?? null) ? (TipoMovimiento::tryFrom($filtros['tipo'])?->etiqueta() ?? $filtros['tipo']) : null,
+            'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
+            'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
+        ]);
+
+        $contexto = new ContextoExportacion('Movimientos de inventario', $empresaFiltro, $filtrosHumanos, $movimientos->count());
+
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Fecha', 'Empresa', 'Tipo', 'Dirección', 'Cantidad', 'Existencia anterior', 'Existencia resultante',
             'Almacén', 'Sucursal', 'Activo', 'Talla', 'Motivo', 'Realizó',
-        ], 'Movimientos de inventario');
+        ], $contexto);
     }
 
     /**

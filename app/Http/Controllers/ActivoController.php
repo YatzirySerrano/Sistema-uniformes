@@ -9,7 +9,9 @@ use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ReactivaSuspendidos;
+use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Activos\AgregarExistenciasRequest;
 use App\Http\Requests\Activos\GuardarActivoRequest;
 use App\Models\Activo;
@@ -40,7 +42,9 @@ use Inertia\Response;
 class ActivoController extends Controller
 {
     use ConEmpresa;
+    use CreaConCodigoUnico;
     use ReactivaSuspendidos;
+    use ReconciliaSecuenciaCodigo;
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
@@ -270,30 +274,34 @@ class ActivoController extends Controller
     {
         $empresa = $request->empresaResuelta();
 
-        $datosActivo = [
-            'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
-            ...$this->datosCategoria($request, $empresa->id),
-            'nombre' => $request->string('nombre'),
-            'descripcion' => $request->input('descripcion'),
-            'tipo_control' => (string) $request->string('tipo_control'),
-            'codigo' => ($request->input('codigo') ?: null) ?: $this->generarCodigo($empresa),
-            'activo' => $request->boolean('activo', true),
-            'imagen_ruta' => $request->hasFile('imagen')
-                ? ($request->file('imagen')->store("activos/{$empresa->id}", 'public') ?: null)
-                : null,
-        ];
+        $rutaImagen = $request->hasFile('imagen')
+            ? ($request->file('imagen')->store("activos/{$empresa->id}", 'public') ?: null)
+            : null;
 
         $tallaIds = array_map('intval', $request->input('tallas', []));
 
-        $resultado = $accion->ejecutar(
-            empresaId: $empresa->id,
-            datosActivo: $datosActivo,
-            tallaIds: $tallaIds,
-            almacenId: $request->integer('almacen_id') ?: null,
-            existenciaInicial: $this->existenciaInicialDesdeRequest($request, $tallaIds),
-            cantidadUnidades: (int) $request->input('cantidad_inicial', 0),
-            realizadoPor: $request->user()?->id,
-        );
+        $resultado = $this->crearConCodigoUnico(function () use ($request, $empresa, $rutaImagen, $tallaIds, $accion): array {
+            $datosActivo = [
+                'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
+                ...$this->datosCategoria($request, $empresa->id),
+                'nombre' => $request->string('nombre'),
+                'descripcion' => $request->input('descripcion'),
+                'tipo_control' => (string) $request->string('tipo_control'),
+                'codigo' => $this->generarCodigo($empresa),
+                'activo' => $request->boolean('activo', true),
+                'imagen_ruta' => $rutaImagen,
+            ];
+
+            return $accion->ejecutar(
+                empresaId: $empresa->id,
+                datosActivo: $datosActivo,
+                tallaIds: $tallaIds,
+                almacenId: $request->integer('almacen_id') ?: null,
+                existenciaInicial: $this->existenciaInicialDesdeRequest($request, $tallaIds),
+                cantidadUnidades: (int) $request->input('cantidad_inicial', 0),
+                realizadoPor: $request->user()?->id,
+            );
+        });
         $activo = $resultado['activo'];
 
         $this->auditoria->registrar('activos', 'crear', [
@@ -366,7 +374,8 @@ class ActivoController extends Controller
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
             'tipo_control' => (string) $request->string('tipo_control'),
-            'codigo' => $request->input('codigo') ?: $activo->codigo,
+            // `codigo` es inmutable: nunca se acepta un valor del cliente,
+            // ni en alta ni en edición.
             'activo' => $request->boolean('activo', $activo->activo),
         ]);
 
@@ -620,12 +629,36 @@ class ActivoController extends Controller
 
     /**
      * Genera un código consecutivo y único dentro de la empresa (ACT-0001,
-     * ACT-0002, …) cuando el usuario no captura uno. Race-safe:
-     * `ServicioGeneradorCodigos` bloquea el contador dentro de una
-     * transacción (nunca `count() + 1` sin lock).
+     * ACT-0002, …). Race-safe: `ServicioGeneradorCodigos` bloquea el
+     * contador dentro de una transacción (nunca `count() + 1` sin lock) y
+     * reconcilia contra el mayor código "ACT-XXXX" REALMENTE existente en
+     * esa empresa en cada llamada — nunca repite un código ya usado aunque
+     * el contador haya quedado atrasado.
      */
     private function generarCodigo(Empresa $empresa): string
     {
-        return $this->codigos->siguienteConPrefijo($empresa, 'activo', 'ACT');
+        return $this->codigos->siguienteConPrefijo($empresa, 'activo', 'ACT', semilla: fn (): int => $this->maximoSufijo(
+            Activo::query()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'ACT-%')->pluck('codigo'),
+            'ACT-',
+        ));
+    }
+
+    /**
+     * Previsualización NO autoritativa del siguiente código de activo para
+     * la empresa indicada — no reserva el consecutivo. El valor definitivo
+     * se calcula de nuevo, atómicamente, en `store()`.
+     */
+    public function siguienteCodigo(Request $request): JsonResponse
+    {
+        $this->authorize('create', Activo::class);
+
+        $empresa = $this->resolverEmpresa($request);
+
+        $codigo = $this->codigos->siguienteConPrefijoAproximado($empresa, 'activo', 'ACT', semilla: fn (): int => $this->maximoSufijo(
+            Activo::query()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'ACT-%')->pluck('codigo'),
+            'ACT-',
+        ));
+
+        return response()->json(['codigo' => $codigo]);
     }
 }
