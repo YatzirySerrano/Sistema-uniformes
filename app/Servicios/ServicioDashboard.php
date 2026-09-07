@@ -37,6 +37,10 @@ class ServicioDashboard
      */
     public function resumen(array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
     {
+        // Se calcula una sola vez: KPIs y la serie "Unidades por estado" antes
+        // colapsaban el mismo GROUP BY de `unidades_activo` por separado.
+        $unidadesAgrupadas = $this->unidadesAgrupadas($empresaIds, $almacenId);
+
         return [
             'kpis' => [
                 'colaboradores_activos' => Colaborador::query()
@@ -57,7 +61,7 @@ class ServicioDashboard
                     ->bajoMinimo()
                     ->count(),
                 'almacenes_activos' => Almacen::query()->activos()->paraEmpresas($empresaIds)->count(),
-                ...$this->kpisUnidades($empresaIds, $almacenId),
+                ...$this->kpisUnidades($unidadesAgrupadas),
             ],
             'series' => [
                 'entregas_por_periodo' => $this->serieDiaria(
@@ -69,7 +73,7 @@ class ServicioDashboard
                     'fecha', $desde, $hasta,
                 ),
                 'movimientos_por_periodo' => $this->movimientosPorPeriodo($empresaIds, $desde, $hasta, $sucursalId, $almacenId),
-                'unidades_por_estado' => $this->unidadesPorEstado($empresaIds, $almacenId),
+                'unidades_por_estado' => $this->unidadesPorEstado($unidadesAgrupadas),
                 'existencias_por_almacen' => $this->existenciasPorAlmacen($empresaIds, $almacenId),
                 'stock_por_categoria' => $this->stockPorCategoria($empresaIds, $almacenId),
             ],
@@ -148,16 +152,12 @@ class ServicioDashboard
      * en PHP con la MISMA regla de `UnidadActivo::estadoVisible()`
      * (`EstadoVisibleUnidad::resolver()`), nunca una réplica en SQL.
      *
-     * @param  array<int, int>  $empresaIds
+     * @param  Collection<int, array{visible: EstadoVisibleUnidad, total: int}>  $unidadesAgrupadas
      * @return array<string, int>
      */
-    private function kpisUnidades(array $empresaIds, ?int $almacenId): array
+    private function kpisUnidades(Collection $unidadesAgrupadas): array
     {
-        $totales = array_fill_keys(array_map(fn (EstadoVisibleUnidad $e) => $e->value, EstadoVisibleUnidad::cases()), 0);
-
-        foreach ($this->unidadesAgrupadas($empresaIds, $almacenId) as $fila) {
-            $totales[$fila['visible']->value] += $fila['total'];
-        }
+        $totales = $this->colapsarUnidadesPorVisible($unidadesAgrupadas);
 
         return [
             'unidades_disponibles' => $totales[EstadoVisibleUnidad::Disponible->value],
@@ -169,16 +169,12 @@ class ServicioDashboard
     }
 
     /**
-     * @param  array<int, int>  $empresaIds
+     * @param  Collection<int, array{visible: EstadoVisibleUnidad, total: int}>  $unidadesAgrupadas
      * @return array<int, array{estado: string, etiqueta: string, total: int}>
      */
-    private function unidadesPorEstado(array $empresaIds, ?int $almacenId): array
+    private function unidadesPorEstado(Collection $unidadesAgrupadas): array
     {
-        $totales = array_fill_keys(array_map(fn (EstadoVisibleUnidad $e) => $e->value, EstadoVisibleUnidad::cases()), 0);
-
-        foreach ($this->unidadesAgrupadas($empresaIds, $almacenId) as $fila) {
-            $totales[$fila['visible']->value] += $fila['total'];
-        }
+        $totales = $this->colapsarUnidadesPorVisible($unidadesAgrupadas);
 
         return collect(EstadoVisibleUnidad::cases())
             ->map(fn (EstadoVisibleUnidad $e): array => [
@@ -186,6 +182,21 @@ class ServicioDashboard
                 'etiqueta' => $e->etiqueta(),
                 'total' => $totales[$e->value],
             ])->all();
+    }
+
+    /**
+     * @param  Collection<int, array{visible: EstadoVisibleUnidad, total: int}>  $unidadesAgrupadas
+     * @return array<string, int>
+     */
+    private function colapsarUnidadesPorVisible(Collection $unidadesAgrupadas): array
+    {
+        $totales = array_fill_keys(array_map(fn (EstadoVisibleUnidad $e) => $e->value, EstadoVisibleUnidad::cases()), 0);
+
+        foreach ($unidadesAgrupadas as $fila) {
+            $totales[$fila['visible']->value] += $fila['total'];
+        }
+
+        return $totales;
     }
 
     /**

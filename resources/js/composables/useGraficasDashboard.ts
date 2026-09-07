@@ -349,7 +349,24 @@ export function useGraficasDashboard() {
             responsive: [
                 {
                     breakpoint: 640,
-                    options: { xaxis: { tickAmount: 4 } },
+                    options: {
+                        chart: { height: 240 },
+                        legend: {
+                            horizontalAlign: 'center',
+                            fontSize: '11px',
+                            itemMargin: { horizontal: 6, vertical: 4 },
+                        },
+                        xaxis: { tickAmount: 4 },
+                    },
+                },
+                {
+                    breakpoint: 420,
+                    options: {
+                        chart: { height: 220 },
+                        legend: { fontSize: '10px' },
+                        xaxis: { tickAmount: 3 },
+                        yaxis: { labels: { style: { fontSize: '10px' } } },
+                    },
                 },
             ],
         };
@@ -396,6 +413,17 @@ export function useGraficasDashboard() {
                 axisTicks: { color: colores.value.border },
             },
             yaxis: { labels: { style: ejeEstilo() } },
+            responsive: [
+                {
+                    breakpoint: 480,
+                    options: {
+                        chart: { height: 240 },
+                        plotOptions: { bar: { barHeight: '70%' } },
+                        dataLabels: { style: { fontSize: '10px' } },
+                        yaxis: { labels: { style: { fontSize: '10px' } } },
+                    },
+                },
+            ],
         };
     }
 
@@ -452,6 +480,19 @@ export function useGraficasDashboard() {
                     },
                 },
             },
+            responsive: [
+                {
+                    breakpoint: 480,
+                    options: {
+                        chart: { height: 280 },
+                        legend: {
+                            fontSize: '11px',
+                            itemMargin: { horizontal: 6, vertical: 4 },
+                        },
+                        plotOptions: { pie: { donut: { size: '62%' } } },
+                    },
+                },
+            ],
         };
     }
 

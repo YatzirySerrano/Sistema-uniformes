@@ -13,8 +13,7 @@ import {
     Wrench,
     X,
 } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
-import VueApexCharts from 'vue3-apexcharts';
+import { computed, defineAsyncComponent, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -108,6 +107,11 @@ defineOptions({
         breadcrumbs: [{ title: 'Dashboard', href: '/dashboard' }],
     },
 });
+
+// ApexCharts es una librería pesada: cargarla de forma asíncrona permite que
+// los KPIs y filtros (lo primero que el usuario necesita ver) se rendericen
+// sin esperar a que se descargue y evalúe el bundle completo de gráficas.
+const VueApexCharts = defineAsyncComponent(() => import('vue3-apexcharts'));
 
 const {
     colores,
