@@ -38,16 +38,14 @@ class GuardarConjuntoRequest extends FormRequest
         $conjunto = $this->route('conjunto');
         $conjuntoId = $conjunto instanceof Conjunto ? $conjunto->getKey() : null;
 
+        // `codigo` NO se valida ni se acepta: es autogenerado por el backend
+        // (CON-0001, race-safe vía ServicioGeneradorCodigos) e inmutable, igual
+        // que en Empresa/Sucursal/Almacén/Área/Activo. Un request manipulado
+        // que lo envíe simplemente se ignora en el controlador.
         return [
             ...($conjuntoId === null ? ['empresa_id' => ['required', 'integer']] : []),
             'nombre' => ['required', 'string', 'max:255'],
             'descripcion' => ['nullable', 'string', 'max:2000'],
-            'codigo' => [
-                'nullable', 'string', 'max:60', 'alpha_dash',
-                Rule::unique('conjuntos', 'codigo')
-                    ->where(fn ($q) => $q->where('empresa_id', $empresaId))
-                    ->ignore($conjuntoId),
-            ],
             'activo' => ['boolean'],
             'componentes' => ['required', 'array', 'min:1'],
             'componentes.*.activo_id' => [
@@ -124,7 +122,6 @@ class GuardarConjuntoRequest extends FormRequest
         return [
             'empresa_id.required' => 'Selecciona la empresa del conjunto.',
             'nombre.required' => 'El nombre del conjunto es obligatorio.',
-            'codigo.unique' => 'Ese código de conjunto ya existe en esta empresa.',
             'componentes.required' => 'Agrega al menos un componente.',
             'componentes.min' => 'Agrega al menos un componente.',
             'componentes.*.activo_id.required' => 'Selecciona el activo.',

@@ -20,7 +20,6 @@ use App\Http\Controllers\ImportacionColaboradorController;
 use App\Http\Controllers\InventarioController;
 use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
-use App\Http\Controllers\Portal\PortalController;
 use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\RolController;
 use App\Http\Controllers\SucursalController;
@@ -37,9 +36,6 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Guía ilustrada del sistema: estática, sin datos de negocio, disponible
     // para cualquier usuario autenticado sin importar su rol.
     Route::get('ayuda', fn () => Inertia::render('Ayuda/Index'))->name('ayuda');
-
-    // Portal del colaborador
-    Route::get('portal/mis-entregas', [PortalController::class, 'index'])->name('portal.mis-entregas');
 
     // Colaboradores
     Route::get('colaboradores', [ColaboradorController::class, 'index'])->name('colaboradores.index');
@@ -143,6 +139,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Conjuntos
     Route::get('conjuntos', [ConjuntoController::class, 'index'])->name('conjuntos.index');
     Route::get('conjuntos/buscar', [ConjuntoController::class, 'buscar'])->name('conjuntos.buscar');
+    Route::get('conjuntos/siguiente-codigo', [ConjuntoController::class, 'siguienteCodigo'])->name('conjuntos.siguiente-codigo');
     Route::get('conjuntos/crear', [ConjuntoController::class, 'create'])->name('conjuntos.create');
     Route::get('conjuntos/exportar', [ConjuntoController::class, 'exportar'])->name('conjuntos.exportar');
     Route::post('conjuntos', [ConjuntoController::class, 'store'])->name('conjuntos.store');
@@ -223,6 +220,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('sucursales/{sucursal}/suspendidos/reactivar', [SucursalController::class, 'reactivarSuspendidos'])->name('sucursales.suspendidos.reactivar');
 
     Route::get('usuarios', [UsuarioController::class, 'index'])->name('usuarios.index');
+    Route::get('usuarios/exportar', [UsuarioController::class, 'exportar'])->name('usuarios.exportar');
     Route::get('usuarios/crear', [UsuarioController::class, 'create'])->name('usuarios.create');
     Route::post('usuarios', [UsuarioController::class, 'store'])->name('usuarios.store');
     Route::get('usuarios/{usuario}/editar', [UsuarioController::class, 'edit'])->name('usuarios.edit');
@@ -230,6 +228,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('usuarios/{usuario}/estado', [UsuarioController::class, 'toggle'])->name('usuarios.toggle');
 
     Route::get('roles', [RolController::class, 'index'])->name('roles.index');
+    Route::get('roles/exportar', [RolController::class, 'exportar'])->name('roles.exportar');
     Route::post('roles', [RolController::class, 'store'])->name('roles.store');
     Route::put('roles/{rol}', [RolController::class, 'update'])->name('roles.update');
     Route::delete('roles/{rol}', [RolController::class, 'destroy'])->name('roles.destroy');

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Plus, Trash2 } from '@lucide/vue';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
@@ -79,6 +80,62 @@ watch(empresaId, (id) => {
     form.empresa_id = id === '' ? null : id;
 });
 
+// --- Código: lo genera el backend (CON-0001), nunca lo escribe el usuario.
+// Esto sólo previsualiza (no reserva) el código; el valor definitivo se
+// calcula y reserva atómicamente al guardar.
+const codigoPreview = ref<string | null>(props.conjunto?.codigo ?? null);
+const cargandoPreviewCodigo = ref(false);
+let controladorPreviewCodigo: AbortController | undefined;
+let temporizadorPreviewCodigo: ReturnType<typeof setTimeout> | undefined;
+
+async function actualizarPreviewCodigo(): Promise<void> {
+    if (empresaId.value === '') {
+        codigoPreview.value = null;
+        cargandoPreviewCodigo.value = false;
+        return;
+    }
+
+    controladorPreviewCodigo?.abort();
+    controladorPreviewCodigo = new AbortController();
+    cargandoPreviewCodigo.value = true;
+
+    try {
+        const res = await fetch(
+            `/conjuntos/siguiente-codigo?empresa_id=${empresaId.value}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal: controladorPreviewCodigo.signal,
+            },
+        );
+        if (!res.ok) return;
+        codigoPreview.value = (await res.json()).codigo ?? null;
+    } catch {
+        // Petición abortada o de red: se ignora.
+    } finally {
+        cargandoPreviewCodigo.value = false;
+    }
+}
+
+if (!esEdicion) {
+    watch(
+        empresaId,
+        () => {
+            clearTimeout(temporizadorPreviewCodigo);
+            temporizadorPreviewCodigo = setTimeout(
+                actualizarPreviewCodigo,
+                300,
+            );
+        },
+        { immediate: true },
+    );
+}
+
+onBeforeUnmount(() => {
+    clearTimeout(temporizadorPreviewCodigo);
+    controladorPreviewCodigo?.abort();
+});
+
 type Fila = {
     activo_id: number | '';
     cantidad_requerida: number;
@@ -104,14 +161,12 @@ if (filasIniciales.length === 0) {
 const form = useForm<{
     empresa_id: number | null;
     nombre: string;
-    codigo: string;
     descripcion: string;
     activo: boolean;
     componentes: Fila[];
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
     nombre: props.conjunto?.nombre ?? '',
-    codigo: props.conjunto?.codigo ?? '',
     descripcion: props.conjunto?.descripcion ?? '',
     activo: props.conjunto?.activo ?? true,
     componentes: filasIniciales,
@@ -253,18 +308,34 @@ function enviar(): void {
                 </div>
 
                 <div class="grid gap-1.5">
-                    <Label for="codigo"
-                        >Código
-                        <span class="text-muted-foreground"
-                            >(opcional)</span
-                        ></Label
-                    >
-                    <Input
+                    <Label for="codigo" class="flex items-center gap-1.5">
+                        Código
+                        <AyudaTooltip
+                            texto="Lo genera el sistema automáticamente (CON-0001). No se puede escribir ni editar."
+                            etiqueta="Ayuda sobre el código"
+                        />
+                    </Label>
+                    <div
                         id="codigo"
-                        v-model="form.codigo"
-                        class="uppercase"
-                    />
-                    <InputError :message="form.errors.codigo" />
+                        class="bg-muted/50 text-muted-foreground flex h-9 items-center rounded-md border px-3 font-mono text-sm"
+                    >
+                        <span v-if="codigoPreview" class="text-foreground">{{
+                            codigoPreview
+                        }}</span>
+                        <span v-else-if="cargandoPreviewCodigo"
+                            >Calculando…</span
+                        >
+                        <span v-else class="italic"
+                            >Se generará automáticamente al guardar.</span
+                        >
+                    </div>
+                    <p class="text-muted-foreground text-xs">
+                        {{
+                            esEdicion
+                                ? 'Asignado al crear el conjunto; no se puede modificar.'
+                                : 'Selecciona la empresa para ver el código que se asignará al guardar.'
+                        }}
+                    </p>
                 </div>
 
                 <div class="grid gap-1.5">

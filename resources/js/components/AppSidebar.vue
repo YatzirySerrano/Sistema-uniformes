@@ -206,12 +206,6 @@ const grupos = computed<Grupo[]>(() =>
             titulo: null,
             enlaces: [
                 {
-                    titulo: 'Mis entregas',
-                    href: '/portal/mis-entregas',
-                    icono: Package,
-                    visible: true,
-                },
-                {
                     titulo: 'Ayuda',
                     href: '/ayuda',
                     icono: Compass,

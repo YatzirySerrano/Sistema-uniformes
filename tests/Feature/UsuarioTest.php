@@ -1,8 +1,11 @@
 <?php
 
 use App\Enums\RolSistema;
+use App\Exports\ListadoExport;
 use App\Models\Empresa;
 use App\Models\User;
+use Illuminate\Support\Str;
+use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
@@ -81,4 +84,87 @@ it('marca puedeCambiarEstado en falso para el propio usuario y para un superadmi
 
     expect($filas[$this->admin->id]['puedeCambiarEstado'])->toBeFalse()
         ->and($filas[$superadmin->id]['puedeCambiarEstado'])->toBeFalse();
+});
+
+it('busca usuarios por nombre y por correo', function () {
+    $ana = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+    $ana->update(['name' => 'Ana Ramírez', 'email' => 'ana.r@empresa.test']);
+    $beto = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+    $beto->update(['name' => 'Beto López', 'email' => 'beto@otra.test']);
+
+    $porNombre = collect($this->actingAs($this->admin)->get('/usuarios?buscar=ram')
+        ->viewData('page')['props']['usuarios']['data'])->pluck('name');
+    expect($porNombre)->toContain('Ana Ramírez')->not->toContain('Beto López');
+
+    $porCorreo = collect($this->actingAs($this->admin)->get('/usuarios?buscar=otra.test')
+        ->viewData('page')['props']['usuarios']['data'])->pluck('name');
+    expect($porCorreo)->toContain('Beto López')->not->toContain('Ana Ramírez');
+});
+
+it('filtra usuarios por rol y por estado', function () {
+    $encargado = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+    $encargado->update(['name' => 'Solo Encargado']);
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->empresa]);
+    $supervisor->update(['name' => 'Solo Supervisor']);
+    $eliminado = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+    $eliminado->update(['name' => 'Eliminado', 'activo' => false]);
+
+    $porRol = collect($this->actingAs($this->admin)->get('/usuarios?rol='.RolSistema::Supervisor->value)
+        ->viewData('page')['props']['usuarios']['data'])->pluck('name');
+    expect($porRol)->toContain('Solo Supervisor')->not->toContain('Solo Encargado');
+
+    $eliminados = collect($this->actingAs($this->admin)->get('/usuarios?estado=eliminados')
+        ->viewData('page')['props']['usuarios']['data'])->pluck('name');
+    expect($eliminados)->toContain('Eliminado')->not->toContain('Solo Encargado');
+});
+
+it('filtra usuarios por empresa asignada', function () {
+    $otraEmpresa = Empresa::factory()->create();
+    $deLaEmpresa = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+    $deLaEmpresa->update(['name' => 'De la empresa']);
+    $deOtra = usuarioCon(RolSistema::Encargado->value, [$otraEmpresa]);
+    $deOtra->update(['name' => 'De otra empresa']);
+
+    $filas = collect($this->actingAs($this->admin)->get("/usuarios?empresa_id={$this->empresa->id}")
+        ->viewData('page')['props']['usuarios']['data'])->pluck('name');
+
+    expect($filas)->toContain('De la empresa')->not->toContain('De otra empresa');
+});
+
+it('exporta el listado de usuarios a Excel respetando los filtros y sin datos sensibles', function () {
+    Excel::fake();
+
+    $ana = usuarioCon(RolSistema::Supervisor->value, [$this->empresa]);
+    $ana->update(['name' => 'Ana Export', 'email' => 'ana.export@empresa.test']);
+    $otro = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+    $otro->update(['name' => 'Otro Rol']);
+
+    $this->actingAs($this->admin)->get('/usuarios/exportar?rol='.RolSistema::Supervisor->value)->assertOk();
+
+    Excel::assertDownloaded('usuarios-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $export): bool {
+        $filas = $export->array();
+        $planas = collect($filas)->flatmap(fn (array $f): array => $f)->map(fn ($v): string => (string) $v);
+
+        // La fila del supervisor está; la del encargado (filtrada) no.
+        expect(collect($filas)->pluck(0))->toContain('Ana Export')->not->toContain('Otro Rol');
+        // Nunca se exporta el hash de contraseña ni tokens.
+        expect($planas->contains(fn (string $v): bool => Str::startsWith($v, '$2y$')))->toBeFalse();
+
+        return true;
+    });
+});
+
+it('exporta el listado de usuarios a PDF', function () {
+    usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+
+    $respuesta = $this->actingAs($this->admin)->get('/usuarios/exportar?formato=pdf')->assertOk();
+
+    expect($respuesta->getContent())->toStartWith('%PDF-');
+    $respuesta->assertHeader('content-type', 'application/pdf');
+});
+
+it('el endpoint de exportación de usuarios exige el permiso usuarios.ver', function () {
+    $sinPermiso = usuarioCon(RolSistema::Colaborador->value, [$this->empresa]);
+
+    $this->actingAs($sinPermiso)->get('/usuarios/exportar')->assertForbidden();
 });

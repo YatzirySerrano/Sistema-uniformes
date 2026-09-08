@@ -215,6 +215,74 @@ it('un rol restringido no puede ver un conjunto de una empresa fuera de su alcan
     expect($respuesta->status())->toBeIn([403, 404]);
 });
 
+it('asigna un código automático CON-0001 y lo va consecutivando por empresa', function () {
+    $activo = Activo::factory()->for($this->empresa)->create();
+
+    foreach (['Uno', 'Dos'] as $nombre) {
+        $this->actingAs($this->admin)->post('/conjuntos', [
+            'empresa_id' => $this->empresa->id,
+            'nombre' => $nombre,
+            'componentes' => [['activo_id' => $activo->id, 'cantidad_requerida' => 1, 'talla_libre' => false]],
+        ])->assertSessionHasNoErrors();
+    }
+
+    expect(Conjunto::query()->where('nombre', 'Uno')->value('codigo'))->toBe('CON-0001')
+        ->and(Conjunto::query()->where('nombre', 'Dos')->value('codigo'))->toBe('CON-0002');
+});
+
+it('la previsualización de código no reserva el consecutivo y avanza tras guardar', function () {
+    $ruta = "/conjuntos/siguiente-codigo?empresa_id={$this->empresa->id}";
+
+    $a = $this->actingAs($this->admin)->getJson($ruta)->json('codigo');
+    $b = $this->actingAs($this->admin)->getJson($ruta)->json('codigo');
+
+    expect($a)->toBe('CON-0001')->and($b)->toBe('CON-0001'); // no reserva
+
+    $activo = Activo::factory()->for($this->empresa)->create();
+    $this->actingAs($this->admin)->post('/conjuntos', [
+        'empresa_id' => $this->empresa->id,
+        'nombre' => 'Real',
+        'componentes' => [['activo_id' => $activo->id, 'cantidad_requerida' => 1, 'talla_libre' => false]],
+    ])->assertSessionHasNoErrors();
+
+    expect($this->actingAs($this->admin)->getJson($ruta)->json('codigo'))->toBe('CON-0002');
+});
+
+it('ignora un "codigo" enviado en un request manipulado, tanto al crear como al editar', function () {
+    $activo = Activo::factory()->for($this->empresa)->create();
+
+    $this->actingAs($this->admin)->post('/conjuntos', [
+        'empresa_id' => $this->empresa->id,
+        'nombre' => 'Manipulado',
+        'codigo' => 'HACKEADO',
+        'componentes' => [['activo_id' => $activo->id, 'cantidad_requerida' => 1, 'talla_libre' => false]],
+    ])->assertSessionHasNoErrors();
+
+    $conjunto = Conjunto::query()->where('nombre', 'Manipulado')->firstOrFail();
+    expect($conjunto->codigo)->toBe('CON-0001');
+
+    $this->actingAs($this->admin)->put("/conjuntos/{$conjunto->id}", [
+        'nombre' => 'Manipulado',
+        'codigo' => 'OTRO-9999',
+        'componentes' => [['activo_id' => $activo->id, 'cantidad_requerida' => 2, 'talla_libre' => false]],
+    ])->assertSessionHasNoErrors();
+
+    expect($conjunto->fresh()->codigo)->toBe('CON-0001');
+});
+
+it('reconcilia el contador contra códigos ya existentes, incluidos los eliminados', function () {
+    Conjunto::factory()->for($this->empresa)->create(['codigo' => 'CON-0009'])->delete();
+
+    $activo = Activo::factory()->for($this->empresa)->create();
+    $this->actingAs($this->admin)->post('/conjuntos', [
+        'empresa_id' => $this->empresa->id,
+        'nombre' => 'Tras hueco',
+        'componentes' => [['activo_id' => $activo->id, 'cantidad_requerida' => 1, 'talla_libre' => false]],
+    ])->assertSessionHasNoErrors();
+
+    expect(Conjunto::query()->where('nombre', 'Tras hueco')->value('codigo'))->toBe('CON-0010');
+});
+
 it('la búsqueda de conjuntos se acota a la empresa indicada', function () {
     $conjunto = Conjunto::factory()->for($this->empresa)->create(['nombre' => 'Kit Oficina']);
     $otra = Empresa::factory()->create();

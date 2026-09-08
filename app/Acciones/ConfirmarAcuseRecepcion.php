@@ -5,14 +5,17 @@ namespace App\Acciones;
 use App\Enums\EstadoEntrega;
 use App\Excepciones\EntregaYaFirmadaException;
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Mail\ComprobanteEntregaMail;
 use App\Models\AcuseRecepcion;
 use App\Models\EntregaUniforme;
 use App\Servicios\ServicioAcusePdf;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
 use App\Soporte\ValidadorFirma;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
@@ -138,7 +141,11 @@ class ConfirmarAcuseRecepcion
 
         $this->materializarPdf($acuse);
 
-        return $acuse->refresh();
+        $acuse = $acuse->refresh();
+
+        $this->enviarComprobante($acuse, $entrega);
+
+        return $acuse;
     }
 
     public function regenerarPdf(AcuseRecepcion $acuse): AcuseRecepcion
@@ -155,6 +162,49 @@ class ConfirmarAcuseRecepcion
             $acuse->update(['ruta_pdf' => $ruta]);
         } catch (Throwable $e) {
             Log::error('No se pudo generar el PDF del acuse '.$acuse->folio, ['excepcion' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Notifica a AMBAS partes que la entrega quedó confirmada: el
+     * ENCARGADO que realizó la entrega y el COLABORADOR que la recibió y
+     * firmó (sólo si tiene correo registrado). Adjunta el PDF del acuse si
+     * ya se materializó.
+     *
+     * Se ejecuta SIEMPRE fuera de la transacción de negocio y nunca lanza:
+     * si el correo — o incluso la cola — fallara, la entrega firmada, su
+     * acuse, las firmas y el inventario permanecen intactos (sólo se
+     * registra el fallo en el log).
+     *
+     * Idempotencia: sólo se llega aquí una vez por confirmación (la
+     * transición `PendienteFirma → Firmada` es irreversible y está protegida
+     * con `lockForUpdate`). Ningún endpoint de consulta, descarga o
+     * regeneración de PDF pasa por este método. El candado en caché es una
+     * segunda barrera ante una doble invocación por concurrencia.
+     */
+    private function enviarComprobante(AcuseRecepcion $acuse, EntregaUniforme $entrega): void
+    {
+        if (! Cache::add('acuse-recepcion:correo:'.$acuse->getKey(), true, now()->addDays(7))) {
+            return;
+        }
+
+        $destinatarios = collect([
+            $entrega->encargado?->email,
+            $entrega->colaborador?->correo,
+        ])
+            ->filter(fn (?string $correo): bool => is_string($correo) && filter_var($correo, FILTER_VALIDATE_EMAIL) !== false)
+            ->map(fn (string $correo): string => mb_strtolower(trim($correo)))
+            ->unique()
+            ->values();
+
+        if ($destinatarios->isEmpty()) {
+            return;
+        }
+
+        try {
+            Mail::to($destinatarios->all())->queue(new ComprobanteEntregaMail($acuse));
+        } catch (Throwable $e) {
+            Log::error('No se pudo encolar el comprobante de la entrega '.$entrega->folio, ['excepcion' => $e->getMessage()]);
         }
     }
 

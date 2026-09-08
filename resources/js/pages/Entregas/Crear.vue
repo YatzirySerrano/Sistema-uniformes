@@ -599,16 +599,26 @@ function enviar(): void {
 
             <!-- Activos sueltos -->
             <section class="space-y-3 rounded-xl border p-4">
-                <div class="flex items-center justify-between">
-                    <h2 class="text-sm font-semibold">Activos por cantidad</h2>
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <h2 class="text-sm font-semibold">
+                            Artículos por cantidad
+                        </h2>
+                        <p class="text-muted-foreground mt-0.5 text-xs">
+                            Para prendas u otros artículos controlados por
+                            existencias. Selecciona el artículo, la talla o
+                            variante cuando aplique y la cantidad a entregar.
+                        </p>
+                    </div>
                     <Button
                         type="button"
                         variant="outline"
                         size="sm"
+                        class="shrink-0"
                         :disabled="!almacenSel"
                         @click="agregarActivo"
                     >
-                        <Plus class="size-4" /> Agregar activo
+                        <Plus class="size-4" /> Agregar artículo
                     </Button>
                 </div>
                 <p v-if="!almacenSel" class="text-muted-foreground text-sm">
@@ -717,14 +727,23 @@ function enviar(): void {
 
             <!-- Unidades de seguimiento individual -->
             <section class="space-y-3 rounded-xl border p-4">
-                <div class="flex items-center justify-between">
-                    <h2 class="text-sm font-semibold">
-                        Unidades identificadas
-                    </h2>
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <h2 class="text-sm font-semibold">
+                            Equipos y unidades identificadas
+                        </h2>
+                        <p class="text-muted-foreground mt-0.5 text-xs">
+                            Para equipos u otros activos con seguimiento
+                            individual mediante un código o identificador único,
+                            como computadoras, celulares o herramientas. Aquí
+                            eliges una unidad específica.
+                        </p>
+                    </div>
                     <Button
                         type="button"
                         variant="outline"
                         size="sm"
+                        class="shrink-0"
                         :disabled="!almacenSel"
                         @click="agregarUnidad"
                     >
@@ -809,12 +828,20 @@ function enviar(): void {
 
             <!-- Conjuntos -->
             <section class="space-y-3 rounded-xl border p-4">
-                <div class="flex items-center justify-between">
-                    <h2 class="text-sm font-semibold">Conjuntos</h2>
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <h2 class="text-sm font-semibold">Conjuntos</h2>
+                        <p class="text-muted-foreground mt-0.5 text-xs">
+                            Para kits o grupos de artículos que se entregan
+                            juntos, como un uniforme completo o un kit de
+                            equipo.
+                        </p>
+                    </div>
                     <Button
                         type="button"
                         variant="outline"
                         size="sm"
+                        class="shrink-0"
                         :disabled="!almacenSel"
                         @click="agregarConjunto"
                     >

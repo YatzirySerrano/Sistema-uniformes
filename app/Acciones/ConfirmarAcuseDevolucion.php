@@ -6,6 +6,7 @@ use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Mail\ComprobanteDevolucionMail;
 use App\Models\AcuseDevolucion;
 use App\Models\Devolucion;
 use App\Models\UnidadActivo;
@@ -16,8 +17,10 @@ use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
 use App\Servicios\ServicioUnidadesActivo;
 use App\Soporte\ValidadorFirma;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
@@ -77,7 +80,7 @@ class ConfirmarAcuseDevolucion
         $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
         $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
-        $devolucion->loadMissing(['detalles.activo', 'detalles.talla', 'detalles.unidadActivo', 'colaborador', 'sucursal', 'almacen', 'empresa', 'registradaPor']);
+        $devolucion->loadMissing(['detalles.activo', 'detalles.talla', 'detalles.unidadActivo', 'colaborador', 'sucursal', 'almacen', 'empresa', 'registradaPor', 'entrega:id,folio']);
 
         $snapshot = $this->construirSnapshot($devolucion);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
@@ -209,7 +212,11 @@ class ConfirmarAcuseDevolucion
 
         $this->materializarPdf($acuse);
 
-        return $acuse->refresh();
+        $acuse = $acuse->refresh();
+
+        $this->enviarComprobante($acuse, $devolucion);
+
+        return $acuse;
     }
 
     public function regenerarPdf(AcuseDevolucion $acuse): AcuseDevolucion
@@ -226,6 +233,45 @@ class ConfirmarAcuseDevolucion
             $acuse->update(['ruta_pdf' => $ruta]);
         } catch (Throwable $e) {
             Log::error('No se pudo generar el PDF del acuse de devolución '.$acuse->folio, ['excepcion' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Notifica a las partes correspondientes que la devolución quedó
+     * confirmada: el ENCARGADO que registró/recibió la operación y el
+     * COLABORADOR relacionado (sólo si tiene correo registrado). Adjunta el
+     * PDF del acuse de devolución si ya se materializó y, cuando aplica,
+     * incluye la referencia a la entrega de origen.
+     *
+     * Igual que en las entregas: fuera de la transacción, nunca lanza (un
+     * fallo de SMTP/cola no revierte el reingreso de inventario ni el
+     * acuse), e idempotente — sólo se alcanza una vez por confirmación
+     * (`PendienteFirma → Confirmada`, irreversible y con `lockForUpdate`),
+     * con un candado en caché como segunda barrera.
+     */
+    private function enviarComprobante(AcuseDevolucion $acuse, Devolucion $devolucion): void
+    {
+        if (! Cache::add('acuse-devolucion:correo:'.$acuse->getKey(), true, now()->addDays(7))) {
+            return;
+        }
+
+        $destinatarios = collect([
+            $devolucion->registradaPor?->email,
+            $devolucion->colaborador?->correo,
+        ])
+            ->filter(fn (?string $correo): bool => is_string($correo) && filter_var($correo, FILTER_VALIDATE_EMAIL) !== false)
+            ->map(fn (string $correo): string => mb_strtolower(trim($correo)))
+            ->unique()
+            ->values();
+
+        if ($destinatarios->isEmpty()) {
+            return;
+        }
+
+        try {
+            Mail::to($destinatarios->all())->queue(new ComprobanteDevolucionMail($acuse, $devolucion->entrega?->folio));
+        } catch (Throwable $e) {
+            Log::error('No se pudo encolar el comprobante de la devolución '.$devolucion->folio, ['excepcion' => $e->getMessage()]);
         }
     }
 

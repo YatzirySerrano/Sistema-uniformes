@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Enums\RolSistema;
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ExportaListado;
 use App\Models\Empresa;
 use App\Models\User;
 use App\Servicios\ServicioAuditoria;
+use App\Soporte\ContextoExportacion;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -16,10 +19,13 @@ use Illuminate\Validation\Rules\Password;
 use Inertia\Inertia;
 use Inertia\Response;
 use Spatie\Permission\Models\Role;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class UsuarioController extends Controller
 {
     use ConEmpresa;
+    use ExportaListado;
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -27,18 +33,16 @@ class UsuarioController extends Controller
     {
         $this->authorize('viewAny', User::class);
 
-        $empresasIds = $this->empresasGestionables($request->user());
+        $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
 
         // Sólo quien puede desactivar usuarios puede ver los eliminados en
         // el listado. Para el resto, "activo" se fuerza sin excepción.
         $puedeVerEliminados = $request->user()->can('usuarios.desactivar');
 
-        $usuarios = User::query()
-            ->when(! $request->user()->esSuperadministrador(), fn ($q) => $q->whereHas('empresas', fn ($e) => $e->whereIn('empresas.id', $empresasIds)))
-            ->when(! $puedeVerEliminados, fn ($q) => $q->where('activo', true))
-            ->with(['roles:id,name', 'empresas:id,nombre_comercial'])
-            ->orderBy('name')
+        $usuarios = $this->consultaUsuarios($request, $filtros)
             ->paginate($this->porPagina())
+            ->withQueryString()
             ->through(fn (User $u): array => [
                 'id' => $u->id,
                 'name' => $u->name,
@@ -55,7 +59,103 @@ class UsuarioController extends Controller
             'usuarios' => $usuarios,
             'puedeCrear' => $request->user()->can('create', User::class),
             'puedeVerEliminados' => $puedeVerEliminados,
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'rolesDisponibles' => $this->rolesAsignables($request->user()),
+            'filtros' => [
+                'buscar' => $filtros['buscar'] ?? '',
+                'rol' => $filtros['rol'] ?? '',
+                'estado' => $filtros['estado'] ?? '',
+                'empresa_id' => $empresaFiltro?->id,
+            ],
         ]);
+    }
+
+    /**
+     * Excel/PDF del listado de usuarios, respetando los mismos filtros que
+     * `index()`. Nunca exporta contraseñas, hashes, tokens ni secretos 2FA.
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', User::class);
+
+        $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        $usuarios = $this->consultaUsuarios($request, $filtros)
+            ->with('sucursales:id,nombre')
+            ->get();
+
+        $filas = $usuarios->map(fn (User $u): array => [
+            $u->name,
+            $u->email,
+            $u->roles->pluck('name')->map(fn (string $r): string => Str::of($r)->replace('_', ' ')->title()->value())->implode(', ') ?: '—',
+            $u->empresas->pluck('nombre_comercial')->implode(', ') ?: '—',
+            $u->sucursales->pluck('nombre')->implode(', ') ?: '—',
+            $u->activo ? 'Activo' : 'Eliminado',
+            $u->email_verified_at !== null ? 'Sí' : 'No',
+        ])->all();
+
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Rol' => isset($filtros['rol']) && $filtros['rol'] !== ''
+                ? Str::of($filtros['rol'])->replace('_', ' ')->title()->value()
+                : null,
+            'Estado' => match ($filtros['estado'] ?? null) {
+                'activos' => 'Activos',
+                'eliminados' => 'Eliminados',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Usuarios', $empresaFiltro, $filtrosHumanos, $usuarios->count());
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Nombre', 'Correo', 'Roles', 'Empresas', 'Sucursales', 'Estado', 'Correo verificado',
+        ], $contexto);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'rol' => ['nullable', 'string', Rule::exists('roles', 'name')],
+            'estado' => ['nullable', 'in:activos,eliminados'],
+        ]);
+    }
+
+    /**
+     * Consulta filtrada compartida por `index()` (paginada) y `exportar()`
+     * (completa). El alcance por empresa del usuario autenticado se aplica
+     * siempre; el filtro `empresa_id` sólo lo acota más.
+     *
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<User>
+     */
+    private function consultaUsuarios(Request $request, array $filtros): Builder
+    {
+        $empresasIds = $this->empresasGestionables($request->user());
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $puedeVerEliminados = $request->user()->can('usuarios.desactivar');
+
+        return User::query()
+            ->when(! $request->user()->esSuperadministrador(), fn (Builder $q) => $q->whereHas('empresas', fn (Builder $e) => $e->whereIn('empresas.id', $empresasIds)))
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->whereHas('empresas', fn (Builder $e) => $e->where('empresas.id', $empresaFiltro->id)))
+            ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'eliminados', fn (Builder $q) => $q->where('activo', false))
+            ->when($filtros['rol'] ?? null, fn (Builder $q, string $rol) => $q->whereHas('roles', fn (Builder $r) => $r->where('name', $rol)))
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
+                $q->where(function (Builder $sub) use ($buscar): void {
+                    $sub->where('name', 'like', "%{$buscar}%")
+                        ->orWhere('email', 'like', "%{$buscar}%")
+                        ->orWhereHas('roles', fn (Builder $r) => $r->where('name', 'like', "%{$buscar}%"));
+                });
+            })
+            ->with(['roles:id,name', 'empresas:id,nombre_comercial'])
+            ->orderBy('name');
     }
 
     public function create(Request $request): Response

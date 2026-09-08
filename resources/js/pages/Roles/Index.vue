@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { Plus, Search, ShieldAlert, Trash2 } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { Plus, Search, ShieldAlert, Trash2, X } from '@lucide/vue';
+import { computed, ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import InputError from '@/components/InputError.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,9 +40,12 @@ type Grupo = {
     permisos: Record<string, string>;
 };
 
+type TipoFiltro = '' | 'base' | 'personalizados';
+
 const props = defineProps<{
     roles: Rol[];
     gruposPermisos: Record<string, Grupo>;
+    filtros: { buscar: string; tipo: TipoFiltro };
     permisos: { crear: boolean; editar: boolean };
 }>();
 
@@ -49,6 +54,43 @@ defineOptions({
         breadcrumbs: [{ title: 'Roles y permisos', href: '/roles' }],
     },
 });
+
+const buscar = ref(props.filtros.buscar);
+const tipo = ref<TipoFiltro>(props.filtros.tipo);
+
+const hayFiltrosActivos = computed(
+    () => buscar.value !== '' || tipo.value !== '',
+);
+
+let temporizador: ReturnType<typeof setTimeout> | undefined;
+watch([buscar, tipo], () => {
+    clearTimeout(temporizador);
+    temporizador = setTimeout(() => {
+        router.get(
+            '/roles',
+            {
+                buscar: buscar.value || undefined,
+                tipo: tipo.value || undefined,
+            },
+            {
+                preserveState: true,
+                preserveScroll: true,
+                replace: true,
+                only: ['roles', 'filtros'],
+            },
+        );
+    }, 300);
+});
+
+function limpiarFiltros(): void {
+    buscar.value = '';
+    tipo.value = '';
+}
+
+const filtrosExport = computed(() => ({
+    buscar: buscar.value || undefined,
+    tipo: tipo.value || undefined,
+}));
 
 const abierto = ref(false);
 const editando = ref<Rol | null>(null);
@@ -182,21 +224,73 @@ function confirmarEliminar() {
                 descripcion="Define roles con permisos granulares por módulo. Los roles base del sistema no se pueden eliminar y algunos no permiten cambiar su nombre."
             >
                 <template #acciones>
+                    <BotonesExportar
+                        endpoint="/roles/exportar"
+                        :filtros="filtrosExport"
+                    />
                     <Button v-if="permisos.crear" @click="nuevo">
                         <Plus class="size-4" /> Nuevo rol
                     </Button>
                 </template>
             </EncabezadoPagina>
 
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div class="relative w-full sm:w-[360px]">
+                    <Search
+                        class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
+                    />
+                    <Input
+                        v-model="buscar"
+                        class="pl-8"
+                        placeholder="Buscar por nombre de rol o permiso"
+                        aria-label="Buscar por nombre de rol o permiso"
+                    />
+                </div>
+
+                <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Tipo</span>
+                    <div class="w-48">
+                        <SelectSimple
+                            v-model="tipo"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todos' },
+                                { valor: 'base', etiqueta: 'Base del sistema' },
+                                {
+                                    valor: 'personalizados',
+                                    etiqueta: 'Personalizados',
+                                },
+                            ]"
+                        />
+                    </div>
+                </label>
+
+                <Button
+                    v-if="hayFiltrosActivos"
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    @click="limpiarFiltros"
+                >
+                    <X class="size-3.5" /> Limpiar filtros
+                </Button>
+            </div>
+
             <EstadoVacio
                 v-if="!roles.length"
-                titulo="No hay roles configurados"
-                descripcion="Crea un rol para empezar a asignar permisos a tu equipo."
+                titulo="No hay roles para mostrar"
+                :descripcion="
+                    hayFiltrosActivos
+                        ? 'Ningún rol coincide con la búsqueda o el filtro aplicado.'
+                        : 'Crea un rol para empezar a asignar permisos a tu equipo.'
+                "
             >
-                <template #acciones>
-                    <Button v-if="permisos.crear" size="sm" @click="nuevo">
-                        Crear rol
+                <template v-if="hayFiltrosActivos" #acciones>
+                    <Button variant="outline" size="sm" @click="limpiarFiltros">
+                        <X class="size-4" /> Limpiar filtros
                     </Button>
+                </template>
+                <template v-else-if="permisos.crear" #acciones>
+                    <Button size="sm" @click="nuevo"> Crear rol </Button>
                 </template>
             </EstadoVacio>
 

@@ -3,13 +3,17 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Conjuntos\GuardarConjuntoRequest;
 use App\Models\Almacen;
 use App\Models\Conjunto;
 use App\Models\ConjuntoComponente;
+use App\Models\Empresa;
 use App\Servicios\ServicioAuditoria;
 use App\Soporte\ContextoExportacion;
+use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -27,9 +31,14 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 class ConjuntoController extends Controller
 {
     use ConEmpresa;
+    use CreaConCodigoUnico;
     use ExportaListado;
+    use ReconciliaSecuenciaCodigo;
 
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioGeneradorCodigos $codigos,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -154,13 +163,13 @@ class ConjuntoController extends Controller
     {
         $empresa = $request->empresaResuelta();
 
-        $conjunto = Conjunto::query()->create([
+        $conjunto = $this->crearConCodigoUnico(fn () => Conjunto::query()->create([
             'empresa_id' => $empresa->id,
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
-            'codigo' => $request->input('codigo') ?: null,
+            'codigo' => $this->generarCodigo($empresa),
             'activo' => $request->boolean('activo', true),
-        ]);
+        ]));
 
         $this->sincronizarComponentes($conjunto, $request->input('componentes', []));
 
@@ -197,10 +206,12 @@ class ConjuntoController extends Controller
 
     public function update(GuardarConjuntoRequest $request, Conjunto $conjunto): RedirectResponse
     {
+        // El código es autogenerado e inmutable: se asignó al crear el
+        // conjunto y nunca se reescribe (aunque un request manipulado envíe
+        // `codigo`).
         $conjunto->update([
             'nombre' => $request->string('nombre'),
             'descripcion' => $request->input('descripcion'),
-            'codigo' => $request->input('codigo') ?: null,
             'activo' => $request->boolean('activo', $conjunto->activo),
         ]);
 
@@ -324,6 +335,42 @@ class ConjuntoController extends Controller
         }
 
         return response()->json(['conjuntos' => $resultado]);
+    }
+
+    /**
+     * Genera un código consecutivo y único dentro de la empresa (CON-0001,
+     * CON-0002, …), con la misma filosofía que Sucursal/Área/Activo. Race-safe:
+     * `ServicioGeneradorCodigos` bloquea el contador dentro de una transacción
+     * y reconcilia contra el mayor código "CON-XXXX" REALMENTE existente en esa
+     * empresa (incluidos los conjuntos eliminados por soft-delete, que siguen
+     * ocupando su código) — nunca repite un código ya usado aunque el contador
+     * haya quedado atrasado. Nunca lo captura el usuario.
+     */
+    private function generarCodigo(Empresa $empresa): string
+    {
+        return $this->codigos->siguienteConPrefijo($empresa, 'conjunto', 'CON', semilla: fn (): int => $this->maximoSufijo(
+            Conjunto::withTrashed()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'CON-%')->pluck('codigo'),
+            'CON-',
+        ));
+    }
+
+    /**
+     * Previsualización NO autoritativa del siguiente código de conjunto para la
+     * empresa indicada — no reserva el consecutivo. El valor definitivo se
+     * calcula de nuevo, atómicamente, en `store()`.
+     */
+    public function siguienteCodigo(Request $request): JsonResponse
+    {
+        $this->authorize('create', Conjunto::class);
+
+        $empresa = $this->resolverEmpresa($request);
+
+        $codigo = $this->codigos->siguienteConPrefijoAproximado($empresa, 'conjunto', 'CON', semilla: fn (): int => $this->maximoSufijo(
+            Conjunto::withTrashed()->where('empresa_id', $empresa->id)->where('codigo', 'like', 'CON-%')->pluck('codigo'),
+            'CON-',
+        ));
+
+        return response()->json(['codigo' => $codigo]);
     }
 
     /**

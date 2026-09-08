@@ -192,6 +192,25 @@ final class Permisos
     }
 
     /**
+     * Mapa plano `clave de permiso` => `etiqueta legible` (p. ej.
+     * `activos.ver` => "Ver activos"), para reportes y exportaciones donde
+     * mostrar la clave técnica no aporta valor.
+     *
+     * @return array<string, string>
+     */
+    public static function etiquetas(): array
+    {
+        $etiquetas = [];
+        foreach (self::GRUPOS as $grupo) {
+            foreach ($grupo['permisos'] as $clave => $etiqueta) {
+                $etiquetas[$clave] = $etiqueta;
+            }
+        }
+
+        return $etiquetas;
+    }
+
+    /**
      * Permisos por defecto para cada rol base del sistema.
      *
      * @return array<string, list<string>|string>
