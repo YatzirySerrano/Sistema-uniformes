@@ -133,5 +133,13 @@ class FortifyServiceProvider extends ServiceProvider
                 ($request->input('credential.id') ?: $request->session()->getId()).'|'.$request->ip(),
             );
         });
+
+        // Verificación de correo por enlace: acotado por (usuario del enlace +
+        // IP) para que un usuario no agote el cupo de otro, y con margen para
+        // que un solo clic legítimo (o un reintento tras «ya verificado»)
+        // nunca dispare un 429. Sigue limitando el abuso.
+        RateLimiter::for('verificacion-correo', function (Request $request) {
+            return Limit::perMinute(15)->by(((string) $request->route('id')).'|'.$request->ip());
+        });
     }
 }

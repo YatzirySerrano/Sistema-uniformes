@@ -4,6 +4,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 
 | Applies to | Rule file |
 | --- | --- |
+| bootstrap/app.php,app/Providers/AppServiceProvider.php | .ai/rules/bootstrap-providers.md |
 | resources/js/components/sistema/SubidaArchivo.vue, resources/js/components/sistema/PadFirma.vue | .ai/rules/components-sistema.md |
 | resources/js/pages/**, resources/js/components/** | .ai/rules/components.md |
 | app/Servicios/ServicioCascadaSuspension.php,app/Servicios/ServicioOperatividad.php,app/Models/Suspension.php,app/Http/Controllers/{Empresa,Sucursal,Activo}Controller.php,app/Http/Controllers/Concerns/ReactivaSuspendidos.php | .ai/rules/concerns.md |
@@ -15,6 +16,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Acciones/RegistrarEntregaFirmada.php,app/Acciones/ConfirmarAcuseRecepcion.php,app/Http/Controllers/EntregaController.php,app/Http/Requests/Entregas/GuardarEntregaRequest.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/pages-entregas.md |
 | resources/js/pages/**/Detalle.vue, resources/js/pages/**/Index.vue | .ai/rules/pages.md |
 | app/Soporte/Permisos.php,database/seeders/RolesPermisosSeeder.php,app/Policies/** | .ai/rules/policies.md |
+| app/Http/Controllers/Auth/VerificarCorreoController.php,app/Providers/AppServiceProvider.php,bootstrap/app.php,lang/es.json | .ai/rules/providers.md |
 | app/Http/Controllers/Concerns/ExportaListado.php,app/Exports/ListadoExport.php,resources/views/reportes/listado-generico.blade.php,resources/js/components/sistema/BotonesExportar.vue | .ai/rules/sistema.md |
 | app/Http/Controllers/{Almacen,TipoActivo,Sucursal,Area,Activo}Controller.php,app/Soporte/ServicioGeneradorCodigos*.php | .ai/rules/soporte.md |
 | tests/** | .ai/rules/tests.md |

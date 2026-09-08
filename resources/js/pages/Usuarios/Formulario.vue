@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import { computed, watch } from 'vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
+import PasswordInput from '@/components/PasswordInput.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -51,6 +53,32 @@ const form = useForm<{
     sucursales: props.usuario?.sucursales ?? [],
 });
 
+// Coincidencia de contraseñas en tiempo real (sólo UX; el backend revalida
+// con la regla `confirmed`). Amistosa: nada mientras la confirmación está
+// vacía; el aviso aparece en cuanto se escribe algo distinto y desaparece
+// al coincidir. En edición ambos campos vacíos = sin cambio de contraseña.
+const noCoinciden = computed(
+    () =>
+        form.password_confirmation !== '' &&
+        form.password !== form.password_confirmation,
+);
+
+const errorConfirmacion = computed(() =>
+    form.errors.password_confirmation
+        ? form.errors.password_confirmation
+        : noCoinciden.value
+          ? 'Las contraseñas no coinciden.'
+          : undefined,
+);
+
+// Limpia los errores de servidor de contraseña en cuanto el usuario retoca
+// cualquiera de los dos campos (mismo criterio amistoso del resto de la app).
+watch([() => form.password, () => form.password_confirmation], () => {
+    if (form.errors.password || form.errors.password_confirmation) {
+        form.clearErrors('password', 'password_confirmation');
+    }
+});
+
 function enviar() {
     if (esEdicion) form.put(`/usuarios/${props.usuario!.id}`);
     else form.post('/usuarios');
@@ -92,11 +120,14 @@ function enviar() {
             <div class="grid gap-4 sm:grid-cols-2">
                 <div class="grid gap-1.5">
                     <Label for="password">Contraseña</Label>
-                    <Input
+                    <PasswordInput
                         id="password"
+                        name="password"
                         v-model="form.password"
-                        type="password"
                         autocomplete="new-password"
+                        :aria-invalid="!!form.errors.password || undefined"
+                        mostrar-label="Mostrar contraseña"
+                        ocultar-label="Ocultar contraseña"
                     />
                     <InputError :message="form.errors.password" />
                 </div>
@@ -104,12 +135,16 @@ function enviar() {
                     <Label for="password_confirmation"
                         >Confirmar contraseña</Label
                     >
-                    <Input
+                    <PasswordInput
                         id="password_confirmation"
+                        name="password_confirmation"
                         v-model="form.password_confirmation"
-                        type="password"
                         autocomplete="new-password"
+                        :aria-invalid="!!errorConfirmacion || undefined"
+                        mostrar-label="Mostrar confirmación de contraseña"
+                        ocultar-label="Ocultar confirmación de contraseña"
                     />
+                    <InputError :message="errorConfirmacion" />
                 </div>
             </div>
 
@@ -173,7 +208,10 @@ function enviar() {
             </label>
 
             <div class="flex items-center gap-3">
-                <Button type="submit" :disabled="form.processing">
+                <Button
+                    type="submit"
+                    :disabled="form.processing || noCoinciden"
+                >
                     {{ esEdicion ? 'Guardar cambios' : 'Crear usuario' }}
                 </Button>
                 <Button variant="ghost" as-child>

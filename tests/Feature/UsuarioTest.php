@@ -4,6 +4,9 @@ use App\Enums\RolSistema;
 use App\Exports\ListadoExport;
 use App\Models\Empresa;
 use App\Models\User;
+use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Permission\Models\Role;
@@ -167,4 +170,57 @@ it('el endpoint de exportación de usuarios exige el permiso usuarios.ver', func
     $sinPermiso = usuarioCon(RolSistema::Colaborador->value, [$this->empresa]);
 
     $this->actingAs($sinPermiso)->get('/usuarios/exportar')->assertForbidden();
+});
+
+it('crea un usuario con contraseña y confirmación válidas y le envía el correo de verificación', function () {
+    Notification::fake();
+
+    $this->actingAs($this->admin)->post('/usuarios', [
+        'name' => 'Nueva Persona',
+        'email' => 'nueva.persona@empresa.test',
+        'password' => 'Password123',
+        'password_confirmation' => 'Password123',
+        'roles' => [RolSistema::Encargado->value],
+        'empresas' => [$this->empresa->id],
+    ])->assertRedirect('/usuarios')->assertSessionHasNoErrors();
+
+    $usuario = User::query()->where('email', 'nueva.persona@empresa.test')->firstOrFail();
+
+    expect($usuario->email_verified_at)->toBeNull()
+        ->and(Hash::check('Password123', $usuario->password))->toBeTrue();
+
+    Notification::assertSentTo($usuario, VerifyEmail::class);
+});
+
+it('rechaza crear un usuario si la confirmación de contraseña no coincide (el backend es la fuente de verdad)', function () {
+    Notification::fake();
+
+    $this->actingAs($this->admin)->post('/usuarios', [
+        'name' => 'Con Error',
+        'email' => 'con.error@empresa.test',
+        'password' => 'Password123',
+        'password_confirmation' => 'Password124',
+        'roles' => [RolSistema::Encargado->value],
+        'empresas' => [$this->empresa->id],
+    ])->assertSessionHasErrors('password');
+
+    expect(User::query()->where('email', 'con.error@empresa.test')->exists())->toBeFalse();
+    Notification::assertNothingSent();
+});
+
+it('al editar un usuario, dejar la contraseña en blanco no la cambia', function () {
+    $objetivo = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
+    $hashOriginal = $objetivo->password;
+
+    $this->actingAs($this->admin)->put("/usuarios/{$objetivo->id}", [
+        'name' => 'Nombre Editado',
+        'email' => $objetivo->email,
+        'password' => '',
+        'password_confirmation' => '',
+        'roles' => $objetivo->getRoleNames()->all(),
+        'empresas' => [$this->empresa->id],
+    ])->assertRedirect('/usuarios')->assertSessionHasNoErrors();
+
+    expect($objetivo->fresh()->password)->toBe($hashOriginal)
+        ->and($objetivo->fresh()->name)->toBe('Nombre Editado');
 });

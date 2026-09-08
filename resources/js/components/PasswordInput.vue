@@ -7,9 +7,20 @@ import { cn } from '@/lib/utils';
 
 defineOptions({ inheritAttrs: false });
 
-const props = defineProps<{
-    class?: HTMLAttributes['class'];
-}>();
+const props = withDefaults(
+    defineProps<{
+        class?: HTMLAttributes['class'];
+        /** aria-label del botón cuando la contraseña está oculta. */
+        mostrarLabel?: string;
+        /** aria-label del botón cuando la contraseña está visible. */
+        ocultarLabel?: string;
+    }>(),
+    {
+        class: undefined,
+        mostrarLabel: 'Mostrar contraseña',
+        ocultarLabel: 'Ocultar contraseña',
+    },
+);
 
 const showPassword = ref(false);
 const inputRef = useTemplateRef('inputRef');
@@ -36,8 +47,8 @@ defineExpose({
                     'text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute inset-y-0 right-0 flex items-center rounded-r-md px-3 focus-visible:ring-[3px] focus-visible:outline-none',
                 )
             "
-            :aria-label="showPassword ? 'Hide password' : 'Show password'"
-            :tabindex="-1"
+            :aria-label="showPassword ? props.ocultarLabel : props.mostrarLabel"
+            :aria-pressed="showPassword"
         >
             <EyeOff v-if="showPassword" class="size-4" />
             <Eye v-else class="size-4" />
