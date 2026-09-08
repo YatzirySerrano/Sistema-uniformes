@@ -16,7 +16,9 @@ use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
+use App\Servicios\ServicioAcusePdf;
 use App\Servicios\ServicioInventario;
+use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
 /**
@@ -27,6 +29,18 @@ use Tests\TestCase;
  * autorización cross-empresa y que los errores de negocio nunca sean un 500.
  */
 beforeEach(function () {
+    // El flujo único de entrega firma en el mismo POST: guarda las firmas y
+    // materializa el PDF del acuse. Aquí sólo interesa la validación de
+    // existencias/autorización, así que se aísla el disco y se sustituye el
+    // render real del PDF (dompdf) por un doble para no acumular su costo en
+    // cada caso "sin errores" de este archivo.
+    Storage::fake('local');
+    Mail::fake();
+    $this->mock(ServicioAcusePdf::class, function ($mock): void {
+        $mock->shouldReceive('generar')->andReturn('acuses/fake.pdf');
+        $mock->shouldReceive('contenido')->andReturn(null);
+    });
+
     $this->datos = escenarioMultiempresa();
     $this->admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA'], $this->datos['empresaB']]);
 });
@@ -108,6 +122,10 @@ function payloadBase(array $datos, int $encargadoId): array
         'colaborador_id' => $datos['colaboradorA']->id,
         'almacen_id' => $datos['almacenA']->id,
         'fecha_entrega' => now()->toDateString(),
+        // Flujo único: la petición SIEMPRE trae ambas firmas y la aceptación.
+        'firma' => firmaDemoBase64(),
+        'firma_operador' => firmaDemoBase64(),
+        'aceptacion' => true,
     ];
 }
 

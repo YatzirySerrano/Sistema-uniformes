@@ -28,6 +28,17 @@ use Throwable;
  * privado, crea el acuse con huellas SHA-256 y marca la entrega como
  * firmada. El PDF se materializa tras confirmar la transacción; si su
  * generación falla, el acuse queda válido sin PDF y puede regenerarse.
+ *
+ * La confirmación está partida en dos para que el flujo ÚNICO de entrega
+ * (`RegistrarEntregaFirmada`) pueda registrar y firmar en una sola
+ * transacción sin duplicar reglas:
+ *   - `confirmarEnTransaccion()` — todo lo transaccional (valida firmas,
+ *     guarda archivos privados, snapshot, hashes, acuse, marca la entrega
+ *     firmada, auditoría). Puede correr dentro de una transacción externa.
+ *   - `finalizarAcuse()` — efectos POST-commit (materializar PDF + encolar
+ *     el correo). Nunca dentro de una transacción abierta.
+ *   - `ejecutar()` — encadena ambas; es el punto de entrada del flujo
+ *     histórico de firma diferida (`AcuseController::confirmar`).
  */
 class ConfirmarAcuseRecepcion
 {
@@ -46,6 +57,30 @@ class ConfirmarAcuseRecepcion
     ) {}
 
     public function ejecutar(
+        EntregaUniforme $entrega,
+        string $firmaColaboradorBase64,
+        string $firmaOperadorBase64,
+        bool $aceptacionTitular,
+        ?int $usuarioOperadorId,
+        ?string $ip,
+        ?string $userAgent,
+    ): AcuseRecepcion {
+        $acuse = $this->confirmarEnTransaccion(
+            $entrega, $firmaColaboradorBase64, $firmaOperadorBase64,
+            $aceptacionTitular, $usuarioOperadorId, $ip, $userAgent,
+        );
+
+        return $this->finalizarAcuse($acuse, $entrega);
+    }
+
+    /**
+     * Parte transaccional de la confirmación: NO materializa el PDF ni encola
+     * el correo (eso es `finalizarAcuse()`, post-commit). Segura para correr
+     * dentro de una transacción externa (p. ej. el flujo único que crea la
+     * entrega y la firma en la misma operación). Los archivos de firma se
+     * escriben antes de la transacción y se borran si algo falla.
+     */
+    public function confirmarEnTransaccion(
         EntregaUniforme $entrega,
         string $firmaColaboradorBase64,
         string $firmaOperadorBase64,
@@ -139,6 +174,15 @@ class ConfirmarAcuseRecepcion
             throw $e;
         }
 
+        return $acuse;
+    }
+
+    /**
+     * Efectos POST-commit: materializa el PDF del acuse y encola el correo de
+     * comprobante. Nunca debe llamarse dentro de una transacción abierta.
+     */
+    public function finalizarAcuse(AcuseRecepcion $acuse, EntregaUniforme $entrega): AcuseRecepcion
+    {
         $this->materializarPdf($acuse);
 
         $acuse = $acuse->refresh();

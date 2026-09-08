@@ -20,6 +20,10 @@ use Illuminate\Validation\Validator;
  * activos sueltos por cantidad+variante, unidades de seguimiento individual
  * elegidas explícitamente, y conjuntos (que expanden a sus componentes reales
  * — el stock se valida por componente, nunca "stock del conjunto").
+ *
+ * Flujo ÚNICO: la petición trae SIEMPRE las dos firmas manuscritas y la
+ * aceptación. No existe un alta "pendiente de firma"; sin firmas la
+ * validación falla y no se registra ni descuenta nada.
  */
 class GuardarEntregaRequest extends FormRequest
 {
@@ -51,6 +55,14 @@ class GuardarEntregaRequest extends FormRequest
             ],
             'fecha_entrega' => ['required', 'date', 'before_or_equal:today'],
             'notas' => ['nullable', 'string', 'max:1000'],
+
+            // Firmas de AMBAS partes + aceptación: parte inseparable del alta.
+            'firma' => ['required', 'string', 'max:3000000'],
+            'firma_operador' => ['required', 'string', 'max:3000000'],
+            'aceptacion' => ['accepted'],
+            // Idempotencia opcional generada por el formulario: evita que un
+            // doble submit / reintento de red registre dos entregas.
+            'idempotency_key' => ['nullable', 'uuid'],
 
             'activos' => ['nullable', 'array'],
             'activos.*.activo_id' => [
@@ -228,6 +240,9 @@ class GuardarEntregaRequest extends FormRequest
             'almacen_id.required' => 'Selecciona el almacén de origen.',
             'almacen_id.exists' => 'El almacén seleccionado no abastece a la empresa del colaborador.',
             'fecha_entrega.before_or_equal' => 'La fecha de entrega no puede ser futura.',
+            'firma.required' => 'Solicita la firma del colaborador para continuar.',
+            'firma_operador.required' => 'Falta la firma del encargado que realiza la entrega.',
+            'aceptacion.accepted' => 'Debes confirmar la aceptación antes de finalizar la entrega.',
             'colaborador_id.exists' => 'El colaborador seleccionado no es válido o no tienes acceso a su empresa.',
             'activos.*.activo_id.required' => 'Selecciona un activo.',
             'activos.*.cantidad.required' => 'Indica la cantidad.',

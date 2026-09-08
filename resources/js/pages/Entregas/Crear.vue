@@ -1,13 +1,28 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { Plus, Trash2 } from '@lucide/vue';
-import { computed, reactive, ref } from 'vue';
+import {
+    ChevronLeft,
+    ChevronRight,
+    ExternalLink,
+    IdCard,
+    Plus,
+    Trash2,
+} from '@lucide/vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
+import PadFirma from '@/components/sistema/PadFirma.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -62,6 +77,20 @@ type OpcionConjunto = {
     disponible: number | null;
 };
 
+type DocIdentidad = {
+    disponible: boolean;
+    nombre?: string;
+    mime?: string;
+    previsualizable?: boolean;
+    actualizado_en?: string | null;
+    url?: string;
+};
+
+const props = defineProps<{
+    encargado: { name: string; email: string };
+    textoConsentimiento: string;
+}>();
+
 defineOptions({
     layout: {
         breadcrumbs: [
@@ -72,6 +101,16 @@ defineOptions({
 });
 
 const hoy = new Date().toISOString().slice(0, 10);
+
+// ------------------------------------------------------------------
+// Pasos del flujo: la entrega NO termina hasta firmar.
+// ------------------------------------------------------------------
+const PASOS = [
+    { n: 1, titulo: 'Datos de la entrega' },
+    { n: 2, titulo: 'Artículos, unidades y conjuntos' },
+    { n: 3, titulo: 'Revisión y firmas' },
+] as const;
+const paso = ref<1 | 2 | 3>(1);
 
 // ------------------------------------------------------------------
 // Empresa → Sucursal → Colaborador → Almacén de origen
@@ -169,6 +208,7 @@ function alElegirColaborador(o: OpcionColaborador | null): void {
     colaboradorSel.value = o;
     form.colaborador_id = o?.id ?? '';
     form.clearErrors('colaborador_id');
+    docIdentidad.value = null;
 }
 
 const avisoAlmacenCambiado = ref(false);
@@ -224,6 +264,10 @@ const form = useForm<{
     activos: FilaActivo[];
     unidades: FilaUnidad[];
     conjuntos: FilaConjunto[];
+    firma: string;
+    firma_operador: string;
+    aceptacion: boolean;
+    idempotency_key: string;
 }>({
     colaborador_id: '',
     almacen_id: null,
@@ -232,11 +276,27 @@ const form = useForm<{
     activos: [],
     unidades: [],
     conjuntos: [],
+    firma: '',
+    firma_operador: '',
+    aceptacion: false,
+    // Una clave por intento de alta: evita que un doble submit registre dos
+    // entregas (el backend la rechaza si ya la vio).
+    idempotency_key:
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
 });
 
 /** Acceso laxo a errores anidados (`activos.0.talla_id`, `unidades.0.unidad_activo_id`…). */
 const erroresLaxos = computed(
     () => form.errors as unknown as Record<string, string>,
+);
+
+const totalRenglones = computed(
+    () =>
+        form.activos.filter((f) => f.activo_id !== '').length +
+        form.unidades.filter((f) => f.unidad_activo_id !== '').length +
+        form.conjuntos.filter((f) => f.conjunto_id !== '').length,
 );
 
 // --- Disponibilidad general (hint agregado, el backend siempre revalida) ---
@@ -286,7 +346,6 @@ async function buscarActivosCantidad(
 
 function activoSinExistencias(item: OpcionActivo): string | false {
     if (item.usa_variantes) {
-        // Con variantes: sólo se bloquea si NINGUNA variante tiene existencia.
         const algunaConStock = item.tallas.some((t) => (t.disponible ?? 0) > 0);
 
         return algunaConStock
@@ -443,19 +502,131 @@ function alElegirConjunto(i: number, o: OpcionConjunto | null): void {
     form.clearErrors(`conjuntos.${i}.conjunto_id`);
 }
 
+// ------------------------------------------------------------------
+// Paso 3 — Documento de identidad + firmas
+// ------------------------------------------------------------------
+const padColaborador = ref<InstanceType<typeof PadFirma> | null>(null);
+const padOperador = ref<InstanceType<typeof PadFirma> | null>(null);
+const firmaColaboradorVacia = ref(true);
+const firmaOperadorVacia = ref(true);
+
+const docIdentidad = ref<DocIdentidad | null>(null);
+const docIdentidadCargando = ref(false);
+const inePreviewAbierto = ref(false);
+
+async function cargarDocIdentidad(): Promise<void> {
+    if (form.colaborador_id === '') return;
+    docIdentidadCargando.value = true;
+    docIdentidad.value = null;
+    try {
+        const res = await fetch(
+            `/entregas/documento-identidad/${form.colaborador_id}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            },
+        );
+        docIdentidad.value = res.ok ? await res.json() : { disponible: false };
+    } catch {
+        docIdentidad.value = { disponible: false };
+    } finally {
+        docIdentidadCargando.value = false;
+    }
+}
+
+watch(paso, (p) => {
+    if (p === 3 && docIdentidad.value === null && !docIdentidadCargando.value) {
+        void cargarDocIdentidad();
+    }
+
+    // Los PadFirma viven dentro del contenedor del paso 3 (`v-show`), así que
+    // se montan ocultos. Al entrar al paso hay que recalibrar el canvas ya
+    // con el ancho real (el ResizeObserver interno también lo hace, esto lo
+    // fuerza de inmediato tras el repintado). No borra la firma existente.
+    if (p === 3) {
+        void nextTick(() => {
+            padColaborador.value?.recalibrar();
+            padOperador.value?.recalibrar();
+        });
+    }
+});
+
+const esImagenIne = computed(() =>
+    (docIdentidad.value?.mime ?? '').startsWith('image/'),
+);
+const esPdfIne = computed(() => docIdentidad.value?.mime === 'application/pdf');
+
+// ------------------------------------------------------------------
+// Navegación entre pasos + envío
+// ------------------------------------------------------------------
+const puedeAvanzarPaso1 = computed(
+    () => form.colaborador_id !== '' && form.almacen_id !== null,
+);
+const puedeAvanzarPaso2 = computed(() => totalRenglones.value > 0);
+
+const faltantesFirma = computed<string[]>(() => {
+    const faltan: string[] = [];
+    if (firmaColaboradorVacia.value)
+        faltan.push('Solicita la firma del colaborador para continuar.');
+    if (firmaOperadorVacia.value)
+        faltan.push('Falta la firma del encargado que realiza la entrega.');
+    if (!form.aceptacion)
+        faltan.push(
+            'Debes confirmar la aceptación antes de finalizar la entrega.',
+        );
+    return faltan;
+});
+
+const puedeConfirmar = computed(
+    () =>
+        totalRenglones.value > 0 &&
+        faltantesFirma.value.length === 0 &&
+        !form.processing,
+);
+
+function irA(n: 1 | 2 | 3): void {
+    if (n === 2 && !puedeAvanzarPaso1.value) return;
+    if (n === 3 && (!puedeAvanzarPaso1.value || !puedeAvanzarPaso2.value))
+        return;
+    paso.value = n;
+}
+
+function irAPasoConError(): void {
+    const claves = Object.keys(form.errors);
+    if (
+        claves.some(
+            (k) =>
+                k === 'firma' || k === 'firma_operador' || k === 'aceptacion',
+        )
+    ) {
+        paso.value = 3;
+    } else if (
+        claves.some((k) => /^(activos|unidades|conjuntos)\b/.test(k)) ||
+        claves.includes('items')
+    ) {
+        paso.value = 2;
+    } else {
+        paso.value = 1;
+    }
+}
+
 function enviar(): void {
-    // "+ Agregar conjunto/activo/unidad" deja una fila vacía en pantalla para
-    // que el usuario la llene; si la deja sin seleccionar nada, se ignora en
-    // vez de bloquear el envío con "El campo … es obligatorio" — conjunto,
-    // activo y unidad son cada uno opcionales, sólo se exige que la entrega
-    // termine con al menos un elemento entregable en total (lo valida el
-    // backend en `GuardarEntregaRequest`).
+    form.firma = padColaborador.value?.obtenerDataUrl() ?? '';
+    form.firma_operador = padOperador.value?.obtenerDataUrl() ?? '';
+
+    if (!puedeConfirmar.value) {
+        return;
+    }
+
     form.transform((datos) => ({
         ...datos,
         activos: datos.activos.filter((fila) => fila.activo_id !== ''),
         unidades: datos.unidades.filter((fila) => fila.unidad_activo_id !== ''),
         conjuntos: datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
-    })).post('/entregas');
+    })).post('/entregas', {
+        preserveScroll: true,
+        onError: () => irAPasoConError(),
+    });
 }
 </script>
 
@@ -465,11 +636,53 @@ function enviar(): void {
     <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Registrar entrega"
-            descripcion="Empresa → Sucursal → Colaborador → Almacén de origen → activos. Cada paso acota al siguiente; el inventario se descuenta del almacén elegido."
+            descripcion="Registrar y firmar son un solo proceso: la entrega no queda concluida hasta que el colaborador y el encargado firman la recepción."
         />
 
+        <!-- Indicador de pasos -->
+        <ol class="flex flex-wrap items-center gap-2 text-sm">
+            <li
+                v-for="(p, idx) in PASOS"
+                :key="p.n"
+                class="flex items-center gap-2"
+            >
+                <button
+                    type="button"
+                    class="flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors"
+                    :class="
+                        paso === p.n
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : paso > p.n
+                              ? 'border-primary/40 text-primary'
+                              : 'text-muted-foreground'
+                    "
+                    :aria-current="paso === p.n ? 'step' : undefined"
+                    @click="irA(p.n)"
+                >
+                    <span
+                        class="flex size-5 items-center justify-center rounded-full border text-xs font-semibold"
+                        :class="
+                            paso >= p.n
+                                ? 'border-current'
+                                : 'border-muted-foreground/40'
+                        "
+                        >{{ p.n }}</span
+                    >
+                    {{ p.titulo }}
+                </button>
+                <ChevronRight
+                    v-if="idx < PASOS.length - 1"
+                    class="text-muted-foreground/50 size-4"
+                />
+            </li>
+        </ol>
+
         <form class="space-y-6" @submit.prevent="enviar">
-            <section class="grid gap-4 rounded-xl border p-4 sm:grid-cols-2">
+            <!-- ============ PASO 1 · Datos ============ -->
+            <section
+                v-show="paso === 1"
+                class="grid gap-4 rounded-xl border p-4 sm:grid-cols-2"
+            >
                 <div class="grid gap-1.5">
                     <Label for="empresa">Empresa</Label>
                     <BuscadorAsync
@@ -584,312 +797,122 @@ function enviar(): void {
                         Selecciona primero una empresa.
                     </p>
                 </div>
+
+                <div class="grid gap-1.5 sm:col-span-2">
+                    <Label for="notas">Notas (opcional)</Label>
+                    <textarea
+                        id="notas"
+                        v-model="form.notas"
+                        rows="2"
+                        class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                    />
+                </div>
             </section>
 
-            <p
-                v-if="avisoAlmacenCambiado"
-                class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
-            >
-                Se limpiaron los elementos de la entrega porque cambió el
-                almacén de origen: la disponibilidad correspondía al almacén
-                anterior.
-            </p>
-
-            <InputError :message="erroresLaxos['items']" />
-
-            <!-- Activos sueltos -->
-            <section class="space-y-3 rounded-xl border p-4">
-                <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                        <h2 class="text-sm font-semibold">
-                            Artículos por cantidad
-                        </h2>
-                        <p class="text-muted-foreground mt-0.5 text-xs">
-                            Para prendas u otros artículos controlados por
-                            existencias. Selecciona el artículo, la talla o
-                            variante cuando aplique y la cantidad a entregar.
-                        </p>
-                    </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        class="shrink-0"
-                        :disabled="!almacenSel"
-                        @click="agregarActivo"
-                    >
-                        <Plus class="size-4" /> Agregar artículo
-                    </Button>
-                </div>
-                <p v-if="!almacenSel" class="text-muted-foreground text-sm">
-                    Selecciona empresa y almacén para consultar existencias.
+            <!-- ============ PASO 2 · Elementos ============ -->
+            <div v-show="paso === 2" class="space-y-6">
+                <p
+                    v-if="avisoAlmacenCambiado"
+                    class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                >
+                    Se limpiaron los elementos de la entrega porque cambió el
+                    almacén de origen: la disponibilidad correspondía al almacén
+                    anterior.
                 </p>
 
-                <div
-                    v-for="(fila, i) in form.activos"
-                    :key="i"
-                    class="grid grid-cols-1 gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_140px_110px_auto] sm:items-start"
-                >
-                    <div>
-                        <BuscadorAsync
-                            :model-value="activosUI[i].sel"
-                            :buscar="buscarActivosCantidad"
-                            :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
-                            :deshabilitar-opcion="
-                                (a) => activoSinExistencias(a as OpcionActivo)
-                            "
-                            :etiqueta="(a) => (a as OpcionActivo).nombre"
-                            :descripcion="
-                                (a) =>
-                                    (a as OpcionActivo).usa_variantes
-                                        ? ((a as OpcionActivo).codigo ?? '')
-                                        : `Disponible: ${(a as OpcionActivo).disponible ?? 0}`
-                            "
-                            placeholder="Buscar activo…"
-                            placeholder-busqueda="Buscar por nombre o código"
-                            :invalido="!!erroresLaxos[`activos.${i}.activo_id`]"
-                            @update:model-value="
-                                (v) =>
-                                    alElegirActivo(i, v as OpcionActivo | null)
-                            "
-                        />
-                        <InputError
-                            :message="erroresLaxos[`activos.${i}.activo_id`]"
-                        />
-                    </div>
-                    <div v-if="activosUI[i].sel?.usa_variantes">
-                        <SelectSimple
-                            :model-value="fila.talla_id"
-                            :opciones="
-                                (activosUI[i].sel?.tallas ?? []).map((t) => ({
-                                    valor: t.id,
-                                    etiqueta: `${t.valor}${(t.disponible ?? 0) > 0 ? ` (${t.disponible})` : ' (sin existencias)'}`,
-                                    disabled: (t.disponible ?? 0) <= 0,
-                                }))
-                            "
-                            placeholder="Variante"
-                            :invalido="!!erroresLaxos[`activos.${i}.talla_id`]"
-                            @update:model-value="
-                                (v) => (fila.talla_id = v as number | null)
-                            "
-                        />
-                        <InputError
-                            :message="erroresLaxos[`activos.${i}.talla_id`]"
-                        />
-                    </div>
-                    <div>
-                        <Input
-                            v-model.number="fila.cantidad"
-                            type="number"
-                            min="1"
-                            :max="
-                                disponibleDe(fila.activo_id, fila.talla_id) ??
-                                undefined
-                            "
-                            class="h-9"
-                        />
-                        <p
-                            v-if="
-                                disponibleDe(fila.activo_id, fila.talla_id) !==
-                                null
-                            "
-                            class="text-muted-foreground mt-0.5 text-[11px]"
-                            :class="
-                                (disponibleDe(fila.activo_id, fila.talla_id) ??
-                                    0) < fila.cantidad
-                                    ? 'text-destructive'
-                                    : ''
-                            "
+                <InputError :message="erroresLaxos['items']" />
+
+                <!-- Artículos por cantidad -->
+                <section class="space-y-3 rounded-xl border p-4">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <h2 class="text-sm font-semibold">
+                                Artículos por cantidad
+                            </h2>
+                            <p class="text-muted-foreground mt-0.5 text-xs">
+                                Para prendas u otros artículos controlados por
+                                existencias. Selecciona el artículo, la talla o
+                                variante cuando aplique y la cantidad a
+                                entregar.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            class="shrink-0"
+                            :disabled="!almacenSel"
+                            @click="agregarActivo"
                         >
-                            Disponible:
-                            {{ disponibleDe(fila.activo_id, fila.talla_id) }}
-                        </p>
-                        <InputError
-                            :message="erroresLaxos[`activos.${i}.cantidad`]"
-                        />
+                            <Plus class="size-4" /> Agregar artículo
+                        </Button>
                     </div>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        @click="quitarActivo(i)"
-                    >
-                        <Trash2 class="size-4" />
-                    </Button>
-                </div>
-                <p
-                    v-if="almacenSel && !form.activos.length"
-                    class="text-muted-foreground text-sm"
-                >
-                    Sin activos por cantidad agregados.
-                </p>
-            </section>
+                    <p v-if="!almacenSel" class="text-muted-foreground text-sm">
+                        Selecciona empresa y almacén para consultar existencias.
+                    </p>
 
-            <!-- Unidades de seguimiento individual -->
-            <section class="space-y-3 rounded-xl border p-4">
-                <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                        <h2 class="text-sm font-semibold">
-                            Equipos y unidades identificadas
-                        </h2>
-                        <p class="text-muted-foreground mt-0.5 text-xs">
-                            Para equipos u otros activos con seguimiento
-                            individual mediante un código o identificador único,
-                            como computadoras, celulares o herramientas. Aquí
-                            eliges una unidad específica.
-                        </p>
-                    </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        class="shrink-0"
-                        :disabled="!almacenSel"
-                        @click="agregarUnidad"
-                    >
-                        <Plus class="size-4" /> Agregar unidad
-                    </Button>
-                </div>
-
-                <div
-                    v-for="(fila, i) in form.unidades"
-                    :key="i"
-                    class="grid grid-cols-1 gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-start"
-                >
-                    <div>
-                        <BuscadorAsync
-                            :model-value="unidadesUI[i].activoSel"
-                            :buscar="buscarActivosIndividual"
-                            :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
-                            :deshabilitar-opcion="
-                                (a) =>
-                                    activoIndividualSinExistencias(
-                                        a as OpcionActivo,
-                                    )
-                            "
-                            :etiqueta="(a) => (a as OpcionActivo).nombre"
-                            :descripcion="
-                                (a) => (a as OpcionActivo).codigo ?? ''
-                            "
-                            placeholder="Activo…"
-                            placeholder-busqueda="Buscar por nombre o código"
-                            @update:model-value="
-                                (v) =>
-                                    alElegirActivoUnidad(
-                                        i,
-                                        v as OpcionActivo | null,
-                                    )
-                            "
-                        />
-                    </div>
-                    <div>
-                        <BuscadorAsync
-                            :model-value="unidadesUI[i].unidadSel"
-                            :buscar="buscarUnidades(i)"
-                            :dependencia="`${unidadesUI[i].activoSel?.id ?? ''}-${almacenSel?.id ?? ''}`"
-                            :disabled="!unidadesUI[i].activoSel"
-                            :deshabilitar-opcion="
-                                (u) => unidadNoEntregable(u as OpcionUnidad)
-                            "
-                            :etiqueta="(u) => (u as OpcionUnidad).codigo"
-                            placeholder="Unidad (código)…"
-                            placeholder-busqueda="Buscar por código"
-                            sin-resultados="Sin unidades de este activo en el almacén."
-                            :invalido="
-                                !!erroresLaxos[`unidades.${i}.unidad_activo_id`]
-                            "
-                            @update:model-value="
-                                (v) =>
-                                    alElegirUnidad(i, v as OpcionUnidad | null)
-                            "
-                        />
-                        <InputError
-                            :message="
-                                erroresLaxos[`unidades.${i}.unidad_activo_id`]
-                            "
-                        />
-                    </div>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        @click="quitarUnidad(i)"
-                    >
-                        <Trash2 class="size-4" />
-                    </Button>
-                </div>
-                <p
-                    v-if="almacenSel && !form.unidades.length"
-                    class="text-muted-foreground text-sm"
-                >
-                    Sin unidades identificadas agregadas.
-                </p>
-            </section>
-
-            <!-- Conjuntos -->
-            <section class="space-y-3 rounded-xl border p-4">
-                <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                        <h2 class="text-sm font-semibold">Conjuntos</h2>
-                        <p class="text-muted-foreground mt-0.5 text-xs">
-                            Para kits o grupos de artículos que se entregan
-                            juntos, como un uniforme completo o un kit de
-                            equipo.
-                        </p>
-                    </div>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        class="shrink-0"
-                        :disabled="!almacenSel"
-                        @click="agregarConjunto"
-                    >
-                        <Plus class="size-4" /> Agregar conjunto
-                    </Button>
-                </div>
-
-                <div
-                    v-for="(fila, i) in form.conjuntos"
-                    :key="i"
-                    class="space-y-2 rounded-lg border p-3"
-                >
                     <div
-                        class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_110px_auto] sm:items-start"
+                        v-for="(fila, i) in form.activos"
+                        :key="i"
+                        class="grid grid-cols-1 gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_140px_110px_auto] sm:items-start"
                     >
                         <div>
                             <BuscadorAsync
-                                :model-value="conjuntosUI[i].sel"
-                                :buscar="buscarConjuntos"
+                                :model-value="activosUI[i].sel"
+                                :buscar="buscarActivosCantidad"
                                 :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
                                 :deshabilitar-opcion="
-                                    (c) =>
-                                        conjuntoSinDisponibilidad(
-                                            c as OpcionConjunto,
-                                        )
+                                    (a) =>
+                                        activoSinExistencias(a as OpcionActivo)
                                 "
-                                :etiqueta="(c) => (c as OpcionConjunto).nombre"
+                                :etiqueta="(a) => (a as OpcionActivo).nombre"
                                 :descripcion="
-                                    (c) =>
-                                        `Disponible: ${(c as OpcionConjunto).disponible ?? 0}`
+                                    (a) =>
+                                        (a as OpcionActivo).usa_variantes
+                                            ? ((a as OpcionActivo).codigo ?? '')
+                                            : `Disponible: ${(a as OpcionActivo).disponible ?? 0}`
                                 "
-                                placeholder="Buscar conjunto…"
-                                placeholder-busqueda="Buscar por nombre"
+                                placeholder="Buscar activo…"
+                                placeholder-busqueda="Buscar por nombre o código"
                                 :invalido="
-                                    !!erroresLaxos[`conjuntos.${i}.conjunto_id`]
+                                    !!erroresLaxos[`activos.${i}.activo_id`]
                                 "
                                 @update:model-value="
                                     (v) =>
-                                        alElegirConjunto(
+                                        alElegirActivo(
                                             i,
-                                            v as OpcionConjunto | null,
+                                            v as OpcionActivo | null,
                                         )
                                 "
                             />
                             <InputError
                                 :message="
-                                    erroresLaxos[`conjuntos.${i}.conjunto_id`]
+                                    erroresLaxos[`activos.${i}.activo_id`]
                                 "
+                            />
+                        </div>
+                        <div v-if="activosUI[i].sel?.usa_variantes">
+                            <SelectSimple
+                                :model-value="fila.talla_id"
+                                :opciones="
+                                    (activosUI[i].sel?.tallas ?? []).map(
+                                        (t) => ({
+                                            valor: t.id,
+                                            etiqueta: `${t.valor}${(t.disponible ?? 0) > 0 ? ` (${t.disponible})` : ' (sin existencias)'}`,
+                                            disabled: (t.disponible ?? 0) <= 0,
+                                        }),
+                                    )
+                                "
+                                placeholder="Variante"
+                                :invalido="
+                                    !!erroresLaxos[`activos.${i}.talla_id`]
+                                "
+                                @update:model-value="
+                                    (v) => (fila.talla_id = v as number | null)
+                                "
+                            />
+                            <InputError
+                                :message="erroresLaxos[`activos.${i}.talla_id`]"
                             />
                         </div>
                         <div>
@@ -898,13 +921,145 @@ function enviar(): void {
                                 type="number"
                                 min="1"
                                 :max="
-                                    conjuntosUI[i].sel?.disponible ?? undefined
+                                    disponibleDe(
+                                        fila.activo_id,
+                                        fila.talla_id,
+                                    ) ?? undefined
                                 "
                                 class="h-9"
                             />
+                            <p
+                                v-if="
+                                    disponibleDe(
+                                        fila.activo_id,
+                                        fila.talla_id,
+                                    ) !== null
+                                "
+                                class="text-muted-foreground mt-0.5 text-[11px]"
+                                :class="
+                                    (disponibleDe(
+                                        fila.activo_id,
+                                        fila.talla_id,
+                                    ) ?? 0) < fila.cantidad
+                                        ? 'text-destructive'
+                                        : ''
+                                "
+                            >
+                                Disponible:
+                                {{
+                                    disponibleDe(fila.activo_id, fila.talla_id)
+                                }}
+                            </p>
+                            <InputError
+                                :message="erroresLaxos[`activos.${i}.cantidad`]"
+                            />
+                        </div>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            :aria-label="`Quitar artículo ${i + 1}`"
+                            @click="quitarActivo(i)"
+                        >
+                            <Trash2 class="size-4" />
+                        </Button>
+                    </div>
+                    <p
+                        v-if="almacenSel && !form.activos.length"
+                        class="text-muted-foreground text-sm"
+                    >
+                        Sin artículos por cantidad agregados.
+                    </p>
+                </section>
+
+                <!-- Equipos y unidades identificadas -->
+                <section class="space-y-3 rounded-xl border p-4">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <h2 class="text-sm font-semibold">
+                                Equipos y unidades identificadas
+                            </h2>
+                            <p class="text-muted-foreground mt-0.5 text-xs">
+                                Para equipos u otros activos con seguimiento
+                                individual mediante un código o identificador
+                                único, como computadoras, celulares o
+                                herramientas. Aquí eliges una unidad específica.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            class="shrink-0"
+                            :disabled="!almacenSel"
+                            @click="agregarUnidad"
+                        >
+                            <Plus class="size-4" /> Agregar unidad
+                        </Button>
+                    </div>
+
+                    <div
+                        v-for="(fila, i) in form.unidades"
+                        :key="i"
+                        class="grid grid-cols-1 gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_1fr_auto] sm:items-start"
+                    >
+                        <div>
+                            <BuscadorAsync
+                                :model-value="unidadesUI[i].activoSel"
+                                :buscar="buscarActivosIndividual"
+                                :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                                :deshabilitar-opcion="
+                                    (a) =>
+                                        activoIndividualSinExistencias(
+                                            a as OpcionActivo,
+                                        )
+                                "
+                                :etiqueta="(a) => (a as OpcionActivo).nombre"
+                                :descripcion="
+                                    (a) => (a as OpcionActivo).codigo ?? ''
+                                "
+                                placeholder="Activo…"
+                                placeholder-busqueda="Buscar por nombre o código"
+                                @update:model-value="
+                                    (v) =>
+                                        alElegirActivoUnidad(
+                                            i,
+                                            v as OpcionActivo | null,
+                                        )
+                                "
+                            />
+                        </div>
+                        <div>
+                            <BuscadorAsync
+                                :model-value="unidadesUI[i].unidadSel"
+                                :buscar="buscarUnidades(i)"
+                                :dependencia="`${unidadesUI[i].activoSel?.id ?? ''}-${almacenSel?.id ?? ''}`"
+                                :disabled="!unidadesUI[i].activoSel"
+                                :deshabilitar-opcion="
+                                    (u) => unidadNoEntregable(u as OpcionUnidad)
+                                "
+                                :etiqueta="(u) => (u as OpcionUnidad).codigo"
+                                placeholder="Unidad (código)…"
+                                placeholder-busqueda="Buscar por código"
+                                sin-resultados="Sin unidades de este activo en el almacén."
+                                :invalido="
+                                    !!erroresLaxos[
+                                        `unidades.${i}.unidad_activo_id`
+                                    ]
+                                "
+                                @update:model-value="
+                                    (v) =>
+                                        alElegirUnidad(
+                                            i,
+                                            v as OpcionUnidad | null,
+                                        )
+                                "
+                            />
                             <InputError
                                 :message="
-                                    erroresLaxos[`conjuntos.${i}.cantidad`]
+                                    erroresLaxos[
+                                        `unidades.${i}.unidad_activo_id`
+                                    ]
                                 "
                             />
                         </div>
@@ -912,86 +1067,495 @@ function enviar(): void {
                             type="button"
                             variant="ghost"
                             size="icon-sm"
-                            @click="quitarConjunto(i)"
+                            :aria-label="`Quitar unidad ${i + 1}`"
+                            @click="quitarUnidad(i)"
                         >
                             <Trash2 class="size-4" />
                         </Button>
                     </div>
+                    <p
+                        v-if="almacenSel && !form.unidades.length"
+                        class="text-muted-foreground text-sm"
+                    >
+                        Sin unidades identificadas agregadas.
+                    </p>
+                </section>
+
+                <!-- Conjuntos -->
+                <section class="space-y-3 rounded-xl border p-4">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <h2 class="text-sm font-semibold">Conjuntos</h2>
+                            <p class="text-muted-foreground mt-0.5 text-xs">
+                                Para kits o grupos de artículos que se entregan
+                                juntos, como un uniforme completo o un kit de
+                                equipo.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            class="shrink-0"
+                            :disabled="!almacenSel"
+                            @click="agregarConjunto"
+                        >
+                            <Plus class="size-4" /> Agregar conjunto
+                        </Button>
+                    </div>
 
                     <div
-                        v-if="
-                            conjuntosUI[i].sel?.componentes_variante_libre
-                                .length
-                        "
-                        class="bg-muted/30 grid gap-2 rounded-md border p-2 sm:grid-cols-2"
+                        v-for="(fila, i) in form.conjuntos"
+                        :key="i"
+                        class="space-y-2 rounded-lg border p-3"
                     >
                         <div
-                            v-for="comp in conjuntosUI[i].sel
-                                ?.componentes_variante_libre ?? []"
-                            :key="comp.componente_id"
-                            class="grid gap-1"
+                            class="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_110px_auto] sm:items-start"
                         >
-                            <Label class="text-xs">
-                                Variante de {{ comp.activo_nombre }}
-                            </Label>
-                            <SelectSimple
-                                :model-value="
-                                    fila.variantes[comp.componente_id] ?? null
-                                "
-                                :opciones="
-                                    comp.tallas.map((t) => ({
-                                        valor: t.id,
-                                        etiqueta: t.valor,
-                                    }))
-                                "
-                                placeholder="Selecciona"
-                                :invalido="
-                                    !!erroresLaxos[
-                                        `conjuntos.${i}.variantes.${comp.componente_id}`
-                                    ]
-                                "
-                                @update:model-value="
-                                    (v) =>
-                                        (fila.variantes[comp.componente_id] =
-                                            v as number | null)
-                                "
-                            />
-                            <InputError
-                                :message="
-                                    erroresLaxos[
-                                        `conjuntos.${i}.variantes.${comp.componente_id}`
-                                    ]
-                                "
-                            />
+                            <div>
+                                <BuscadorAsync
+                                    :model-value="conjuntosUI[i].sel"
+                                    :buscar="buscarConjuntos"
+                                    :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                                    :deshabilitar-opcion="
+                                        (c) =>
+                                            conjuntoSinDisponibilidad(
+                                                c as OpcionConjunto,
+                                            )
+                                    "
+                                    :etiqueta="
+                                        (c) => (c as OpcionConjunto).nombre
+                                    "
+                                    :descripcion="
+                                        (c) =>
+                                            `Disponible: ${(c as OpcionConjunto).disponible ?? 0}`
+                                    "
+                                    placeholder="Buscar conjunto…"
+                                    placeholder-busqueda="Buscar por nombre"
+                                    :invalido="
+                                        !!erroresLaxos[
+                                            `conjuntos.${i}.conjunto_id`
+                                        ]
+                                    "
+                                    @update:model-value="
+                                        (v) =>
+                                            alElegirConjunto(
+                                                i,
+                                                v as OpcionConjunto | null,
+                                            )
+                                    "
+                                />
+                                <InputError
+                                    :message="
+                                        erroresLaxos[
+                                            `conjuntos.${i}.conjunto_id`
+                                        ]
+                                    "
+                                />
+                            </div>
+                            <div>
+                                <Input
+                                    v-model.number="fila.cantidad"
+                                    type="number"
+                                    min="1"
+                                    :max="
+                                        conjuntosUI[i].sel?.disponible ??
+                                        undefined
+                                    "
+                                    class="h-9"
+                                />
+                                <InputError
+                                    :message="
+                                        erroresLaxos[`conjuntos.${i}.cantidad`]
+                                    "
+                                />
+                            </div>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                :aria-label="`Quitar conjunto ${i + 1}`"
+                                @click="quitarConjunto(i)"
+                            >
+                                <Trash2 class="size-4" />
+                            </Button>
+                        </div>
+
+                        <div
+                            v-if="
+                                conjuntosUI[i].sel?.componentes_variante_libre
+                                    .length
+                            "
+                            class="bg-muted/30 grid gap-2 rounded-md border p-2 sm:grid-cols-2"
+                        >
+                            <div
+                                v-for="comp in conjuntosUI[i].sel
+                                    ?.componentes_variante_libre ?? []"
+                                :key="comp.componente_id"
+                                class="grid gap-1"
+                            >
+                                <Label class="text-xs">
+                                    Variante de {{ comp.activo_nombre }}
+                                </Label>
+                                <SelectSimple
+                                    :model-value="
+                                        fila.variantes[comp.componente_id] ??
+                                        null
+                                    "
+                                    :opciones="
+                                        comp.tallas.map((t) => ({
+                                            valor: t.id,
+                                            etiqueta: t.valor,
+                                        }))
+                                    "
+                                    placeholder="Selecciona"
+                                    :invalido="
+                                        !!erroresLaxos[
+                                            `conjuntos.${i}.variantes.${comp.componente_id}`
+                                        ]
+                                    "
+                                    @update:model-value="
+                                        (v) =>
+                                            (fila.variantes[
+                                                comp.componente_id
+                                            ] = v as number | null)
+                                    "
+                                />
+                                <InputError
+                                    :message="
+                                        erroresLaxos[
+                                            `conjuntos.${i}.variantes.${comp.componente_id}`
+                                        ]
+                                    "
+                                />
+                            </div>
                         </div>
                     </div>
-                </div>
-                <p
-                    v-if="almacenSel && !form.conjuntos.length"
-                    class="text-muted-foreground text-sm"
-                >
-                    Sin conjuntos agregados.
-                </p>
-            </section>
-
-            <div class="grid gap-1.5">
-                <Label for="notas">Notas (opcional)</Label>
-                <textarea
-                    id="notas"
-                    v-model="form.notas"
-                    rows="2"
-                    class="border-input bg-background rounded-md border px-3 py-2 text-sm"
-                />
+                    <p
+                        v-if="almacenSel && !form.conjuntos.length"
+                        class="text-muted-foreground text-sm"
+                    >
+                        Sin conjuntos agregados.
+                    </p>
+                </section>
             </div>
 
-            <div class="flex items-center gap-3">
-                <Button type="submit" :disabled="form.processing">
-                    Registrar entrega
+            <!-- ============ PASO 3 · Revisión y firmas ============ -->
+            <div v-show="paso === 3" class="space-y-6">
+                <!-- Resumen -->
+                <section class="rounded-xl border p-4">
+                    <h2 class="mb-3 text-sm font-semibold">
+                        Revisión de la entrega
+                    </h2>
+                    <dl
+                        class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3"
+                    >
+                        <div>
+                            <dt class="text-muted-foreground text-xs">
+                                Colaborador
+                            </dt>
+                            <dd>
+                                {{ colaboradorSel?.nombre_completo ?? '—' }}
+                                <span class="text-muted-foreground"
+                                    >· N.º
+                                    {{
+                                        colaboradorSel?.numero_empleado ?? '—'
+                                    }}</span
+                                >
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-muted-foreground text-xs">
+                                Empresa
+                            </dt>
+                            <dd>{{ empresaSel?.nombre_comercial ?? '—' }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-muted-foreground text-xs">
+                                Sucursal
+                            </dt>
+                            <dd>{{ sucursalSel?.nombre ?? '—' }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-muted-foreground text-xs">
+                                Almacén de origen
+                            </dt>
+                            <dd>{{ almacenSel?.nombre ?? '—' }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-muted-foreground text-xs">Fecha</dt>
+                            <dd>{{ form.fecha_entrega }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-muted-foreground text-xs">
+                                Elementos a entregar
+                            </dt>
+                            <dd>
+                                {{ totalRenglones }}
+                                {{
+                                    totalRenglones === 1
+                                        ? 'renglón'
+                                        : 'renglones'
+                                }}
+                            </dd>
+                        </div>
+                    </dl>
+                </section>
+
+                <!-- Firma de quien recibe -->
+                <section class="space-y-4 rounded-xl border p-4">
+                    <div>
+                        <h2 class="text-sm font-semibold">
+                            Firma de quien recibe
+                        </h2>
+                        <dl
+                            class="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2"
+                        >
+                            <div>
+                                <dt class="text-muted-foreground text-xs">
+                                    Nombre
+                                </dt>
+                                <dd>
+                                    {{ colaboradorSel?.nombre_completo ?? '—' }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-muted-foreground text-xs">
+                                    Número de empleado
+                                </dt>
+                                <dd>
+                                    {{ colaboradorSel?.numero_empleado ?? '—' }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-muted-foreground text-xs">
+                                    Empresa
+                                </dt>
+                                <dd>
+                                    {{ empresaSel?.nombre_comercial ?? '—' }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-muted-foreground text-xs">
+                                    Sucursal
+                                </dt>
+                                <dd>{{ sucursalSel?.nombre ?? '—' }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+
+                    <!-- Documento de identidad -->
+                    <div class="bg-muted/30 rounded-lg border p-3">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <IdCard class="text-muted-foreground size-4" />
+                            <span class="text-sm font-medium"
+                                >Documento de identidad</span
+                            >
+                            <Button
+                                v-if="docIdentidad?.disponible"
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                class="ml-auto"
+                                @click="inePreviewAbierto = true"
+                            >
+                                <ExternalLink class="size-3.5" /> Ver INE
+                            </Button>
+                        </div>
+                        <p
+                            v-if="docIdentidadCargando"
+                            class="text-muted-foreground mt-2 text-xs"
+                        >
+                            Buscando el documento en el expediente…
+                        </p>
+                        <template v-else-if="docIdentidad?.disponible">
+                            <p class="text-muted-foreground mt-2 text-xs">
+                                Consulta el documento registrado en el
+                                expediente del colaborador para realizar una
+                                verificación visual antes de solicitar su firma.
+                            </p>
+                            <p
+                                class="text-muted-foreground mt-1 text-[11px] italic"
+                            >
+                                La revisión de identidad y firma es
+                                responsabilidad del encargado que realiza la
+                                entrega.
+                            </p>
+                        </template>
+                        <p
+                            v-else
+                            class="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500"
+                        >
+                            No hay un documento de identidad disponible en el
+                            expediente de este colaborador.
+                        </p>
+                    </div>
+
+                    <div class="grid gap-1.5">
+                        <Label>Firma del colaborador</Label>
+                        <PadFirma
+                            ref="padColaborador"
+                            @cambio="
+                                (v: boolean) => (firmaColaboradorVacia = v)
+                            "
+                        />
+                        <InputError :message="form.errors.firma" />
+                    </div>
+                </section>
+
+                <!-- Firma del encargado -->
+                <section class="space-y-4 rounded-xl border p-4">
+                    <div>
+                        <h2 class="text-sm font-semibold">
+                            Firma del encargado que realiza la entrega
+                        </h2>
+                        <dl
+                            class="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2"
+                        >
+                            <div>
+                                <dt class="text-muted-foreground text-xs">
+                                    Nombre
+                                </dt>
+                                <dd>{{ encargado.name }}</dd>
+                            </div>
+                            <div>
+                                <dt class="text-muted-foreground text-xs">
+                                    Correo
+                                </dt>
+                                <dd>{{ encargado.email }}</dd>
+                            </div>
+                        </dl>
+                    </div>
+                    <div class="grid gap-1.5">
+                        <Label>Firma del encargado</Label>
+                        <PadFirma
+                            ref="padOperador"
+                            @cambio="(v: boolean) => (firmaOperadorVacia = v)"
+                        />
+                        <InputError :message="form.errors.firma_operador" />
+                    </div>
+                </section>
+
+                <!-- Aceptación -->
+                <label
+                    class="bg-muted/40 flex items-start gap-2 rounded-lg border p-3 text-sm"
+                >
+                    <input
+                        v-model="form.aceptacion"
+                        type="checkbox"
+                        class="mt-0.5 size-4 shrink-0"
+                    />
+                    <span>{{ textoConsentimiento }}</span>
+                </label>
+                <InputError :message="form.errors.aceptacion" />
+
+                <!-- Faltantes para finalizar -->
+                <ul
+                    v-if="faltantesFirma.length"
+                    class="text-muted-foreground space-y-1 text-sm"
+                >
+                    <li
+                        v-for="msg in faltantesFirma"
+                        :key="msg"
+                        class="flex items-center gap-1.5"
+                    >
+                        <span
+                            class="bg-muted-foreground/50 inline-block size-1.5 rounded-full"
+                        />
+                        {{ msg }}
+                    </li>
+                </ul>
+            </div>
+
+            <!-- ============ Navegación ============ -->
+            <div class="flex flex-wrap items-center gap-3">
+                <Button
+                    v-if="paso > 1"
+                    type="button"
+                    variant="outline"
+                    @click="irA((paso - 1) as 1 | 2 | 3)"
+                >
+                    <ChevronLeft class="size-4" /> Atrás
                 </Button>
+
+                <Button
+                    v-if="paso === 1"
+                    type="button"
+                    :disabled="!puedeAvanzarPaso1"
+                    @click="irA(2)"
+                >
+                    Siguiente <ChevronRight class="size-4" />
+                </Button>
+                <Button
+                    v-else-if="paso === 2"
+                    type="button"
+                    :disabled="!puedeAvanzarPaso2"
+                    @click="irA(3)"
+                >
+                    Continuar a confirmación y firma
+                    <ChevronRight class="size-4" />
+                </Button>
+                <Button
+                    v-else
+                    type="submit"
+                    :disabled="!puedeConfirmar"
+                    :class="
+                        puedeConfirmar &&
+                        'shadow-success/30 shadow-lg transition-shadow duration-300'
+                    "
+                >
+                    Confirmar entrega
+                </Button>
+
                 <Button variant="ghost" as-child>
                     <Link href="/entregas">Cancelar</Link>
                 </Button>
             </div>
         </form>
+
+        <!-- Diálogo de previsualización del INE -->
+        <Dialog v-model:open="inePreviewAbierto">
+            <DialogContent
+                class="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-auto sm:max-w-3xl"
+            >
+                <DialogHeader>
+                    <DialogTitle>Documento de identidad</DialogTitle>
+                    <DialogDescription>
+                        Verificación visual a cargo del encargado. Este
+                        documento no se adjunta al acuse ni al correo.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div class="mt-2">
+                    <img
+                        v-if="
+                            docIdentidad?.disponible &&
+                            docIdentidad.url &&
+                            esImagenIne
+                        "
+                        :src="docIdentidad.url"
+                        alt="Documento de identidad del colaborador"
+                        class="mx-auto max-h-[70dvh] w-auto rounded-md border"
+                    />
+                    <iframe
+                        v-else-if="
+                            docIdentidad?.disponible &&
+                            docIdentidad.url &&
+                            esPdfIne
+                        "
+                        :src="docIdentidad.url"
+                        title="Documento de identidad del colaborador"
+                        class="h-[70dvh] w-full rounded-md border"
+                    />
+                    <p
+                        v-else
+                        class="text-muted-foreground py-8 text-center text-sm"
+                    >
+                        Este documento no puede previsualizarse aquí. Consúltalo
+                        desde el expediente del colaborador.
+                    </p>
+                </div>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

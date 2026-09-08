@@ -1,14 +1,14 @@
 ---
 paths:
-  - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,Conjunto}Controller.php'
-  - 'app/Http/Requests/{Almacenes,Areas,Activos,Conjuntos}/**'
-  - app/Http/Requests/Concerns/ResuelveEmpresa.php
-  - app/Soporte/AccesoEmpresa.php
-  - 'app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php'
-  - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario}.php'
-  - 'app/Models/{Conjunto,ConjuntoComponente}.php'
-  - app/Soporte/DescripcionAuditoria.php
-  - 'app/Acciones/ConfirmarAcuse*.php'
+    - 'app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,Conjunto}Controller.php'
+    - 'app/Http/Requests/{Almacenes,Areas,Activos,Conjuntos}/**'
+    - app/Http/Requests/Concerns/ResuelveEmpresa.php
+    - app/Soporte/AccesoEmpresa.php
+    - 'app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php'
+    - 'app/Acciones/{RegistrarEntradaInventario,AjustarInventario}.php'
+    - 'app/Models/{Conjunto,ConjuntoComponente}.php'
+    - app/Soporte/DescripcionAuditoria.php
+    - 'app/Acciones/ConfirmarAcuse*.php'
 ---
 
 # Módulos Almacenes / Áreas / Activos / Inventario
@@ -250,4 +250,5 @@ Transforma `valores_anteriores`/`valores_nuevos` de `bitacora_auditoria` en `[{c
 - Sólo funciona donde el `registrar()` de origen YA capturó `valores_anteriores`/`valores_nuevos`. La mayoría de acciones (crear/editar en catálogos) sólo registran `descripcion`; ahí `cambios` sale vacío y la card muestra "Sin cambios detallados" — es intencional, no un bug. Los toggles (`activar`/`desactivar`) en Empresa/Sucursal/Area/Activo/Almacen/Conjunto/Usuario/Colaborador y las 3 acciones de `UnidadActivo` (recuperar/incidencia/baja) sí capturan before/after mínimo.
 
 ## Correos de comprobante de Entrega/Devolución: encolados, post-commit, idempotentes
+
 `ConfirmarAcuseRecepcion`/`ConfirmarAcuseDevolucion::ejecutar()` despachan `ComprobanteEntregaMail`/`ComprobanteDevolucionMail` (Mailables `ShouldQueue`, `$this->afterCommit()`) en un método privado `enviarComprobante()` que corre DESPUÉS de la transacción y de `materializarPdf()`, envuelto en try/catch(Throwable)+Log — un fallo de SMTP/cola nunca revierte la operación. Destinatarios: encargado (User) + colaborador (`correo`), deduplicados por email en minúsculas; lista vacía = no se envía. Todo el contenido sale del snapshot inmutable del acuse (`snapshot_entrega`/`snapshot_devolucion`), no de datos recalculados. Idempotencia: la transición de estado es irreversible (guardada con lockForUpdate) y ningún endpoint GET/regenerar-PDF llama a `ejecutar()`; además `Cache::add('acuse-recepcion:correo:{id}'...)` como segunda barrera. NO existe columna `correo_enviado` (no se puede tocar BD). VPS: requiere `php artisan queue:work` (QUEUE_CONNECTION=database, tabla `jobs` ya existe). Vistas: `resources/views/emails/{layout,comprobante}.blade.php`.

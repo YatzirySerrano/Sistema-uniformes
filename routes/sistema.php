@@ -153,6 +153,10 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('entregas/crear', [EntregaController::class, 'create'])->name('entregas.create');
     Route::get('entregas/buscar', [EntregaController::class, 'buscar'])->name('entregas.buscar');
     Route::get('entregas/disponibilidad', [EntregaController::class, 'disponibilidad'])->name('entregas.disponibilidad');
+    // Consulta del documento de identidad del colaborador durante el flujo de
+    // firma (autorización de mínimo privilegio, ver EntregaController).
+    Route::get('entregas/documento-identidad/{colaborador}', [EntregaController::class, 'documentoIdentidad'])->name('entregas.documento-identidad');
+    Route::get('entregas/documento-identidad/{colaborador}/ver', [EntregaController::class, 'verDocumentoIdentidad'])->name('entregas.documento-identidad.ver');
     Route::post('entregas', [EntregaController::class, 'store'])->name('entregas.store');
     Route::get('entregas/{entrega}', [EntregaController::class, 'show'])->name('entregas.show');
     Route::get('entregas/{entrega}/corregir', [CorreccionEntregaController::class, 'create'])->name('entregas.corregir.create');
