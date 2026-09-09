@@ -203,7 +203,12 @@ class EntregaController extends Controller
                 $datos['unidades'] ?? [],
                 $datos['conjuntos'] ?? [],
                 $datos['notas'] ?? null,
-                isset($datos['servicio_id']) ? (int) $datos['servicio_id'] : null,
+                // Snapshot histórico del servicio: SIEMPRE el servicio operativo
+                // vigente del colaborador, resuelto en el backend. Nunca se
+                // confía en un `servicio_id` del formulario (no existe ya). Si
+                // el colaborador no tiene servicio (personal administrativo),
+                // la entrega se registra igual con snapshot nulo.
+                $colaborador->servicio_actual_id,
                 $datos['firma'],
                 $datos['firma_operador'],
                 true, // aceptación (validada por la regla `accepted`)

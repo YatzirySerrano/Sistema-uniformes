@@ -434,6 +434,10 @@ class ColaboradorController extends Controller
 
         $empresaId = $request->filled('empresa_id') ? (int) $request->query('empresa_id') : null;
         $sucursalId = $request->filled('sucursal_id') ? (int) $request->query('sucursal_id') : null;
+        // Filtros opcionales para "Servicio → Asignar colaboradores": sólo los
+        // que hoy no tienen servicio, o sólo los de un servicio concreto.
+        $sinServicio = $request->boolean('sin_servicio');
+        $conServicioId = $request->filled('con_servicio_id') ? (int) $request->query('con_servicio_id') : null;
 
         if ($empresaId !== null && ! $idsAutorizadas->contains($empresaId)) {
             return response()->json(['colaboradores' => []]);
@@ -455,6 +459,8 @@ class ColaboradorController extends Controller
             ->whereIn('empresa_id', $idsAutorizadas)
             ->when($empresaId !== null, fn ($q) => $q->where('empresa_id', $empresaId))
             ->when($sucursalId !== null, fn ($q) => $q->where('sucursal_id', $sucursalId))
+            ->when($sinServicio, fn ($q) => $q->whereNull('servicio_actual_id'))
+            ->when($conServicioId !== null, fn ($q) => $q->where('servicio_actual_id', $conServicioId))
             ->where('activo', true)
             ->whereHas('empresa', fn ($q) => $q->where('activa', true))
             ->whereHas('sucursal', fn ($q) => $q->where('activa', true))

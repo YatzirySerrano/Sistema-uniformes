@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Acciones\AsignarColaboradoresServicio;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
+use App\Http\Requests\Servicios\AsignarColaboradoresServicioRequest;
 use App\Http\Requests\Servicios\GuardarServicioRequest;
+use App\Models\Colaborador;
 use App\Models\Contrato;
 use App\Models\Servicio;
 use App\Servicios\ServicioAuditoria;
@@ -227,6 +230,13 @@ class ServicioController extends Controller
         $servicio->load(['contrato:id,nombre,codigo,activo,empresa_id', 'contrato.empresa:id,nombre_comercial', 'sucursal:id,nombre']);
         $servicio->loadCount('colaboradoresActuales');
 
+        // Sub-listado paginado en servidor (pensado para 3 000+ colaboradores):
+        // nunca se cargan todos de golpe. `colab_page` es un `pageName` propio
+        // para no chocar con ninguna otra paginación de la página.
+        $filtrosColaboradores = $request->validate([
+            'colab_buscar' => ['nullable', 'string', 'max:100'],
+        ]);
+
         return Inertia::render('Servicios/Detalle', [
             'servicio' => [
                 ...$servicio->only(['id', 'nombre', 'codigo', 'direccion', 'descripcion', 'activo']),
@@ -242,11 +252,82 @@ class ServicioController extends Controller
                 ],
                 'colaboradores_actuales' => (int) $servicio->colaboradores_actuales_count,
             ],
+            'colaboradoresAsignados' => $this->consultaColaboradoresAsignados($servicio, $filtrosColaboradores)
+                ->paginate(10, ['*'], 'colab_page')
+                ->withQueryString()
+                ->through(fn (Colaborador $c): array => [
+                    'id' => $c->id,
+                    'nombre_completo' => $c->nombre_completo,
+                    'numero_empleado' => $c->numero_empleado,
+                    'sucursal' => $c->sucursal?->nombre,
+                    'activo' => $c->activo,
+                ]),
+            'filtrosColaboradores' => ['buscar' => $filtrosColaboradores['colab_buscar'] ?? ''],
             'permisos' => [
                 'editar' => $request->user()->can('update', $servicio),
                 'administrar' => $request->user()->can('administrar', $servicio),
+                // La administración de personal desde el Servicio usa el MISMO
+                // permiso que "Cambiar servicio" del colaborador.
+                'asignarColaboradores' => $request->user()->can('colaboradores.editar'),
             ],
         ]);
+    }
+
+    /**
+     * Colaboradores cuya ubicación operativa VIGENTE
+     * (`colaboradores.servicio_actual_id`) es este servicio. Nunca se infiere
+     * desde entregas ni desde otra fuente.
+     *
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<Colaborador>
+     */
+    private function consultaColaboradoresAsignados(Servicio $servicio, array $filtros): Builder
+    {
+        return Colaborador::query()
+            ->where('servicio_actual_id', $servicio->id)
+            // Defensa en capas: un colaborador siempre pertenece a la empresa
+            // del servicio que tenga asignado (lo garantiza CambiarServicio),
+            // pero nunca se muestra personal de otra empresa aunque hubiera una
+            // inconsistencia de datos.
+            ->where('empresa_id', $servicio->contrato->empresa_id)
+            ->when($filtros['colab_buscar'] ?? null, fn (Builder $q, string $b) => $q->where(fn (Builder $s) => $s
+                ->where('nombre_completo', 'like', "%{$b}%")
+                ->orWhere('numero_empleado', 'like', "%{$b}%")))
+            ->with('sucursal:id,nombre')
+            ->orderBy('nombre_completo');
+    }
+
+    /**
+     * Asignación en lote de colaboradores a este servicio (UNA petición, UNA
+     * transacción). Reutiliza `CambiarServicioColaborador` por colaborador
+     * mediante `AsignarColaboradoresServicio` — misma fuente de verdad y misma
+     * auditoría individual que "Colaborador → Cambiar servicio". Quitar un
+     * colaborador del servicio NO pasa por aquí: es "Cambiar servicio" con
+     * `servicio_id = null`.
+     */
+    public function asignarColaboradores(AsignarColaboradoresServicioRequest $request, Servicio $servicio, AsignarColaboradoresServicio $accion): RedirectResponse
+    {
+        $datos = $request->validated();
+
+        $resumen = $accion->ejecutar($servicio, $datos['colaborador_ids'], $datos['motivo'] ?? null);
+
+        $mensaje = $resumen['total'] === 1
+            ? 'Se asignó 1 colaborador a este servicio.'
+            : "Se asignaron {$resumen['total']} colaboradores a este servicio.";
+
+        if ($resumen['movidos'] > 0) {
+            $mensaje .= $resumen['movidos'] === 1
+                ? ' 1 provenía de otro servicio y fue cambiado.'
+                : " {$resumen['movidos']} provenían de otro servicio y fueron cambiados.";
+        }
+
+        if ($resumen['sin_cambio'] > 0) {
+            $mensaje .= $resumen['sin_cambio'] === 1
+                ? ' 1 ya estaba en este servicio.'
+                : " {$resumen['sin_cambio']} ya estaban en este servicio.";
+        }
+
+        return back()->with('toast', ['type' => 'success', 'message' => $mensaje]);
     }
 
     public function store(GuardarServicioRequest $request): RedirectResponse

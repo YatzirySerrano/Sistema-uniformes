@@ -256,6 +256,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('servicios/{servicio}', [ServicioController::class, 'show'])->name('servicios.show');
     Route::put('servicios/{servicio}', [ServicioController::class, 'update'])->name('servicios.update');
     Route::post('servicios/{servicio}/estado', [ServicioController::class, 'toggle'])->name('servicios.toggle');
+    Route::post('servicios/{servicio}/colaboradores', [ServicioController::class, 'asignarColaboradores'])->name('servicios.colaboradores.asignar');
 
     Route::get('usuarios', [UsuarioController::class, 'index'])->name('usuarios.index');
     Route::get('usuarios/exportar', [UsuarioController::class, 'exportar'])->name('usuarios.exportar');

@@ -80,10 +80,10 @@ class CrearEntregaUniforme
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursalId,
                 'almacen_id' => $almacen->getKey(),
-                // Snapshot histórico del servicio de destino de ESTA entrega —
-                // se guarda tal cual llegó validado, sin derivarlo ni
-                // sincronizarlo con `colaborador->servicio_actual_id` (eso es
-                // una acción independiente, ver `CambiarServicioColaborador`).
+                // Snapshot histórico del servicio de destino de ESTA entrega.
+                // El llamador lo resuelve desde `colaborador->servicio_actual_id`
+                // (nunca de un id del frontend); aquí sólo se persiste. Nunca se
+                // vuelve a tocar si el colaborador cambia de servicio después.
                 'servicio_id' => $servicioId,
                 'colaborador_id' => $colaborador->getKey(),
                 'encargado_id' => $encargadoId,
