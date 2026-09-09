@@ -23,11 +23,16 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import { Input } from '@/components/ui/input';
 import { useEscanerQr } from '@/composables/useEscanerQr';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 
+type Seccion = 'todos' | 'encontrados' | 'faltantes' | 'no_esperados';
+
 type Contadores = {
+    todos: number;
     esperados: number;
     encontrados_esperados: number;
     encontrados: number;
@@ -38,6 +43,7 @@ type Contadores = {
 type FilaUnidad = {
     id: number;
     clasificacion: 'encontrado' | 'faltante' | 'no_esperado';
+    clasificacion_etiqueta: string;
     esperada: boolean;
     escaneado_en: string | null;
     escaneado_por: string | null;
@@ -64,7 +70,7 @@ const props = defineProps<{
         finalizado_en: string | null;
     };
     contadores: Contadores;
-    seccion: 'encontrados' | 'faltantes' | 'no_esperados';
+    seccion: Seccion;
     unidades: {
         data: FilaUnidad[];
         links: { url: string | null; label: string; active: boolean }[];
@@ -232,7 +238,26 @@ function enviarManual(): void {
 }
 
 /* ---------- Secciones ---------- */
-function cambiarSeccion(s: 'encontrados' | 'faltantes' | 'no_esperados'): void {
+const SECCIONES: { valor: Seccion; etiqueta: string; total: () => number }[] = [
+    { valor: 'todos', etiqueta: 'Todos', total: () => contadores.todos },
+    {
+        valor: 'encontrados',
+        etiqueta: 'Encontrados',
+        total: () => contadores.encontrados,
+    },
+    {
+        valor: 'faltantes',
+        etiqueta: 'Faltantes',
+        total: () => contadores.pendientes,
+    },
+    {
+        valor: 'no_esperados',
+        etiqueta: 'No esperados',
+        total: () => contadores.no_esperados,
+    },
+];
+
+function cambiarSeccion(s: Seccion): void {
     if (s === props.seccion) return;
     router.get(
         `/inventarios-fisicos/${props.ronda.id}`,
@@ -245,6 +270,10 @@ function cambiarSeccion(s: 'encontrados' | 'faltantes' | 'no_esperados'): void {
         },
     );
 }
+
+// Tabla ↔ Tarjetas del detalle: misma query/paginación/filtros, sólo cambia
+// la presentación.
+const vista = useVistaPreferida('inventario-fisico-detalle', 'tabla');
 
 /* ---------- Finalizar ---------- */
 const dialogoFinalizar = ref(false);
@@ -266,6 +295,14 @@ function finalizar(): void {
 
 function fecha(valor: string | null): string {
     return valor ? new Date(valor).toLocaleString() : '—';
+}
+
+function claseClasificacion(c: FilaUnidad['clasificacion']): string {
+    return c === 'encontrado'
+        ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
+        : c === 'no_esperado'
+          ? 'border-amber-500/40 text-amber-700 dark:text-amber-400'
+          : 'border-red-500/40 text-red-700 dark:text-red-400';
 }
 
 onBeforeUnmount(() => {
@@ -552,28 +589,17 @@ onBeforeUnmount(() => {
         </p>
 
         <!-- Secciones -->
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap items-center gap-2">
             <Button
+                v-for="s in SECCIONES"
+                :key="s.valor"
                 size="sm"
-                :variant="seccion === 'encontrados' ? 'default' : 'outline'"
-                @click="cambiarSeccion('encontrados')"
+                :variant="seccion === s.valor ? 'default' : 'outline'"
+                @click="cambiarSeccion(s.valor)"
             >
-                Encontrados ({{ contadores.encontrados }})
+                {{ s.etiqueta }} ({{ s.total() }})
             </Button>
-            <Button
-                size="sm"
-                :variant="seccion === 'faltantes' ? 'default' : 'outline'"
-                @click="cambiarSeccion('faltantes')"
-            >
-                Faltantes ({{ contadores.pendientes }})
-            </Button>
-            <Button
-                size="sm"
-                :variant="seccion === 'no_esperados' ? 'default' : 'outline'"
-                @click="cambiarSeccion('no_esperados')"
-            >
-                No esperados ({{ contadores.no_esperados }})
-            </Button>
+            <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
         <EstadoVacio
@@ -584,14 +610,25 @@ onBeforeUnmount(() => {
                     ? 'Todas las unidades esperadas fueron escaneadas.'
                     : seccion === 'no_esperados'
                       ? 'No se ha escaneado ninguna unidad fuera del universo esperado.'
-                      : 'Todavía no se ha escaneado ninguna unidad.'
+                      : seccion === 'todos'
+                        ? 'Esta ronda no tiene unidades registradas.'
+                        : 'Todavía no se ha escaneado ninguna unidad.'
             "
         />
 
-        <div v-else class="overflow-x-auto rounded-xl border">
+        <div
+            v-else-if="vista === 'tabla'"
+            class="overflow-x-auto rounded-xl border"
+        >
             <table class="w-full min-w-[820px] text-sm">
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
+                        <th
+                            v-if="seccion === 'todos'"
+                            class="px-3 py-2 font-medium"
+                        >
+                            Resultado
+                        </th>
                         <th class="px-3 py-2 font-medium">Código / Activo</th>
                         <th class="px-3 py-2 font-medium">Almacén</th>
                         <th class="px-3 py-2 font-medium">Asignada a</th>
@@ -605,6 +642,15 @@ onBeforeUnmount(() => {
                         :key="f.id"
                         class="hover:bg-muted/40 border-t transition-colors"
                     >
+                        <td v-if="seccion === 'todos'" class="px-3 py-2">
+                            <Badge
+                                variant="outline"
+                                class="text-xs"
+                                :class="claseClasificacion(f.clasificacion)"
+                            >
+                                {{ f.clasificacion_etiqueta }}
+                            </Badge>
+                        </td>
                         <td class="px-3 py-2">
                             <p class="font-mono font-medium">
                                 {{ f.codigo ?? '—' }}
@@ -643,6 +689,60 @@ onBeforeUnmount(() => {
                     </tr>
                 </tbody>
             </table>
+        </div>
+
+        <div
+            v-else
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+        >
+            <div
+                v-for="f in unidades.data"
+                :key="f.id"
+                class="flex flex-col gap-2 rounded-xl border p-4 text-sm"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="font-mono font-medium">
+                            {{ f.codigo ?? '—' }}
+                        </p>
+                        <p class="text-muted-foreground truncate text-xs">
+                            {{ f.activo ?? '—' }}
+                        </p>
+                    </div>
+                    <Badge
+                        variant="outline"
+                        class="shrink-0 text-xs"
+                        :class="claseClasificacion(f.clasificacion)"
+                    >
+                        {{ f.clasificacion_etiqueta }}
+                    </Badge>
+                </div>
+
+                <div
+                    class="text-muted-foreground grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs"
+                >
+                    <span>Estado sistema:</span>
+                    <span class="text-foreground">
+                        {{ f.estado_visible_etiqueta ?? '—' }}
+                    </span>
+                    <span>Almacén:</span>
+                    <span class="text-foreground">{{ f.almacen ?? '—' }}</span>
+                    <span>Asignada a:</span>
+                    <span class="text-foreground">
+                        {{ f.colaborador ?? '—' }}
+                    </span>
+                </div>
+
+                <div class="text-muted-foreground text-xs">
+                    <template v-if="f.escaneado_en">
+                        Escaneada: {{ fecha(f.escaneado_en) }}
+                        <span v-if="f.escaneado_por" class="block">
+                            Por: {{ f.escaneado_por }}
+                        </span>
+                    </template>
+                    <span v-else>Escaneada: — · Por: —</span>
+                </div>
+            </div>
         </div>
 
         <Paginacion :links="unidades.links" :total="unidades.total" />

@@ -154,6 +154,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventarios-fisicos', [InventarioFisicoController::class, 'index'])->name('inventarios-fisicos.index');
     Route::get('inventarios-fisicos/crear', [InventarioFisicoController::class, 'create'])->name('inventarios-fisicos.create');
     Route::get('inventarios-fisicos/universo', [InventarioFisicoController::class, 'universo'])->name('inventarios-fisicos.universo');
+    Route::get('inventarios-fisicos/exportar', [InventarioFisicoController::class, 'exportarListado'])->name('inventarios-fisicos.exportar-listado');
     Route::post('inventarios-fisicos', [InventarioFisicoController::class, 'store'])->name('inventarios-fisicos.store');
     Route::get('inventarios-fisicos/{inventarioFisico}', [InventarioFisicoController::class, 'show'])->name('inventarios-fisicos.show');
     Route::get('inventarios-fisicos/{inventarioFisico}/exportar', [InventarioFisicoController::class, 'exportar'])->name('inventarios-fisicos.exportar');

@@ -2,14 +2,17 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, ScanLine, Search, SquareArrowOutUpRight, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Ronda = {
@@ -111,6 +114,10 @@ function limpiarFiltros(): void {
 function fecha(valor: string | null): string {
     return valor ? new Date(valor).toLocaleString() : '—';
 }
+
+// Tabla ↔ Tarjetas: sólo cambia la presentación; el dataset (misma query,
+// paginación y filtros) es el mismo. Preferencia recordada por dispositivo.
+const vista = useVistaPreferida('inventario-fisico', 'tabla');
 </script>
 
 <template>
@@ -122,6 +129,10 @@ function fecha(valor: string | null): string {
             descripcion="Rondas de corte físico por escaneo de QR: recorres las instalaciones, escaneas cada unidad identificada y el sistema compara lo encontrado contra lo que tiene registrado. Es un módulo de verificación: no mueve stock ni cambia asignaciones."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/inventarios-fisicos/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="permisos.crear" as-child>
                     <Link href="/inventarios-fisicos/crear">
                         <Plus class="size-4" /> Nueva ronda
@@ -181,6 +192,8 @@ function fecha(valor: string | null): string {
             >
                 <X class="size-3.5" /> Limpiar filtros
             </Button>
+
+            <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
         <EstadoVacio
@@ -195,7 +208,10 @@ function fecha(valor: string | null): string {
             <template #icono><ScanLine class="size-6" /></template>
         </EstadoVacio>
 
-        <div v-else class="overflow-x-auto rounded-xl border">
+        <div
+            v-else-if="vista === 'tabla'"
+            class="overflow-x-auto rounded-xl border"
+        >
             <table class="w-full min-w-[900px] text-sm">
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
@@ -290,6 +306,89 @@ function fecha(valor: string | null): string {
                     </tr>
                 </tbody>
             </table>
+        </div>
+
+        <div
+            v-else
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+        >
+            <div
+                v-for="r in rondas.data"
+                :key="r.id"
+                class="flex flex-col gap-3 rounded-xl border p-4"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="font-mono text-xs">{{ r.folio }}</p>
+                        <p class="truncate font-medium">{{ r.nombre }}</p>
+                    </div>
+                    <Badge
+                        variant="outline"
+                        class="shrink-0"
+                        :class="
+                            r.estado === 'en_proceso'
+                                ? 'border-amber-500/40 text-amber-700 dark:text-amber-400'
+                                : 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
+                        "
+                    >
+                        {{ r.estado_etiqueta }}
+                    </Badge>
+                </div>
+
+                <div class="text-muted-foreground text-sm">
+                    <p>{{ r.empresa ?? '—' }}</p>
+                    <p v-if="r.almacen">Almacén: {{ r.almacen }}</p>
+                </div>
+
+                <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                    <dt class="text-muted-foreground">Esperados</dt>
+                    <dd class="text-right font-medium tabular-nums">
+                        {{ r.esperados }}
+                    </dd>
+                    <dt class="text-muted-foreground">Escaneados</dt>
+                    <dd class="text-right font-medium tabular-nums">
+                        {{ r.escaneados }}
+                    </dd>
+                    <dt class="text-muted-foreground">Faltantes</dt>
+                    <dd
+                        class="text-right font-medium tabular-nums"
+                        :class="
+                            r.faltantes > 0
+                                ? 'text-red-600 dark:text-red-400'
+                                : ''
+                        "
+                    >
+                        {{ r.faltantes }}
+                    </dd>
+                    <dt class="text-muted-foreground">No esperados</dt>
+                    <dd
+                        class="text-right font-medium tabular-nums"
+                        :class="
+                            r.no_esperados > 0
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : ''
+                        "
+                    >
+                        {{ r.no_esperados }}
+                    </dd>
+                </dl>
+
+                <div class="text-muted-foreground text-xs">
+                    <p>Responsable: {{ r.responsable ?? '—' }}</p>
+                    <p>Inicio: {{ fecha(r.iniciado_en) }}</p>
+                </div>
+
+                <Button
+                    variant="outline"
+                    size="sm"
+                    class="mt-auto self-end"
+                    as-child
+                >
+                    <Link :href="`/inventarios-fisicos/${r.id}`">
+                        <SquareArrowOutUpRight class="size-3.5" /> Ver
+                    </Link>
+                </Button>
+            </div>
         </div>
 
         <Paginacion :links="rondas.links" :total="rondas.total" />

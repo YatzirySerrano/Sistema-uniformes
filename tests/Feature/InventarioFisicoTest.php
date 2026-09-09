@@ -2,9 +2,11 @@
 
 use App\Acciones\CrearRondaInventarioFisico;
 use App\Acciones\EscanearUnidadInventarioFisico;
+use App\Acciones\FinalizarRondaInventarioFisico;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoInventarioFisico;
 use App\Enums\RolSistema;
+use App\Exports\ListadoExport;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Empresa;
@@ -12,6 +14,8 @@ use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoUnidad;
 use App\Models\UnidadActivo;
 use App\Models\User;
+use Illuminate\Support\Str;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * Módulo de inventario físico por rondas de escaneo QR. Es un módulo de
@@ -394,6 +398,224 @@ it('la exportación exige el mismo permiso que ver la ronda', function () {
     $forastero = usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]);
 
     $this->actingAs($forastero)->get("/inventarios-fisicos/{$ronda->id}/exportar?formato=xlsx")->assertForbidden();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Detalle: sección "Todos"
+|--------------------------------------------------------------------------
+*/
+
+it('la sección "todos" lista el universo registrado en la ronda sin recalcular UnidadActivo ni duplicar', function () {
+    $encontrada = ($this->unidad)();
+    $faltante = ($this->unidad)();
+    $ronda = crearRonda($this->admin, $this->empresa);
+    $noEsperada = ($this->unidad)(); // creada tras el snapshot
+
+    $accion = app(EscanearUnidadInventarioFisico::class);
+    $accion->ejecutar($ronda, $encontrada->public_token, $this->admin);
+    $accion->ejecutar($ronda, $noEsperada->public_token, $this->admin);
+
+    // Otra unidad NUEVA que jamás se escaneó: no debe aparecer (la ronda es histórica).
+    ($this->unidad)();
+
+    $this->actingAs($this->admin)->get("/inventarios-fisicos/{$ronda->id}?seccion=todos")
+        ->assertOk()
+        ->assertInertia(fn ($p) => $p
+            ->where('seccion', 'todos')
+            ->where('contadores.todos', 3)                // 2 esperados + 1 no esperado
+            ->where('contadores.esperados', 2)
+            ->where('contadores.no_esperados', 1)
+            ->where('unidades.data', function ($data) use ($encontrada, $faltante, $noEsperada) {
+                $codigos = collect($data)->pluck('codigo');
+                $clasif = collect($data)->pluck('clasificacion', 'codigo');
+
+                return count($data) === 3
+                    && $codigos->duplicates()->isEmpty()
+                    && $clasif[$encontrada->codigo] === 'encontrado'
+                    && $clasif[$faltante->codigo] === 'faltante'
+                    && $clasif[$noEsperada->codigo] === 'no_esperado';
+            }));
+});
+
+it('las secciones encontrados / faltantes / no_esperados siguen siendo correctas junto a "todos"', function () {
+    $encontrada = ($this->unidad)();
+    $faltante = ($this->unidad)();
+    $ronda = crearRonda($this->admin, $this->empresa);
+    $noEsperada = ($this->unidad)();
+
+    $accion = app(EscanearUnidadInventarioFisico::class);
+    $accion->ejecutar($ronda, $encontrada->public_token, $this->admin);
+    $accion->ejecutar($ronda, $noEsperada->public_token, $this->admin);
+
+    // "Encontrados" = todo lo escaneado (esperado o no); "Faltantes" = esperado
+    // sin escanear; "No esperados" = escaneado fuera del snapshot.
+    foreach ([
+        'encontrados' => collect([$encontrada->codigo, $noEsperada->codigo])->sort()->values()->all(),
+        'faltantes' => [$faltante->codigo],
+        'no_esperados' => [$noEsperada->codigo],
+    ] as $seccion => $esperados) {
+        $this->actingAs($this->admin)->get("/inventarios-fisicos/{$ronda->id}?seccion={$seccion}")
+            ->assertInertia(fn ($p) => $p
+                ->where('unidades.data', fn ($d) => collect($d)->pluck('codigo')->sort()->values()->all() === $esperados));
+    }
+});
+
+it('exporta la sección "todos" con la columna Clasificación', function () {
+    Excel::fake();
+    $encontrada = ($this->unidad)();
+    ($this->unidad)(); // faltante
+    $ronda = crearRonda($this->admin, $this->empresa);
+    $noEsperada = ($this->unidad)();
+    app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, $encontrada->public_token, $this->admin);
+    app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, $noEsperada->public_token, $this->admin);
+
+    $this->actingAs($this->admin)
+        ->get("/inventarios-fisicos/{$ronda->id}/exportar?formato=xlsx&seccion=todos")
+        ->assertOk();
+
+    Excel::assertDownloaded('inventario-fisico-'.Str::slug($ronda->folio).'-'.Str::slug($this->empresa->nombre_comercial).'-'.now()->toDateString().'.xlsx', function (ListadoExport $e): bool {
+        $clasificaciones = array_column($e->array(), 0);
+        expect($e->array())->toHaveCount(3)
+            ->and($clasificaciones)->toContain('Encontrado')->toContain('Faltante')->toContain('No esperado');
+
+        return true;
+    });
+});
+
+it('exportar una sección concreta sólo incluye sus filas y no se limita a la página visible', function () {
+    config()->set('uniformes.por_pagina', 2);
+    Excel::fake();
+
+    $encontradas = collect(range(1, 3))->map(fn () => ($this->unidad)());
+    collect(range(1, 5))->each(fn () => ($this->unidad)()); // 5 faltantes
+    $ronda = crearRonda($this->admin, $this->empresa);
+    $encontradas->each(fn ($u) => app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, $u->public_token, $this->admin));
+
+    $archivo = 'inventario-fisico-'.Str::slug($ronda->folio).'-'.Str::slug($this->empresa->nombre_comercial).'-'.now()->toDateString().'.xlsx';
+
+    $this->actingAs($this->admin)->get("/inventarios-fisicos/{$ronda->id}/exportar?formato=xlsx&seccion=faltantes")->assertOk();
+    Excel::assertDownloaded($archivo, function (ListadoExport $e): bool {
+        expect($e->array())->toHaveCount(5)
+            ->and(array_unique(array_column($e->array(), 0)))->toBe(['Faltante']);
+
+        return true;
+    });
+
+    $this->actingAs($this->admin)->get("/inventarios-fisicos/{$ronda->id}/exportar?formato=xlsx&seccion=encontrados")->assertOk();
+    Excel::assertDownloaded($archivo, function (ListadoExport $e): bool {
+        expect($e->array())->toHaveCount(3)
+            ->and(array_unique(array_column($e->array(), 0)))->toBe(['Encontrado']);
+
+        return true;
+    });
+});
+
+/*
+|--------------------------------------------------------------------------
+| Exportación del LISTADO general de rondas
+|--------------------------------------------------------------------------
+*/
+
+it('exporta el listado general de rondas en Excel y PDF', function () {
+    crearRonda($this->admin, $this->empresa);
+
+    $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx')
+        ->assertOk()
+        ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+    $pdf = $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=pdf');
+    $pdf->assertOk()->assertHeader('content-type', 'application/pdf');
+    expect(substr($pdf->getContent(), 0, 4))->toBe('%PDF');
+});
+
+it('la exportación general NO se limita a la página visible', function () {
+    config()->set('uniformes.por_pagina', 2);
+    Excel::fake();
+
+    crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa);
+
+    $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx')->assertOk();
+
+    Excel::assertDownloaded('inventarios-fisicos-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $e): bool {
+        expect($e->array())->toHaveCount(3);
+
+        return true;
+    });
+});
+
+it('la exportación general respeta el filtro de empresa y el alcance multiempresa', function () {
+    Excel::fake();
+
+    crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa);
+
+    $otra = Empresa::factory()->create(['nombre_comercial' => 'OtraCo']);
+    InventarioFisico::factory()->for($otra)->create();
+
+    $multi = usuarioCon(RolSistema::Administrador->value, [$this->empresa, $otra]);
+
+    $this->actingAs($multi)->get("/inventarios-fisicos/exportar?formato=xlsx&empresa_id={$this->empresa->id}")->assertOk();
+    Excel::assertDownloaded('inventarios-fisicos-'.Str::slug($this->empresa->nombre_comercial).'-'.now()->toDateString().'.xlsx', function (ListadoExport $e): bool {
+        expect($e->array())->toHaveCount(2)
+            ->and(array_column($e->array(), 2))->each->toBe('DASTI');
+
+        return true;
+    });
+});
+
+it('la exportación general respeta el filtro de estado', function () {
+    Excel::fake();
+
+    crearRonda($this->admin, $this->empresa);
+    $finalizada = crearRonda($this->admin, $this->empresa);
+    app(FinalizarRondaInventarioFisico::class)->ejecutar($finalizada, $this->admin->id);
+
+    $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx&estado=finalizado')->assertOk();
+    Excel::assertDownloaded('inventarios-fisicos-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $e) use ($finalizada): bool {
+        expect($e->array())->toHaveCount(1)
+            ->and($e->array()[0][0])->toBe($finalizada->folio)
+            ->and($e->array()[0][6])->toBe('Finalizado');
+
+        return true;
+    });
+});
+
+it('la exportación general respeta la búsqueda por folio / nombre', function () {
+    Excel::fake();
+
+    $r1 = crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa);
+
+    $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx&buscar='.$r1->folio)->assertOk();
+    Excel::assertDownloaded('inventarios-fisicos-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $e) use ($r1): bool {
+        expect($e->array())->toHaveCount(1)->and($e->array()[0][0])->toBe($r1->folio);
+
+        return true;
+    });
+});
+
+it('un usuario no puede exportar el listado de rondas de una empresa fuera de su alcance', function () {
+    crearRonda($this->admin, $this->empresa);
+    $forastero = usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]);
+
+    // El filtro de empresa ajena se ignora y el resultado queda acotado a SU
+    // alcance (0 rondas): nunca ve las de otra empresa.
+    Excel::fake();
+    $this->actingAs($forastero)->get("/inventarios-fisicos/exportar?formato=xlsx&empresa_id={$this->empresa->id}")->assertOk();
+    Excel::assertDownloaded('inventarios-fisicos-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $e): bool {
+        expect($e->array())->toHaveCount(0);
+
+        return true;
+    });
+});
+
+it('sin permiso de ver, la exportación general responde 403', function () {
+    $sinPermiso = usuarioCon(RolSistema::Colaborador->value);
+
+    $this->actingAs($sinPermiso)->get('/inventarios-fisicos/exportar?formato=xlsx')->assertForbidden();
 });
 
 /**

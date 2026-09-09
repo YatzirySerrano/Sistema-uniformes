@@ -195,48 +195,83 @@ class InventarioFisicoController extends Controller
     }
 
     /**
+     * Excel / PDF del LISTADO general de rondas, respetando EXACTAMENTE los
+     * mismos filtros (`buscar` / `empresa_id` / `estado`) y alcance multiempresa
+     * que `index()` — reutiliza `consultaRondas()`, sin `->paginate()`, así que
+     * exporta TODAS las rondas que coinciden, no sólo la página visible.
+     */
+    public function exportarListado(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', InventarioFisico::class);
+
+        $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        $rondas = $this->consultaRondas($request, $filtros)->get();
+        $contadores = $this->contadoresPorRonda($rondas->pluck('id'));
+
+        $filas = $rondas->map(function (InventarioFisico $r) use ($contadores): array {
+            $c = $contadores[$r->id] ?? $this->contadoresVacios();
+
+            return [
+                $r->folio,
+                $r->nombre,
+                $r->empresa?->nombre_comercial,
+                $r->almacen?->nombre,
+                $r->created_at?->format('d/m/Y H:i'),
+                $r->usuario?->name,
+                $r->estado->etiqueta(),
+                $c['esperados'],
+                $c['escaneados'],
+                $c['faltantes'],
+                $c['no_esperados'],
+            ];
+        })->all();
+
+        $contexto = new ContextoExportacion(
+            'Inventarios físicos',
+            $empresaFiltro,
+            array_filter([
+                'Búsqueda' => $filtros['buscar'] ?? null,
+                'Estado' => ($filtros['estado'] ?? null) ? EstadoInventarioFisico::from($filtros['estado'])->etiqueta() : null,
+            ]),
+            count($filas),
+        );
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Folio', 'Nombre', 'Empresa', 'Almacén', 'Inicio', 'Responsable', 'Estado',
+            'Esperados', 'Escaneados', 'Faltantes', 'No esperados',
+        ], $contexto);
+    }
+
+    /**
      * Excel / PDF del resumen de una ronda, respetando el mismo filtro de
-     * sección que la pantalla. Mismo permiso que `show()`.
+     * sección que la pantalla (`todos` / `encontrados` / `faltantes` /
+     * `no_esperados`). Sin `->paginate()`: exporta la sección COMPLETA, no la
+     * página visible. Mismo permiso que `show()`.
      */
     public function exportar(Request $request, InventarioFisico $inventarioFisico): BinaryFileResponse|HttpResponse
     {
         $this->authorize('view', $inventarioFisico);
 
         $seccion = $request->input('seccion');
-        $seccionValida = in_array($seccion, ServicioResumenInventarioFisico::SECCIONES, true) ? $seccion : null;
+        $seccion = in_array($seccion, ServicioResumenInventarioFisico::SECCIONES, true) ? $seccion : 'todos';
 
-        $consulta = $seccionValida !== null
-            ? $this->resumen->consultaSeccion($inventarioFisico, $seccionValida)
-            : InventarioFisicoUnidad::query()
-                ->where('inventario_fisico_id', $inventarioFisico->id)
-                ->with([
-                    'unidad:id,codigo,activo_id,almacen_id,empresa_id,colaborador_id,estado,condicion',
-                    'unidad.activo:id,nombre', 'unidad.almacen:id,nombre',
-                    'unidad.colaborador:id,nombre_completo', 'escaneadoPor:id,name',
-                ])
-                ->orderByRaw('escaneado_en is null desc')
-                ->orderBy('id');
+        $filas = $this->resumen->consultaSeccion($inventarioFisico, $seccion)->get()
+            ->map(function (InventarioFisicoUnidad $f): array {
+                $d = $this->resumen->filaResumen($f);
 
-        $clasificacionEtiqueta = [
-            InventarioFisicoUnidad::CLASIFICACION_ENCONTRADO => 'Encontrado',
-            InventarioFisicoUnidad::CLASIFICACION_FALTANTE => 'Faltante',
-            InventarioFisicoUnidad::CLASIFICACION_NO_ESPERADO => 'No esperado',
-        ];
-
-        $filas = $consulta->get()->map(function (InventarioFisicoUnidad $f) use ($clasificacionEtiqueta): array {
-            $d = $this->resumen->filaResumen($f);
-
-            return [
-                $clasificacionEtiqueta[$d['clasificacion']] ?? $d['clasificacion'],
-                $d['codigo'],
-                $d['activo'],
-                $d['almacen'],
-                $d['colaborador'],
-                $d['estado_visible_etiqueta'],
-                $d['escaneado_en'],
-                $d['escaneado_por'],
-            ];
-        })->all();
+                return [
+                    $d['clasificacion_etiqueta'],
+                    $d['codigo'],
+                    $d['activo'],
+                    $d['almacen'],
+                    $d['colaborador'],
+                    $d['estado_visible_etiqueta'],
+                    $d['escaneado_en'],
+                    $d['escaneado_por'],
+                ];
+            })->all();
 
         $inventarioFisico->loadMissing('empresa:id,nombre_comercial,logo_ruta');
 
@@ -245,7 +280,7 @@ class InventarioFisicoController extends Controller
             $inventarioFisico->empresa,
             array_filter([
                 'Ronda' => $inventarioFisico->nombre,
-                'Sección' => $seccionValida !== null ? ucfirst(str_replace('_', ' ', $seccionValida)) : 'Todas',
+                'Sección' => $seccion === 'todos' ? 'Todos' : ucfirst(str_replace('_', ' ', $seccion)),
             ]),
             count($filas),
         );

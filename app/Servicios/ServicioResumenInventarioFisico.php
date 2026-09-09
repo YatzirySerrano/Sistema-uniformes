@@ -21,7 +21,22 @@ use Illuminate\Support\Facades\DB;
  */
 class ServicioResumenInventarioFisico
 {
-    public const SECCIONES = ['encontrados', 'faltantes', 'no_esperados'];
+    /**
+     * Secciones seleccionables en el detalle y en la exportación. `todos` es
+     * el universo completo REGISTRADO en la ronda (esperados + no esperados,
+     * una fila por unidad — el `UNIQUE(ronda, unidad)` garantiza que no se
+     * duplica ninguna).
+     */
+    public const SECCIONES = ['todos', 'encontrados', 'faltantes', 'no_esperados'];
+
+    /**
+     * @var array<string, string>
+     */
+    private const CLASIFICACION_ETIQUETA = [
+        InventarioFisicoUnidad::CLASIFICACION_ENCONTRADO => 'Encontrado',
+        InventarioFisicoUnidad::CLASIFICACION_FALTANTE => 'Faltante',
+        InventarioFisicoUnidad::CLASIFICACION_NO_ESPERADO => 'No esperado',
+    ];
 
     /**
      * @return array<string, int>
@@ -44,6 +59,10 @@ class ServicioResumenInventarioFisico
         $noEsperados = (int) ($r->no_esperados ?? 0);
 
         return [
+            // "Todos" = universo REGISTRADO en la ronda: cada unidad es
+            // `esperada` o `!esperada` (mutuamente excluyentes, una fila por
+            // unidad), así que la suma nunca duplica.
+            'todos' => $esperados + $noEsperados,
             'esperados' => $esperados,
             'encontrados_esperados' => $encontradosEsperados,
             'encontrados' => $encontradosEsperados + $noEsperados,
@@ -68,6 +87,7 @@ class ServicioResumenInventarioFisico
             ]);
 
         return match ($seccion) {
+            'todos' => $consulta->orderByRaw('escaneado_en is null desc')->orderByDesc('escaneado_en')->orderBy('id'),
             'encontrados' => $consulta->whereNotNull('escaneado_en')->orderByDesc('escaneado_en'),
             'no_esperados' => $consulta->where('esperada', false)->orderByDesc('escaneado_en'),
             default => $consulta->where('esperada', true)->whereNull('escaneado_en')->orderBy('id'),
@@ -84,6 +104,7 @@ class ServicioResumenInventarioFisico
         return [
             'id' => $fila->id,
             'clasificacion' => $fila->clasificacion(),
+            'clasificacion_etiqueta' => self::CLASIFICACION_ETIQUETA[$fila->clasificacion()] ?? $fila->clasificacion(),
             'esperada' => $fila->esperada,
             'escaneado_en' => $fila->escaneado_en?->toDateTimeString(),
             'escaneado_por' => $fila->escaneadoPor?->name,
