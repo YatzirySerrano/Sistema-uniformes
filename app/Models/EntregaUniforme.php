@@ -37,6 +37,7 @@ class EntregaUniforme extends Model
         'empresa_id',
         'sucursal_id',
         'almacen_id',
+        'servicio_id',
         'colaborador_id',
         'encargado_id',
         'estado',
@@ -76,6 +77,19 @@ class EntregaUniforme extends Model
     public function almacen(): BelongsTo
     {
         return $this->belongsTo(Almacen::class);
+    }
+
+    /**
+     * Servicio operativo al momento de la entrega — snapshot HISTÓRICO,
+     * nunca se actualiza si el colaborador cambia de servicio después.
+     * Nullable: entregas anteriores a este módulo no lo tienen ("Servicio no
+     * registrado"), y una entrega interna puede no tener servicio.
+     *
+     * @return BelongsTo<Servicio, $this>
+     */
+    public function servicio(): BelongsTo
+    {
+        return $this->belongsTo(Servicio::class);
     }
 
     /**

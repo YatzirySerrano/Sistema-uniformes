@@ -50,6 +50,14 @@ const props = defineProps<{
         almacen: { id: number; nombre: string | null };
         empresa: { id: number; nombre_comercial: string | null };
         colaborador: { id: number; nombre_completo: string } | null;
+        ubicacion_operativa:
+            | {
+                  tipo: 'almacen';
+                  almacen: { id: number; nombre: string } | null;
+              }
+            | { tipo: 'servicio'; contrato: string; servicio: string }
+            | { tipo: 'sin_servicio' }
+            | { tipo: 'baja' };
         registrado_por: string | null;
         creada_en: string | null;
     };
@@ -309,6 +317,27 @@ function darDeBaja(): void {
                                 unidad.colaborador?.nombre_completo ??
                                 'Sin asignar'
                             }}
+                        </dd>
+                    </div>
+                    <div v-if="unidad.ubicacion_operativa.tipo === 'servicio'">
+                        <dt class="text-muted-foreground text-xs">
+                            Ubicación operativa
+                        </dt>
+                        <dd>
+                            {{ unidad.ubicacion_operativa.contrato }} —
+                            {{ unidad.ubicacion_operativa.servicio }}
+                        </dd>
+                    </div>
+                    <div
+                        v-else-if="
+                            unidad.ubicacion_operativa.tipo === 'sin_servicio'
+                        "
+                    >
+                        <dt class="text-muted-foreground text-xs">
+                            Ubicación operativa
+                        </dt>
+                        <dd class="text-muted-foreground">
+                            Sin servicio asignado
                         </dd>
                     </div>
                     <div v-if="unidad.motivo_baja">

@@ -33,6 +33,24 @@ final class Permisos
                 'sucursales.desactivar' => 'Activar / desactivar sucursales',
             ],
         ],
+        'contratos' => [
+            'etiqueta' => 'Contratos',
+            'permisos' => [
+                'contratos.ver' => 'Ver contratos',
+                'contratos.crear' => 'Crear contratos',
+                'contratos.editar' => 'Editar contratos',
+                'contratos.administrar' => 'Activar / desactivar contratos',
+            ],
+        ],
+        'servicios' => [
+            'etiqueta' => 'Servicios',
+            'permisos' => [
+                'servicios.ver' => 'Ver servicios',
+                'servicios.crear' => 'Crear servicios',
+                'servicios.editar' => 'Editar servicios',
+                'servicios.administrar' => 'Activar / desactivar servicios',
+            ],
+        ],
         'usuarios' => [
             'etiqueta' => 'Usuarios',
             'permisos' => [
@@ -236,6 +254,8 @@ final class Permisos
                 'colaboradores.ver', 'colaboradores.crear', 'colaboradores.editar', 'colaboradores.importar',
                 'colaboradores.expediente-ver', 'colaboradores.expediente-administrar', 'colaboradores.expediente-descargar',
                 'areas.ver', 'areas.crear', 'areas.editar',
+                'contratos.ver', 'contratos.crear', 'contratos.editar',
+                'servicios.ver', 'servicios.crear', 'servicios.editar',
                 'activos.ver',
                 'inventario.ver', 'inventario.entrada', 'inventario.minimos',
                 'unidades-activo.ver', 'unidades-activo.administrar',
@@ -250,6 +270,8 @@ final class Permisos
                 'colaboradores.ver',
                 'colaboradores.expediente-ver',
                 'areas.ver',
+                'contratos.ver',
+                'servicios.ver',
                 'almacenes.ver',
                 'activos.ver',
                 'inventario.ver',

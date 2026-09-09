@@ -33,13 +33,23 @@ type OpcionEmpresa = {
 };
 type OpcionSucursal = { id: number; nombre: string };
 
+type OpcionServicioActual = {
+    id: number;
+    nombre: string;
+    contrato: { id: number; nombre: string };
+};
+
 type OpcionColaborador = {
     id: number;
     nombre_completo: string;
     numero_empleado: string;
     empresa_id: number;
     sucursal_id: number;
+    servicio_actual: OpcionServicioActual | null;
 };
+
+type OpcionContrato = { id: number; nombre: string; codigo?: string };
+type OpcionServicio = { id: number; nombre: string; contrato_id: number };
 
 type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
 
@@ -122,6 +132,23 @@ const almacenSel = ref<OpcionAlmacen | null>(null);
 const empresaId = computed(() => empresaSel.value?.id ?? null);
 const sucursalId = computed(() => sucursalSel.value?.id ?? null);
 
+// --- Servicio operativo de destino de ESTA entrega (snapshot histórico) ---
+// Se precarga desde `colaborador.servicio_actual` pero es editable para esta
+// entrega puntual; cambiarlo aquí NUNCA actualiza el servicio vigente del
+// colaborador (eso es la acción independiente "Cambiar servicio").
+const contratoSel = ref<OpcionContrato | null>(null);
+const servicioSel = ref<OpcionServicio | null>(null);
+const contratoId = computed(() => contratoSel.value?.id ?? null);
+// El colaborador no tiene servicio vigente Y el usuario no eligió uno
+// manualmente: la entrega se guardará como "interna", sin ubicación
+// operativa — se muestra explícito para que nunca sea un olvido silencioso.
+const sinServicioPorFaltaDeAsignacion = computed(
+    () =>
+        colaboradorSel.value !== null &&
+        colaboradorSel.value.servicio_actual === null &&
+        servicioSel.value === null,
+);
+
 async function buscarEmpresas(
     q: string,
     signal?: AbortSignal,
@@ -191,8 +218,11 @@ function alElegirEmpresa(o: OpcionEmpresa | null): void {
     sucursalSel.value = null;
     colaboradorSel.value = null;
     almacenSel.value = null;
+    contratoSel.value = null;
+    servicioSel.value = null;
     form.colaborador_id = '';
     form.almacen_id = null;
+    form.servicio_id = null;
     limpiarRenglones();
     form.clearErrors();
 }
@@ -209,6 +239,66 @@ function alElegirColaborador(o: OpcionColaborador | null): void {
     form.colaborador_id = o?.id ?? '';
     form.clearErrors('colaborador_id');
     docIdentidad.value = null;
+
+    // Precarga el servicio VIGENTE del colaborador para esta entrega — sigue
+    // siendo editable sólo para este formulario, nunca actualiza
+    // `colaborador.servicio_actual_id`.
+    contratoSel.value = o?.servicio_actual?.contrato ?? null;
+    servicioSel.value =
+        o?.servicio_actual === null || o?.servicio_actual === undefined
+            ? null
+            : {
+                  id: o.servicio_actual.id,
+                  nombre: o.servicio_actual.nombre,
+                  contrato_id: o.servicio_actual.contrato.id,
+              };
+    form.servicio_id = o?.servicio_actual?.id ?? null;
+}
+
+async function buscarContratosServicio(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionContrato[]> {
+    if (empresaId.value === null) return [];
+    const res = await fetch(
+        `/contratos/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).contratos ?? [];
+}
+
+async function buscarServiciosEntrega(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionServicio[]> {
+    if (contratoId.value === null) return [];
+    const res = await fetch(
+        `/servicios/buscar?contrato_id=${contratoId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).servicios ?? [];
+}
+
+function alElegirContratoServicio(o: OpcionContrato | null): void {
+    contratoSel.value = o;
+    servicioSel.value = null;
+    form.servicio_id = null;
+}
+
+function alElegirServicioEntrega(o: OpcionServicio | null): void {
+    servicioSel.value = o;
+    form.servicio_id = o?.id ?? null;
+    form.clearErrors('servicio_id');
 }
 
 const avisoAlmacenCambiado = ref(false);
@@ -259,6 +349,7 @@ type FilaConjunto = {
 const form = useForm<{
     colaborador_id: number | '';
     almacen_id: number | null;
+    servicio_id: number | null;
     fecha_entrega: string;
     notas: string;
     activos: FilaActivo[];
@@ -271,6 +362,7 @@ const form = useForm<{
 }>({
     colaborador_id: '',
     almacen_id: null,
+    servicio_id: null,
     fecha_entrega: hoy,
     notas: '',
     activos: [],
@@ -757,6 +849,65 @@ function enviar(): void {
                         class="text-muted-foreground text-xs"
                     >
                         Selecciona empresa y sucursal.
+                    </p>
+                </div>
+
+                <div class="grid gap-1.5">
+                    <Label for="contrato-entrega">
+                        Contrato (servicio de destino)
+                    </Label>
+                    <BuscadorAsync
+                        id="contrato-entrega"
+                        :model-value="contratoSel"
+                        :buscar="buscarContratosServicio"
+                        :dependencia="empresaId"
+                        :disabled="empresaId === null"
+                        :etiqueta="(c) => (c as OpcionContrato).nombre"
+                        placeholder="Sin contrato"
+                        placeholder-busqueda="Buscar contrato…"
+                        @update:model-value="
+                            (v) =>
+                                alElegirContratoServicio(
+                                    v as OpcionContrato | null,
+                                )
+                        "
+                    />
+                </div>
+
+                <div class="grid gap-1.5">
+                    <Label for="servicio-entrega">Servicio</Label>
+                    <BuscadorAsync
+                        id="servicio-entrega"
+                        :model-value="servicioSel"
+                        :buscar="buscarServiciosEntrega"
+                        :dependencia="contratoId"
+                        :disabled="contratoId === null"
+                        :etiqueta="(s) => (s as OpcionServicio).nombre"
+                        placeholder="Sin servicio"
+                        placeholder-busqueda="Buscar servicio…"
+                        :invalido="!!form.errors.servicio_id"
+                        @update:model-value="
+                            (v) =>
+                                alElegirServicioEntrega(
+                                    v as OpcionServicio | null,
+                                )
+                        "
+                    />
+                    <InputError :message="form.errors.servicio_id" />
+                    <p
+                        v-if="colaboradorSel && colaboradorSel.servicio_actual"
+                        class="text-muted-foreground text-xs"
+                    >
+                        Servicio actual de
+                        {{ colaboradorSel.nombre_completo }}: precargado, pero
+                        puedes cambiarlo sólo para esta entrega.
+                    </p>
+                    <p
+                        v-if="sinServicioPorFaltaDeAsignacion"
+                        class="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400"
+                    >
+                        Sin servicio asignado — esta entrega se guardará como
+                        entrega interna, sin ubicación operativa.
                     </p>
                 </div>
 
@@ -1281,6 +1432,20 @@ function enviar(): void {
                                 Almacén de origen
                             </dt>
                             <dd>{{ almacenSel?.nombre ?? '—' }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-muted-foreground text-xs">
+                                Servicio (ubicación operativa de esta entrega)
+                            </dt>
+                            <dd>
+                                <template v-if="servicioSel && contratoSel">
+                                    {{ contratoSel.nombre }} —
+                                    {{ servicioSel.nombre }}
+                                </template>
+                                <span v-else class="text-muted-foreground"
+                                    >Sin servicio (entrega interna)</span
+                                >
+                            </dd>
                         </div>
                         <div>
                             <dt class="text-muted-foreground text-xs">Fecha</dt>

@@ -55,7 +55,7 @@
             <thead>
                 <tr>
                     <th>Folio</th><th>Fecha</th><th>Empresa</th><th>Sucursal</th><th>N.º empleado</th>
-                    <th>Colaborador</th><th>Responsable</th><th>Estado</th><th>Activo</th><th>Talla</th><th>Cant.</th>
+                    <th>Colaborador</th><th>Responsable</th><th>Servicio</th><th>Estado</th><th>Activo</th><th>Talla</th><th>Cant.</th>
                 </tr>
             </thead>
             <tbody>
@@ -69,6 +69,7 @@
                             <td>{{ $entrega->colaborador?->numero_empleado }}</td>
                             <td>{{ $entrega->colaborador?->nombre_completo }}</td>
                             <td>{{ $entrega->encargado?->name }}</td>
+                            <td>{{ $entrega->servicio ? $entrega->servicio->contrato->nombre.' — '.$entrega->servicio->nombre : '—' }}</td>
                             <td>{{ $entrega->estado->etiqueta() }}</td>
                             <td>{{ $detalle->activo_nombre_snapshot }}</td>
                             <td>{{ $detalle->talla_valor_snapshot }}</td>

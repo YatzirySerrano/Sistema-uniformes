@@ -137,6 +137,53 @@ class UnidadActivo extends Model
     }
 
     /**
+     * Ubicación operativa actual — única fuente de verdad, reusada por
+     * índice y detalle para no duplicar la regla (mismo espíritu que
+     * `DescripcionAuditoria`). Nunca se persiste (`unidad_activo.servicio_id`
+     * NO existe a propósito): se deriva en vivo de `colaborador.servicioActual`
+     * cuando está asignada, o del almacén cuando no lo está.
+     *
+     * - `en_almacen` → ubicación = el almacén (comportamiento previo, intacto).
+     * - `asignada` → ubicación = servicio VIGENTE del colaborador (o
+     *   "sin_servicio" si el colaborador no tiene uno asignado).
+     * - `baja` → sin ubicación operativa.
+     *
+     * @return array{tipo: 'almacen', almacen: array{id: int, nombre: string}|null}|array{tipo: 'servicio', colaborador: string, contrato: string, servicio: string}|array{tipo: 'sin_servicio', colaborador: string|null}|array{tipo: 'baja'}
+     */
+    public function ubicacionOperativa(): array
+    {
+        if ($this->estado === EstadoUnidadActivo::Baja) {
+            return ['tipo' => 'baja'];
+        }
+
+        if ($this->estado === EstadoUnidadActivo::EnAlmacen) {
+            return [
+                'tipo' => 'almacen',
+                'almacen' => $this->almacen === null ? null : ['id' => $this->almacen->id, 'nombre' => $this->almacen->nombre],
+            ];
+        }
+
+        // Asignada: la ubicación viene SIEMPRE del servicio vigente del
+        // colaborador — nunca de un dato propio de la unidad (evita
+        // desincronización, ver módulo Contratos/Servicios).
+        $servicio = $this->colaborador?->servicioActual;
+
+        if ($servicio === null) {
+            return [
+                'tipo' => 'sin_servicio',
+                'colaborador' => $this->colaborador?->nombre_completo,
+            ];
+        }
+
+        return [
+            'tipo' => 'servicio',
+            'colaborador' => $this->colaborador->nombre_completo,
+            'contrato' => $servicio->contrato->nombre,
+            'servicio' => $servicio->nombre,
+        ];
+    }
+
+    /**
      * Estado visible consolidado (ver `EstadoVisibleUnidad`). `Inservible` se
      * agrupa junto con `EnReparacion` bajo "Reparación": ambas son "fuera de
      * operación con diagnóstico abierto" de cara al usuario, aunque

@@ -23,15 +23,25 @@ type Entrega = {
     numero_empleado: string;
     sucursal: string;
     encargado: string;
+    servicio: string | null;
     estado: string;
     estado_etiqueta: string;
     fecha_entrega: string;
     renglones: number;
 };
 
+type OpcionContrato = { id: number; nombre: string };
+type OpcionServicio = { id: number; nombre: string; contrato_id: number };
+
 const props = defineProps<{
     entregas: Paginado<Entrega>;
-    filtros: { buscar?: string; empresa_id?: number | null; estado?: string };
+    filtros: {
+        buscar?: string;
+        empresa_id?: number | null;
+        estado?: string;
+        contrato_id?: number | null;
+        servicio_id?: number | null;
+    };
     empresasAutorizadas: EmpresaAutorizada[];
     estados: { valor: string; etiqueta: string }[];
     puedeCrear: boolean;
@@ -69,8 +79,55 @@ async function buscarEmpresas(termino: string) {
     );
 }
 
+const contratoSeleccionado = ref<OpcionContrato | null>(null);
+const servicioSeleccionado = ref<OpcionServicio | null>(null);
+const contratoId = computed(() => contratoSeleccionado.value?.id ?? '');
+const servicioId = computed(() => servicioSeleccionado.value?.id ?? '');
+
+watch(empresaId, () => {
+    contratoSeleccionado.value = null;
+    servicioSeleccionado.value = null;
+});
+watch(contratoSeleccionado, () => {
+    servicioSeleccionado.value = null;
+});
+
+async function buscarContratosFiltro(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionContrato[]> {
+    if (!empresaId.value) return [];
+    const res = await fetch(
+        `/contratos/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).contratos ?? [];
+}
+
+async function buscarServiciosFiltro(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionServicio[]> {
+    if (!contratoId.value) return [];
+    const res = await fetch(
+        `/servicios/buscar?contrato_id=${contratoId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).servicios ?? [];
+}
+
 let t: ReturnType<typeof setTimeout>;
-watch([buscar, empresaId, estado], () => {
+watch([buscar, empresaId, estado, contratoId, servicioId], () => {
     clearTimeout(t);
     t = setTimeout(() => {
         router.get(
@@ -79,6 +136,8 @@ watch([buscar, empresaId, estado], () => {
                 buscar: buscar.value || undefined,
                 empresa_id: empresaId.value || undefined,
                 estado: estado.value || undefined,
+                contrato_id: contratoId.value || undefined,
+                servicio_id: servicioId.value || undefined,
             },
             { preserveState: true, replace: true, preserveScroll: true },
         );
@@ -123,6 +182,26 @@ const vista = useVistaPreferida('entregas', 'tabla');
                 :etiqueta="(e) => String(e.nombre_comercial)"
                 placeholder="Todas las empresas"
                 placeholder-busqueda="Buscar empresa…"
+                class="w-56"
+            />
+            <BuscadorAsync
+                v-if="empresaId"
+                v-model="contratoSeleccionado"
+                :buscar="buscarContratosFiltro"
+                :dependencia="empresaId"
+                :etiqueta="(c) => String(c.nombre)"
+                placeholder="Todos los contratos"
+                placeholder-busqueda="Buscar contrato…"
+                class="w-56"
+            />
+            <BuscadorAsync
+                v-if="contratoId"
+                v-model="servicioSeleccionado"
+                :buscar="buscarServiciosFiltro"
+                :dependencia="contratoId"
+                :etiqueta="(s) => String(s.nombre)"
+                placeholder="Todos los servicios"
+                placeholder-busqueda="Buscar servicio…"
                 class="w-56"
             />
             <div class="w-48">
@@ -174,6 +253,9 @@ const vista = useVistaPreferida('entregas', 'tabla');
                     <span class="text-xs">· {{ e.numero_empleado }}</span>
                 </p>
                 <p class="text-muted-foreground text-sm">{{ e.sucursal }}</p>
+                <p v-if="e.servicio" class="text-muted-foreground text-xs">
+                    {{ e.servicio }}
+                </p>
                 <div
                     class="text-muted-foreground mt-auto flex items-center justify-between text-xs"
                 >
@@ -190,6 +272,7 @@ const vista = useVistaPreferida('entregas', 'tabla');
                         <th class="px-3 py-2 font-medium">Folio</th>
                         <th class="px-3 py-2 font-medium">Colaborador</th>
                         <th class="px-3 py-2 font-medium">Sucursal</th>
+                        <th class="px-3 py-2 font-medium">Servicio</th>
                         <th class="px-3 py-2 font-medium">Fecha</th>
                         <th class="px-3 py-2 text-right font-medium">
                             Renglones
@@ -212,6 +295,9 @@ const vista = useVistaPreferida('entregas', 'tabla');
                             >
                         </td>
                         <td class="px-3 py-2">{{ e.sucursal }}</td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ e.servicio ?? '—' }}
+                        </td>
                         <td class="text-muted-foreground px-3 py-2">
                             {{ e.fecha_entrega }}
                         </td>

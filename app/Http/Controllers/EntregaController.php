@@ -47,6 +47,8 @@ class EntregaController extends Controller
             'buscar' => ['nullable', 'string', 'max:100'],
             'empresa_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'string'],
+            'contrato_id' => ['nullable', 'integer'],
+            'servicio_id' => ['nullable', 'integer'],
         ]);
 
         $empresaFiltro = $this->empresaDelFiltro($request);
@@ -58,7 +60,13 @@ class EntregaController extends Controller
                 ->where('folio', 'like', "%{$b}%")
                 ->orWhereHas('colaborador', fn ($c) => $c->where('nombre_completo', 'like', "%{$b}%")->orWhere('numero_empleado', 'like', "%{$b}%"))))
             ->when($filtros['estado'] ?? null, fn ($q, $e) => $q->where('estado', $e))
-            ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'encargado:id,name'])
+            // Servicio es el snapshot histórico de la propia entrega
+            // (`entregas_uniformes.servicio_id`); Contrato filtra por el
+            // contrato de ese mismo servicio — ninguno de los dos usa el
+            // servicio VIGENTE del colaborador, que puede ya haber cambiado.
+            ->when($filtros['servicio_id'] ?? null, fn ($q, $s) => $q->where('servicio_id', $s))
+            ->when($filtros['contrato_id'] ?? null, fn ($q, $c) => $q->whereHas('servicio', fn ($sq) => $sq->where('contrato_id', $c)))
+            ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'encargado:id,name', 'servicio:id,nombre,contrato_id', 'servicio.contrato:id,nombre'])
             ->withCount('detalles')
             ->latest()
             ->paginate($this->porPagina())
@@ -71,6 +79,7 @@ class EntregaController extends Controller
                 'numero_empleado' => $e->colaborador?->numero_empleado,
                 'sucursal' => $e->sucursal?->nombre,
                 'encargado' => $e->encargado?->name,
+                'servicio' => $e->servicio === null ? null : $e->servicio->contrato->nombre.' — '.$e->servicio->nombre,
                 'estado' => $e->estado->value,
                 'estado_etiqueta' => $e->estado->etiqueta(),
                 'fecha_entrega' => $e->fecha_entrega->toDateString(),
@@ -194,6 +203,7 @@ class EntregaController extends Controller
                 $datos['unidades'] ?? [],
                 $datos['conjuntos'] ?? [],
                 $datos['notas'] ?? null,
+                isset($datos['servicio_id']) ? (int) $datos['servicio_id'] : null,
                 $datos['firma'],
                 $datos['firma_operador'],
                 true, // aceptación (validada por la regla `accepted`)
@@ -312,6 +322,8 @@ class EntregaController extends Controller
             'sucursal:id,nombre',
             'empresa:id,nombre_comercial',
             'almacen:id,nombre',
+            'servicio:id,nombre,contrato_id',
+            'servicio.contrato:id,nombre',
             'encargado:id,name',
             'acuse',
             'correcciones.corregidaPor:id,name',
@@ -328,6 +340,13 @@ class EntregaController extends Controller
                 'notas' => $entrega->notas,
                 'empresa' => $entrega->empresa?->nombre_comercial,
                 'almacen' => $entrega->almacen?->nombre,
+                // Snapshot histórico: el servicio al MOMENTO de la entrega,
+                // nunca se actualiza si el colaborador cambia de servicio
+                // después. Null en entregas anteriores a este módulo.
+                'servicio' => $entrega->servicio === null ? null : [
+                    'nombre' => $entrega->servicio->nombre,
+                    'contrato' => $entrega->servicio->contrato->nombre,
+                ],
                 'colaborador' => $entrega->colaborador?->only(['id', 'nombre_completo', 'numero_empleado']),
                 'sucursal' => $entrega->sucursal?->nombre,
                 'encargado' => $entrega->encargado?->name,

@@ -130,6 +130,14 @@ class Empresa extends Model
     }
 
     /**
+     * @return HasMany<Contrato, $this>
+     */
+    public function contratos(): HasMany
+    {
+        return $this->hasMany(Contrato::class);
+    }
+
+    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

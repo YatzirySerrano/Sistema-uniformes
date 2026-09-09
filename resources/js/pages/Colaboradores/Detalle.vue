@@ -6,6 +6,7 @@ import {
     Camera,
     FileText,
     FolderOpen,
+    MapPin,
     Mail,
     Package,
     Pencil,
@@ -16,6 +17,7 @@ import {
 } from '@lucide/vue';
 import { ref } from 'vue';
 import CambiarFotoDialog from '@/components/colaboradores/CambiarFotoDialog.vue';
+import DialogCambiarServicio from '@/components/colaboradores/DialogCambiarServicio.vue';
 import ExpedienteExplorer from '@/components/colaboradores/ExpedienteExplorer.vue';
 import FormularioColaborador from '@/components/colaboradores/FormularioColaborador.vue';
 import type { ColaboradorEditable } from '@/components/colaboradores/FormularioColaborador.vue';
@@ -39,6 +41,11 @@ import { cn } from '@/lib/utils';
 
 type ColaboradorPerfil = ColaboradorEditable & {
     empresa_nombre: string | null;
+    servicio_actual: {
+        id: number;
+        nombre: string;
+        contrato: { id: number; nombre: string };
+    } | null;
 };
 
 type ExpedientePayload = {
@@ -127,6 +134,9 @@ function confirmarEliminar(): void {
 
 // --- Foto de perfil ---
 const modalFoto = ref(false);
+
+// --- Cambiar servicio (ubicación operativa vigente) ---
+const modalServicio = ref(false);
 </script>
 
 <template>
@@ -203,6 +213,14 @@ const modalFoto = ref(false);
                     @click="abrirEditar"
                 >
                     <Pencil class="size-3.5" /> Editar
+                </Button>
+                <Button
+                    v-if="puedeEditar"
+                    variant="outline"
+                    size="sm"
+                    @click="modalServicio = true"
+                >
+                    <MapPin class="size-3.5" /> Cambiar servicio
                 </Button>
                 <Button
                     v-if="puedeEliminar"
@@ -325,6 +343,22 @@ const modalFoto = ref(false);
                     <dt
                         class="text-muted-foreground flex items-center gap-1 text-xs"
                     >
+                        <MapPin class="size-3" /> Servicio actual
+                    </dt>
+                    <dd>
+                        <template v-if="colaborador.servicio_actual">
+                            {{ colaborador.servicio_actual.contrato.nombre }} —
+                            {{ colaborador.servicio_actual.nombre }}
+                        </template>
+                        <span v-else class="text-muted-foreground"
+                            >Sin servicio asignado</span
+                        >
+                    </dd>
+                </div>
+                <div>
+                    <dt
+                        class="text-muted-foreground flex items-center gap-1 text-xs"
+                    >
                         <Mail class="size-3" /> Correo
                     </dt>
                     <dd>{{ colaborador.correo ?? '—' }}</dd>
@@ -412,6 +446,13 @@ const modalFoto = ref(false);
             v-model:open="modalFoto"
             :colaborador-id="colaborador.id"
             :foto-actual-url="colaborador.foto_url"
+        />
+
+        <DialogCambiarServicio
+            v-model:open="modalServicio"
+            :colaborador-id="colaborador.id"
+            :empresa-id="colaborador.empresa_id"
+            :servicio-actual="colaborador.servicio_actual"
         />
     </div>
 </template>

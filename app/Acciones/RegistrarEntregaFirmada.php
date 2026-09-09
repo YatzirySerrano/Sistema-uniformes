@@ -48,6 +48,7 @@ class RegistrarEntregaFirmada
         array $unidades,
         array $conjuntos,
         ?string $notas,
+        ?int $servicioId,
         string $firmaColaboradorBase64,
         string $firmaOperadorBase64,
         bool $aceptacion,
@@ -57,7 +58,7 @@ class RegistrarEntregaFirmada
         /** @var array{entrega: EntregaUniforme, acuse: AcuseRecepcion} $resultado */
         $resultado = DB::transaction(function () use (
             $colaboradorId, $almacenId, $encargadoId, $fechaEntrega,
-            $activos, $unidades, $conjuntos, $notas,
+            $activos, $unidades, $conjuntos, $notas, $servicioId,
             $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent,
         ): array {
             $entrega = $this->crearEntrega->ejecutar(
@@ -69,6 +70,7 @@ class RegistrarEntregaFirmada
                 $unidades,
                 $conjuntos,
                 $notas,
+                $servicioId,
             );
 
             $acuse = $this->confirmarAcuse->confirmarEnTransaccion(

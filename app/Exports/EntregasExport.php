@@ -41,6 +41,7 @@ class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, With
                     $entrega->colaborador?->numero_empleado,
                     $entrega->colaborador?->nombre_completo,
                     $entrega->encargado?->name,
+                    $entrega->servicio === null ? null : $entrega->servicio->contrato->nombre.' — '.$entrega->servicio->nombre,
                     $entrega->estado->etiqueta(),
                     $detalle->activo_nombre_snapshot,
                     $detalle->talla_valor_snapshot,
@@ -57,7 +58,7 @@ class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, With
      */
     public function headings(): array
     {
-        return ['Folio', 'Fecha de entrega', 'Empresa', 'Sucursal', 'N.º empleado', 'Colaborador', 'Responsable', 'Estado', 'Activo', 'Talla', 'Cantidad'];
+        return ['Folio', 'Fecha de entrega', 'Empresa', 'Sucursal', 'N.º empleado', 'Colaborador', 'Responsable', 'Servicio', 'Estado', 'Activo', 'Talla', 'Cantidad'];
     }
 
     public function title(): string

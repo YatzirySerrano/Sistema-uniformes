@@ -38,7 +38,7 @@ class ServicioReportes
             ->when($filtros['hasta'] ?? null, fn ($q, $v) => $q->whereDate('fecha_entrega', '<=', $v))
             ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('activo_id', $v)))
             ->when($filtros['talla_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('talla_id', $v)))
-            ->with(['empresa:id,nombre_comercial', 'colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'encargado:id,name', 'detalles'])
+            ->with(['empresa:id,nombre_comercial', 'colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'encargado:id,name', 'detalles', 'servicio:id,nombre,contrato_id', 'servicio.contrato:id,nombre'])
             ->latest('fecha_entrega');
     }
 

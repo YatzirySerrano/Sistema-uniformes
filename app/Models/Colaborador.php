@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $sucursal_id
  * @property int|null $usuario_id
  * @property int|null $area_id
+ * @property int|null $servicio_actual_id
  * @property string $numero_empleado
  * @property string $nombre_completo
  * @property string|null $area
@@ -39,6 +40,7 @@ class Colaborador extends Model
         'puesto',
         'area',
         'area_id',
+        'servicio_actual_id',
         'correo',
         'foto_ruta',
         'activo',
@@ -77,6 +79,20 @@ class Colaborador extends Model
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(User::class, 'usuario_id');
+    }
+
+    /**
+     * Ubicación operativa VIGENTE del colaborador (puesto/servicio de
+     * vigilancia). Nullable: puede no tener servicio asignado todavía, estar
+     * temporalmente fuera de servicio o ser personal administrativo. Se
+     * cambia únicamente vía `App\Acciones\CambiarServicioColaborador` — nunca
+     * a través del formulario general de edición.
+     *
+     * @return BelongsTo<Servicio, $this>
+     */
+    public function servicioActual(): BelongsTo
+    {
+        return $this->belongsTo(Servicio::class, 'servicio_actual_id');
     }
 
     /**

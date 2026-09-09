@@ -19,6 +19,7 @@ const props = defineProps<{
         notas: string | null;
         empresa: string | null;
         almacen: string | null;
+        servicio: { nombre: string; contrato: string } | null;
         colaborador: {
             nombre_completo: string;
             numero_empleado: string;
@@ -156,6 +157,18 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                         >Almacén de origen:</span
                     >
                     {{ entrega.almacen }}
+                </p>
+                <p>
+                    <span class="text-muted-foreground"
+                        >Servicio (al momento de la entrega):</span
+                    >
+                    <template v-if="entrega.servicio">
+                        {{ entrega.servicio.contrato }} —
+                        {{ entrega.servicio.nombre }}
+                    </template>
+                    <span v-else class="text-muted-foreground italic"
+                        >Servicio no registrado</span
+                    >
                 </p>
                 <p>
                     <span class="text-muted-foreground">Fecha de entrega:</span>

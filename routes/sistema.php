@@ -11,6 +11,7 @@ use App\Http\Controllers\CategoriaActivoController;
 use App\Http\Controllers\ColaboradorController;
 use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\ConjuntoController;
+use App\Http\Controllers\ContratoController;
 use App\Http\Controllers\CorreccionEntregaController;
 use App\Http\Controllers\DevolucionController;
 use App\Http\Controllers\DocumentoExpedienteController;
@@ -23,6 +24,7 @@ use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
 use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\RolController;
+use App\Http\Controllers\ServicioController;
 use App\Http\Controllers\SucursalController;
 use App\Http\Controllers\TallaController;
 use App\Http\Controllers\TipoActivoController;
@@ -54,6 +56,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/{colaborador}/editar', [ColaboradorController::class, 'edit'])->name('colaboradores.edit');
     Route::put('colaboradores/{colaborador}', [ColaboradorController::class, 'update'])->name('colaboradores.update');
     Route::post('colaboradores/{colaborador}/estado', [ColaboradorController::class, 'toggle'])->name('colaboradores.toggle');
+    Route::post('colaboradores/{colaborador}/servicio', [ColaboradorController::class, 'cambiarServicio'])->name('colaboradores.cambiar-servicio');
 
     // Expediente digital del colaborador
     Route::get('colaboradores/{colaborador}/expediente', [DocumentoExpedienteController::class, 'index'])->name('colaboradores.expediente.index');
@@ -235,6 +238,24 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::put('sucursales/{sucursal}', [SucursalController::class, 'update'])->name('sucursales.update');
     Route::post('sucursales/{sucursal}/estado', [SucursalController::class, 'toggle'])->name('sucursales.toggle');
     Route::post('sucursales/{sucursal}/suspendidos/reactivar', [SucursalController::class, 'reactivarSuspendidos'])->name('sucursales.suspendidos.reactivar');
+
+    Route::get('contratos', [ContratoController::class, 'index'])->name('contratos.index');
+    Route::get('contratos/buscar', [ContratoController::class, 'buscar'])->name('contratos.buscar');
+    Route::get('contratos/siguiente-codigo', [ContratoController::class, 'siguienteCodigo'])->name('contratos.siguiente-codigo');
+    Route::get('contratos/exportar', [ContratoController::class, 'exportar'])->name('contratos.exportar');
+    Route::post('contratos', [ContratoController::class, 'store'])->name('contratos.store');
+    Route::get('contratos/{contrato}', [ContratoController::class, 'show'])->name('contratos.show');
+    Route::put('contratos/{contrato}', [ContratoController::class, 'update'])->name('contratos.update');
+    Route::post('contratos/{contrato}/estado', [ContratoController::class, 'toggle'])->name('contratos.toggle');
+
+    Route::get('servicios', [ServicioController::class, 'index'])->name('servicios.index');
+    Route::get('servicios/buscar', [ServicioController::class, 'buscar'])->name('servicios.buscar');
+    Route::get('servicios/siguiente-codigo', [ServicioController::class, 'siguienteCodigo'])->name('servicios.siguiente-codigo');
+    Route::get('servicios/exportar', [ServicioController::class, 'exportar'])->name('servicios.exportar');
+    Route::post('servicios', [ServicioController::class, 'store'])->name('servicios.store');
+    Route::get('servicios/{servicio}', [ServicioController::class, 'show'])->name('servicios.show');
+    Route::put('servicios/{servicio}', [ServicioController::class, 'update'])->name('servicios.update');
+    Route::post('servicios/{servicio}/estado', [ServicioController::class, 'toggle'])->name('servicios.toggle');
 
     Route::get('usuarios', [UsuarioController::class, 'index'])->name('usuarios.index');
     Route::get('usuarios/exportar', [UsuarioController::class, 'exportar'])->name('usuarios.exportar');

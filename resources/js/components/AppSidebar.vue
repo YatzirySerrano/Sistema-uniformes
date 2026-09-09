@@ -8,7 +8,9 @@ import {
     ClipboardList,
     Compass,
     FileBarChart2,
+    FileSignature,
     LayoutGrid,
+    MapPin,
     Network,
     Package,
     Palette,
@@ -81,6 +83,18 @@ const grupos = computed<Grupo[]>(() =>
                     href: '/sucursales',
                     icono: Store,
                     visible: puede('sucursales.ver'),
+                },
+                {
+                    titulo: 'Contratos',
+                    href: '/contratos',
+                    icono: FileSignature,
+                    visible: puede('contratos.ver'),
+                },
+                {
+                    titulo: 'Servicios',
+                    href: '/servicios',
+                    icono: MapPin,
+                    visible: puede('servicios.ver'),
                 },
                 {
                     titulo: 'Colaboradores',

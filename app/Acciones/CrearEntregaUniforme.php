@@ -55,6 +55,7 @@ class CrearEntregaUniforme
         array $unidades,
         array $conjuntos,
         ?string $notas = null,
+        ?int $servicioId = null,
     ): EntregaUniforme {
         $colaborador = Colaborador::query()->findOr($colaboradorId, fn () => throw new ExcepcionDeNegocioSimple('El colaborador indicado no existe.'));
 
@@ -73,12 +74,17 @@ class CrearEntregaUniforme
             throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
         }
 
-        return DB::transaction(function () use ($empresaId, $sucursalId, $almacen, $colaborador, $encargadoId, $fechaEntrega, $activosConsolidados, $unidadIds, $conjuntos, $notas): EntregaUniforme {
+        return DB::transaction(function () use ($empresaId, $sucursalId, $almacen, $colaborador, $encargadoId, $fechaEntrega, $activosConsolidados, $unidadIds, $conjuntos, $notas, $servicioId): EntregaUniforme {
             $entrega = EntregaUniforme::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA),
                 'empresa_id' => $empresaId,
                 'sucursal_id' => $sucursalId,
                 'almacen_id' => $almacen->getKey(),
+                // Snapshot histórico del servicio de destino de ESTA entrega —
+                // se guarda tal cual llegó validado, sin derivarlo ni
+                // sincronizarlo con `colaborador->servicio_actual_id` (eso es
+                // una acción independiente, ver `CambiarServicioColaborador`).
+                'servicio_id' => $servicioId,
                 'colaborador_id' => $colaborador->getKey(),
                 'encargado_id' => $encargadoId,
                 'estado' => EstadoEntrega::PendienteFirma,

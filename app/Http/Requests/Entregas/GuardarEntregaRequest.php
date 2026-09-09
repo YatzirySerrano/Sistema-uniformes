@@ -9,6 +9,7 @@ use App\Models\Colaborador;
 use App\Models\Conjunto;
 use App\Models\EntregaUniforme;
 use App\Models\SaldoInventario;
+use App\Models\Servicio;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -53,6 +54,12 @@ class GuardarEntregaRequest extends FormRequest
                 'required', 'integer',
                 Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
+            // Servicio operativo de DESTINO de esta entrega — snapshot
+            // histórico, nunca actualiza `colaborador->servicio_actual_id`
+            // (eso es una acción independiente). Nullable: hay colaboradores
+            // sin servicio asignado (entrega interna) y entregas donde el
+            // usuario decide no registrar ubicación operativa.
+            'servicio_id' => ['nullable', 'integer', Rule::exists('servicios', 'id')->where('activo', true)],
             'fecha_entrega' => ['required', 'date', 'before_or_equal:today'],
             'notas' => ['nullable', 'string', 'max:1000'],
 
@@ -117,6 +124,19 @@ class GuardarEntregaRequest extends FormRequest
             }
             $empresaId = $colaborador->empresa_id;
             $almacenId = $this->integer('almacen_id');
+
+            $servicioId = $this->input('servicio_id');
+            if ($servicioId !== null && ! $validator->errors()->has('servicio_id')) {
+                $servicio = Servicio::query()->with('contrato')->find((int) $servicioId);
+
+                if ($servicio !== null) {
+                    if (! $servicio->contrato->activo) {
+                        $validator->errors()->add('servicio_id', 'El contrato de ese servicio está inactivo.');
+                    } elseif ($servicio->contrato->empresa_id !== $empresaId) {
+                        $validator->errors()->add('servicio_id', 'Ese servicio pertenece a una empresa distinta a la del colaborador.');
+                    }
+                }
+            }
 
             $activoIdsSueltos = collect($activos)->pluck('activo_id')->filter()->map(fn ($id) => (int) $id)->unique();
             $activosSueltos = Activo::query()->withCount('tallas')->whereIn('id', $activoIdsSueltos)->get()->keyBy('id');

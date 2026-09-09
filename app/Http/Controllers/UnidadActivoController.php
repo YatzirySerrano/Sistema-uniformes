@@ -59,6 +59,7 @@ class UnidadActivoController extends Controller
                 'activo' => $u->activo?->nombre,
                 'almacen' => $u->almacen?->nombre,
                 'colaborador' => $u->colaborador?->nombre_completo,
+                'ubicacion_operativa' => $u->ubicacionOperativa(),
                 'estado' => $u->estado->value,
                 'estado_etiqueta' => $u->estado->etiqueta(),
                 'condicion' => $u->condicion->value,
@@ -79,6 +80,8 @@ class UnidadActivoController extends Controller
                 'estado' => $filtros['estado'] ?? '',
                 'condicion' => $filtros['condicion'] ?? '',
                 'estado_visible' => $filtros['estado_visible'] ?? '',
+                'contrato_id' => $filtros['contrato_id'] ?? null,
+                'servicio_id' => $filtros['servicio_id'] ?? null,
             ],
             'estadosVisibles' => collect(EstadoVisibleUnidad::cases())
                 ->map(fn (EstadoVisibleUnidad $e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
@@ -99,15 +102,25 @@ class UnidadActivoController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $unidades = $this->consultaUnidades($request, $filtros)->get();
 
-        $filas = $unidades->map(fn (UnidadActivo $u): array => [
-            $u->codigo,
-            $u->activo?->nombre,
-            $u->almacen?->nombre,
-            $u->colaborador?->nombre_completo,
-            $u->estadoVisible()->etiqueta(),
-            $u->estado->etiqueta(),
-            $u->condicion->etiqueta(),
-        ])->all();
+        $filas = $unidades->map(function (UnidadActivo $u): array {
+            $ubicacion = $u->ubicacionOperativa();
+            $servicioTexto = match ($ubicacion['tipo']) {
+                'servicio' => $ubicacion['contrato'].' — '.$ubicacion['servicio'],
+                'sin_servicio' => 'Sin servicio asignado',
+                default => null,
+            };
+
+            return [
+                $u->codigo,
+                $u->activo?->nombre,
+                $u->almacen?->nombre,
+                $u->colaborador?->nombre_completo,
+                $servicioTexto,
+                $u->estadoVisible()->etiqueta(),
+                $u->estado->etiqueta(),
+                $u->condicion->etiqueta(),
+            ];
+        })->all();
 
         $filtrosHumanos = array_filter([
             'Búsqueda' => $filtros['buscar'] ?? null,
@@ -121,7 +134,7 @@ class UnidadActivoController extends Controller
         $contexto = new ContextoExportacion('Unidades identificadas', $empresaFiltro, $filtrosHumanos, $unidades->count());
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'Código', 'Activo', 'Almacén', 'Colaborador', 'Estado', 'Posesión', 'Condición',
+            'Código', 'Activo', 'Almacén', 'Colaborador', 'Servicio', 'Estado', 'Posesión', 'Condición',
         ], $contexto);
     }
 
@@ -137,6 +150,8 @@ class UnidadActivoController extends Controller
             'estado' => ['nullable', Rule::enum(EstadoUnidadActivo::class)],
             'condicion' => ['nullable', Rule::enum(CondicionUnidadActivo::class)],
             'estado_visible' => ['nullable', Rule::enum(EstadoVisibleUnidad::class)],
+            'contrato_id' => ['nullable', 'integer'],
+            'servicio_id' => ['nullable', 'integer'],
         ]);
     }
 
@@ -152,7 +167,12 @@ class UnidadActivoController extends Controller
 
         return UnidadActivo::query()
             ->whereIn('empresa_id', $idsScope)
-            ->with(['activo:id,nombre,codigo', 'almacen:id,nombre', 'colaborador:id,nombre_completo'])
+            ->with([
+                'activo:id,nombre,codigo', 'almacen:id,nombre',
+                'colaborador:id,nombre_completo,servicio_actual_id',
+                'colaborador.servicioActual:id,nombre,contrato_id',
+                'colaborador.servicioActual.contrato:id,nombre',
+            ])
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
                 $q->where(function (Builder $sub) use ($buscar): void {
                     $sub->where('codigo', 'like', "%{$buscar}%")
@@ -164,6 +184,10 @@ class UnidadActivoController extends Controller
             ->when($filtros['estado'] ?? null, fn (Builder $q, $v) => $q->where('estado', $v))
             ->when($filtros['condicion'] ?? null, fn (Builder $q, $v) => $q->where('condicion', $v))
             ->when($filtros['estado_visible'] ?? null, fn (Builder $q, $v) => $this->aplicarFiltroEstadoVisible($q, $v))
+            // Filtra por la ubicación operativa VIGENTE del colaborador
+            // asignado (nunca por un dato propio de la unidad — no existe).
+            ->when($filtros['servicio_id'] ?? null, fn (Builder $q, $v) => $q->whereHas('colaborador', fn (Builder $c) => $c->where('servicio_actual_id', $v)))
+            ->when($filtros['contrato_id'] ?? null, fn (Builder $q, $v) => $q->whereHas('colaborador.servicioActual', fn (Builder $s) => $s->where('contrato_id', $v)))
             ->orderByDesc('id');
     }
 
@@ -196,7 +220,13 @@ class UnidadActivoController extends Controller
     {
         $this->authorize('view', $unidad);
 
-        $unidad->load(['activo:id,nombre,codigo,tipo_control', 'almacen:id,nombre', 'empresa:id,nombre_comercial', 'colaborador:id,nombre_completo', 'registradoPor:id,name']);
+        $unidad->load([
+            'activo:id,nombre,codigo,tipo_control', 'almacen:id,nombre', 'empresa:id,nombre_comercial',
+            'colaborador:id,nombre_completo,servicio_actual_id',
+            'colaborador.servicioActual:id,nombre,contrato_id',
+            'colaborador.servicioActual.contrato:id,nombre',
+            'registradoPor:id,name',
+        ]);
 
         $movimientos = MovimientoInventario::query()
             ->where('unidad_activo_id', $unidad->id)
@@ -231,6 +261,7 @@ class UnidadActivoController extends Controller
                 'colaborador' => $unidad->colaborador === null ? null : [
                     'id' => $unidad->colaborador->id, 'nombre_completo' => $unidad->colaborador->nombre_completo,
                 ],
+                'ubicacion_operativa' => $unidad->ubicacionOperativa(),
                 'registrado_por' => $unidad->registradoPor?->name,
                 'creada_en' => $unidad->created_at?->toDateTimeString(),
             ],

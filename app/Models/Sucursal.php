@@ -72,6 +72,18 @@ class Sucursal extends Model
     }
 
     /**
+     * Servicios operativos anclados administrativamente a esta sucursal
+     * (pueden pertenecer a colaboradores de otra sucursal — ver módulo
+     * Contratos/Servicios).
+     *
+     * @return HasMany<Servicio, $this>
+     */
+    public function servicios(): HasMany
+    {
+        return $this->hasMany(Servicio::class);
+    }
+
+    /**
      * @param  Builder<static>  $query
      * @return Builder<static>
      */

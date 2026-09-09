@@ -16,6 +16,12 @@ import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
+type UbicacionOperativa =
+    | { tipo: 'almacen'; almacen: { id: number; nombre: string } | null }
+    | { tipo: 'servicio'; contrato: string; servicio: string }
+    | { tipo: 'sin_servicio' }
+    | { tipo: 'baja' };
+
 type Unidad = {
     id: number;
     public_token: string;
@@ -23,6 +29,7 @@ type Unidad = {
     activo: string | null;
     almacen: string | null;
     colaborador: string | null;
+    ubicacion_operativa: UbicacionOperativa;
     estado: string;
     estado_etiqueta: string;
     condicion: string;
@@ -48,9 +55,14 @@ const props = defineProps<{
         estado: string;
         condicion: string;
         estado_visible: string;
+        contrato_id: number | null;
+        servicio_id: number | null;
     };
     permisos: { administrar: boolean };
 }>();
+
+type OpcionContrato = { id: number; nombre: string };
+type OpcionServicio = { id: number; nombre: string; contrato_id: number };
 
 defineOptions({
     layout: {
@@ -60,6 +72,16 @@ defineOptions({
         ],
     },
 });
+
+/**
+ * Texto de la ubicación operativa cuando la unidad está ASIGNADA — la
+ * ubicación "en almacén" ya se muestra aparte con `u.almacen`.
+ */
+function ubicacionServicioTexto(u: UbicacionOperativa): string | null {
+    if (u.tipo === 'servicio') return `${u.contrato} — ${u.servicio}`;
+    if (u.tipo === 'sin_servicio') return 'Sin servicio asignado';
+    return null;
+}
 
 const buscar = ref(props.filtros.buscar);
 const empresaSeleccionada = ref<EmpresaAutorizada | null>(
@@ -91,37 +113,101 @@ async function buscarEmpresas(termino: string) {
     );
 }
 
+// --- Filtro por ubicación operativa (Contrato → Servicio del colaborador
+// asignado) — dependiente de la empresa seleccionada.
+const contratoSeleccionado = ref<OpcionContrato | null>(null);
+const servicioSeleccionado = ref<OpcionServicio | null>(null);
+const contratoId = computed(() => contratoSeleccionado.value?.id ?? '');
+const servicioId = computed(() => servicioSeleccionado.value?.id ?? '');
+
+watch(empresaId, () => {
+    contratoSeleccionado.value = null;
+    servicioSeleccionado.value = null;
+});
+watch(contratoSeleccionado, () => {
+    servicioSeleccionado.value = null;
+});
+
+async function buscarContratosFiltro(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionContrato[]> {
+    if (!empresaId.value) return [];
+    const res = await fetch(
+        `/contratos/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).contratos ?? [];
+}
+
+async function buscarServiciosFiltro(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionServicio[]> {
+    if (!contratoId.value) return [];
+    const res = await fetch(
+        `/servicios/buscar?contrato_id=${contratoId.value}&q=${encodeURIComponent(q)}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).servicios ?? [];
+}
+
 const hayFiltros = computed(
     () =>
         buscar.value !== '' ||
         empresaId.value !== '' ||
         estado.value !== '' ||
         condicion.value !== '' ||
-        estadoVisible.value !== '',
+        estadoVisible.value !== '' ||
+        contratoId.value !== '' ||
+        servicioId.value !== '',
 );
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
-watch([buscar, empresaId, estado, condicion, estadoVisible], () => {
-    clearTimeout(temporizador);
-    temporizador = setTimeout(() => {
-        router.get(
-            '/activos/unidades',
-            {
-                buscar: buscar.value || undefined,
-                empresa_id: empresaId.value || undefined,
-                estado: estado.value || undefined,
-                condicion: condicion.value || undefined,
-                estado_visible: estadoVisible.value || undefined,
-            },
-            {
-                preserveState: true,
-                preserveScroll: true,
-                replace: true,
-                only: ['unidades', 'filtros'],
-            },
-        );
-    }, 300);
-});
+watch(
+    [
+        buscar,
+        empresaId,
+        estado,
+        condicion,
+        estadoVisible,
+        contratoId,
+        servicioId,
+    ],
+    () => {
+        clearTimeout(temporizador);
+        temporizador = setTimeout(() => {
+            router.get(
+                '/activos/unidades',
+                {
+                    buscar: buscar.value || undefined,
+                    empresa_id: empresaId.value || undefined,
+                    estado: estado.value || undefined,
+                    condicion: condicion.value || undefined,
+                    estado_visible: estadoVisible.value || undefined,
+                    contrato_id: contratoId.value || undefined,
+                    servicio_id: servicioId.value || undefined,
+                },
+                {
+                    preserveState: true,
+                    preserveScroll: true,
+                    replace: true,
+                    only: ['unidades', 'filtros'],
+                },
+            );
+        }, 300);
+    },
+);
 
 function limpiarFiltros(): void {
     buscar.value = '';
@@ -129,6 +215,8 @@ function limpiarFiltros(): void {
     estado.value = '';
     condicion.value = '';
     estadoVisible.value = '';
+    contratoSeleccionado.value = null;
+    servicioSeleccionado.value = null;
 }
 
 const idsSeleccionados = ref<number[]>([]);
@@ -205,6 +293,38 @@ const vista = useVistaPreferida('unidades-activo');
                         placeholder="Todas"
                         placeholder-busqueda="Buscar empresa…"
                         class="w-56"
+                    />
+                </label>
+
+                <label
+                    v-if="empresaId"
+                    class="flex items-center gap-1.5 text-sm"
+                >
+                    <span class="text-muted-foreground">Contrato</span>
+                    <BuscadorAsync
+                        v-model="contratoSeleccionado"
+                        :buscar="buscarContratosFiltro"
+                        :dependencia="empresaId"
+                        :etiqueta="(c) => String(c.nombre)"
+                        placeholder="Todos"
+                        placeholder-busqueda="Buscar contrato…"
+                        class="w-52"
+                    />
+                </label>
+
+                <label
+                    v-if="contratoId"
+                    class="flex items-center gap-1.5 text-sm"
+                >
+                    <span class="text-muted-foreground">Servicio</span>
+                    <BuscadorAsync
+                        v-model="servicioSeleccionado"
+                        :buscar="buscarServiciosFiltro"
+                        :dependencia="contratoId"
+                        :etiqueta="(s) => String(s.nombre)"
+                        placeholder="Todos"
+                        placeholder-busqueda="Buscar servicio…"
+                        class="w-52"
                     />
                 </label>
 
@@ -336,7 +456,8 @@ const vista = useVistaPreferida('unidades-activo');
                     {{ u.almacen ?? 'Sin almacén' }}
                 </p>
                 <p v-if="u.colaborador" class="text-muted-foreground text-xs">
-                    Con: {{ u.colaborador }}
+                    Con: {{ u.colaborador }} ·
+                    {{ ubicacionServicioTexto(u.ubicacion_operativa) }}
                 </p>
 
                 <div class="mt-auto flex flex-wrap gap-2">
@@ -412,7 +533,12 @@ const vista = useVistaPreferida('unidades-activo');
                         <td class="text-muted-foreground px-3 py-2">
                             {{ u.almacen ?? 'Sin almacén' }}
                             <span v-if="u.colaborador" class="block text-xs">
-                                Con: {{ u.colaborador }}
+                                Con: {{ u.colaborador }} ·
+                                {{
+                                    ubicacionServicioTexto(
+                                        u.ubicacion_operativa,
+                                    )
+                                }}
                             </span>
                         </td>
                         <td class="px-3 py-2 text-right">

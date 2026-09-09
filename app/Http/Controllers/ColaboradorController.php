@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Acciones\CambiarServicioColaborador;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Colaboradores\ActualizarFotoColaboradorRequest;
+use App\Http\Requests\Colaboradores\CambiarServicioColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Area;
 use App\Models\Colaborador;
@@ -259,7 +261,7 @@ class ColaboradorController extends Controller
     {
         $this->authorize('view', $colaborador);
 
-        $colaborador->load(['sucursal:id,nombre', 'departamento:id,nombre', 'empresa:id,nombre_comercial']);
+        $colaborador->load(['sucursal:id,nombre', 'departamento:id,nombre', 'empresa:id,nombre_comercial', 'servicioActual.contrato']);
         $colaborador->loadCount(['entregas', 'devoluciones', 'documentosExpediente', 'unidadesActivo']);
 
         $usuario = $request->user();
@@ -272,6 +274,11 @@ class ColaboradorController extends Controller
                 'empresa_nombre' => $colaborador->empresa?->nombre_comercial,
                 'sucursal' => $colaborador->sucursal === null ? null : ['id' => $colaborador->sucursal->id, 'nombre' => $colaborador->sucursal->nombre],
                 'area_actual' => $colaborador->departamento === null ? null : ['id' => $colaborador->departamento->id, 'nombre' => $colaborador->departamento->nombre],
+                'servicio_actual' => $colaborador->servicioActual === null ? null : [
+                    'id' => $colaborador->servicioActual->id,
+                    'nombre' => $colaborador->servicioActual->nombre,
+                    'contrato' => ['id' => $colaborador->servicioActual->contrato->id, 'nombre' => $colaborador->servicioActual->contrato->nombre],
+                ],
                 'foto_url' => $fotoUrl,
             ],
             'kpis' => [
@@ -389,6 +396,21 @@ class ColaboradorController extends Controller
     }
 
     /**
+     * Cambia ÚNICAMENTE la ubicación operativa vigente del colaborador
+     * (servicio actual). Acción independiente: no crea entregas ni
+     * devoluciones, no toca inventario/almacén/unidades — ver
+     * `App\Acciones\CambiarServicioColaborador`.
+     */
+    public function cambiarServicio(CambiarServicioColaboradorRequest $request, Colaborador $colaborador, CambiarServicioColaborador $accion): RedirectResponse
+    {
+        $datos = $request->validated();
+
+        $accion->ejecutar($colaborador, $datos['servicio_id'] ?? null, $datos['motivo'] ?? null);
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Servicio actualizado correctamente.']);
+    }
+
+    /**
      * Búsqueda con autocompletado para flujos donde la empresa se DERIVA del
      * colaborador (Entregas/Devoluciones): a diferencia de otros buscadores,
      * NO exige `empresa_id` — busca entre todas las empresas autorizadas del
@@ -439,7 +461,7 @@ class ColaboradorController extends Controller
             ->when($termino !== '', fn ($q) => $q->where(fn ($sub) => $sub
                 ->where('nombre_completo', 'like', "%{$termino}%")
                 ->orWhere('numero_empleado', 'like', "%{$termino}%")))
-            ->with(['empresa:id,nombre_comercial', 'sucursal:id,nombre'])
+            ->with(['empresa:id,nombre_comercial', 'sucursal:id,nombre', 'servicioActual:id,nombre,contrato_id', 'servicioActual.contrato:id,nombre'])
             ->orderBy('nombre_completo')
             ->limit(20)
             ->get()
@@ -451,6 +473,13 @@ class ColaboradorController extends Controller
                 'empresa' => $c->empresa?->nombre_comercial,
                 'sucursal_id' => $c->sucursal_id,
                 'sucursal' => $c->sucursal?->nombre,
+                // Ubicación operativa VIGENTE, para precargar Contrato/Servicio
+                // en el paso 1 de Entregas — snapshot histórico independiente.
+                'servicio_actual' => $c->servicioActual === null ? null : [
+                    'id' => $c->servicioActual->id,
+                    'nombre' => $c->servicioActual->nombre,
+                    'contrato' => ['id' => $c->servicioActual->contrato->id, 'nombre' => $c->servicioActual->contrato->nombre],
+                ],
             ]);
 
         return response()->json(['colaboradores' => $colaboradores]);
