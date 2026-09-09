@@ -106,14 +106,17 @@ class ReporteController extends Controller
         return Excel::download(new EntregasExport($entregas, $contexto), $contexto->nombreArchivo().'.xlsx');
     }
 
-    public function exportarInventario(Request $request): BinaryFileResponse
+    public function exportarInventario(Request $request): BinaryFileResponse|HttpResponse
     {
         abort_unless($request->user()->can('reportes.exportar'), 403);
 
         $filtros = $this->filtros($request);
         $empresaIds = $this->idsEmpresasAutorizadas($request);
         $almacenes = $this->almacenesVisibles($request);
+        $formato = $request->input('formato', 'xlsx');
 
+        // Misma consulta filtrada que el `index()` (paginada) y que el Excel —
+        // el scope por empresa/almacén ya viaja dentro, no se reconstruye.
         $saldos = $this->reportes->consultaInventario($empresaIds, $almacenes, $filtros)->get();
 
         $contexto = new ContextoExportacion(
@@ -122,6 +125,18 @@ class ReporteController extends Controller
             $this->filtrosHumanosInventario($filtros),
             $saldos->count(),
         );
+
+        if ($formato === 'pdf') {
+            $pdf = Pdf::loadView('reportes.inventario', [
+                'saldos' => $saldos,
+                'contexto' => $contexto,
+            ])->setPaper('letter', 'landscape');
+
+            return response($pdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$contexto->nombreArchivo().'.pdf"',
+            ]);
+        }
 
         return Excel::download(new InventarioExport($saldos, $contexto), $contexto->nombreArchivo().'.xlsx');
     }

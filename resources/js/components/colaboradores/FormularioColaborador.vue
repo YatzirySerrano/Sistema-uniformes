@@ -74,6 +74,7 @@ const form = useForm<{
     area_id: number | '';
     correo: string;
     foto: File | null;
+    eliminar_foto: boolean;
     activo: boolean;
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
@@ -83,6 +84,7 @@ const form = useForm<{
     area_id: areaSel.value?.id ?? '',
     correo: props.colaborador?.correo ?? '',
     foto: null,
+    eliminar_foto: false,
     activo: props.colaborador?.activo ?? true,
 });
 
@@ -332,6 +334,7 @@ function enviar(): void {
             <SubidaArchivo
                 id="fc-foto"
                 v-model="form.foto"
+                v-model:eliminar="form.eliminar_foto"
                 tipo="imagen"
                 accept="image/jpeg,image/png,image/webp"
                 formatos-etiqueta="JPG, PNG o WEBP"

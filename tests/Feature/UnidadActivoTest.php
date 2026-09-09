@@ -449,3 +449,54 @@ it('rechaza recuperar con una condición resultante que sea otra incidencia', fu
         ])
         ->assertSessionHasErrors('condicion_resultante');
 });
+
+/*
+|--------------------------------------------------------------------------
+| Código QR: verlo / imprimirlo DESPUÉS de crear la unidad
+|--------------------------------------------------------------------------
+| El QR no es un archivo persistido: se deriva del `public_token` (permanente
+| y único). El endpoint es de sólo lectura → idempotente, sin concurrencia y
+| sin posibilidad de un segundo QR ni de cambiar el `codigo` estable.
+*/
+
+it('devuelve el PNG del QR de una unidad ya registrada a un usuario autorizado', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+
+    $respuesta = $this->actingAs($this->admin)->get("/activos/unidades/{$unidad->public_token}/qr");
+
+    $respuesta->assertOk();
+    expect($respuesta->headers->get('Content-Type'))->toContain('image/png');
+    // Firma de un PNG: bytes 0x89 'P' 'N' 'G'.
+    $contenido = $respuesta->getContent();
+    expect(substr($contenido, 1, 3))->toBe('PNG');
+});
+
+it('pedir el QR no cambia el código estable de la unidad y es idempotente', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+    $codigo = $unidad->codigo;
+    $token = $unidad->public_token;
+
+    $primera = $this->actingAs($this->admin)->get("/activos/unidades/{$token}/qr")->assertOk();
+    $segunda = $this->actingAs($this->admin)->get("/activos/unidades/{$token}/qr")->assertOk();
+
+    $unidad->refresh();
+    expect($unidad->codigo)->toBe($codigo)
+        ->and($unidad->public_token)->toBe($token)
+        ->and($primera->getContent())->toBe($segunda->getContent());
+    expect(UnidadActivo::query()->where('activo_id', $this->activo->id)->count())->toBe(1);
+});
+
+it('un usuario de otra empresa no puede obtener el QR de la unidad (403)', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+    $otra = Empresa::factory()->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Supervisor->value, [$otra]))
+        ->get("/activos/unidades/{$unidad->public_token}/qr")
+        ->assertForbidden();
+});
+
+it('un token inexistente devuelve 404, no un 500', function () {
+    $this->actingAs($this->admin)
+        ->get('/activos/unidades/00000000-0000-0000-0000-000000000000/qr')
+        ->assertNotFound();
+});

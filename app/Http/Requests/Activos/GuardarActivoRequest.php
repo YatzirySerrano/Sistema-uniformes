@@ -88,6 +88,9 @@ class GuardarActivoRequest extends FormRequest
                 Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('activa', true)),
             ],
             'imagen' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:4096'],
+            // Bandera explícita "eliminar la imagen actual" (Caso C/E). Sólo
+            // aplica en edición; en alta se ignora (no hay imagen previa).
+            'eliminar_imagen' => ['sometimes', 'boolean'],
         ];
     }
 

@@ -37,6 +37,7 @@ const form = useForm<{
     direccion: string;
     activa: boolean;
     logo: File | null;
+    eliminar_logo: boolean;
 }>({
     nombre_comercial: props.empresa?.nombre_comercial ?? '',
     razon_social: props.empresa?.razon_social ?? '',
@@ -46,6 +47,7 @@ const form = useForm<{
     direccion: props.empresa?.direccion ?? '',
     activa: props.empresa?.activa ?? true,
     logo: null,
+    eliminar_logo: false,
 });
 
 /** Campos que el usuario ya tocó: sólo mostramos error en tiempo real tras salir del campo. */
@@ -339,6 +341,7 @@ function enviar(): void {
             </Label>
             <SubidaArchivo
                 v-model="form.logo"
+                v-model:eliminar="form.eliminar_logo"
                 tipo="imagen"
                 tamano="compact"
                 accept="image/png,image/jpeg,image/svg+xml"

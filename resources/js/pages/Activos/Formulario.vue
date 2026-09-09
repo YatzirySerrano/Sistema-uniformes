@@ -142,6 +142,7 @@ const form = useForm<{
     activo: boolean;
     tallas: number[];
     imagen: File | null;
+    eliminar_imagen: boolean;
     // Existencia inicial (sólo alta): el almacén es el de la ENTRADA
     // INICIAL, no una propiedad permanente del activo.
     almacen_id: number | null;
@@ -161,6 +162,7 @@ const form = useForm<{
     activo: props.activo?.activo ?? true,
     tallas: props.activo?.tallas ?? [],
     imagen: null,
+    eliminar_imagen: false,
     almacen_id: null,
     cantidad_inicial: 0,
     existencias: [],
@@ -940,6 +942,7 @@ function enviar() {
                     <SubidaArchivo
                         id="imagen"
                         v-model="form.imagen"
+                        v-model:eliminar="form.eliminar_imagen"
                         tipo="imagen"
                         tamano="compact"
                         accept="image/jpeg,image/png,image/webp"

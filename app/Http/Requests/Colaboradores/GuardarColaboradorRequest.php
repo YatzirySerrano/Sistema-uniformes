@@ -53,6 +53,9 @@ class GuardarColaboradorRequest extends FormRequest
             ],
             'correo' => ['nullable', 'email', 'max:255'],
             'foto' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:3072'],
+            // Bandera explícita "eliminar la foto actual" (Caso C/E). Una `foto`
+            // nula por sí sola significa "no tocar", nunca "eliminar".
+            'eliminar_foto' => ['sometimes', 'boolean'],
             'activo' => ['boolean'],
         ];
     }

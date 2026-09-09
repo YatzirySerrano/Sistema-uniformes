@@ -206,7 +206,7 @@ class ColaboradorController extends Controller
             $numeroEmpleado = $this->generadorNumeroEmpleado->generar($empresa, (string) $request->validated('nombre_completo'));
 
             $colaborador = Colaborador::query()->create([
-                ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
+                ...$request->safe()->except(['activo', 'empresa_id', 'foto', 'eliminar_foto']),
                 'empresa_id' => $empresa->id,
                 'numero_empleado' => $numeroEmpleado,
                 'area' => $this->nombreAreaEspejo($empresa->id, $request->integer('area_id') ?: null, $request->input('area')),
@@ -307,12 +307,14 @@ class ColaboradorController extends Controller
         $anteriores = $colaborador->toArray();
         $rutaFotoAnterior = $colaborador->foto_ruta;
         $rutaFotoNueva = $request->hasFile('foto') ? $this->guardarFotoSegura($request->file('foto'), $colaborador->empresa_id) : null;
+        // Caso C/E: "Quitar" sin reemplazo. Sólo cuenta si no llegó foto nueva.
+        $eliminarFoto = $rutaFotoNueva === null && $request->boolean('eliminar_foto') && $rutaFotoAnterior !== null;
 
         try {
             $colaborador->update([
-                ...$request->safe()->except(['activo', 'empresa_id', 'foto']),
+                ...$request->safe()->except(['activo', 'empresa_id', 'foto', 'eliminar_foto']),
                 'area' => $this->nombreAreaEspejo($colaborador->empresa_id, $request->integer('area_id') ?: null, $request->input('area')),
-                'foto_ruta' => $rutaFotoNueva ?? $colaborador->foto_ruta,
+                'foto_ruta' => $rutaFotoNueva ?? ($eliminarFoto ? null : $colaborador->foto_ruta),
                 'activo' => $request->boolean('activo', $colaborador->activo),
             ]);
         } catch (Throwable $e) {
@@ -323,16 +325,17 @@ class ColaboradorController extends Controller
             throw $e;
         }
 
-        // La foto anterior sólo se borra DESPUÉS de que la nueva quedó
-        // guardada en BD con éxito — si algo falla antes, el colaborador
-        // conserva su foto original en vez de quedarse sin ninguna.
-        if ($rutaFotoNueva !== null && $rutaFotoAnterior !== null) {
+        // La foto anterior sólo se borra DESPUÉS de que el cambio quedó
+        // guardado en BD con éxito — si algo falla antes, el colaborador
+        // conserva su foto original en vez de quedarse sin ninguna. Aplica
+        // tanto al reemplazo (Caso B/D) como a la eliminación (Caso C/E).
+        if (($rutaFotoNueva !== null || $eliminarFoto) && $rutaFotoAnterior !== null) {
             Storage::disk('local')->delete($rutaFotoAnterior);
         }
 
         $this->auditoria->registrar('colaboradores', 'editar', [
             'tipo_entidad' => Colaborador::class, 'entidad_id' => $colaborador->id, 'empresa_id' => $colaborador->empresa_id,
-            'descripcion' => 'Edición de colaborador '.$colaborador->nombre_completo,
+            'descripcion' => 'Edición de colaborador '.$colaborador->nombre_completo.($eliminarFoto ? ' · foto eliminada' : ''),
             'valores_anteriores' => $anteriores,
             'valores_nuevos' => $colaborador->toArray(),
         ]);

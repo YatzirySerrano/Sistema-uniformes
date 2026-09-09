@@ -145,6 +145,12 @@ function generarEtiquetas(): void {
     );
 }
 
+// Etiqueta QR de UNA unidad, sin tener que seleccionarla primero. El QR ya
+// existe desde que se creó la unidad (deriva de su `public_token`).
+function etiquetaUnidad(id: number): void {
+    window.open(`/activos/unidades/etiquetas?ids=${id}`, '_blank');
+}
+
 const vista = useVistaPreferida('unidades-activo');
 </script>
 
@@ -333,11 +339,22 @@ const vista = useVistaPreferida('unidades-activo');
                     Con: {{ u.colaborador }}
                 </p>
 
-                <Button variant="outline" size="sm" class="mt-auto" as-child>
-                    <Link :href="`/activos/unidades/${u.public_token}`">
-                        <SquareArrowOutUpRight class="size-3.5" /> Ver detalle
-                    </Link>
-                </Button>
+                <div class="mt-auto flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" as-child>
+                        <Link :href="`/activos/unidades/${u.public_token}`">
+                            <SquareArrowOutUpRight class="size-3.5" /> Ver
+                            detalle
+                        </Link>
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        :aria-label="`Etiqueta QR de la unidad ${u.codigo}`"
+                        @click="etiquetaUnidad(u.id)"
+                    >
+                        <QrCode class="size-3.5" /> Etiqueta QR
+                    </Button>
+                </div>
             </div>
         </div>
 
@@ -399,12 +416,22 @@ const vista = useVistaPreferida('unidades-activo');
                             </span>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <Button variant="outline" size="sm" as-child>
-                                <Link
-                                    :href="`/activos/unidades/${u.public_token}`"
-                                    >Ver</Link
+                            <div class="flex justify-end gap-2">
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    :aria-label="`Etiqueta QR de la unidad ${u.codigo}`"
+                                    @click="etiquetaUnidad(u.id)"
                                 >
-                            </Button>
+                                    <QrCode class="size-3.5" /> QR
+                                </Button>
+                                <Button variant="outline" size="sm" as-child>
+                                    <Link
+                                        :href="`/activos/unidades/${u.public_token}`"
+                                        >Ver</Link
+                                    >
+                                </Button>
+                            </div>
                         </td>
                     </tr>
                 </tbody>

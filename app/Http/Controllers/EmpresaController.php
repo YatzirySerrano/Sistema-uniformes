@@ -266,7 +266,7 @@ class EmpresaController extends Controller
 
     public function store(GuardarEmpresaRequest $request): RedirectResponse
     {
-        $datos = $request->safe()->except('logo');
+        $datos = $request->safe()->except(['logo', 'eliminar_logo']);
 
         $empresa = $this->crearConCodigoUnico(fn () => Empresa::query()->create([
             ...$datos,
@@ -296,31 +296,41 @@ class EmpresaController extends Controller
     {
         $anteriores = $empresa->toArray();
 
-        $empresa->fill($request->safe()->except('logo'));
+        $empresa->fill($request->safe()->except(['logo', 'eliminar_logo']));
+
+        // El archivo anterior se borra SIEMPRE después de `save()`: nunca antes
+        // de confirmar que la BD quedó consistente.
+        $rutaLogoABorrar = null;
+        $logoEliminado = false;
 
         if ($request->hasFile('logo')) {
-            $rutaAnterior = $empresa->logo_ruta;
+            // Caso B/D: reemplazo. Guarda el nuevo primero; sólo si se almacenó
+            // bien se sustituye la referencia y se agenda el borrado del viejo.
             $rutaNueva = $request->file('logo')->store("empresas/{$empresa->id}", 'public');
 
-            // Guarda primero el archivo nuevo y sólo borra el anterior si el
-            // nuevo se almacenó correctamente: evita perder el logo vigente
-            // si el disco falla a mitad de la subida.
             if ($rutaNueva !== false) {
+                $rutaLogoABorrar = $empresa->logo_ruta;
                 $empresa->logo_ruta = $rutaNueva;
-
-                if ($rutaAnterior) {
-                    Storage::disk('public')->delete($rutaAnterior);
-                }
             }
+        } elseif ($request->boolean('eliminar_logo') && $empresa->logo_ruta) {
+            // Caso C/E: eliminar sin reemplazo.
+            $rutaLogoABorrar = $empresa->logo_ruta;
+            $empresa->logo_ruta = null;
+            $logoEliminado = true;
         }
 
         $empresa->save();
+
+        if ($rutaLogoABorrar) {
+            // `delete()` de una ruta inexistente devuelve false sin lanzar.
+            Storage::disk('public')->delete($rutaLogoABorrar);
+        }
 
         $this->auditoria->registrar('empresas', 'editar', [
             'empresa_id' => $empresa->id,
             'tipo_entidad' => Empresa::class,
             'entidad_id' => $empresa->id,
-            'descripcion' => 'Edición de empresa '.$empresa->nombre_comercial,
+            'descripcion' => 'Edición de empresa '.$empresa->nombre_comercial.($logoEliminado ? ' · logotipo eliminado' : ''),
             'valores_anteriores' => $anteriores,
             'valores_nuevos' => $empresa->toArray(),
         ]);

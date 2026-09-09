@@ -493,6 +493,84 @@ it('reemplazar el logo en edición guarda el nuevo archivo y borra el anterior',
     Storage::disk('public')->assertExists($rutaNueva);
 });
 
+it('quitar el logo (eliminar_logo) borra la asociación y el archivo del disco', function () {
+    Storage::fake('public');
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/empresas', [
+        'nombre_comercial' => 'Quitar Logo',
+        'logo' => UploadedFile::fake()->image('logo.png'),
+    ]);
+    $empresa = Empresa::query()->where('nombre_comercial', 'Quitar Logo')->first();
+    $ruta = $empresa->logo_ruta;
+    Storage::disk('public')->assertExists($ruta);
+
+    $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
+        'nombre_comercial' => 'Quitar Logo',
+        'eliminar_logo' => true,
+    ])->assertSessionHasNoErrors();
+
+    expect($empresa->fresh()->logo_ruta)->toBeNull();
+    Storage::disk('public')->assertMissing($ruta);
+});
+
+it('elegir un logo nuevo prevalece aunque llegue también eliminar_logo (Caso D)', function () {
+    Storage::fake('public');
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/empresas', [
+        'nombre_comercial' => 'Nuevo Gana',
+        'logo' => UploadedFile::fake()->image('logo.png'),
+    ]);
+    $empresa = Empresa::query()->where('nombre_comercial', 'Nuevo Gana')->first();
+    $rutaOriginal = $empresa->logo_ruta;
+
+    $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
+        'nombre_comercial' => 'Nuevo Gana',
+        'eliminar_logo' => true,
+        'logo' => UploadedFile::fake()->image('logo-nuevo.png'),
+    ])->assertSessionHasNoErrors();
+
+    $rutaNueva = $empresa->fresh()->logo_ruta;
+    expect($rutaNueva)->not->toBeNull()->not->toBe($rutaOriginal);
+    Storage::disk('public')->assertExists($rutaNueva);
+    Storage::disk('public')->assertMissing($rutaOriginal);
+});
+
+it('eliminar_logo no rompe si la empresa no tenía logo o el archivo ya no existe', function () {
+    Storage::fake('public');
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $sinLogo = Empresa::factory()->create(['logo_ruta' => null]);
+    $this->actingAs($admin)->put("/empresas/{$sinLogo->id}", [
+        'nombre_comercial' => $sinLogo->nombre_comercial,
+        'eliminar_logo' => true,
+    ])->assertSessionHasNoErrors();
+    expect($sinLogo->fresh()->logo_ruta)->toBeNull();
+
+    $rutaFantasma = Empresa::factory()->create(['logo_ruta' => 'empresas/999/no-existe.png']);
+    $this->actingAs($admin)->put("/empresas/{$rutaFantasma->id}", [
+        'nombre_comercial' => $rutaFantasma->nombre_comercial,
+        'eliminar_logo' => true,
+    ])->assertSessionHasNoErrors();
+    expect($rutaFantasma->fresh()->logo_ruta)->toBeNull();
+});
+
+it('un usuario sin acceso a la empresa no puede quitar su logo', function () {
+    Storage::fake('public');
+    $empresa = Empresa::factory()->create(['logo_ruta' => 'empresas/1/logo.png']);
+    $ajena = Empresa::factory()->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Supervisor->value, [$ajena]))
+        ->put("/empresas/{$empresa->id}", [
+            'nombre_comercial' => $empresa->nombre_comercial,
+            'eliminar_logo' => true,
+        ])
+        ->assertForbidden();
+
+    expect($empresa->fresh()->logo_ruta)->toBe('empresas/1/logo.png');
+});
+
 it('rechaza un logo que supera los 2 MB con un mensaje claro de peso', function () {
     Storage::fake('public');
 

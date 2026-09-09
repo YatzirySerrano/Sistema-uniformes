@@ -379,19 +379,34 @@ class ActivoController extends Controller
             'activo' => $request->boolean('activo', $activo->activo),
         ]);
 
+        // El archivo anterior se borra SIEMPRE después de `save()`, nunca antes:
+        // si la escritura en BD falla, el activo conserva su imagen vigente.
+        $rutaImagenABorrar = null;
+        $imagenEliminada = false;
+
         if ($request->hasFile('imagen')) {
-            if ($activo->imagen_ruta) {
-                Storage::disk('public')->delete($activo->imagen_ruta);
+            $rutaNueva = $request->file('imagen')->store("activos/{$activo->empresa_id}", 'public');
+
+            if ($rutaNueva !== false) {
+                $rutaImagenABorrar = $activo->imagen_ruta;
+                $activo->imagen_ruta = $rutaNueva;
             }
-            $activo->imagen_ruta = $request->file('imagen')->store("activos/{$activo->empresa_id}", 'public') ?: null;
+        } elseif ($request->boolean('eliminar_imagen') && $activo->imagen_ruta) {
+            $rutaImagenABorrar = $activo->imagen_ruta;
+            $activo->imagen_ruta = null;
+            $imagenEliminada = true;
         }
 
         $activo->save();
         $activo->tallas()->sync($request->input('tallas', []));
 
+        if ($rutaImagenABorrar) {
+            Storage::disk('public')->delete($rutaImagenABorrar);
+        }
+
         $this->auditoria->registrar('activos', 'editar', [
             'tipo_entidad' => Activo::class, 'entidad_id' => $activo->id, 'empresa_id' => $activo->empresa_id,
-            'descripcion' => 'Edición de activo '.$activo->nombre,
+            'descripcion' => 'Edición de activo '.$activo->nombre.($imagenEliminada ? ' · imagen eliminada' : ''),
         ]);
 
         return to_route('activos.index')->with('toast', ['type' => 'success', 'message' => 'Activo actualizado.']);

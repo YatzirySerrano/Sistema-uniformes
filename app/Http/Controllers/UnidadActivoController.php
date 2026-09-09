@@ -246,6 +246,26 @@ class UnidadActivoController extends Controller
     }
 
     /**
+     * PNG del código QR de UNA unidad, para verlo/imprimirlo en cualquier
+     * momento después de crearla. El QR no es un archivo persistido: se
+     * deriva en vivo del `public_token` (permanente y único). La operación es
+     * de sólo lectura → idempotente, sin concurrencia, sin duplicados y sin
+     * tocar el `codigo` estable de la unidad. La ruta enlaza por
+     * `public_token` (no por id) y la Policy revalida el acceso a la empresa
+     * de la unidad (defensa IDOR).
+     */
+    public function qr(UnidadActivo $unidad, ServicioEtiquetasQr $qr): HttpResponse
+    {
+        $this->authorize('view', $unidad);
+
+        return response($qr->pngBytes($unidad), 200, [
+            'Content-Type' => 'image/png',
+            'Content-Disposition' => 'inline; filename="qr-'.$unidad->codigo.'.png"',
+            'Cache-Control' => 'private, max-age=86400',
+        ]);
+    }
+
+    /**
      * Búsqueda de unidades entregables de un Activo (para el futuro flujo de
      * Entregas/Conjuntos). Requiere `activo_id`.
      */

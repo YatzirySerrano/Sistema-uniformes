@@ -12,10 +12,18 @@ import { computed, ref } from 'vue';
  * `tamano` ajusta la presencia visual sin cambiar el comportamiento:
  * `compact`/`normal` para logos e imágenes puntuales, `large` para
  * importaciones (Excel) donde la zona de arrastre es el foco de la pantalla.
+ *
+ * Semántica de "Quitar" (Casos A–E): "no elegir archivo nuevo" (`modelValue`
+ * nulo) NO significa "eliminar la imagen actual". Para eso el consumidor
+ * enlaza `v-model:eliminar` a una bandera booleana que viaja al backend; sólo
+ * cuando esa bandera es `true` el backend borra la imagen guardada. Elegir un
+ * archivo nuevo siempre limpia la bandera (gana la imagen nueva).
  */
 const props = withDefaults(
     defineProps<{
         modelValue: File | null;
+        /** Bandera "eliminar la imagen ya guardada al guardar el formulario". */
+        eliminar?: boolean;
         /** Atributo `accept` del input, p. ej. "image/png,image/jpeg". */
         accept?: string;
         /** Sólo para el texto de ayuda ("Formatos aceptados: ... Peso máximo: N MB"). */
@@ -38,11 +46,12 @@ const props = withDefaults(
         disabled?: boolean;
         id?: string;
     }>(),
-    { tipo: 'documento', tamano: 'normal' },
+    { tipo: 'documento', tamano: 'normal', eliminar: false },
 );
 
 const emit = defineEmits<{
     (e: 'update:modelValue', value: File | null): void;
+    (e: 'update:eliminar', value: boolean): void;
 }>();
 
 const input = ref<HTMLInputElement | null>(null);
@@ -56,11 +65,24 @@ const previsualizacion = computed(() =>
         : null,
 );
 
-const hayArchivoActual = computed(
+// Hay una imagen guardada que el usuario todavía no ha marcado para eliminar.
+const hayGuardadoVigente = computed(
     () =>
-        !!props.modelValue ||
-        !!props.archivoActualUrl ||
-        !!props.archivoActualNombre,
+        !props.eliminar &&
+        (!!props.archivoActualUrl || !!props.archivoActualNombre),
+);
+
+// "Quitar" pulsado sobre una imagen ya guardada, sin archivo nuevo que la
+// sustituya: se mostrará el aviso "se eliminará al guardar".
+const marcadoParaEliminar = computed(
+    () =>
+        !!props.eliminar &&
+        !props.modelValue &&
+        (!!props.archivoActualUrl || !!props.archivoActualNombre),
+);
+
+const hayArchivoActual = computed(
+    () => !!props.modelValue || hayGuardadoVigente.value,
 );
 
 function elegir(): void {
@@ -68,21 +90,40 @@ function elegir(): void {
     input.value?.click();
 }
 
-function alSeleccionar(evento: Event): void {
-    const archivo = (evento.target as HTMLInputElement).files?.[0] ?? null;
+function establecerArchivo(archivo: File | null): void {
     emit('update:modelValue', archivo);
+    // Elegir un archivo nuevo cancela cualquier intención previa de eliminar:
+    // gana la imagen nueva (Caso D).
+    if (archivo && props.eliminar) emit('update:eliminar', false);
+}
+
+function alSeleccionar(evento: Event): void {
+    establecerArchivo((evento.target as HTMLInputElement).files?.[0] ?? null);
 }
 
 function quitar(): void {
-    emit('update:modelValue', null);
+    // Descarta el archivo nuevo que estuviera elegido...
+    if (props.modelValue) emit('update:modelValue', null);
+    // ...y, si hay una imagen ya guardada, marca la intención de eliminarla
+    // (el backend sólo borra cuando recibe esta bandera).
+    if (
+        (!!props.archivoActualUrl || !!props.archivoActualNombre) &&
+        !props.eliminar
+    ) {
+        emit('update:eliminar', true);
+    }
     if (input.value) input.value.value = '';
+}
+
+function deshacerEliminar(): void {
+    emit('update:eliminar', false);
 }
 
 function alSoltar(evento: DragEvent): void {
     arrastrando.value = false;
     if (deshabilitado.value) return;
     const archivo = evento.dataTransfer?.files?.[0] ?? null;
-    if (archivo) emit('update:modelValue', archivo);
+    if (archivo) establecerArchivo(archivo);
 }
 
 const tamanoClase = computed(
@@ -179,6 +220,39 @@ const miniaturaClase = computed(
                         @click.stop="quitar"
                     >
                         <X class="size-3" /> Quitar
+                    </button>
+                </div>
+            </template>
+            <template v-else-if="marcadoParaEliminar">
+                <div
+                    class="text-muted-foreground flex flex-col items-center gap-1"
+                    :class="{ 'py-2': tamano !== 'compact' }"
+                >
+                    <X class="text-destructive" :class="iconoClase" />
+                    <p class="text-foreground text-sm font-medium">
+                        La imagen se eliminará al guardar
+                    </p>
+                    <p class="text-xs">
+                        Mientras no guardes el formulario, la imagen actual
+                        sigue intacta.
+                    </p>
+                </div>
+                <div class="flex gap-2">
+                    <button
+                        type="button"
+                        class="text-primary text-xs underline"
+                        :disabled="deshabilitado"
+                        @click.stop="elegir"
+                    >
+                        Elegir otra
+                    </button>
+                    <button
+                        type="button"
+                        class="text-xs underline"
+                        :disabled="deshabilitado"
+                        @click.stop="deshacerEliminar"
+                    >
+                        Deshacer
                     </button>
                 </div>
             </template>

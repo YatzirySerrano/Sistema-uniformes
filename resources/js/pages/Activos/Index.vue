@@ -2,6 +2,7 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     Boxes,
+    Building2,
     Layers,
     Package,
     Pencil,
@@ -45,6 +46,7 @@ type Activo = {
     nombre: string;
     categoria: string | null;
     codigo: string | null;
+    empresa: { id: number; nombre_comercial: string | null };
     tipo: string | null;
     tipo_control: 'cantidad' | 'individual';
     tipo_control_etiqueta: string;
@@ -538,6 +540,20 @@ const vista = useVistaPreferida('activos');
                             >
                                 {{ a.codigo ?? '—' }}
                             </p>
+                            <p
+                                class="text-muted-foreground mt-0.5 flex items-center gap-1 text-xs"
+                            >
+                                <Building2 class="size-3 shrink-0" />
+                                <span
+                                    class="truncate"
+                                    :title="
+                                        a.empresa.nombre_comercial ?? undefined
+                                    "
+                                    >{{
+                                        a.empresa.nombre_comercial ?? '—'
+                                    }}</span
+                                >
+                            </p>
                         </div>
                     </div>
                     <Badge :variant="a.activo ? 'success' : 'secondary'">
@@ -645,6 +661,12 @@ const vista = useVistaPreferida('activos');
                             <p class="font-medium">{{ a.nombre }}</p>
                             <p class="text-muted-foreground font-mono text-xs">
                                 {{ a.codigo ?? '—' }}
+                            </p>
+                            <p
+                                class="text-muted-foreground flex items-center gap-1 text-xs"
+                            >
+                                <Building2 class="size-3 shrink-0" />
+                                {{ a.empresa.nombre_comercial ?? '—' }}
                             </p>
                         </td>
                         <td class="text-muted-foreground px-3 py-2">

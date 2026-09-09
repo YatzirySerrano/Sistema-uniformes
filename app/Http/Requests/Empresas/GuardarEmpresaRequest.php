@@ -34,6 +34,7 @@ class GuardarEmpresaRequest extends FormRequest
             'correo' => $this->limpiar($this->input('correo')),
             'direccion' => $this->limpiar($this->input('direccion')),
             'activa' => $this->boolean('activa'),
+            'eliminar_logo' => $this->boolean('eliminar_logo'),
         ]);
     }
 
@@ -54,6 +55,9 @@ class GuardarEmpresaRequest extends FormRequest
             'direccion' => ['nullable', 'string', 'max:500'],
             'activa' => ['boolean'],
             'logo' => ['nullable', 'image', 'mimes:png,jpg,jpeg,svg', 'max:2048'],
+            // Bandera explícita "eliminar el logotipo actual" (Caso C/E). Un
+            // `logo` nulo por sí solo significa "no tocar", nunca "eliminar".
+            'eliminar_logo' => ['sometimes', 'boolean'],
         ];
     }
 

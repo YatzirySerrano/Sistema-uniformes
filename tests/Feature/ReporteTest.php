@@ -114,3 +114,47 @@ it('sin permiso reportes.ver, /reportes responde 403', function () {
 
     $this->actingAs($colaborador)->get('/reportes')->assertForbidden();
 });
+
+it('exporta el reporte de inventario en PDF respetando el mismo permiso y los filtros', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    $activo = Activo::factory()->for($empresa)->create();
+    SaldoInventario::factory()->for($empresa)->for($almacen)->for($activo)->create(['cantidad' => 2, 'minimo' => 10]);
+    SaldoInventario::factory()->for($empresa)->for($almacen)->for($activo)->create(['cantidad' => 40, 'minimo' => 5]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    $completo = $this->actingAs($admin)->get('/reportes/inventario/exportar?formato=pdf');
+    $completo->assertOk()->assertHeader('content-type', 'application/pdf');
+    expect(substr($completo->getContent(), 0, 4))->toBe('%PDF');
+
+    // El filtro `solo_bajo_minimo` se respeta igual que en pantalla / Excel.
+    $filtrado = $this->actingAs($admin)->get('/reportes/inventario/exportar?formato=pdf&solo_bajo_minimo=1');
+    $filtrado->assertOk()->assertHeader('content-type', 'application/pdf');
+});
+
+it('el Excel de inventario sigue funcionando tras añadir el PDF', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    $activo = Activo::factory()->for($empresa)->create();
+    SaldoInventario::factory()->for($empresa)->for($almacen)->for($activo)->create(['cantidad' => 3, 'minimo' => 1]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    $this->actingAs($admin)
+        ->get('/reportes/inventario/exportar?formato=xlsx')
+        ->assertOk()
+        ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+});
+
+it('un usuario sin reportes.exportar no puede descargar el PDF de inventario aunque arme la URL', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $sinPermiso = usuarioCon(RolSistema::Encargado->value, [$empresa]);
+
+    $this->actingAs($sinPermiso)
+        ->get("/reportes/inventario/exportar?formato=pdf&empresa_id={$empresa->id}")
+        ->assertForbidden();
+});

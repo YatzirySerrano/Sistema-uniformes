@@ -162,36 +162,52 @@ function darDeBaja(): void {
         </Button>
 
         <div
-            class="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-start sm:justify-between"
         >
-            <div class="min-w-0">
-                <h1
-                    class="flex items-center gap-2 truncate font-mono text-xl font-semibold tracking-tight"
-                >
-                    <QrCode class="text-muted-foreground size-5 shrink-0" />
-                    {{ unidad.codigo }}
-                </h1>
-                <p class="text-muted-foreground text-sm">
-                    {{ unidad.activo.nombre }}
-                </p>
-                <div class="mt-1.5 flex flex-wrap items-center gap-2">
-                    <Badge
-                        variant="outline"
-                        :class="claseEstadoVisibleUnidad(unidad.estado_visible)"
-                    >
-                        {{ unidad.estado_visible_etiqueta }}
-                    </Badge>
-                    <Badge
-                        v-if="unidad.condicion !== 'funcionando'"
-                        variant="outline"
-                        class="text-muted-foreground"
-                    >
-                        {{ unidad.condicion_etiqueta }}
-                    </Badge>
+            <div class="flex min-w-0 gap-4">
+                <div class="shrink-0 text-center">
+                    <img
+                        :src="`/activos/unidades/${unidad.public_token}/qr`"
+                        :alt="`Código QR de la unidad ${unidad.codigo}`"
+                        class="size-24 rounded-md border bg-white p-1"
+                        width="96"
+                        height="96"
+                    />
+                    <p class="text-muted-foreground mt-1 text-[11px]">
+                        QR generado
+                    </p>
                 </div>
-                <p class="text-muted-foreground mt-1 text-xs">
-                    {{ unidad.estado_visible_descripcion }}
-                </p>
+                <div class="min-w-0">
+                    <h1
+                        class="flex items-center gap-2 truncate font-mono text-xl font-semibold tracking-tight"
+                    >
+                        <QrCode class="text-muted-foreground size-5 shrink-0" />
+                        {{ unidad.codigo }}
+                    </h1>
+                    <p class="text-muted-foreground text-sm">
+                        {{ unidad.activo.nombre }}
+                    </p>
+                    <div class="mt-1.5 flex flex-wrap items-center gap-2">
+                        <Badge
+                            variant="outline"
+                            :class="
+                                claseEstadoVisibleUnidad(unidad.estado_visible)
+                            "
+                        >
+                            {{ unidad.estado_visible_etiqueta }}
+                        </Badge>
+                        <Badge
+                            v-if="unidad.condicion !== 'funcionando'"
+                            variant="outline"
+                            class="text-muted-foreground"
+                        >
+                            {{ unidad.condicion_etiqueta }}
+                        </Badge>
+                    </div>
+                    <p class="text-muted-foreground mt-1 text-xs">
+                        {{ unidad.estado_visible_descripcion }}
+                    </p>
+                </div>
             </div>
 
             <div class="flex flex-wrap gap-2">
@@ -200,7 +216,15 @@ function darDeBaja(): void {
                         :href="`/activos/unidades/etiquetas?ids=${unidad.id}`"
                         target="_blank"
                     >
-                        <QrCode class="size-3.5" /> Generar etiqueta
+                        <QrCode class="size-3.5" /> Descargar etiqueta (PDF)
+                    </a>
+                </Button>
+                <Button variant="ghost" size="sm" as-child>
+                    <a
+                        :href="`/activos/unidades/${unidad.public_token}/qr`"
+                        target="_blank"
+                    >
+                        <QrCode class="size-3.5" /> Ver QR
                     </a>
                 </Button>
                 <Button

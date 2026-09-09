@@ -11,6 +11,7 @@ use App\Models\Talla;
 use App\Models\TipoActivo;
 use App\Models\UnidadActivo;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -272,6 +273,58 @@ it('valida la imagen: rechaza un archivo que no es imagen', function () {
             'imagen' => UploadedFile::fake()->create('doc.pdf', 20, 'application/pdf'),
         ])
         ->assertSessionHasErrors('imagen');
+});
+
+it('quitar la imagen (eliminar_imagen) borra la ruta y el archivo; sin bandera la conserva', function () {
+    Storage::fake('public');
+    $empresa = Empresa::factory()->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->post('/activos', [
+        'empresa_id' => $empresa->id,
+        'nombre' => 'Con imagen',
+        'tipo_control' => 'cantidad',
+        'imagen' => UploadedFile::fake()->image('activo.png'),
+    ]);
+    $activo = Activo::query()->where('nombre', 'Con imagen')->firstOrFail();
+    $ruta = $activo->imagen_ruta;
+    expect($ruta)->not->toBeNull();
+    Storage::disk('public')->assertExists($ruta);
+
+    // Sin bandera ni archivo nuevo: se conserva (Caso A).
+    $this->actingAs($admin)->post("/activos/{$activo->id}", [
+        'nombre' => 'Con imagen',
+        'tipo_control' => 'cantidad',
+        '_method' => 'POST',
+    ])->assertRedirect();
+    expect($activo->fresh()->imagen_ruta)->toBe($ruta);
+
+    // Con bandera: se elimina la asociación y el archivo (Caso C).
+    $this->actingAs($admin)->post("/activos/{$activo->id}", [
+        'nombre' => 'Con imagen',
+        'tipo_control' => 'cantidad',
+        'eliminar_imagen' => true,
+        '_method' => 'POST',
+    ])->assertRedirect();
+    expect($activo->fresh()->imagen_ruta)->toBeNull();
+    Storage::disk('public')->assertMissing($ruta);
+});
+
+it('un rol restringido no puede eliminar la imagen de un activo fuera de su alcance', function () {
+    Storage::fake('public');
+    $ajena = Empresa::factory()->create();
+    $activo = Activo::factory()->for($ajena)->create(['imagen_ruta' => 'activos/'.$ajena->id.'/x.png']);
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]);
+    $supervisor->givePermissionTo('activos.editar');
+
+    expect($this->actingAs($supervisor)->post("/activos/{$activo->id}", [
+        'nombre' => $activo->nombre,
+        'tipo_control' => $activo->tipo_control->value,
+        'eliminar_imagen' => true,
+        '_method' => 'POST',
+    ])->status())->toBeIn([403, 404]);
+
+    expect($activo->fresh()->imagen_ruta)->toBe('activos/'.$ajena->id.'/x.png');
 });
 
 it('rechaza crear un activo en una empresa fuera del alcance del usuario', function () {

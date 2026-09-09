@@ -203,12 +203,7 @@ function urlExport(formato: string) {
                             ><Download class="size-4" /> Excel</a
                         >
                     </Button>
-                    <Button
-                        v-if="f.tab === 'entregas'"
-                        size="sm"
-                        variant="outline"
-                        as-child
-                    >
+                    <Button size="sm" variant="outline" as-child>
                         <a :href="urlExport('pdf')"
                             ><Download class="size-4" /> PDF</a
                         >

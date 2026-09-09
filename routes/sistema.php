@@ -95,6 +95,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('activos/unidades/etiquetas', [UnidadActivoController::class, 'generarEtiquetas'])->name('unidades-activo.etiquetas');
     Route::get('activos/unidades/exportar', [UnidadActivoController::class, 'exportar'])->name('unidades-activo.exportar');
     Route::get('activos/unidades/{unidad:public_token}', [UnidadActivoController::class, 'show'])->name('unidades-activo.show');
+    Route::get('activos/unidades/{unidad:public_token}/qr', [UnidadActivoController::class, 'qr'])->name('unidades-activo.qr');
     Route::post('activos/unidades/{unidad:public_token}/baja', [UnidadActivoController::class, 'darDeBaja'])->name('unidades-activo.baja');
     Route::post('activos/unidades/{unidad:public_token}/incidencia', [UnidadActivoController::class, 'marcarIncidencia'])->name('unidades-activo.incidencia');
     Route::post('activos/unidades/{unidad:public_token}/recuperar', [UnidadActivoController::class, 'recuperar'])->name('unidades-activo.recuperar');

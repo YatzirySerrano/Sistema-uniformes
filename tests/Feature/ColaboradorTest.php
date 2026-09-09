@@ -254,6 +254,89 @@ it('reemplazar la foto borra la anterior del disco', function () {
     Storage::disk('local')->assertExists($colaborador->foto_ruta);
 });
 
+it('quitar la foto (eliminar_foto) borra la asociación y el archivo', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'nombre_completo' => $colaborador->nombre_completo,
+        'sucursal_id' => $colaborador->sucursal_id,
+        'foto' => UploadedFile::fake()->image('perfil.jpg'),
+    ]);
+
+    $ruta = $colaborador->fresh()->foto_ruta;
+    Storage::disk('local')->assertExists($ruta);
+
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'nombre_completo' => $colaborador->nombre_completo,
+        'sucursal_id' => $colaborador->sucursal_id,
+        'eliminar_foto' => true,
+    ]);
+
+    expect($colaborador->fresh()->foto_ruta)->toBeNull();
+    Storage::disk('local')->assertMissing($ruta);
+});
+
+it('un colaborador nulo por eliminar_foto no falla si ya no tenía foto', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create(['foto_ruta' => null]);
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'nombre_completo' => $colaborador->nombre_completo,
+        'sucursal_id' => $colaborador->sucursal_id,
+        'eliminar_foto' => true,
+    ])->assertRedirect();
+
+    expect($colaborador->fresh()->foto_ruta)->toBeNull();
+});
+
+it('no toca la foto si no se manda archivo nuevo ni la bandera eliminar_foto', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'nombre_completo' => $colaborador->nombre_completo,
+        'sucursal_id' => $colaborador->sucursal_id,
+        'foto' => UploadedFile::fake()->image('perfil.jpg'),
+    ]);
+    $ruta = $colaborador->fresh()->foto_ruta;
+
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'nombre_completo' => 'Nombre Cambiado',
+        'sucursal_id' => $colaborador->sucursal_id,
+    ]);
+
+    expect($colaborador->fresh()->foto_ruta)->toBe($ruta);
+    Storage::disk('local')->assertExists($ruta);
+});
+
+it('un usuario sin acceso a la empresa no puede quitar la foto de su colaborador', function () {
+    Storage::fake('local');
+    $empresa = Empresa::factory()->create();
+    $ajena = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create(['foto_ruta' => 'colaboradores/'.$empresa->id.'/x.jpg']);
+
+    $this->actingAs(usuarioCon(RolSistema::Supervisor->value, [$ajena]))
+        ->put("/colaboradores/{$colaborador->id}", [
+            'nombre_completo' => $colaborador->nombre_completo,
+            'sucursal_id' => $colaborador->sucursal_id,
+            'eliminar_foto' => true,
+        ])
+        ->assertForbidden();
+
+    expect($colaborador->fresh()->foto_ruta)->not->toBeNull();
+});
+
 it('rechaza una foto que no es imagen o que excede el peso máximo', function () {
     Storage::fake('local');
     $empresa = Empresa::factory()->create();

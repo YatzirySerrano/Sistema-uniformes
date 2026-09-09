@@ -24,9 +24,18 @@ class ServicioEtiquetasQr
 
     public function pngDataUri(UnidadActivo $unidad, int $tamano = 220): string
     {
-        $writer = new Writer(new GDLibRenderer($tamano, 1));
-        $png = $writer->writeString($this->urlPublica($unidad));
+        return 'data:image/png;base64,'.base64_encode($this->pngBytes($unidad, $tamano));
+    }
 
-        return 'data:image/png;base64,'.base64_encode($png);
+    /**
+     * Bytes crudos del PNG del QR. La generación es una función pura del
+     * `public_token` de la unidad (permanente y único): idempotente, sin
+     * estado que persistir y sin posibilidad de duplicado.
+     */
+    public function pngBytes(UnidadActivo $unidad, int $tamano = 320): string
+    {
+        $writer = new Writer(new GDLibRenderer($tamano, 1));
+
+        return $writer->writeString($this->urlPublica($unidad));
     }
 }
