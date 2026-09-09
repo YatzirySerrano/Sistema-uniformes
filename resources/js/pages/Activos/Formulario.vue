@@ -148,9 +148,10 @@ const form = useForm<{
     almacen_id: number | null;
     cantidad_inicial: number;
     existencias: { talla_id: number; cantidad: number }[];
-    // Seguimiento individual: opcional generar etiquetas QR de una vez para
-    // las unidades recién creadas.
-    generar_qr: boolean;
+    // Seguimiento individual: NO controla la existencia del QR (permanente
+    // desde el alta), sólo si al guardar se abre el PDF de etiquetas para
+    // imprimirlas ahora.
+    abrir_etiquetas: boolean;
     _method?: string;
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
@@ -166,7 +167,7 @@ const form = useForm<{
     almacen_id: null,
     cantidad_inicial: 0,
     existencias: [],
-    generar_qr: false,
+    abrir_etiquetas: false,
 });
 
 // --- Código de activo: lo genera el backend, nunca lo escribe el usuario.
@@ -888,13 +889,13 @@ function enviar() {
                         class="mt-1 flex items-center gap-2 text-sm"
                     >
                         <input
-                            v-model="form.generar_qr"
+                            v-model="form.abrir_etiquetas"
                             type="checkbox"
                             class="size-4"
                         />
-                        Generar etiquetas QR para estas unidades
+                        Abrir las etiquetas para imprimir al guardar
                         <AyudaTooltip
-                            texto="Al guardar, se abrirá el PDF de etiquetas (código + QR) listo para imprimir. Puedes generarlas después desde el listado de unidades si prefieres no hacerlo ahora."
+                            texto="El código QR de cada unidad queda disponible siempre (deriva de su identificador permanente). Esto sólo abre el PDF de etiquetas (código + QR) listo para imprimir ahora; podrás verlas o reimprimirlas después desde cada unidad."
                             etiqueta="Ayuda sobre etiquetas QR"
                         />
                     </label>

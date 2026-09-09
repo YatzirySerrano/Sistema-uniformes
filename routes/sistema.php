@@ -18,6 +18,7 @@ use App\Http\Controllers\EmpresaController;
 use App\Http\Controllers\EntregaController;
 use App\Http\Controllers\ImportacionColaboradorController;
 use App\Http\Controllers\InventarioController;
+use App\Http\Controllers\InventarioFisicoController;
 use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
 use App\Http\Controllers\ReporteController;
@@ -148,6 +149,16 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('conjuntos/{conjunto}/editar', [ConjuntoController::class, 'edit'])->name('conjuntos.edit');
     Route::put('conjuntos/{conjunto}', [ConjuntoController::class, 'update'])->name('conjuntos.update');
     Route::post('conjuntos/{conjunto}/estado', [ConjuntoController::class, 'toggle'])->name('conjuntos.toggle');
+
+    // Inventario físico (rondas de escaneo QR)
+    Route::get('inventarios-fisicos', [InventarioFisicoController::class, 'index'])->name('inventarios-fisicos.index');
+    Route::get('inventarios-fisicos/crear', [InventarioFisicoController::class, 'create'])->name('inventarios-fisicos.create');
+    Route::get('inventarios-fisicos/universo', [InventarioFisicoController::class, 'universo'])->name('inventarios-fisicos.universo');
+    Route::post('inventarios-fisicos', [InventarioFisicoController::class, 'store'])->name('inventarios-fisicos.store');
+    Route::get('inventarios-fisicos/{inventarioFisico}', [InventarioFisicoController::class, 'show'])->name('inventarios-fisicos.show');
+    Route::get('inventarios-fisicos/{inventarioFisico}/exportar', [InventarioFisicoController::class, 'exportar'])->name('inventarios-fisicos.exportar');
+    Route::post('inventarios-fisicos/{inventarioFisico}/escanear', [InventarioFisicoController::class, 'escanear'])->name('inventarios-fisicos.escanear');
+    Route::post('inventarios-fisicos/{inventarioFisico}/finalizar', [InventarioFisicoController::class, 'finalizar'])->name('inventarios-fisicos.finalizar');
 
     // Entregas
     Route::get('entregas', [EntregaController::class, 'index'])->name('entregas.index');

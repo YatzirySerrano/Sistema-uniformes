@@ -12,6 +12,7 @@ use App\Models\Empresa;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\UnidadActivo;
+use App\Servicios\ServicioEtiquetasQr;
 use App\Soporte\ServicioGeneradorCodigos;
 
 beforeEach(function () {
@@ -105,7 +106,7 @@ it('crea un activo de seguimiento individual con N unidades desde el alta unific
     expect(UnidadActivo::query()->where('activo_id', $activo->id)->count())->toBe(3);
 });
 
-it('el alta sin "generar_qr" hace un redirect Inertia normal, sin tocar el PDF', function () {
+it('el alta sin "abrir_etiquetas" hace un redirect Inertia normal, sin tocar el PDF', function () {
     $respuesta = $this->actingAs($this->admin)
         ->post('/activos', [
             'empresa_id' => $this->empresa->id,
@@ -122,7 +123,7 @@ it('el alta sin "generar_qr" hace un redirect Inertia normal, sin tocar el PDF',
     expect($respuesta->headers->get('content-type'))->not->toContain('application/pdf');
 });
 
-it('el alta con "generar_qr" crea el activo y sus unidades con una respuesta Inertia normal (NUNCA el PDF en el POST)', function () {
+it('el alta con "abrir_etiquetas" crea el activo y sus unidades con una respuesta Inertia normal (NUNCA el PDF en el POST)', function () {
     $respuesta = $this->actingAs($this->admin)
         ->post('/activos', [
             'empresa_id' => $this->empresa->id,
@@ -130,7 +131,7 @@ it('el alta con "generar_qr" crea el activo y sus unidades con una respuesta Ine
             'tipo_control' => 'individual',
             'almacen_id' => $this->almacen->id,
             'cantidad_inicial' => 2,
-            'generar_qr' => true,
+            'abrir_etiquetas' => true,
         ]);
 
     $activo = Activo::query()->where('nombre', 'Tablet')->firstOrFail();
@@ -325,12 +326,12 @@ it('agrega más unidades a un activo de seguimiento individual ya existente desd
     expect(UnidadActivo::query()->where('activo_id', $this->activo->id)->count())->toBe(5);
 });
 
-it('agregar existencias con "generar_qr" deja la URL de etiquetas en flash, sin devolver el PDF en el POST', function () {
+it('agregar existencias con "abrir_etiquetas" deja la URL de etiquetas en flash, sin devolver el PDF en el POST', function () {
     $respuesta = $this->actingAs($this->admin)
         ->post("/activos/{$this->activo->id}/existencias", [
             'almacen_id' => $this->almacen->id,
             'cantidad' => 2,
-            'generar_qr' => true,
+            'abrir_etiquetas' => true,
         ]);
 
     $ids = UnidadActivo::query()->where('activo_id', $this->activo->id)->pluck('id')->implode(',');
@@ -499,4 +500,47 @@ it('un token inexistente devuelve 404, no un 500', function () {
     $this->actingAs($this->admin)
         ->get('/activos/unidades/00000000-0000-0000-0000-000000000000/qr')
         ->assertNotFound();
+});
+
+it('toda unidad recién creada tiene public_token único y su QR disponible de inmediato', function () {
+    $unidades = app(RegistrarUnidadesActivo::class)->ejecutar($this->empresa, $this->activo, $this->almacen, 3, 'Alta', $this->admin->id);
+
+    expect($unidades->pluck('public_token')->filter()->unique())->toHaveCount(3);
+
+    foreach ($unidades as $unidad) {
+        $respuesta = $this->actingAs($this->admin)->get("/activos/unidades/{$unidad->public_token}/qr")->assertOk();
+        expect(substr($respuesta->getContent(), 1, 3))->toBe('PNG');
+    }
+});
+
+it('el QR de una unidad es estable: el mismo token produce siempre el mismo contenido y no hay flujo para un segundo QR', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+    $servicio = app(ServicioEtiquetasQr::class);
+
+    expect($servicio->urlPublica($unidad))->toContain($unidad->public_token)
+        ->and($servicio->pngBytes($unidad))->toBe($servicio->pngBytes($unidad->fresh()));
+
+    // No existe ninguna ruta que regenere/cree otro token o QR para la unidad.
+    $rutas = collect(app('router')->getRoutes())->map->uri()
+        ->filter(fn (string $u) => str_contains($u, 'unidades'));
+    expect($rutas->contains(fn (string $u) => str_contains($u, 'generar') || str_contains($u, 'regenerar')))->toBeFalse();
+});
+
+it('el alta de unidades sin "abrir_etiquetas" sigue creando las unidades con su token (el QR no depende de esa casilla)', function () {
+    $this->actingAs($this->admin)
+        ->post('/activos', [
+            'empresa_id' => $this->empresa->id,
+            'nombre' => 'Escáner de mano',
+            'tipo_control' => 'individual',
+            'almacen_id' => $this->almacen->id,
+            'cantidad_inicial' => 2,
+        ])
+        ->assertSessionHasNoErrors()
+        ->assertSessionMissing('etiquetasUrl');
+
+    $activo = Activo::query()->where('nombre', 'Escáner de mano')->firstOrFail();
+    $unidades = UnidadActivo::query()->where('activo_id', $activo->id)->get();
+
+    expect($unidades)->toHaveCount(2)
+        ->and($unidades->pluck('public_token')->filter()->unique())->toHaveCount(2);
 });

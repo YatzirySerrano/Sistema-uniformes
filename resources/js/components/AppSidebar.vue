@@ -13,6 +13,7 @@ import {
     Package,
     Palette,
     Ruler,
+    ScanLine,
     ScrollText,
     ShieldCheck,
     Store,
@@ -127,6 +128,12 @@ const grupos = computed<Grupo[]>(() =>
                     href: '/inventario/movimientos',
                     icono: ArrowLeftRight,
                     visible: puede('inventario.ver'),
+                },
+                {
+                    titulo: 'Inventario físico',
+                    href: '/inventarios-fisicos',
+                    icono: ScanLine,
+                    visible: puede('inventario-fisico.ver'),
                 },
                 {
                     titulo: 'Tipos y categorías',

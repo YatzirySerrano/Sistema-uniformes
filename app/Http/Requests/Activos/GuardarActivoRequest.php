@@ -63,9 +63,10 @@ class GuardarActivoRequest extends FormRequest
                 'existencias' => ['nullable', 'array'],
                 'existencias.*.talla_id' => ['required', 'integer'],
                 'existencias.*.cantidad' => ['required', 'integer', 'min:0'],
-                // Seguimiento individual: opcional generar etiquetas QR de una
-                // vez para las unidades recién creadas.
-                'generar_qr' => ['boolean'],
+                // Seguimiento individual: NO controla la existencia del QR (que
+                // es permanente desde el alta), sólo si al guardar se abre el
+                // PDF de etiquetas para imprimirlas ahora.
+                'abrir_etiquetas' => ['boolean'],
             ] : []),
             'nombre' => ['required', 'string', 'max:255'],
             'descripcion' => ['nullable', 'string', 'max:2000'],

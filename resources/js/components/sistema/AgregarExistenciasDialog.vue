@@ -33,13 +33,13 @@ const form = useForm<{
     talla_id: number | null;
     cantidad: number;
     motivo: string;
-    generar_qr: boolean;
+    abrir_etiquetas: boolean;
 }>({
     almacen_id: null,
     talla_id: null,
     cantidad: 1,
     motivo: '',
-    generar_qr: false,
+    abrir_etiquetas: false,
 });
 
 const almacenSel = ref<OpcionAlmacen | null>(null);
@@ -182,17 +182,21 @@ function enviar(): void {
                     <InputError :message="form.errors.cantidad" />
                 </div>
 
-                <label
-                    v-if="esSeguimientoIndividual"
-                    class="flex items-center gap-2 text-sm"
-                >
-                    <input
-                        v-model="form.generar_qr"
-                        type="checkbox"
-                        class="size-4"
-                    />
-                    Generar etiquetas QR para estas unidades
-                </label>
+                <div v-if="esSeguimientoIndividual" class="space-y-1">
+                    <label class="flex items-center gap-2 text-sm">
+                        <input
+                            v-model="form.abrir_etiquetas"
+                            type="checkbox"
+                            class="size-4"
+                        />
+                        Abrir las etiquetas para imprimir al guardar
+                    </label>
+                    <p class="text-muted-foreground text-xs">
+                        El código QR de cada unidad queda disponible siempre;
+                        esto sólo abre el PDF de etiquetas para imprimirlas
+                        ahora. Podrás reimprimirlas después desde cada unidad.
+                    </p>
+                </div>
 
                 <div class="grid gap-1.5">
                     <Label for="existencias-motivo"

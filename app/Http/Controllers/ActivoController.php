@@ -309,7 +309,7 @@ class ActivoController extends Controller
             'descripcion' => 'Alta de activo '.$activo->nombre,
         ]);
 
-        if ($request->boolean('generar_qr') && $resultado['unidades']->isNotEmpty()) {
+        if ($request->boolean('abrir_etiquetas') && $resultado['unidades']->isNotEmpty()) {
             $ids = $resultado['unidades']->pluck('id')->implode(',');
 
             // El PDF de etiquetas NUNCA se devuelve en la respuesta de esta
@@ -540,7 +540,7 @@ class ActivoController extends Controller
                 realizadoPor: $request->user()?->id,
             );
 
-            if ($request->boolean('generar_qr')) {
+            if ($request->boolean('abrir_etiquetas')) {
                 return back()
                     ->with('toast', ['type' => 'success', 'message' => 'Unidades agregadas correctamente.'])
                     ->with('etiquetasUrl', route('unidades-activo.etiquetas', ['ids' => $unidades->pluck('id')->implode(',')]));

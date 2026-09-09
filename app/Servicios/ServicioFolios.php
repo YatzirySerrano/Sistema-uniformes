@@ -25,6 +25,8 @@ class ServicioFolios
 
     public const ACUSE_DEVOLUCION = 'acuse_devolucion';
 
+    public const INVENTARIO_FISICO = 'inventario_fisico';
+
     /**
      * @var array<string, string>
      */
@@ -33,6 +35,7 @@ class ServicioFolios
         self::ACUSE => 'ACU',
         self::DEVOLUCION => 'DEV',
         self::ACUSE_DEVOLUCION => 'ACD',
+        self::INVENTARIO_FISICO => 'INVF',
     ];
 
     public function siguiente(string $tipo, ?int $anio = null): string

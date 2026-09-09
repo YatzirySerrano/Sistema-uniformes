@@ -45,7 +45,9 @@ class AgregarExistenciasRequest extends FormRequest
             ],
             'cantidad' => ['required', 'integer', 'min:1', 'max:100000'],
             'motivo' => ['nullable', 'string', 'max:255'],
-            'generar_qr' => ['boolean'],
+            // No controla la existencia del QR (permanente desde el alta), sólo
+            // si al guardar se abre el PDF de etiquetas para imprimirlas ahora.
+            'abrir_etiquetas' => ['boolean'],
         ];
     }
 

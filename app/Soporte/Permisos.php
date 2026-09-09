@@ -120,6 +120,13 @@ final class Permisos
                 'conjuntos.administrar' => 'Activar / desactivar conjuntos',
             ],
         ],
+        'inventario-fisico' => [
+            'etiqueta' => 'Inventario físico (rondas de escaneo QR)',
+            'permisos' => [
+                'inventario-fisico.ver' => 'Ver rondas de inventario físico y sus resultados',
+                'inventario-fisico.administrar' => 'Iniciar rondas, escanear unidades y finalizarlas',
+            ],
+        ],
         'entregas' => [
             'etiqueta' => 'Entregas',
             'permisos' => [
@@ -232,6 +239,7 @@ final class Permisos
                 'activos.ver',
                 'inventario.ver', 'inventario.entrada', 'inventario.minimos',
                 'unidades-activo.ver', 'unidades-activo.administrar',
+                'inventario-fisico.ver', 'inventario-fisico.administrar',
                 'conjuntos.ver', 'conjuntos.crear', 'conjuntos.editar',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf', 'acuses.ver-firma',
@@ -246,6 +254,7 @@ final class Permisos
                 'activos.ver',
                 'inventario.ver',
                 'unidades-activo.ver',
+                'inventario-fisico.ver',
                 'conjuntos.ver',
                 'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf',
