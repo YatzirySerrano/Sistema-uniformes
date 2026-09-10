@@ -8,7 +8,9 @@ use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Mail\ComprobanteDevolucionMail;
 use App\Models\AcuseDevolucion;
+use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
+use App\Models\Evidencia;
 use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioAcuseDevolucionPdf;
@@ -56,7 +58,36 @@ class ConfirmarAcuseDevolucion
         private readonly ServicioUnidadesActivo $unidadesActivo,
     ) {}
 
+    /**
+     * Encadena las dos fases: es el punto de entrada del camino diferido de
+     * firma (`AcuseDevolucionController::confirmar`).
+     */
     public function ejecutar(
+        Devolucion $devolucion,
+        string $firmaColaboradorBase64,
+        string $firmaOperadorBase64,
+        bool $aceptacionOperador,
+        ?int $usuarioOperadorId,
+        ?string $ip,
+        ?string $userAgent,
+    ): AcuseDevolucion {
+        $acuse = $this->confirmarEnTransaccion(
+            $devolucion, $firmaColaboradorBase64, $firmaOperadorBase64,
+            $aceptacionOperador, $usuarioOperadorId, $ip, $userAgent,
+        );
+
+        return $this->finalizarAcuse($acuse, $devolucion);
+    }
+
+    /**
+     * Parte TRANSACCIONAL: valida ambas firmas, escribe las firmas en disco
+     * privado (y las borra en su propio `catch` si algo falla), reingresa el
+     * inventario, crea el `AcuseDevolucion` y marca la devolución confirmada.
+     * Puede correr dentro de una transacción externa (flujo del wizard
+     * `RegistrarDevolucionFirmada`, donde su `DB::transaction` interno actúa
+     * como savepoint). NO materializa PDF ni encola correo.
+     */
+    public function confirmarEnTransaccion(
         Devolucion $devolucion,
         string $firmaColaboradorBase64,
         string $firmaOperadorBase64,
@@ -80,7 +111,7 @@ class ConfirmarAcuseDevolucion
         $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
         $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
-        $devolucion->loadMissing(['detalles.activo', 'detalles.talla', 'detalles.unidadActivo', 'colaborador', 'sucursal', 'almacen', 'empresa', 'registradaPor', 'entrega:id,folio']);
+        $devolucion->loadMissing(['detalles.activo', 'detalles.talla', 'detalles.unidadActivo', 'detalles.evidencias', 'colaborador', 'sucursal', 'almacen', 'empresa', 'registradaPor', 'entrega:id,folio']);
 
         $snapshot = $this->construirSnapshot($devolucion);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
@@ -210,6 +241,16 @@ class ConfirmarAcuseDevolucion
             throw $e;
         }
 
+        return $acuse;
+    }
+
+    /**
+     * Efectos POST-commit: materializa el PDF y encola el correo. Nunca debe
+     * llamarse dentro de una transacción abierta; nunca lanza (un fallo de
+     * PDF/SMTP no revierte el reingreso de inventario ni el acuse).
+     */
+    public function finalizarAcuse(AcuseDevolucion $acuse, Devolucion $devolucion): AcuseDevolucion
+    {
         $this->materializarPdf($acuse);
 
         $acuse = $acuse->refresh();
@@ -315,11 +356,14 @@ class ConfirmarAcuseDevolucion
                 'motivo' => $devolucion->motivo,
                 'notas' => $devolucion->notas,
             ],
-            'items' => $devolucion->detalles->map(fn ($d): array => [
+            // Orden determinista por id del detalle (ver ConfirmarAcuseRecepcion).
+            'items' => $devolucion->detalles->sortBy('id')->values()->map(fn (DetalleDevolucion $d): array => [
                 'activo' => $d->activo?->nombre,
                 'talla' => $d->talla?->valor,
                 'cantidad' => (int) $d->cantidad,
                 'condicion' => ($d->unidad_activo_id !== null ? $d->condicion_unidad : $d->condicion)?->etiqueta(),
+                'evidencias' => $d->evidencias->sortBy('id')->values()
+                    ->map(fn (Evidencia $e): array => ['hash_sha256' => $e->hash_sha256, 'mime' => $e->mime])->all(),
             ])->all(),
             'firmado_en' => now()->toIso8601String(),
         ];

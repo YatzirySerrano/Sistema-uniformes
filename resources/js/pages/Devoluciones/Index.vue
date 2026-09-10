@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
+import { Eye, Plus } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -8,8 +8,10 @@ import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
+import { varianteBadgeEstadoDevolucion } from '@/lib/estadoDevolucion';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Devolucion = {
@@ -21,6 +23,9 @@ type Devolucion = {
     registrada_por: string;
     fecha: string;
     renglones: number;
+    estado: string;
+    estado_etiqueta: string;
+    tiene_acuse: boolean;
 };
 
 const props = defineProps<{
@@ -125,7 +130,12 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                 :key="d.id"
                 class="flex flex-col gap-2 rounded-xl border p-4"
             >
-                <p class="font-medium">{{ d.folio }}</p>
+                <div class="flex items-start justify-between gap-2">
+                    <p class="font-medium">{{ d.folio }}</p>
+                    <Badge :variant="varianteBadgeEstadoDevolucion(d.estado)">{{
+                        d.estado_etiqueta
+                    }}</Badge>
+                </div>
                 <p class="text-muted-foreground text-sm">{{ d.colaborador }}</p>
                 <p class="text-muted-foreground text-sm">{{ d.sucursal }}</p>
                 <div
@@ -137,6 +147,11 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                 <p class="text-muted-foreground text-xs">
                     Registró: {{ d.registrada_por }}
                 </p>
+                <Button variant="outline" size="sm" as-child class="mt-1 w-fit">
+                    <Link :href="`/devoluciones/${d.id}`">
+                        <Eye class="size-4" /> Ver detalle
+                    </Link>
+                </Button>
             </div>
         </div>
 
@@ -148,11 +163,13 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                         <th class="px-3 py-2 font-medium">Empresa</th>
                         <th class="px-3 py-2 font-medium">Colaborador</th>
                         <th class="px-3 py-2 font-medium">Sucursal</th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
                         <th class="px-3 py-2 font-medium">Fecha</th>
                         <th class="px-3 py-2 text-right font-medium">
                             Renglones
                         </th>
                         <th class="px-3 py-2 font-medium">Registró</th>
+                        <th class="px-3 py-2 font-medium">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -165,12 +182,27 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                         <td class="px-3 py-2">{{ d.empresa }}</td>
                         <td class="px-3 py-2">{{ d.colaborador }}</td>
                         <td class="px-3 py-2">{{ d.sucursal }}</td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                :variant="
+                                    varianteBadgeEstadoDevolucion(d.estado)
+                                "
+                                >{{ d.estado_etiqueta }}</Badge
+                            >
+                        </td>
                         <td class="text-muted-foreground px-3 py-2">
                             {{ d.fecha }}
                         </td>
                         <td class="px-3 py-2 text-right">{{ d.renglones }}</td>
                         <td class="text-muted-foreground px-3 py-2">
                             {{ d.registrada_por }}
+                        </td>
+                        <td class="px-3 py-2">
+                            <Button variant="ghost" size="sm" as-child>
+                                <Link :href="`/devoluciones/${d.id}`">
+                                    <Eye class="size-4" /> Ver
+                                </Link>
+                            </Button>
                         </td>
                     </tr>
                 </tbody>

@@ -25,6 +25,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -476,6 +477,32 @@ class EntregaController extends Controller
             $request->user(),
         );
 
-        return response()->json(['ok' => true]);
+        // Verificación de persistencia real: `ok:true` sólo si el documento, su
+        // versión 1 y el archivo físico existen tras el commit. Un fallo
+        // parcial NO se reporta como éxito.
+        $documento = $this->documentoDeIdentidad($colaborador->fresh() ?? $colaborador);
+        $version = $documento?->versionActual;
+
+        if ($documento === null || $version === null || ! Storage::disk('local')->exists($version->ruta)) {
+            Log::error('INE durante entrega: el documento no persistió correctamente', [
+                'colaborador_id' => $colaborador->id,
+                'documento_id' => $documento?->id,
+                'tiene_version' => $version !== null,
+            ]);
+
+            throw new ExcepcionDeNegocioSimple('No se pudo guardar la identificación. Inténtalo de nuevo.');
+        }
+
+        return response()->json([
+            'ok' => true,
+            'documento' => [
+                'disponible' => true,
+                'nombre' => $documento->nombre,
+                'mime' => $version->mime,
+                'previsualizable' => ServicioExpediente::esPrevisualizable($version->mime),
+                'actualizado_en' => $version->created_at?->toIso8601String(),
+                'url' => route('entregas.documento-identidad.ver', $colaborador),
+            ],
+        ]);
     }
 }

@@ -292,11 +292,78 @@ const form = useForm<{
 });
 const errln = computed(() => form.errors as unknown as Record<string, string>);
 
-const filaValida = (f: FilaRenglon): boolean =>
-    f.activoSel !== null &&
-    (f.control === 'cantidad'
-        ? f.cantidad > 0 && (!f.activoSel.usa_variantes || f.talla_id !== null)
-        : f.unidades.length > 0);
+// El activo por cantidad usa variantes REALES si trae al menos una elegible.
+function necesitaTalla(f: FilaRenglon): boolean {
+    return (
+        f.control === 'cantidad' &&
+        f.activoSel !== null &&
+        f.activoSel.tallas.length > 0
+    );
+}
+
+// Existencia disponible de la DIMENSIÓN EXACTA seleccionada (empresa + almacén +
+// activo + talla). Con variantes: el saldo de la talla elegida, NUNCA el
+// agregado del activo. Sin variantes: el saldo único. `null` = todavía no se
+// puede consultar (falta activo o falta talla).
+function disponibleFila(f: FilaRenglon): number | null {
+    if (!f.activoSel) return null;
+    if (f.control === 'individual') return f.activoSel.disponible ?? null;
+    if (necesitaTalla(f)) {
+        if (f.talla_id === null) return null;
+        return (
+            f.activoSel.tallas.find((t) => t.id === f.talla_id)?.disponible ?? 0
+        );
+    }
+    return f.activoSel.disponible ?? 0;
+}
+
+const filaValida = (f: FilaRenglon): boolean => {
+    if (f.activoSel === null) return false;
+    if (f.control === 'individual') return f.unidades.length > 0;
+    if (necesitaTalla(f) && f.talla_id === null) return false;
+    const disp = disponibleFila(f);
+    return f.cantidad > 0 && disp !== null && f.cantidad <= disp;
+};
+
+// Lista visible de qué falta / qué está mal en el paso 2 (no basta con
+// deshabilitar el botón — hay que explicar el motivo).
+const problemasPaso2 = computed<string[]>(() => {
+    const msgs: string[] = [];
+    filas.forEach((f, i) => {
+        const n = i + 1;
+        if (!f.activoSel) {
+            msgs.push(`Renglón ${n}: selecciona un activo.`);
+            return;
+        }
+        if (f.control === 'individual') {
+            if (f.unidades.length === 0)
+                msgs.push(`Renglón ${n}: selecciona al menos una unidad.`);
+            return;
+        }
+        if (necesitaTalla(f) && f.talla_id === null) {
+            msgs.push(`Renglón ${n}: elige una talla.`);
+            return;
+        }
+        const disp = disponibleFila(f);
+        if (f.cantidad <= 0) {
+            msgs.push(`Renglón ${n}: la cantidad debe ser mayor a cero.`);
+        } else if (disp !== null && f.cantidad > disp) {
+            msgs.push(
+                `Renglón ${n}: sólo hay ${disp} disponibles de ${f.activoSel.nombre}${
+                    necesitaTalla(f)
+                        ? ` talla ${f.activoSel.tallas.find((t) => t.id === f.talla_id)?.valor ?? ''}`
+                        : ''
+                }.`,
+            );
+        }
+        if (ambiguoSinResolver(i)) {
+            msgs.push(
+                `Renglón ${n}: hay varios activos que coinciden en la empresa destino; elige uno.`,
+            );
+        }
+    });
+    return msgs;
+});
 
 const puedeAvanzar1 = computed(
     () =>
@@ -337,8 +404,9 @@ function enviar(): void {
     form.post('/inventario/traspasos', {
         preserveScroll: true,
         onError: () => {
-            if (Object.keys(form.errors).some((k) => k.startsWith('renglones')))
-                paso.value = 2;
+            const claves = Object.keys(form.errors);
+            if (claves.some((k) => k.startsWith('renglones'))) paso.value = 2;
+            else if (claves.includes('negocio')) paso.value = 3;
             else paso.value = 1;
         },
     });
@@ -493,7 +561,24 @@ function enviar(): void {
 
             <!-- ============ PASO 2 ============ -->
             <div v-show="paso === 2" class="space-y-4">
+                <p
+                    v-if="errln['negocio']"
+                    class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-2 text-sm"
+                >
+                    {{ errln['negocio'] }}
+                </p>
                 <InputError :message="errln['renglones']" />
+                <div
+                    v-if="problemasPaso2.length"
+                    class="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400"
+                >
+                    <p class="font-medium">
+                        Revisa lo siguiente antes de continuar:
+                    </p>
+                    <ul class="mt-1 list-disc space-y-0.5 pl-4">
+                        <li v-for="m in problemasPaso2" :key="m">{{ m }}</li>
+                    </ul>
+                </div>
                 <div class="flex items-center justify-between gap-2">
                     <h2 class="text-sm font-semibold">Artículos a traspasar</h2>
                     <Button
@@ -583,48 +668,89 @@ function enviar(): void {
                     </div>
 
                     <!-- cantidad -->
-                    <div
-                        v-if="fila.control === 'cantidad'"
-                        class="flex flex-wrap items-start gap-2"
-                    >
-                        <div v-if="fila.activoSel?.usa_variantes" class="w-40">
-                            <Label class="text-xs">Variante</Label>
-                            <SelectSimple
-                                :model-value="fila.talla_id"
-                                :opciones="
-                                    (fila.activoSel?.tallas ?? []).map((t) => ({
-                                        valor: t.id,
-                                        etiqueta: t.valor,
-                                    }))
-                                "
-                                placeholder="Variante"
-                                :invalido="!!errln[`renglones.${i}.talla_id`]"
-                                @update:model-value="
-                                    (v) => (fila.talla_id = v as number | null)
-                                "
-                            />
-                            <InputError
-                                :message="errln[`renglones.${i}.talla_id`]"
-                            />
+                    <div v-if="fila.control === 'cantidad'" class="space-y-1.5">
+                        <div class="flex flex-wrap items-start gap-2">
+                            <div v-if="necesitaTalla(fila)" class="w-40">
+                                <Label class="text-xs">Variante</Label>
+                                <SelectSimple
+                                    :model-value="fila.talla_id"
+                                    :opciones="
+                                        (fila.activoSel?.tallas ?? []).map(
+                                            (t) => ({
+                                                valor: t.id,
+                                                etiqueta: t.valor,
+                                            }),
+                                        )
+                                    "
+                                    placeholder="Variante"
+                                    :invalido="
+                                        !!errln[`renglones.${i}.talla_id`]
+                                    "
+                                    @update:model-value="
+                                        (v) =>
+                                            (fila.talla_id = v as number | null)
+                                    "
+                                />
+                                <InputError
+                                    :message="errln[`renglones.${i}.talla_id`]"
+                                />
+                            </div>
+                            <div class="w-32">
+                                <Label class="text-xs">Cantidad</Label>
+                                <Input
+                                    v-model.number="fila.cantidad"
+                                    type="number"
+                                    min="1"
+                                    :max="disponibleFila(fila) ?? undefined"
+                                    class="h-9"
+                                    :class="
+                                        (disponibleFila(fila) ?? Infinity) <
+                                        fila.cantidad
+                                            ? 'border-destructive'
+                                            : ''
+                                    "
+                                />
+                            </div>
                         </div>
-                        <div class="w-32">
-                            <Label class="text-xs">Cantidad</Label>
-                            <Input
-                                v-model.number="fila.cantidad"
-                                type="number"
-                                min="1"
-                                class="h-9"
-                            />
+
+                        <!-- feedback de existencia POR VARIANTE -->
+                        <p
+                            v-if="necesitaTalla(fila) && fila.talla_id === null"
+                            class="text-muted-foreground text-[11px]"
+                        >
+                            Selecciona una talla para consultar la existencia
+                            disponible.
+                        </p>
+                        <template v-else-if="disponibleFila(fila) !== null">
                             <p
-                                v-if="fila.activoSel?.disponible != null"
-                                class="text-muted-foreground mt-0.5 text-[11px]"
+                                v-if="
+                                    fila.cantidad > (disponibleFila(fila) ?? 0)
+                                "
+                                class="text-destructive text-xs"
                             >
-                                Disponible: {{ fila.activoSel.disponible }}
+                                Sólo hay {{ disponibleFila(fila) }} unidades
+                                disponibles de {{ fila.activoSel?.nombre
+                                }}{{
+                                    necesitaTalla(fila)
+                                        ? ` talla ${fila.activoSel?.tallas.find((t) => t.id === fila.talla_id)?.valor ?? ''}`
+                                        : ''
+                                }}
+                                en el almacén
+                                {{ almacenOrigen?.nombre }}.
                             </p>
-                            <InputError
-                                :message="errln[`renglones.${i}.cantidad`]"
-                            />
-                        </div>
+                            <p v-else class="text-muted-foreground text-[11px]">
+                                {{ fila.cantidad }} de
+                                {{ disponibleFila(fila) }} disponibles ·
+                                quedarán
+                                {{
+                                    (disponibleFila(fila) ?? 0) - fila.cantidad
+                                }}
+                                en el almacén origen.
+                            </p>
+                        </template>
+                        <InputError
+                            :message="errln[`renglones.${i}.cantidad`]"
+                        />
                     </div>
 
                     <!-- individual -->
@@ -732,6 +858,12 @@ function enviar(): void {
 
             <!-- ============ PASO 3 ============ -->
             <div v-show="paso === 3" class="space-y-4">
+                <p
+                    v-if="errln['negocio']"
+                    class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-2 text-sm"
+                >
+                    {{ errln['negocio'] }}
+                </p>
                 <section class="rounded-xl border p-4 text-sm">
                     <div class="flex flex-wrap items-center gap-2">
                         <span class="font-medium">{{

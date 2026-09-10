@@ -57,6 +57,34 @@ class RegistrarDevolucion
         ?string $notas = null,
         array $evidencias = [],
     ): Devolucion {
+        return DB::transaction(fn (): Devolucion => $this->crearYRegistrar(
+            $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor, $motivo, $notas, $evidencias,
+        ));
+    }
+
+    /**
+     * Núcleo transaccional reutilizable: NO abre `DB::transaction` — asume que
+     * ya hay una activa (la abre el llamador: `ejecutar()` para el camino
+     * diferido, `RegistrarDevolucionFirmada` para el wizard). Crea la
+     * `Devolucion` (`pendiente_firma`), sus `DetalleDevolucion`, adjunta las
+     * `Evidencia` y audita. NO toca inventario ni `UnidadActivo` (eso es
+     * `ConfirmarAcuseDevolucion`).
+     *
+     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}>  $activos
+     * @param  array<int, array{detalle_entrega_id: int|string, condicion: string}>  $unidades
+     * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias
+     */
+    public function crearYRegistrar(
+        int $entregaId,
+        int $almacenId,
+        string $fecha,
+        array $activos,
+        array $unidades,
+        ?int $registradaPor,
+        ?string $motivo = null,
+        ?string $notas = null,
+        array $evidencias = [],
+    ): Devolucion {
         $entrega = EntregaUniforme::query()->findOr($entregaId, fn () => throw new ExcepcionDeNegocioSimple('La entrega indicada no existe.'));
 
         $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($entrega->empresa_id), $almacenId);
@@ -65,45 +93,43 @@ class RegistrarDevolucion
             throw new ExcepcionDeNegocioSimple('Agrega al menos un renglón a devolver.');
         }
 
-        return DB::transaction(function () use ($entrega, $almacen, $activos, $unidades, $fecha, $registradaPor, $motivo, $notas, $evidencias): Devolucion {
-            $devolucion = Devolucion::query()->create([
-                'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION),
-                'empresa_id' => $entrega->empresa_id,
-                'sucursal_id' => $entrega->sucursal_id,
-                'almacen_id' => $almacen->getKey(),
-                'colaborador_id' => $entrega->colaborador_id,
-                'entrega_uniforme_id' => $entrega->getKey(),
-                'registrada_por' => $registradaPor,
-                'fecha' => $fecha,
-                'motivo' => $motivo,
-                'notas' => $notas,
-                'estado' => EstadoDevolucion::PendienteFirma,
-            ]);
+        $devolucion = Devolucion::query()->create([
+            'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION),
+            'empresa_id' => $entrega->empresa_id,
+            'sucursal_id' => $entrega->sucursal_id,
+            'almacen_id' => $almacen->getKey(),
+            'colaborador_id' => $entrega->colaborador_id,
+            'entrega_uniforme_id' => $entrega->getKey(),
+            'registrada_por' => $registradaPor,
+            'fecha' => $fecha,
+            'motivo' => $motivo,
+            'notas' => $notas,
+            'estado' => EstadoDevolucion::PendienteFirma,
+        ]);
 
-            foreach ($activos as $i => $item) {
-                $detalle = $this->procesarLineaCantidad($devolucion, $entrega, $item);
-                if ($detalle !== null && isset($evidencias["activo:{$i}"])) {
-                    $this->evidenciasSvc->adjuntar($detalle, $evidencias["activo:{$i}"], $registradaPor);
-                }
+        foreach ($activos as $i => $item) {
+            $detalle = $this->procesarLineaCantidad($devolucion, $entrega, $item);
+            if ($detalle !== null && isset($evidencias["activo:{$i}"])) {
+                $this->evidenciasSvc->adjuntar($detalle, $evidencias["activo:{$i}"], $registradaPor);
             }
+        }
 
-            foreach ($unidades as $i => $item) {
-                $detalle = $this->procesarLineaUnidad($devolucion, $entrega, $item);
-                if (isset($evidencias["unidad:{$i}"])) {
-                    $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $registradaPor);
-                }
+        foreach ($unidades as $i => $item) {
+            $detalle = $this->procesarLineaUnidad($devolucion, $entrega, $item);
+            if (isset($evidencias["unidad:{$i}"])) {
+                $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $registradaPor);
             }
+        }
 
-            $this->auditoria->registrar('devoluciones', 'crear', [
-                'tipo_entidad' => Devolucion::class,
-                'entidad_id' => $devolucion->getKey(),
-                'empresa_id' => $entrega->empresa_id,
-                'sucursal_id' => $entrega->sucursal_id,
-                'descripcion' => 'Devolución '.$devolucion->folio.' registrada para la entrega '.$entrega->folio.'; pendiente de firma para concretarse.',
-            ]);
+        $this->auditoria->registrar('devoluciones', 'crear', [
+            'tipo_entidad' => Devolucion::class,
+            'entidad_id' => $devolucion->getKey(),
+            'empresa_id' => $entrega->empresa_id,
+            'sucursal_id' => $entrega->sucursal_id,
+            'descripcion' => 'Devolución '.$devolucion->folio.' registrada para la entrega '.$entrega->folio.'.',
+        ]);
 
-            return $devolucion->load('detalles');
-        });
+        return $devolucion->load('detalles');
     }
 
     /**

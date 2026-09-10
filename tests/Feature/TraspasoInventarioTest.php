@@ -11,6 +11,7 @@ use App\Models\Almacen;
 use App\Models\BitacoraAuditoria;
 use App\Models\CategoriaActivo;
 use App\Models\MovimientoInventario;
+use App\Models\Talla;
 use App\Models\TraspasoInventario;
 use App\Models\TraspasoRenglon;
 use App\Models\UnidadActivo;
@@ -366,4 +367,85 @@ it('sin permiso inventario.transferir el endpoint responde 403', function () {
             'renglones' => [['control' => 'cantidad', 'activo_origen_id' => $this->datos['activoA']->id, 'cantidad' => 1]],
         ])
         ->assertForbidden();
+});
+
+// ---------------------------------------------------------------------------
+// Stock POR VARIANTE (bug del "40"): el saldo mostrado y prevalidado es el de
+// la (empresa+almacén+activo+talla) exacta, nunca el agregado del activo.
+// ---------------------------------------------------------------------------
+it('activos/buscar devuelve el saldo POR VARIANTE en el almacén, además del agregado', function () {
+    $tallaXs = Talla::factory()->create(['valor' => 'XS']);
+    $tallaS = Talla::factory()->create(['valor' => 'S']);
+    $calcetas = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Calcetas']);
+    $calcetas->tallas()->attach([$tallaXs->id, $tallaS->id]);
+
+    ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $calcetas->id, $tallaXs->id, 20);
+    ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $calcetas->id, $tallaS->id, 20);
+
+    $respuesta = $this->actingAs($this->admin)
+        ->getJson("/activos/buscar?empresa_id={$this->datos['empresaA']->id}&almacen_id={$this->datos['almacenA']->id}&control=cantidad&q=Calcetas")
+        ->assertOk()
+        ->json('activos.0');
+
+    expect($respuesta['disponible'])->toBe(40); // agregado (lo que NO debe pintar la UI tras elegir talla)
+    $porTalla = collect($respuesta['tallas'])->keyBy('valor');
+    expect($porTalla['XS']['disponible'])->toBe(20)
+        ->and($porTalla['S']['disponible'])->toBe(20);
+});
+
+it('el Form Request prevalida la cantidad contra el saldo EXACTO de la variante y nombra activo, variante y almacén', function () {
+    $tallaXs = Talla::factory()->create(['valor' => 'XS']);
+    $tallaS = Talla::factory()->create(['valor' => 'S']);
+    $calcetas = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Calcetas']);
+    $calcetas->tallas()->attach([$tallaXs->id, $tallaS->id]);
+
+    ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $calcetas->id, $tallaXs->id, 20);
+    ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $calcetas->id, $tallaS->id, 20);
+
+    // El frontend "dejó pasar" cantidad 21 de la variante XS (saldo real 20).
+    $respuesta = $this->actingAs($this->admin)
+        ->from('/inventario/traspasos/crear')
+        ->post('/inventario/traspasos', [
+            'empresa_origen_id' => $this->datos['empresaA']->id, 'almacen_origen_id' => $this->datos['almacenA']->id,
+            'empresa_destino_id' => $this->datos['empresaA']->id, 'almacen_destino_id' => $this->almacenA2->id,
+            'renglones' => [[
+                'control' => 'cantidad', 'activo_origen_id' => $calcetas->id,
+                'talla_id' => $tallaXs->id, 'cantidad' => 21,
+            ]],
+        ])
+        ->assertSessionHasErrors('renglones.0.cantidad');
+
+    $mensaje = session('errors')->get('renglones.0.cantidad')[0];
+    expect($mensaje)->toContain('Calcetas')
+        ->and($mensaje)->toContain('XS')
+        ->and($mensaje)->toContain('Almacén A')
+        ->and($mensaje)->toContain('20');
+
+    expect(TraspasoInventario::count())->toBe(0);
+});
+
+it('el mensaje de concurrencia reutiliza los datos de la excepción y no dice "Error al registrar traspaso"', function () {
+    ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $this->datos['activoA']->id, $this->datos['tallaA']->id, 20);
+
+    $hacer = fn (int $cantidad) => ($this->traspasar)([
+        'empresa_origen_id' => $this->datos['empresaA']->id, 'almacen_origen_id' => $this->datos['almacenA']->id,
+        'empresa_destino_id' => $this->datos['empresaA']->id, 'almacen_destino_id' => $this->almacenA2->id,
+        'renglones' => [['control' => 'cantidad', 'activo_origen_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => $cantidad]],
+    ]);
+
+    $hacer(15); // deja 5 en origen
+
+    try {
+        $hacer(15); // ahora sólo hay 5: debe fallar con el wording de concurrencia
+        $this->fail('Se esperaba ExcepcionDeNegocio por stock insuficiente.');
+    } catch (ExcepcionDeNegocio $e) {
+        expect($e->getMessage())->toStartWith('El stock disponible cambió.')
+            ->and($e->getMessage())->toContain('Camisa')
+            ->and($e->getMessage())->toContain('Almacén A')
+            ->and($e->getMessage())->toContain('5');
+    }
+
+    // Rollback total del segundo intento.
+    expect($this->inventario->saldoActual($this->datos['empresaA']->id, $this->datos['almacenA']->id, $this->datos['activoA']->id, $this->datos['tallaA']->id))->toBe(5)
+        ->and(TraspasoInventario::count())->toBe(1);
 });

@@ -7,7 +7,9 @@ use App\Excepciones\EntregaYaFirmadaException;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Mail\ComprobanteEntregaMail;
 use App\Models\AcuseRecepcion;
+use App\Models\DetalleEntrega;
 use App\Models\EntregaUniforme;
+use App\Models\Evidencia;
 use App\Servicios\ServicioAcusePdf;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
@@ -104,7 +106,7 @@ class ConfirmarAcuseRecepcion
         $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
         $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
-        $entrega->loadMissing(['detalles', 'colaborador', 'sucursal', 'encargado', 'empresa']);
+        $entrega->loadMissing(['detalles.evidencias', 'colaborador', 'sucursal', 'encargado', 'empresa']);
 
         $snapshot = $this->construirSnapshot($entrega);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
@@ -291,12 +293,20 @@ class ConfirmarAcuseRecepcion
                 'fecha_entrega' => $entrega->fecha_entrega->format('d/m/Y'),
                 'notas' => $entrega->notas,
             ],
-            'items' => $entrega->detalles->map(fn ($d): array => [
+            // Orden determinista por id del detalle: el PDF asocia cada
+            // evidencia a su renglón por posición, así que snapshot y detalles
+            // deben recorrerse en el MISMO orden.
+            'items' => $entrega->detalles->sortBy('id')->values()->map(fn (DetalleEntrega $d): array => [
                 // 'activo' es la clave vigente; los acuses previos guardaron
                 // 'prenda' en su snapshot inmutable y la plantilla lee ambas.
                 'activo' => $d->activo_nombre_snapshot,
                 'talla' => $d->talla_valor_snapshot,
                 'cantidad' => (int) $d->cantidad,
+                // Referencia DETERMINISTA de la evidencia (hash + mime): prueba
+                // QUÉ imagen pertenecía al acuse, sin depender de que el
+                // archivo físico siga existiendo. Ausente en snapshots viejos.
+                'evidencias' => $d->evidencias->sortBy('id')->values()
+                    ->map(fn (Evidencia $e): array => ['hash_sha256' => $e->hash_sha256, 'mime' => $e->mime])->all(),
             ])->all(),
             'firmado_en' => now()->toIso8601String(),
         ];

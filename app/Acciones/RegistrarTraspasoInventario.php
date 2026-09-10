@@ -7,6 +7,7 @@ use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Empresa;
@@ -193,18 +194,32 @@ class RegistrarTraspasoInventario
 
         $tallaValor = $tallaId === null ? null : Talla::query()->whereKey($tallaId)->value('valor');
 
-        $salida = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-            empresaId: $empresaOrigen->id,
-            almacenId: $almacenOrigen->id,
-            activoId: $activoOrigen->id,
-            tallaId: $tallaId,
-            tipo: TipoMovimiento::TraspasoSalida,
-            cantidad: $cantidad,
-            realizadoPor: $realizadoPor,
-            referenciaTipo: TraspasoInventario::class,
-            referenciaId: $traspaso->getKey(),
-            motivo: 'Traspaso '.$traspaso->folio,
-        ));
+        try {
+            $salida = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
+                empresaId: $empresaOrigen->id,
+                almacenId: $almacenOrigen->id,
+                activoId: $activoOrigen->id,
+                tallaId: $tallaId,
+                tipo: TipoMovimiento::TraspasoSalida,
+                cantidad: $cantidad,
+                realizadoPor: $realizadoPor,
+                referenciaTipo: TraspasoInventario::class,
+                referenciaId: $traspaso->getKey(),
+                motivo: 'Traspaso '.$traspaso->folio,
+            ));
+        } catch (ExistenciasInsuficientesException $e) {
+            // Se reutilizan los datos de la propia excepción — `$e->disponible`
+            // es el saldo REAL que `ServicioInventario` leyó bajo lockForUpdate,
+            // sin una segunda consulta que pudiera devolver otra cifra.
+            throw new ExcepcionDeNegocioSimple(sprintf(
+                'El stock disponible cambió. Solicitaste %d unidades de %s%s, pero actualmente sólo hay %d disponibles en el almacén %s.',
+                $e->solicitado,
+                $activoOrigen->nombre,
+                $tallaValor !== null ? " (variante {$tallaValor})" : '',
+                $e->disponible,
+                $almacenOrigen->nombre,
+            ));
+        }
 
         $entrada = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
             empresaId: $empresaDestino->id,

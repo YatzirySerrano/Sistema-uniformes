@@ -2,7 +2,10 @@
 
 use App\Enums\CategoriaDocumentoExpediente;
 use App\Enums\RolSistema;
+use App\Models\Colaborador;
 use App\Models\DocumentoExpediente;
+use App\Models\VersionDocumentoExpediente;
+use App\Servicios\ServicioExpediente;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
@@ -10,52 +13,79 @@ use Illuminate\Support\Facades\Storage;
  * Captura de una identificación oficial FALTANTE durante el flujo de entrega:
  * se guarda en el EXPEDIENTE del colaborador (no sólo en la entrega), con
  * autorización de mínimo privilegio y sin permitir duplicados.
+ *
+ * Las peticiones se hacen con multipart REAL (`->post()` con `UploadedFile` en
+ * el array de datos + `Accept: application/json`) para reproducir el contrato
+ * exacto del `fetch`/`FormData` del frontend.
  */
 beforeEach(function () {
     Storage::fake('local');
     $this->datos = escenarioMultiempresa();
     $this->admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
     $this->colaborador = $this->datos['colaboradorA'];
+
+    $this->subirIne = fn (UploadedFile $archivo, ?int $colaboradorId = null) => $this->post(
+        '/entregas/documento-identidad/'.($colaboradorId ?? $this->colaborador->id),
+        ['archivo' => $archivo],
+        ['Accept' => 'application/json'],
+    );
 });
 
-it('detecta que no hay INE y permite subir una que queda en el expediente', function () {
-    $this->actingAs($this->admin)
-        ->getJson("/entregas/documento-identidad/{$this->colaborador->id}")
-        ->assertOk()
-        ->assertJson(['disponible' => false]);
+it('sube una INE faltante y queda visible con la MISMA consulta que usa el módulo Expediente', function () {
+    $this->actingAs($this->admin);
 
-    $this->actingAs($this->admin)
-        ->postJson("/entregas/documento-identidad/{$this->colaborador->id}", [
-            'archivo' => UploadedFile::fake()->image('ine.jpg', 1000, 640),
-        ])
-        ->assertOk()
-        ->assertJson(['ok' => true]);
+    $this->getJson("/entregas/documento-identidad/{$this->colaborador->id}")
+        ->assertOk()->assertJson(['disponible' => false]);
+
+    ($this->subirIne)(UploadedFile::fake()->image('ine.jpg', 1000, 640))
+        ->assertOk()->assertJson(['ok' => true]);
 
     $documento = DocumentoExpediente::query()
         ->where('colaborador_id', $this->colaborador->id)
         ->where('categoria', CategoriaDocumentoExpediente::Identificacion)
         ->first();
-
     expect($documento)->not->toBeNull();
-    expect($documento->versiones()->count())->toBe(1);
-    expect($documento->versionActual->hash_sha256)->not->toBeEmpty();
+    expect($documento->activo)->toBeTrue();
+    expect($documento->colaborador_id)->toBe($this->colaborador->id);
 
-    // Una entrega posterior del mismo colaborador ya la encuentra.
-    $this->actingAs($this->admin)
-        ->getJson("/entregas/documento-identidad/{$this->colaborador->id}")
+    $version = VersionDocumentoExpediente::query()
+        ->where('documento_expediente_id', $documento->id)->where('version', 1)->first();
+    expect($version)->not->toBeNull();
+    expect(Storage::disk('local')->exists($version->ruta))->toBeTrue();
+
+    // Aparece con la consulta REAL de la pantalla del Expediente.
+    $payload = app(ServicioExpediente::class)->payload($this->colaborador->fresh(), $this->admin, 'activos');
+    expect(collect($payload['documentos'])->pluck('categoria'))->toContain('identificacion');
+
+    // La entrega actual (y futuras) ya la detecta.
+    $this->getJson("/entregas/documento-identidad/{$this->colaborador->id}")
         ->assertJson(['disponible' => true]);
 });
 
-it('no crea una segunda identificación si el colaborador ya tiene una', function () {
-    $this->actingAs($this->admin)->postJson("/entregas/documento-identidad/{$this->colaborador->id}", [
-        'archivo' => UploadedFile::fake()->image('ine.jpg'),
-    ])->assertOk();
+it('acepta JPG, PNG y PDF; rechaza otros formatos', function () {
+    $c1 = Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create();
+    $c2 = Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create();
+    $c3 = Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create();
+    $this->actingAs($this->admin);
 
-    $this->actingAs($this->admin)
-        ->postJson("/entregas/documento-identidad/{$this->colaborador->id}", [
-            'archivo' => UploadedFile::fake()->image('ine2.jpg'),
-        ])
-        ->assertStatus(422);
+    ($this->subirIne)(UploadedFile::fake()->image('a.png'), $c1->id)->assertOk();
+    ($this->subirIne)(UploadedFile::fake()->create('a.pdf', 200, 'application/pdf'), $c2->id)->assertOk();
+    ($this->subirIne)(UploadedFile::fake()->create('a.txt', 10, 'text/plain'), $c3->id)->assertStatus(422);
+});
+
+it('rechaza un archivo mayor a 10 MB con un mensaje mapeable a errors.archivo', function () {
+    $this->actingAs($this->admin);
+
+    ($this->subirIne)(UploadedFile::fake()->create('ine-grande.jpg', 11000, 'image/jpeg'))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('archivo');
+});
+
+it('no crea una segunda identificación si el colaborador ya tiene una', function () {
+    $this->actingAs($this->admin);
+
+    ($this->subirIne)(UploadedFile::fake()->image('ine.jpg'))->assertOk();
+    ($this->subirIne)(UploadedFile::fake()->image('ine2.jpg'))->assertStatus(422);
 
     expect(DocumentoExpediente::query()
         ->where('colaborador_id', $this->colaborador->id)
@@ -63,28 +93,12 @@ it('no crea una segunda identificación si el colaborador ya tiene una', functio
         ->count())->toBe(1);
 });
 
-it('rechaza un archivo que no es imagen ni PDF', function () {
-    $this->actingAs($this->admin)
-        ->postJson("/entregas/documento-identidad/{$this->colaborador->id}", [
-            'archivo' => UploadedFile::fake()->create('x.txt', 10, 'text/plain'),
-        ])
-        ->assertStatus(422);
-});
-
 it('exige poder registrar entregas y acceso a la empresa del colaborador', function () {
-    // Encargado sin acceso a la empresa del colaborador.
     $encargadoAjeno = usuarioCon(RolSistema::Encargado->value, [$this->datos['empresaB']]);
-    $this->actingAs($encargadoAjeno)
-        ->postJson("/entregas/documento-identidad/{$this->colaborador->id}", [
-            'archivo' => UploadedFile::fake()->image('ine.jpg'),
-        ])
-        ->assertForbidden();
+    $this->actingAs($encargadoAjeno);
+    ($this->subirIne)(UploadedFile::fake()->image('ine.jpg'))->assertForbidden();
 
-    // Colaborador base: no puede registrar entregas.
     $colaboradorUser = usuarioCon(RolSistema::Colaborador->value, [$this->datos['empresaA']]);
-    $this->actingAs($colaboradorUser)
-        ->postJson("/entregas/documento-identidad/{$this->colaborador->id}", [
-            'archivo' => UploadedFile::fake()->image('ine.jpg'),
-        ])
-        ->assertForbidden();
+    $this->actingAs($colaboradorUser);
+    ($this->subirIne)(UploadedFile::fake()->image('ine.jpg'))->assertForbidden();
 });

@@ -7,9 +7,11 @@ use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
 use App\Models\Evidencia;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * Guarda y adjunta evidencia fotográfica a un renglón de entrega o devolución.
@@ -99,6 +101,63 @@ class ServicioEvidencias
     {
         foreach ($metas as $meta) {
             Storage::disk('local')->delete($meta['ruta']);
+        }
+    }
+
+    /**
+     * Representación de la evidencia apta para DomPDF: lee el archivo privado,
+     * lo reduce con GD (lado mayor ≤ $maxLado, JPEG q70) y devuelve un
+     * `data:` URI. `null` si el archivo físico ya no existe o no se puede
+     * procesar (el llamador muestra "Evidencia no disponible") — NUNCA lanza,
+     * para que el comprobante siempre pueda generarse.
+     */
+    public function dataUriParaPdf(Evidencia $evidencia, int $maxLado = 700): ?string
+    {
+        try {
+            $disco = Storage::disk($evidencia->disco);
+
+            if (! $disco->exists($evidencia->ruta)) {
+                Log::warning('Evidencia sin archivo físico al generar el comprobante', [
+                    'evidencia_id' => $evidencia->id,
+                    'ruta' => $evidencia->ruta,
+                ]);
+
+                return null;
+            }
+
+            $imagen = @imagecreatefromstring($disco->get($evidencia->ruta));
+            if ($imagen === false) {
+                Log::warning('Evidencia ilegible al generar el comprobante', ['evidencia_id' => $evidencia->id]);
+
+                return null;
+            }
+
+            $ancho = imagesx($imagen);
+            $alto = imagesy($imagen);
+            $ladoMayor = max($ancho, $alto);
+
+            if ($ladoMayor > $maxLado) {
+                $escala = $maxLado / $ladoMayor;
+                $redimensionada = imagescale($imagen, (int) round($ancho * $escala), (int) round($alto * $escala));
+                if ($redimensionada !== false) {
+                    imagedestroy($imagen);
+                    $imagen = $redimensionada;
+                }
+            }
+
+            ob_start();
+            imagejpeg($imagen, null, 70);
+            $binario = (string) ob_get_clean();
+            imagedestroy($imagen);
+
+            return 'data:image/jpeg;base64,'.base64_encode($binario);
+        } catch (Throwable $e) {
+            Log::warning('No se pudo preparar la evidencia para el comprobante', [
+                'evidencia_id' => $evidencia->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
         }
     }
 }

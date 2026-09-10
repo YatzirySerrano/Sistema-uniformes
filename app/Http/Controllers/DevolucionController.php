@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Acciones\RegistrarDevolucion;
+use App\Acciones\ConfirmarAcuseDevolucion;
+use App\Acciones\RegistrarDevolucionFirmada;
 use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
+use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoUnidadActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
@@ -56,6 +58,9 @@ class DevolucionController extends Controller
                 'registrada_por' => $d->registradaPor?->name,
                 'fecha' => $d->fecha->toDateString(),
                 'renglones' => $d->detalles_count,
+                'estado' => $d->estado->value,
+                'estado_etiqueta' => $d->estado->etiqueta(),
+                'tiene_acuse' => (bool) $d->acuse_exists,
             ]);
 
         return Inertia::render('Devoluciones/Index', [
@@ -107,6 +112,7 @@ class DevolucionController extends Controller
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
             ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'entrega:id,folio', 'registradaPor:id,name'])
             ->withCount('detalles')
+            ->withExists('acuse')
             ->latest();
     }
 
@@ -130,6 +136,7 @@ class DevolucionController extends Controller
             'condiciones' => collect(CondicionDevolucion::cases())->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'condicionesUnidad' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
+            'textoConsentimiento' => ConfirmarAcuseDevolucion::TEXTO_CONSENTIMIENTO,
         ]);
     }
 
@@ -165,7 +172,7 @@ class DevolucionController extends Controller
         ];
     }
 
-    public function store(GuardarDevolucionRequest $request, RegistrarDevolucion $accion, ServicioEvidencias $evidenciasSvc): RedirectResponse
+    public function store(GuardarDevolucionRequest $request, RegistrarDevolucionFirmada $accion, ServicioEvidencias $evidenciasSvc): RedirectResponse
     {
         $datos = $request->validated();
 
@@ -173,7 +180,8 @@ class DevolucionController extends Controller
         abort_unless($request->user()->puedeAccederEmpresa($entrega->empresa_id), 403, 'No tienes acceso a la empresa de esa entrega.');
 
         // Evidencia fotográfica OPCIONAL por renglón devuelto: se guarda en
-        // disco privado antes de la transacción; se limpia si algo falla.
+        // disco privado antes de la transacción; SÓLO este `catch` la limpia
+        // (las firmas las gestiona `ConfirmarAcuseDevolucion`).
         $evidencias = [];
         $metasEvidencia = [];
         try {
@@ -194,7 +202,7 @@ class DevolucionController extends Controller
                 }
             }
 
-            $devolucion = $accion->ejecutar(
+            $acuse = $accion->ejecutar(
                 (int) $datos['entrega_uniforme_id'],
                 (int) $datos['almacen_id'],
                 $datos['fecha'],
@@ -203,6 +211,11 @@ class DevolucionController extends Controller
                 $request->user()->id,
                 $datos['motivo'] ?? null,
                 $datos['notas'] ?? null,
+                $datos['firma'],
+                $datos['firma_operador'],
+                true, // aceptación (validada por la regla `accepted`)
+                $request->ip(),
+                $request->userAgent(),
                 $evidencias,
             );
         } catch (Throwable $e) {
@@ -211,8 +224,81 @@ class DevolucionController extends Controller
             throw $e;
         }
 
-        return to_route('devoluciones.firmar', $devolucion)->with('toast', [
-            'type' => 'success', 'message' => "Devolución {$devolucion->folio} registrada. Falta la firma de ambas partes para concretarla.",
+        $acuse->loadMissing('devolucion:id,folio');
+
+        return to_route('devoluciones.show', $acuse->devolucion_id)->with('toast', [
+            'type' => 'success', 'message' => "Devolución {$acuse->devolucion?->folio} confirmada correctamente.",
+        ]);
+    }
+
+    /**
+     * Detalle de una devolución (conceptualmente análogo a Entregas → Detalle):
+     * datos, renglones con condición y evidencia, y el acuse si ya está firmado.
+     */
+    public function show(Request $request, Devolucion $devolucion): Response
+    {
+        $this->authorize('view', $devolucion);
+
+        $devolucion->load([
+            'detalles.activo:id,nombre',
+            'detalles.talla:id,valor',
+            'detalles.unidadActivo:id,codigo,public_token,estado,condicion',
+            'detalles.evidencias:id,evidenciable_id,evidenciable_type,mime,origen',
+            'colaborador:id,nombre_completo,numero_empleado',
+            'sucursal:id,nombre',
+            'empresa:id,nombre_comercial',
+            'almacen:id,nombre',
+            'entrega:id,folio',
+            'registradaPor:id,name',
+            'acuse',
+        ]);
+
+        return Inertia::render('Devoluciones/Detalle', [
+            'devolucion' => [
+                'id' => $devolucion->id,
+                'folio' => $devolucion->folio,
+                'estado' => $devolucion->estado->value,
+                'estado_etiqueta' => $devolucion->estado->etiqueta(),
+                'empresa' => $devolucion->empresa?->nombre_comercial,
+                'sucursal' => $devolucion->sucursal?->nombre,
+                'colaborador' => $devolucion->colaborador?->nombre_completo,
+                'numero_empleado' => $devolucion->colaborador?->numero_empleado,
+                'entrega_id' => $devolucion->entrega_uniforme_id,
+                'entrega_folio' => $devolucion->entrega?->folio,
+                'almacen' => $devolucion->almacen?->nombre,
+                'fecha' => $devolucion->fecha->toDateString(),
+                'motivo' => $devolucion->motivo,
+                'notas' => $devolucion->notas,
+                'registrada_por' => $devolucion->registradaPor?->name,
+                'registrada_en' => $devolucion->created_at?->toIso8601String(),
+                'confirmada_en' => $devolucion->confirmada_en?->toIso8601String(),
+                'items' => $devolucion->detalles->map(fn (DetalleDevolucion $d): array => [
+                    'activo' => $d->activo?->nombre,
+                    'talla' => $d->talla?->valor,
+                    'cantidad' => $d->cantidad,
+                    'condicion' => $d->unidad_activo_id !== null
+                        ? $d->condicion_unidad?->etiqueta()
+                        : $d->condicion->etiqueta(),
+                    'unidad_codigo' => $d->unidadActivo?->codigo,
+                    'reingresa_inventario' => $d->reingresa_inventario,
+                    'evidencias' => $d->evidencias->map(fn (Evidencia $e): array => [
+                        'url' => route('devoluciones.evidencias.ver', $e),
+                        'mime' => $e->mime,
+                    ])->all(),
+                ]),
+            ],
+            'acuse' => $devolucion->acuse === null ? null : [
+                'id' => $devolucion->acuse->id,
+                'folio' => $devolucion->acuse->folio,
+                'firmado_en' => $devolucion->acuse->firmado_en->toIso8601String(),
+                'tiene_pdf' => $devolucion->acuse->tienePdf(),
+                'ver_pdf' => $request->user()->can('verPdf', $devolucion->acuse),
+                'ver_firma' => $request->user()->can('verFirma', $devolucion->acuse),
+            ],
+            'permisos' => [
+                'firmar' => $devolucion->estado === EstadoDevolucion::PendienteFirma
+                    && $request->user()->can('confirmar', $devolucion),
+            ],
         ]);
     }
 

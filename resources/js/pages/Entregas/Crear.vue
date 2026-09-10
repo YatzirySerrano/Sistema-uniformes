@@ -572,9 +572,15 @@ async function cargarDocIdentidad(): Promise<void> {
 // --- Captura de INE faltante (se guarda en el EXPEDIENTE del colaborador) ---
 // Es una subida lateral: no navega ni recrea la página (perdería el estado del
 // wizard), así que va por `fetch` como el resto de llamadas de esta pantalla.
+// El backend SIEMPRE persiste bien (verificado end-to-end); el fallo que se
+// veía era de feedback: un archivo grande rechazado por el límite se mostraba
+// en un texto diminuto mientras el archivo seguía "seleccionado", y un guardado
+// correcto no daba ninguna confirmación.
+const INE_MAX_MB = 10;
 const ineArchivo = ref<File | null>(null);
 const ineGuardando = ref(false);
 const ineError = ref<string | null>(null);
+const ineExito = ref<string | null>(null);
 
 function xsrf(): string {
     const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
@@ -583,8 +589,17 @@ function xsrf(): string {
 
 async function guardarIne(): Promise<void> {
     if (form.colaborador_id === '' || ineArchivo.value === null) return;
-    ineGuardando.value = true;
     ineError.value = null;
+    ineExito.value = null;
+
+    // Guarda en cliente: un archivo demasiado grande se rechaza ANTES de
+    // enviarlo (no debe verse "aceptado" y luego fallar en silencio).
+    if (ineArchivo.value.size > INE_MAX_MB * 1024 * 1024) {
+        ineError.value = `El archivo pesa demasiado. El máximo permitido es ${INE_MAX_MB} MB. Toma una foto con la cámara o sube una versión más ligera.`;
+        return;
+    }
+
+    ineGuardando.value = true;
     const cuerpo = new FormData();
     cuerpo.append('archivo', ineArchivo.value);
     try {
@@ -597,18 +612,36 @@ async function guardarIne(): Promise<void> {
                 body: cuerpo,
             },
         );
+        const j = (await res.json().catch(() => ({}))) as {
+            ok?: boolean;
+            message?: string;
+            documento?: DocIdentidad;
+            errors?: { archivo?: string[] };
+        };
+
         if (!res.ok) {
-            const j = await res.json().catch(() => ({}));
-            ineError.value =
-                j.message ??
-                j.errors?.archivo?.[0] ??
-                'No se pudo guardar la identificación.';
+            if (res.status === 403) {
+                ineError.value =
+                    'No tienes permiso para agregar la identificación de este colaborador.';
+            } else {
+                ineError.value =
+                    j.errors?.archivo?.[0] ??
+                    j.message ??
+                    'No se pudo guardar la identificación.';
+            }
             return;
         }
+
         ineArchivo.value = null;
-        await cargarDocIdentidad();
+        ineExito.value =
+            'Identificación guardada correctamente en el expediente.';
+        // Refleja de inmediato el nuevo estado con el documento que devuelve el
+        // backend, sin depender de una segunda petición (evita carreras).
+        docIdentidad.value = j.documento ?? { disponible: true };
+        void cargarDocIdentidad();
     } catch {
-        ineError.value = 'No se pudo guardar la identificación.';
+        ineError.value =
+            'No se pudo guardar la identificación. Revisa tu conexión e inténtalo de nuevo.';
     } finally {
         ineGuardando.value = false;
     }
@@ -1546,14 +1579,24 @@ function enviar(): void {
                                     :disabled="ineGuardando"
                                     @click="guardarIne"
                                 >
-                                    Guardar en el expediente
+                                    {{
+                                        ineGuardando
+                                            ? 'Guardando…'
+                                            : 'Guardar en el expediente'
+                                    }}
                                 </Button>
                             </div>
                             <p
                                 v-if="ineError"
-                                class="text-destructive mt-1 text-xs"
+                                class="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border p-2 text-sm"
                             >
                                 {{ ineError }}
+                            </p>
+                            <p
+                                v-if="ineExito"
+                                class="mt-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-400"
+                            >
+                                {{ ineExito }}
                             </p>
                             <p class="text-muted-foreground mt-1 text-[11px]">
                                 Se guardará en el expediente del colaborador

@@ -21,6 +21,9 @@
         .firma-img { border: 1px solid #cbd5e1; height: 110px; width: 100%; max-width: 260px; object-fit: contain; }
         .pie { margin-top: 28px; font-size: 9px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 8px; }
         .folio { font-size: 12px; font-weight: bold; }
+        .evidencia-fila td { background: #f8fafc; }
+        .evidencia-fila img { max-height: 90px; max-width: 130px; border: 1px solid #cbd5e1; margin: 2px 4px 2px 0; }
+        .evidencia-nd { font-size: 9px; color: #94a3b8; font-style: italic; }
     </style>
 </head>
 <body>
@@ -83,11 +86,26 @@
         </thead>
         <tbody>
             @foreach ($snapshot['items'] ?? [] as $item)
+                @php($imgs = $evidenciasPorItem[$loop->index] ?? [])
                 <tr>
                     <td>{{ $item['activo'] ?? $item['prenda'] ?? '' }}</td>
                     <td>{{ $item['talla'] }}</td>
                     <td style="text-align:right">{{ $item['cantidad'] }}</td>
                 </tr>
+                @if (!empty($imgs))
+                    <tr class="evidencia-fila">
+                        <td colspan="3">
+                            <strong style="font-size:9px; color:#64748b">Evidencia fotográfica:</strong><br>
+                            @foreach ($imgs as $img)
+                                @if ($img)
+                                    <img src="{{ $img }}" alt="Evidencia">
+                                @else
+                                    <span class="evidencia-nd">Evidencia no disponible.</span>
+                                @endif
+                            @endforeach
+                        </td>
+                    </tr>
+                @endif
             @endforeach
         </tbody>
         <tfoot>
@@ -135,7 +153,10 @@
     <div class="pie">
         <div>Folio de acuse: {{ $acuse->folio }} · Documento generado por el Sistema de Control y Gestión de Uniformes.</div>
         <div>Huella de integridad (SHA-256) del contenido: {{ $acuse->hash_documento }}</div>
-        <div>Huella de integridad (SHA-256) de la firma: {{ $acuse->hash_firma }}</div>
+        <div>Huella (SHA-256) de la firma de quien recibe: {{ $acuse->hash_firma }}</div>
+        @if ($acuse->hash_firma_operador)
+            <div>Huella (SHA-256) de la firma de quien entrega: {{ $acuse->hash_firma_operador }}</div>
+        @endif
         <div>Este comprobante registra una firma de conformidad. No constituye una Firma Electrónica Avanzada ni e.firma.</div>
     </div>
 </body>

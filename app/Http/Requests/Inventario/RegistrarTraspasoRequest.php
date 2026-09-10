@@ -7,6 +7,8 @@ use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\SaldoInventario;
+use App\Models\Talla;
 use App\Models\UnidadActivo;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -125,8 +127,36 @@ class RegistrarTraspasoRequest extends FormRequest
 
                     if ($elegibles !== [] && ($tallaId === null || ! in_array($tallaId, $elegibles, true))) {
                         $validator->errors()->add("renglones.{$i}.talla_id", 'Selecciona una variante válida para este activo.');
-                    } elseif ($elegibles === [] && $tallaId !== null) {
+
+                        continue;
+                    }
+                    if ($elegibles === [] && $tallaId !== null) {
                         $validator->errors()->add("renglones.{$i}.talla_id", 'Este activo no utiliza variantes.');
+
+                        continue;
+                    }
+
+                    // Pre-chequeo de stock POR VARIANTE (no bloqueante: la
+                    // autoridad final es la transacción con lockForUpdate). Se
+                    // consulta el saldo EXACTO de (empresa+almacén+activo+talla),
+                    // nunca el agregado del activo.
+                    $tallaFinal = $elegibles === [] ? null : $tallaId;
+                    $cantidad = (int) ($renglon['cantidad'] ?? 0);
+                    $saldo = SaldoInventario::query()
+                        ->where('empresa_id', $empresaOrigenId)
+                        ->where('almacen_id', $almacenOrigenId)
+                        ->where('activo_id', $activoOrigen->id)
+                        ->when($tallaFinal === null, fn ($q) => $q->whereNull('talla_id'), fn ($q) => $q->where('talla_id', $tallaFinal))
+                        ->value('cantidad');
+                    $disponible = (int) ($saldo ?? 0);
+
+                    if ($cantidad > $disponible) {
+                        $tallaTxt = $tallaFinal === null ? '' : ' (variante '.Talla::query()->whereKey($tallaFinal)->value('valor').')';
+                        $almacenNombre = Almacen::query()->whereKey($almacenOrigenId)->value('nombre');
+                        $validator->errors()->add(
+                            "renglones.{$i}.cantidad",
+                            "Sólo hay {$disponible} unidades disponibles de {$activoOrigen->nombre}{$tallaTxt} en el almacén {$almacenNombre}.",
+                        );
                     }
 
                     continue;

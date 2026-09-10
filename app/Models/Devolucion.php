@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon $fecha
  * @property EstadoDevolucion $estado
  * @property Carbon|null $confirmada_en
+ * @property-read bool $acuse_exists cargado sólo con `withExists('acuse')`
  */
 class Devolucion extends Model
 {

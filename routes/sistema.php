@@ -207,6 +207,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('devoluciones', [DevolucionController::class, 'store'])->name('devoluciones.store');
     Route::get('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'firmar'])->name('devoluciones.firmar');
     Route::post('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'confirmar'])->name('devoluciones.confirmar');
+    Route::get('devoluciones/{devolucion}', [DevolucionController::class, 'show'])->name('devoluciones.show');
     Route::get('acuses-devolucion/{acuse}/pdf', [AcuseDevolucionController::class, 'pdf'])->name('acuses-devolucion.pdf');
     Route::get('acuses-devolucion/{acuse}/firma', [AcuseDevolucionController::class, 'firma'])->name('acuses-devolucion.firma');
     Route::get('acuses-devolucion/{acuse}/firma-operador', [AcuseDevolucionController::class, 'firmaOperador'])->name('acuses-devolucion.firma-operador');

@@ -48,6 +48,13 @@ class GuardarDevolucionRequest extends FormRequest
             'motivo' => ['nullable', 'string', 'max:255'],
             'notas' => ['nullable', 'string', 'max:1000'],
 
+            // Flujo ÚNICO (wizard): la petición trae SIEMPRE las dos firmas
+            // manuscritas y la aceptación. La validez del trazo la revalida
+            // `ValidadorFirma` dentro de `ConfirmarAcuseDevolucion`.
+            'firma' => ['required', 'string', 'max:3000000'],
+            'firma_operador' => ['required', 'string', 'max:3000000'],
+            'aceptacion' => ['accepted'],
+
             'activos' => ['nullable', 'array'],
             'activos.*.detalle_entrega_id' => [
                 'required', 'integer',
@@ -100,6 +107,9 @@ class GuardarDevolucionRequest extends FormRequest
             'almacen_id.required' => 'Selecciona el almacén destino.',
             'almacen_id.exists' => 'El almacén seleccionado no abastece a la empresa de esta entrega.',
             'fecha.before_or_equal' => 'La fecha de devolución no puede ser futura.',
+            'firma.required' => 'Solicita la firma de quien devuelve para continuar.',
+            'firma_operador.required' => 'Falta la firma del encargado que recibe la devolución.',
+            'aceptacion.accepted' => 'Debes confirmar la aceptación antes de finalizar la devolución.',
             'activos.*.detalle_entrega_id.exists' => 'Ese renglón no pertenece a esta entrega.',
             'unidades.*.detalle_entrega_id.exists' => 'Esa unidad no pertenece a esta entrega.',
             'unidades.*.detalle_entrega_id.distinct' => 'No puedes devolver la misma unidad dos veces en un mismo movimiento.',
