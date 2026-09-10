@@ -2,13 +2,20 @@
 
 namespace App\Http\Controllers;
 
+use App\Acciones\RegistrarTraspasoInventario;
 use App\Enums\TipoMovimiento;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Requests\Inventario\RegistrarTraspasoRequest;
+use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\MovimientoInventario;
+use App\Models\TraspasoInventario;
+use App\Servicios\HomologadorActivo;
 use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -64,6 +71,139 @@ class MovimientoInventarioController extends Controller
                 ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($usuario, $id)->all())
                 ->unique('id')->map->only(['id', 'nombre'])->values(),
             'tipos' => collect(TipoMovimiento::cases())->map(fn ($t): array => ['valor' => $t->value, 'etiqueta' => $t->etiqueta()]),
+            'puedeTransferir' => $request->user()->can('inventario.transferir'),
+        ]);
+    }
+
+    /**
+     * Formulario "Nuevo traspaso" (dentro del módulo Movimientos, no un módulo
+     * aparte). El historial existente no se toca.
+     */
+    public function nuevoTraspaso(Request $request): Response
+    {
+        abort_unless($request->user()->can('inventario.transferir'), 403);
+
+        return Inertia::render('Inventario/Traspasos/Crear', [
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+        ]);
+    }
+
+    /**
+     * Previsualización NO autoritativa del Activo destino de cada renglón: por
+     * cada activo de origen indica si en la empresa destino ya existe un
+     * equivalente inequívoco, si hay varios candidatos (ambiguo → el usuario
+     * elige) o si se creará uno nuevo al confirmar. NO crea nada.
+     */
+    public function previsualizarTraspaso(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->can('inventario.transferir'), 403);
+
+        $datos = $request->validate([
+            'empresa_origen_id' => ['required', 'integer'],
+            'empresa_destino_id' => ['required', 'integer'],
+            'activo_ids' => ['required', 'array', 'max:100'],
+            'activo_ids.*' => ['integer'],
+        ]);
+
+        $usuario = $request->user();
+        if (! $usuario->puedeAccederEmpresa((int) $datos['empresa_origen_id']) || ! $usuario->puedeAccederEmpresa((int) $datos['empresa_destino_id'])) {
+            return response()->json(['renglones' => []]);
+        }
+
+        $homologador = app(HomologadorActivo::class);
+        $destinoId = (int) $datos['empresa_destino_id'];
+
+        $activos = Activo::query()
+            ->where('empresa_id', (int) $datos['empresa_origen_id'])
+            ->whereIn('id', $datos['activo_ids'])
+            ->with('tallas:id')
+            ->get();
+
+        $renglones = $activos->map(function (Activo $origen) use ($homologador, $destinoId): array {
+            $candidatos = $homologador->candidatos($origen, $destinoId);
+
+            return [
+                'activo_origen_id' => $origen->id,
+                'candidatos' => $candidatos->map(fn (Activo $c): array => ['id' => $c->id, 'codigo' => $c->codigo, 'nombre' => $c->nombre])->all(),
+                'ambiguo' => $candidatos->count() > 1,
+                'se_creara' => $candidatos->isEmpty(),
+                'activo_destino' => $candidatos->count() === 1
+                    ? ['id' => $candidatos->first()->id, 'codigo' => $candidatos->first()->codigo, 'nombre' => $candidatos->first()->nombre]
+                    : null,
+            ];
+        });
+
+        return response()->json(['renglones' => $renglones]);
+    }
+
+    public function almacenarTraspaso(RegistrarTraspasoRequest $request, RegistrarTraspasoInventario $accion): RedirectResponse
+    {
+        $datos = $request->validated();
+
+        $traspaso = $accion->ejecutar(
+            (int) $datos['empresa_origen_id'],
+            (int) $datos['almacen_origen_id'],
+            (int) $datos['empresa_destino_id'],
+            (int) $datos['almacen_destino_id'],
+            $datos['renglones'],
+            $request->user()->id,
+            $datos['motivo'] ?? null,
+            $datos['notas'] ?? null,
+        );
+
+        return to_route('inventario.movimientos')->with('toast', [
+            'type' => 'success',
+            'message' => "Traspaso {$traspaso->folio} registrado correctamente.",
+        ]);
+    }
+
+    /**
+     * Reconstrucción de un traspaso: encabezado + renglones + movimientos
+     * correlacionados (qué salió / qué entró = mismo traspaso).
+     */
+    public function traspasoShow(Request $request, TraspasoInventario $traspaso): Response
+    {
+        $this->authorize('view', $traspaso);
+
+        $traspaso->load([
+            'empresaOrigen:id,nombre_comercial',
+            'empresaDestino:id,nombre_comercial',
+            'almacenOrigen:id,nombre',
+            'almacenDestino:id,nombre',
+            'realizadoPor:id,name',
+            'renglones.activoOrigen:id,nombre,codigo',
+            'renglones.activoDestino:id,nombre,codigo',
+            'renglones.talla:id,valor',
+        ]);
+
+        return Inertia::render('Inventario/Traspasos/Detalle', [
+            'traspaso' => [
+                'id' => $traspaso->id,
+                'folio' => $traspaso->folio,
+                'tipo' => $traspaso->tipo,
+                'estado' => $traspaso->estado,
+                'motivo' => $traspaso->motivo,
+                'notas' => $traspaso->notas,
+                'ocurrido_en' => $traspaso->ocurrido_en->toIso8601String(),
+                'realizado_por' => $traspaso->realizadoPor?->name,
+                'empresa_origen' => $traspaso->empresaOrigen?->nombre_comercial,
+                'almacen_origen' => $traspaso->almacenOrigen?->nombre,
+                'empresa_destino' => $traspaso->empresaDestino?->nombre_comercial,
+                'almacen_destino' => $traspaso->almacenDestino?->nombre,
+                'renglones' => $traspaso->renglones->map(fn ($r): array => [
+                    'id' => $r->id,
+                    'control' => $r->control->value,
+                    'activo_origen' => $r->activo_origen_nombre_snapshot,
+                    'activo_destino' => $r->activo_destino_nombre_snapshot,
+                    'activo_destino_codigo' => $r->activoDestino?->codigo,
+                    'activo_destino_creado' => $r->activo_destino_creado,
+                    'talla' => $r->talla_valor_snapshot,
+                    'cantidad' => $r->cantidad,
+                    'unidad_codigo' => $r->unidad_codigo_snapshot,
+                    'movimiento_salida_id' => $r->movimiento_salida_id,
+                    'movimiento_entrada_id' => $r->movimiento_entrada_id,
+                ]),
+            ],
         ]);
     }
 

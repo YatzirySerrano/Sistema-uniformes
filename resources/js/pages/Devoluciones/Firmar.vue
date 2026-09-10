@@ -23,6 +23,7 @@ const props = defineProps<{
             activo: string;
             talla: string | null;
             cantidad: number | null;
+            evidencias: { url: string; mime: string }[];
         }[];
     };
 }>();
@@ -118,6 +119,7 @@ function confirmar() {
                         <tr>
                             <th class="py-1.5">Activo</th>
                             <th class="py-1.5">Talla</th>
+                            <th class="py-1.5">Evidencia</th>
                             <th class="py-1.5 text-right">Cantidad</th>
                         </tr>
                     </thead>
@@ -129,6 +131,29 @@ function confirmar() {
                         >
                             <td class="py-1.5">{{ it.activo }}</td>
                             <td class="py-1.5">{{ it.talla ?? '—' }}</td>
+                            <td class="py-1.5">
+                                <div
+                                    v-if="it.evidencias.length"
+                                    class="flex flex-wrap gap-1"
+                                >
+                                    <a
+                                        v-for="(ev, k) in it.evidencias"
+                                        :key="k"
+                                        :href="ev.url"
+                                        target="_blank"
+                                        rel="noopener"
+                                    >
+                                        <img
+                                            :src="ev.url"
+                                            alt="Evidencia del renglón"
+                                            class="size-10 rounded border object-cover"
+                                        />
+                                    </a>
+                                </div>
+                                <span v-else class="text-muted-foreground"
+                                    >—</span
+                                >
+                            </td>
                             <td class="py-1.5 text-right">
                                 {{ it.cantidad ?? 1 }}
                             </td>

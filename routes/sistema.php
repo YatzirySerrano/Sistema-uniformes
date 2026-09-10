@@ -141,6 +141,14 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventario/movimientos', [MovimientoInventarioController::class, 'index'])->name('inventario.movimientos');
     Route::get('inventario/movimientos/exportar', [MovimientoInventarioController::class, 'exportar'])->name('inventario.movimientos.exportar');
 
+    // Traspasos de inventario (entre almacenes de una empresa o entre empresas).
+    // Rutas literales ANTES de `traspasos/{traspaso}` para que "crear" /
+    // "previsualizar" no se capturen como el binding del modelo.
+    Route::get('inventario/traspasos/crear', [MovimientoInventarioController::class, 'nuevoTraspaso'])->name('inventario.traspasos.create');
+    Route::get('inventario/traspasos/previsualizar', [MovimientoInventarioController::class, 'previsualizarTraspaso'])->name('inventario.traspasos.previsualizar');
+    Route::post('inventario/traspasos', [MovimientoInventarioController::class, 'almacenarTraspaso'])->name('inventario.traspasos.store');
+    Route::get('inventario/traspasos/{traspaso}', [MovimientoInventarioController::class, 'traspasoShow'])->name('inventario.traspasos.show');
+
     // Conjuntos
     Route::get('conjuntos', [ConjuntoController::class, 'index'])->name('conjuntos.index');
     Route::get('conjuntos/buscar', [ConjuntoController::class, 'buscar'])->name('conjuntos.buscar');
@@ -173,6 +181,11 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // firma (autorización de mínimo privilegio, ver EntregaController).
     Route::get('entregas/documento-identidad/{colaborador}', [EntregaController::class, 'documentoIdentidad'])->name('entregas.documento-identidad');
     Route::get('entregas/documento-identidad/{colaborador}/ver', [EntregaController::class, 'verDocumentoIdentidad'])->name('entregas.documento-identidad.ver');
+    // Captura de una identificación oficial faltante durante la entrega — se
+    // guarda en el EXPEDIENTE del colaborador (mínimo privilegio).
+    Route::post('entregas/documento-identidad/{colaborador}', [EntregaController::class, 'guardarDocumentoIdentidad'])->name('entregas.documento-identidad.guardar');
+    // Evidencia fotográfica de un renglón de entrega (streaming autorizado).
+    Route::get('entregas/evidencias/{evidencia}', [EntregaController::class, 'verEvidencia'])->name('entregas.evidencias.ver');
     Route::post('entregas', [EntregaController::class, 'store'])->name('entregas.store');
     Route::get('entregas/{entrega}', [EntregaController::class, 'show'])->name('entregas.show');
     Route::get('entregas/{entrega}/corregir', [CorreccionEntregaController::class, 'create'])->name('entregas.corregir.create');
@@ -190,6 +203,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('devoluciones', [DevolucionController::class, 'index'])->name('devoluciones.index');
     Route::get('devoluciones/crear', [DevolucionController::class, 'create'])->name('devoluciones.create');
     Route::get('devoluciones/exportar', [DevolucionController::class, 'exportar'])->name('devoluciones.exportar');
+    Route::get('devoluciones/evidencias/{evidencia}', [DevolucionController::class, 'verEvidencia'])->name('devoluciones.evidencias.ver');
     Route::post('devoluciones', [DevolucionController::class, 'store'])->name('devoluciones.store');
     Route::get('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'firmar'])->name('devoluciones.firmar');
     Route::post('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'confirmar'])->name('devoluciones.confirmar');

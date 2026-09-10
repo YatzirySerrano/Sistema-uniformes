@@ -1,0 +1,10 @@
+---
+paths:
+    - 'app/Acciones/RegistrarTraspasoInventario.php,app/Servicios/HomologadorActivo.php,app/Http/Requests/Inventario/RegistrarTraspasoRequest.php,app/Models/TraspasoInventario.php,app/Models/TraspasoRenglon.php,app/Http/Controllers/MovimientoInventarioController.php'
+---
+
+# Controllers
+
+## Traspasos de inventario: entidad TraspasoInventario + homologación de Activo destino
+
+Traspaso misma-empresa o interempresa: `traspasos_inventario` (encabezado, append-only) + `traspaso_inventario_renglones` (cantidad → talla_id+cantidad; individual → 1 renglón por unidad con `unidad_activo_id`). Se orquesta en `RegistrarTraspasoInventario` (UNA `DB::transaction`): por renglón, `HomologadorActivo::resolver()` → activo destino, luego `ServicioInventario::registrarMovimiento(TraspasoSalida)` en contexto origen + `(TraspasoEntrada)` en contexto destino (los `TipoMovimiento::Traspaso*` YA existían), correlacionados con `referencia_tipo=App\Models\TraspasoInventario` + `referencia_id`; el renglón guarda `movimiento_salida_id`/`movimiento_entrada_id`. NO se altera `movimientos_inventario`/`unidades_activo`/`saldos_inventario`. Unidad interempresa = UPDATE de `empresa_id`/`activo_id`/`almacen_id` en la MISMA fila `UnidadActivo` — `id`/`codigo`/`public_token`/historial ESTABLES (decisión de negocio: identidad física de por vida; el prefijo del código sigue siendo el de la empresa de origen). Homologación ESTRICTA (`HomologadorActivo`): coinciden `tipo_control` + `NormalizadorNombre::catalogo(nombre)` + `tipo_activo_id` (NULL=NULL) + `categoria_id` (NULL=NULL) + el CONJUNTO de `activo_talla`; 1 candidato → reutiliza; 0 → crea el Activo en la empresa destino con su propio `ACT-####` (`ServicioGeneradorCodigos::siguienteConPrefijo`); >1 → `ExcepcionDeNegocioSimple` (NUNCA `first()`) y el form pide elegir. Permiso: `inventario.transferir` (ya existía; Admin/Superadmin por `todos()`, NO se añadió a Supervisor). El Form Request exige `puedeAccederEmpresa` sobre AMBAS empresas. UI: botón "Nuevo traspaso" en `Inventario/Movimientos.vue` → wizard `Inventario/Traspasos/Crear.vue`; `GET inventario/traspasos/previsualizar` para el preview del activo destino.

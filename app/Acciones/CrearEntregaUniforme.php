@@ -10,6 +10,7 @@ use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\Conjunto;
 use App\Models\ConjuntoComponente;
+use App\Models\DetalleEntrega;
 use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\Talla;
@@ -17,6 +18,7 @@ use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
 use App\Servicios\ServicioUnidadesActivo;
@@ -39,12 +41,14 @@ class CrearEntregaUniforme
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
         private readonly ResolverAlmacenOperativo $resolverAlmacen,
+        private readonly ServicioEvidencias $evidenciasSvc,
     ) {}
 
     /**
      * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string}>  $activos
      * @param  array<int, array{unidad_activo_id: int|string}>  $unidades
      * @param  array<int, array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>}>  $conjuntos
+     * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias  claves "activo:{i}" / "unidad:{i}" referidas a los índices de $activos / $unidades
      */
     public function ejecutar(
         int $colaboradorId,
@@ -56,6 +60,7 @@ class CrearEntregaUniforme
         array $conjuntos,
         ?string $notas = null,
         ?int $servicioId = null,
+        array $evidencias = [],
     ): EntregaUniforme {
         $colaborador = Colaborador::query()->findOr($colaboradorId, fn () => throw new ExcepcionDeNegocioSimple('El colaborador indicado no existe.'));
 
@@ -67,14 +72,19 @@ class CrearEntregaUniforme
         $sucursalId = $colaborador->sucursal_id;
         $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId), $almacenId);
 
-        $activosConsolidados = $this->consolidarActivos($activos);
+        // Los renglones con evidencia NO se consolidan: cada uno debe quedar
+        // como su propio DetalleEntrega para poder ligarle su imagen 1:1.
+        $activosConEvidencia = array_filter($activos, fn ($_, $i): bool => isset($evidencias["activo:{$i}"]), ARRAY_FILTER_USE_BOTH);
+        $activosParaConsolidar = array_filter($activos, fn ($_, $i): bool => ! isset($evidencias["activo:{$i}"]), ARRAY_FILTER_USE_BOTH);
+
+        $activosConsolidados = $this->consolidarActivos($activosParaConsolidar);
         $unidadIds = array_values(array_unique(array_map(fn (array $u): int => (int) $u['unidad_activo_id'], $unidades)));
 
-        if ($activosConsolidados === [] && $unidadIds === [] && $conjuntos === []) {
+        if ($activosConsolidados === [] && $activosConEvidencia === [] && $unidadIds === [] && $conjuntos === []) {
             throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
         }
 
-        return DB::transaction(function () use ($empresaId, $sucursalId, $almacen, $colaborador, $encargadoId, $fechaEntrega, $activosConsolidados, $unidadIds, $conjuntos, $notas, $servicioId): EntregaUniforme {
+        return DB::transaction(function () use ($empresaId, $sucursalId, $almacen, $colaborador, $encargadoId, $fechaEntrega, $activosConsolidados, $activosConEvidencia, $unidades, $conjuntos, $notas, $servicioId, $evidencias): EntregaUniforme {
             $entrega = EntregaUniforme::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA),
                 'empresa_id' => $empresaId,
@@ -98,10 +108,30 @@ class CrearEntregaUniforme
                 $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, $item['activo_id'], $item['talla_id'], $item['cantidad']);
             }
 
-            foreach ($unidadIds as $unidadId) {
+            foreach ($activosConEvidencia as $i => $fila) {
+                $cantidad = (int) $fila['cantidad'];
+                if ($cantidad <= 0) {
+                    continue;
+                }
+                $tallaId = ($fila['talla_id'] ?? null) !== null ? (int) $fila['talla_id'] : null;
+                $detalle = $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, (int) $fila['activo_id'], $tallaId, $cantidad);
+                $this->evidenciasSvc->adjuntar($detalle, $evidencias["activo:{$i}"], $encargadoId);
+            }
+
+            $unidadesVistas = [];
+            foreach ($unidades as $i => $fila) {
+                $unidadId = (int) $fila['unidad_activo_id'];
+                if (in_array($unidadId, $unidadesVistas, true)) {
+                    continue;
+                }
+                $unidadesVistas[] = $unidadId;
+
                 $unidad = $this->unidadesActivo->bloquearYVerificarEntregable($unidadId);
                 $this->validarUnidadParaEntrega($unidad, $empresaId, $almacen->getKey());
-                $this->registrarComponenteUnidad($entrega, $sucursalId, $encargadoId, $unidad);
+                $detalle = $this->registrarComponenteUnidad($entrega, $sucursalId, $encargadoId, $unidad);
+                if (isset($evidencias["unidad:{$i}"])) {
+                    $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $encargadoId);
+                }
                 $unidadesUsadas[] = $unidad->id;
             }
 
@@ -122,7 +152,7 @@ class CrearEntregaUniforme
         });
     }
 
-    private function registrarComponenteCantidad(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, int $activoId, ?int $tallaId, int $cantidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null): void
+    private function registrarComponenteCantidad(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, int $activoId, ?int $tallaId, int $cantidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null): DetalleEntrega
     {
         $activo = Activo::query()->where('empresa_id', $empresaId)->where('tipo_control', TipoControlActivo::Cantidad)->where('activo', true)
             ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a esta empresa o ya no está disponible.'));
@@ -132,7 +162,7 @@ class CrearEntregaUniforme
             $tallaValor = Talla::query()->where('activa', true)->findOr($tallaId, fn () => throw new ExcepcionDeNegocioSimple('Una de las variantes seleccionadas no es válida.'))->valor;
         }
 
-        $entrega->detalles()->create([
+        $detalle = $entrega->detalles()->create([
             'activo_id' => $activo->id,
             'talla_id' => $tallaId,
             'cantidad' => $cantidad,
@@ -155,11 +185,13 @@ class CrearEntregaUniforme
             motivo: 'Entrega '.$entrega->folio,
             sucursalId: $sucursalId,
         ));
+
+        return $detalle;
     }
 
-    private function registrarComponenteUnidad(EntregaUniforme $entrega, int $sucursalId, int $encargadoId, UnidadActivo $unidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null): void
+    private function registrarComponenteUnidad(EntregaUniforme $entrega, int $sucursalId, int $encargadoId, UnidadActivo $unidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null): DetalleEntrega
     {
-        $entrega->detalles()->create([
+        $detalle = $entrega->detalles()->create([
             'activo_id' => $unidad->activo_id,
             'talla_id' => null,
             'unidad_activo_id' => $unidad->id,
@@ -171,6 +203,8 @@ class CrearEntregaUniforme
         ]);
 
         $this->unidadesActivo->asignar($unidad, $entrega->colaborador_id, $encargadoId, EntregaUniforme::class, $entrega->getKey(), 'Entrega '.$entrega->folio, $sucursalId);
+
+        return $detalle;
     }
 
     private function validarUnidadParaEntrega(UnidadActivo $unidad, int $empresaId, int $almacenId): void

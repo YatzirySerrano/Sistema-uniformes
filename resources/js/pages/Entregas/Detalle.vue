@@ -30,6 +30,7 @@ const props = defineProps<{
             activo: string;
             talla: string | null;
             cantidad: number;
+            evidencias: { url: string; mime: string }[];
             unidad_codigo: string | null;
             unidad_estado_visible: string | null;
             unidad_estado_visible_etiqueta: string | null;
@@ -196,6 +197,7 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                             <th class="py-1.5">Activo</th>
                             <th class="py-1.5">Talla / unidad</th>
                             <th class="py-1.5">Conjunto</th>
+                            <th class="py-1.5">Evidencia</th>
                             <th class="py-1.5 text-right">Cantidad</th>
                         </tr>
                     </thead>
@@ -228,6 +230,30 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                             </td>
                             <td class="text-muted-foreground py-1.5">
                                 {{ it.conjunto ?? '—' }}
+                            </td>
+                            <td class="py-1.5">
+                                <div
+                                    v-if="it.evidencias.length"
+                                    class="flex flex-wrap gap-1"
+                                >
+                                    <a
+                                        v-for="(ev, k) in it.evidencias"
+                                        :key="k"
+                                        :href="ev.url"
+                                        target="_blank"
+                                        rel="noopener"
+                                        class="block"
+                                    >
+                                        <img
+                                            :src="ev.url"
+                                            alt="Evidencia del renglón"
+                                            class="size-10 rounded border object-cover"
+                                        />
+                                    </a>
+                                </div>
+                                <span v-else class="text-muted-foreground"
+                                    >—</span
+                                >
                             </td>
                             <td class="py-1.5 text-right">{{ it.cantidad }}</td>
                         </tr>

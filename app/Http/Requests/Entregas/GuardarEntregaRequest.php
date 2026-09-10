@@ -77,6 +77,10 @@ class GuardarEntregaRequest extends FormRequest
             ],
             'activos.*.talla_id' => ['nullable', 'integer', Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('activa', true))],
             'activos.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
+            // Evidencia fotográfica OPCIONAL por renglón (foto de cámara o
+            // archivo). Se guarda en disco privado ligada al DetalleEntrega.
+            'activos.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
 
             'unidades' => ['nullable', 'array'],
             'unidades.*.unidad_activo_id' => [
@@ -87,6 +91,8 @@ class GuardarEntregaRequest extends FormRequest
                     ->where('estado', EstadoUnidadActivo::EnAlmacen->value)
                     ->where('condicion', CondicionUnidadActivo::Funcionando->value)),
             ],
+            'unidades.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'unidades.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
 
             'conjuntos' => ['nullable', 'array'],
             'conjuntos.*.conjunto_id' => [

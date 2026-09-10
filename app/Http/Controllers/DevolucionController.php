@@ -12,14 +12,19 @@ use App\Http\Requests\Devoluciones\GuardarDevolucionRequest;
 use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
+use App\Models\Evidencia;
+use App\Servicios\ServicioEvidencias;
 use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Throwable;
 
 /**
  * Devoluciones de activos. SIEMPRE se originan desde una entrega concreta
@@ -160,26 +165,75 @@ class DevolucionController extends Controller
         ];
     }
 
-    public function store(GuardarDevolucionRequest $request, RegistrarDevolucion $accion): RedirectResponse
+    public function store(GuardarDevolucionRequest $request, RegistrarDevolucion $accion, ServicioEvidencias $evidenciasSvc): RedirectResponse
     {
         $datos = $request->validated();
 
         $entrega = EntregaUniforme::findOrFail((int) $datos['entrega_uniforme_id']);
         abort_unless($request->user()->puedeAccederEmpresa($entrega->empresa_id), 403, 'No tienes acceso a la empresa de esa entrega.');
 
-        $devolucion = $accion->ejecutar(
-            (int) $datos['entrega_uniforme_id'],
-            (int) $datos['almacen_id'],
-            $datos['fecha'],
-            $datos['activos'] ?? [],
-            $datos['unidades'] ?? [],
-            $request->user()->id,
-            $datos['motivo'] ?? null,
-            $datos['notas'] ?? null,
-        );
+        // Evidencia fotográfica OPCIONAL por renglón devuelto: se guarda en
+        // disco privado antes de la transacción; se limpia si algo falla.
+        $evidencias = [];
+        $metasEvidencia = [];
+        try {
+            foreach (array_keys($datos['activos'] ?? []) as $i) {
+                $archivo = $request->file("activos.{$i}.evidencia");
+                if ($archivo !== null) {
+                    $meta = $evidenciasSvc->guardarPendiente($archivo, "evidencias/devoluciones/{$entrega->empresa_id}", $datos['activos'][$i]['evidencia_origen'] ?? 'archivo');
+                    $evidencias["activo:{$i}"] = $meta;
+                    $metasEvidencia[] = $meta;
+                }
+            }
+            foreach (array_keys($datos['unidades'] ?? []) as $i) {
+                $archivo = $request->file("unidades.{$i}.evidencia");
+                if ($archivo !== null) {
+                    $meta = $evidenciasSvc->guardarPendiente($archivo, "evidencias/devoluciones/{$entrega->empresa_id}", $datos['unidades'][$i]['evidencia_origen'] ?? 'archivo');
+                    $evidencias["unidad:{$i}"] = $meta;
+                    $metasEvidencia[] = $meta;
+                }
+            }
+
+            $devolucion = $accion->ejecutar(
+                (int) $datos['entrega_uniforme_id'],
+                (int) $datos['almacen_id'],
+                $datos['fecha'],
+                $datos['activos'] ?? [],
+                $datos['unidades'] ?? [],
+                $request->user()->id,
+                $datos['motivo'] ?? null,
+                $datos['notas'] ?? null,
+                $evidencias,
+            );
+        } catch (Throwable $e) {
+            $evidenciasSvc->descartar($metasEvidencia);
+
+            throw $e;
+        }
 
         return to_route('devoluciones.firmar', $devolucion)->with('toast', [
             'type' => 'success', 'message' => "Devolución {$devolucion->folio} registrada. Falta la firma de ambas partes para concretarla.",
+        ]);
+    }
+
+    /**
+     * Sirve, en streaming, la imagen de evidencia de un renglón de devolución.
+     * Autorizada contra la DEVOLUCIÓN dueña del renglón (anti-IDOR).
+     */
+    public function verEvidencia(Request $request, Evidencia $evidencia): StreamedResponse
+    {
+        abort_unless($evidencia->evidenciable_type === DetalleDevolucion::class, 404);
+
+        $detalle = DetalleDevolucion::query()->with('devolucion')->find($evidencia->evidenciable_id);
+        abort_if($detalle === null || $detalle->devolucion === null, 404);
+
+        $this->authorize('view', $detalle->devolucion);
+        abort_unless(Storage::disk($evidencia->disco)->exists($evidencia->ruta), 404);
+
+        return Storage::disk($evidencia->disco)->response($evidencia->ruta, 'evidencia.'.$evidencia->extension, [
+            'Content-Type' => $evidencia->mime,
+            'Content-Disposition' => 'inline; filename="evidencia.'.$evidencia->extension.'"',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 }

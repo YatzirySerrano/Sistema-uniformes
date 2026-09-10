@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
+import { ArrowLeftRight } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import { Button } from '@/components/ui/button';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -33,6 +35,7 @@ const props = defineProps<{
     empresasAutorizadas: EmpresaAutorizada[];
     almacenes: { id: number; nombre: string }[];
     tipos: { valor: string; etiqueta: string }[];
+    puedeTransferir: boolean;
 }>();
 
 defineOptions({
@@ -111,10 +114,17 @@ function fecha(iso: string) {
             descripcion="Historial completo de entradas y salidas. Cada cambio de existencia queda registrado."
         >
             <template #acciones>
-                <BotonesExportar
-                    endpoint="/inventario/movimientos/exportar"
-                    :filtros="filtros"
-                />
+                <div class="flex flex-wrap items-center gap-2">
+                    <Button v-if="puedeTransferir" as-child size="sm">
+                        <Link href="/inventario/traspasos/crear">
+                            <ArrowLeftRight class="size-4" /> Nuevo traspaso
+                        </Link>
+                    </Button>
+                    <BotonesExportar
+                        endpoint="/inventario/movimientos/exportar"
+                        :filtros="filtros"
+                    />
+                </div>
             </template>
         </EncabezadoPagina>
 

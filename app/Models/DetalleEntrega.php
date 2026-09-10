@@ -6,6 +6,7 @@ use Database\Factories\DetalleEntregaFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * Renglón real de una entrega: siempre UN componente concreto (por cantidad+
@@ -89,5 +90,16 @@ class DetalleEntrega extends Model
     public function conjunto(): BelongsTo
     {
         return $this->belongsTo(Conjunto::class);
+    }
+
+    /**
+     * Evidencia fotográfica opcional de este renglón (contenido histórico una
+     * vez firmada la entrega).
+     *
+     * @return MorphMany<Evidencia, $this>
+     */
+    public function evidencias(): MorphMany
+    {
+        return $this->morphMany(Evidencia::class, 'evidenciable');
     }
 }

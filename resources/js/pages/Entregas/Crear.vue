@@ -11,6 +11,7 @@ import {
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
@@ -259,12 +260,20 @@ function limpiarRenglones(): void {
 // ------------------------------------------------------------------
 // Formulario
 // ------------------------------------------------------------------
+type OrigenEvidencia = 'camara' | 'archivo' | null;
 type FilaActivo = {
     activo_id: number | '';
     talla_id: number | null;
     cantidad: number;
+    evidencia: File | null;
+    evidencia_origen: OrigenEvidencia;
 };
-type FilaUnidad = { activo_id: number | ''; unidad_activo_id: number | '' };
+type FilaUnidad = {
+    activo_id: number | '';
+    unidad_activo_id: number | '';
+    evidencia: File | null;
+    evidencia_origen: OrigenEvidencia;
+};
 type FilaConjunto = {
     conjunto_id: number | '';
     cantidad: number;
@@ -374,7 +383,13 @@ function activoSinExistencias(item: OpcionActivo): string | false {
 }
 
 function agregarActivo(): void {
-    form.activos.push({ activo_id: '', talla_id: null, cantidad: 1 });
+    form.activos.push({
+        activo_id: '',
+        talla_id: null,
+        cantidad: 1,
+        evidencia: null,
+        evidencia_origen: null,
+    });
     activosUI.push({ sel: null });
 }
 
@@ -451,7 +466,12 @@ function unidadNoEntregable(item: OpcionUnidad): string | false {
 }
 
 function agregarUnidad(): void {
-    form.unidades.push({ activo_id: '', unidad_activo_id: '' });
+    form.unidades.push({
+        activo_id: '',
+        unidad_activo_id: '',
+        evidencia: null,
+        evidencia_origen: null,
+    });
     unidadesUI.push({ activoSel: null, unidadSel: null });
 }
 
@@ -546,6 +566,51 @@ async function cargarDocIdentidad(): Promise<void> {
         docIdentidad.value = { disponible: false };
     } finally {
         docIdentidadCargando.value = false;
+    }
+}
+
+// --- Captura de INE faltante (se guarda en el EXPEDIENTE del colaborador) ---
+// Es una subida lateral: no navega ni recrea la página (perdería el estado del
+// wizard), así que va por `fetch` como el resto de llamadas de esta pantalla.
+const ineArchivo = ref<File | null>(null);
+const ineGuardando = ref(false);
+const ineError = ref<string | null>(null);
+
+function xsrf(): string {
+    const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
+async function guardarIne(): Promise<void> {
+    if (form.colaborador_id === '' || ineArchivo.value === null) return;
+    ineGuardando.value = true;
+    ineError.value = null;
+    const cuerpo = new FormData();
+    cuerpo.append('archivo', ineArchivo.value);
+    try {
+        const res = await fetch(
+            `/entregas/documento-identidad/${form.colaborador_id}`,
+            {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() },
+                credentials: 'same-origin',
+                body: cuerpo,
+            },
+        );
+        if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            ineError.value =
+                j.message ??
+                j.errors?.archivo?.[0] ??
+                'No se pudo guardar la identificación.';
+            return;
+        }
+        ineArchivo.value = null;
+        await cargarDocIdentidad();
+    } catch {
+        ineError.value = 'No se pudo guardar la identificación.';
+    } finally {
+        ineGuardando.value = false;
     }
 }
 
@@ -1014,6 +1079,13 @@ function enviar(): void {
                         >
                             <Trash2 class="size-4" />
                         </Button>
+                        <div class="sm:col-span-full">
+                            <CapturaEvidencia
+                                v-model="fila.evidencia"
+                                v-model:origen="fila.evidencia_origen"
+                                etiqueta="Agregar foto de evidencia"
+                            />
+                        </div>
                     </div>
                     <p
                         v-if="almacenSel && !form.activos.length"
@@ -1123,6 +1195,13 @@ function enviar(): void {
                         >
                             <Trash2 class="size-4" />
                         </Button>
+                        <div class="sm:col-span-full">
+                            <CapturaEvidencia
+                                v-model="fila.evidencia"
+                                v-model:origen="fila.evidencia_origen"
+                                etiqueta="Agregar foto de evidencia"
+                            />
+                        </div>
                     </div>
                     <p
                         v-if="almacenSel && !form.unidades.length"
@@ -1447,13 +1526,42 @@ function enviar(): void {
                                 entrega.
                             </p>
                         </template>
-                        <p
-                            v-else
-                            class="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500"
-                        >
-                            No hay un documento de identidad disponible en el
-                            expediente de este colaborador.
-                        </p>
+                        <template v-else>
+                            <p
+                                class="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500"
+                            >
+                                No se encontró una identificación en el
+                                expediente de este colaborador.
+                            </p>
+                            <div class="mt-2 flex flex-wrap items-center gap-2">
+                                <CapturaEvidencia
+                                    v-model="ineArchivo"
+                                    permite-pdf
+                                    etiqueta="Tomar foto o subir INE"
+                                />
+                                <Button
+                                    v-if="ineArchivo"
+                                    type="button"
+                                    size="sm"
+                                    :disabled="ineGuardando"
+                                    @click="guardarIne"
+                                >
+                                    Guardar en el expediente
+                                </Button>
+                            </div>
+                            <p
+                                v-if="ineError"
+                                class="text-destructive mt-1 text-xs"
+                            >
+                                {{ ineError }}
+                            </p>
+                            <p class="text-muted-foreground mt-1 text-[11px]">
+                                Se guardará en el expediente del colaborador
+                                (carpeta Identificación) y quedará disponible
+                                para ésta y futuras entregas. La entrega no se
+                                bloquea si decides continuar sin ella.
+                            </p>
+                        </template>
                     </div>
 
                     <div class="grid gap-1.5">

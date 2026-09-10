@@ -55,6 +55,9 @@ class GuardarDevolucionRequest extends FormRequest
             ],
             'activos.*.cantidad' => ['required', 'integer', 'min:1'],
             'activos.*.condicion' => ['required', Rule::enum(CondicionDevolucion::class)],
+            // Evidencia fotográfica OPCIONAL por renglón devuelto.
+            'activos.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
 
             'unidades' => ['nullable', 'array'],
             'unidades.*.detalle_entrega_id' => [
@@ -62,6 +65,8 @@ class GuardarDevolucionRequest extends FormRequest
                 Rule::exists('detalles_entrega', 'id')->where(fn ($q) => $q->where('entrega_uniforme_id', $entregaId)->whereNotNull('unidad_activo_id')),
             ],
             'unidades.*.condicion' => ['required', Rule::enum(CondicionUnidadActivo::class)],
+            'unidades.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'unidades.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
         ];
     }
 

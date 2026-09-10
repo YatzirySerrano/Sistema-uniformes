@@ -15,6 +15,7 @@ use App\Models\EntregaUniforme;
 use App\Models\UnidadActivo;
 use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioFolios;
 use Illuminate\Support\Facades\DB;
 
@@ -37,11 +38,13 @@ class RegistrarDevolucion
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
         private readonly ResolverAlmacenOperativo $resolverAlmacen,
+        private readonly ServicioEvidencias $evidenciasSvc,
     ) {}
 
     /**
      * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}>  $activos
      * @param  array<int, array{detalle_entrega_id: int|string, condicion: string}>  $unidades
+     * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias  claves "activo:{i}" / "unidad:{i}"
      */
     public function ejecutar(
         int $entregaId,
@@ -52,6 +55,7 @@ class RegistrarDevolucion
         ?int $registradaPor,
         ?string $motivo = null,
         ?string $notas = null,
+        array $evidencias = [],
     ): Devolucion {
         $entrega = EntregaUniforme::query()->findOr($entregaId, fn () => throw new ExcepcionDeNegocioSimple('La entrega indicada no existe.'));
 
@@ -61,7 +65,7 @@ class RegistrarDevolucion
             throw new ExcepcionDeNegocioSimple('Agrega al menos un renglón a devolver.');
         }
 
-        return DB::transaction(function () use ($entrega, $almacen, $activos, $unidades, $fecha, $registradaPor, $motivo, $notas): Devolucion {
+        return DB::transaction(function () use ($entrega, $almacen, $activos, $unidades, $fecha, $registradaPor, $motivo, $notas, $evidencias): Devolucion {
             $devolucion = Devolucion::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION),
                 'empresa_id' => $entrega->empresa_id,
@@ -76,12 +80,18 @@ class RegistrarDevolucion
                 'estado' => EstadoDevolucion::PendienteFirma,
             ]);
 
-            foreach ($activos as $item) {
-                $this->procesarLineaCantidad($devolucion, $entrega, $item);
+            foreach ($activos as $i => $item) {
+                $detalle = $this->procesarLineaCantidad($devolucion, $entrega, $item);
+                if ($detalle !== null && isset($evidencias["activo:{$i}"])) {
+                    $this->evidenciasSvc->adjuntar($detalle, $evidencias["activo:{$i}"], $registradaPor);
+                }
             }
 
-            foreach ($unidades as $item) {
-                $this->procesarLineaUnidad($devolucion, $entrega, $item);
+            foreach ($unidades as $i => $item) {
+                $detalle = $this->procesarLineaUnidad($devolucion, $entrega, $item);
+                if (isset($evidencias["unidad:{$i}"])) {
+                    $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $registradaPor);
+                }
             }
 
             $this->auditoria->registrar('devoluciones', 'crear', [
@@ -99,7 +109,7 @@ class RegistrarDevolucion
     /**
      * @param  array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}  $item
      */
-    private function procesarLineaCantidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): void
+    private function procesarLineaCantidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): ?DetalleDevolucion
     {
         $detalleOriginal = DetalleEntrega::query()
             ->where('entrega_uniforme_id', $entrega->getKey())
@@ -110,7 +120,7 @@ class RegistrarDevolucion
         $cantidad = (int) $item['cantidad'];
 
         if ($cantidad <= 0) {
-            return;
+            return null;
         }
 
         $yaDevuelto = (int) DetalleDevolucion::query()
@@ -132,7 +142,7 @@ class RegistrarDevolucion
         // El reingreso real al saldo se aplica al confirmar el acuse
         // (`ConfirmarAcuseDevolucion`); aquí sólo se deja constancia de que
         // esta línea reingresará cuando eso ocurra.
-        $devolucion->detalles()->create([
+        return $devolucion->detalles()->create([
             'detalle_entrega_id' => $detalleOriginal->getKey(),
             'activo_id' => $detalleOriginal->activo_id,
             'talla_id' => $detalleOriginal->talla_id,
@@ -145,7 +155,7 @@ class RegistrarDevolucion
     /**
      * @param  array{detalle_entrega_id: int|string, condicion: string}  $item
      */
-    private function procesarLineaUnidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): void
+    private function procesarLineaUnidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): DetalleDevolucion
     {
         $detalleOriginal = DetalleEntrega::query()
             ->where('entrega_uniforme_id', $entrega->getKey())
@@ -171,7 +181,7 @@ class RegistrarDevolucion
         // La unidad permanece "Asignada" (no disponible para reasignación)
         // hasta que la devolución se confirme con ambas firmas: el cambio de
         // estado/almacén real ocurre en `ConfirmarAcuseDevolucion`.
-        $devolucion->detalles()->create([
+        return $devolucion->detalles()->create([
             'detalle_entrega_id' => $detalleOriginal->getKey(),
             'activo_id' => $detalleOriginal->activo_id,
             'talla_id' => null,

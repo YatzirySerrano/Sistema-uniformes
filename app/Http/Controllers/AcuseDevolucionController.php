@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Acciones\ConfirmarAcuseDevolucion;
 use App\Enums\EstadoDevolucion;
 use App\Models\AcuseDevolucion;
+use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
+use App\Models\Evidencia;
 use App\Servicios\ServicioAcuseDevolucionPdf;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -31,7 +33,7 @@ class AcuseDevolucionController extends Controller
             ]);
         }
 
-        $devolucion->load(['detalles.activo', 'detalles.talla', 'colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'registradaPor:id,name', 'empresa:id,nombre_comercial']);
+        $devolucion->load(['detalles.activo', 'detalles.talla', 'detalles.evidencias:id,evidenciable_id,evidenciable_type,mime,origen', 'colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'registradaPor:id,name', 'empresa:id,nombre_comercial']);
 
         return Inertia::render('Devoluciones/Firmar', [
             'devolucion' => [
@@ -43,10 +45,14 @@ class AcuseDevolucionController extends Controller
                 'sucursal' => $devolucion->sucursal?->nombre,
                 'operador' => $devolucion->registradaPor?->name,
                 'colaborador' => $devolucion->colaborador?->only(['nombre_completo', 'numero_empleado']),
-                'items' => $devolucion->detalles->map(fn ($d): array => [
+                'items' => $devolucion->detalles->map(fn (DetalleDevolucion $d): array => [
                     'activo' => $d->activo?->nombre,
                     'talla' => $d->talla?->valor,
                     'cantidad' => $d->cantidad,
+                    'evidencias' => $d->evidencias->map(fn (Evidencia $e): array => [
+                        'url' => route('devoluciones.evidencias.ver', $e),
+                        'mime' => $e->mime,
+                    ])->all(),
                 ]),
             ],
         ]);

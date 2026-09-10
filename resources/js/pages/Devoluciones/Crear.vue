@@ -2,6 +2,7 @@
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
@@ -90,16 +91,21 @@ function elegirEntrega(o: OpcionEntrega | null): void {
 // ------------------------------------------------------------------
 // Entrega precargada: formulario de renglones
 // ------------------------------------------------------------------
+type OrigenEvidencia = 'camara' | 'archivo' | null;
 type FilaCantidad = {
     detalle_entrega_id: number;
     incluir: boolean;
     cantidad: number;
     condicion: string;
+    evidencia: File | null;
+    evidencia_origen: OrigenEvidencia;
 };
 type FilaUnidad = {
     detalle_entrega_id: number;
     incluir: boolean;
     condicion: string;
+    evidencia: File | null;
+    evidencia_origen: OrigenEvidencia;
 };
 
 const filasCantidad = ref<FilaCantidad[]>(
@@ -110,6 +116,8 @@ const filasCantidad = ref<FilaCantidad[]>(
             incluir: false,
             cantidad: r.pendiente ?? 0,
             condicion: 'reutilizable',
+            evidencia: null,
+            evidencia_origen: null,
         })),
 );
 
@@ -120,6 +128,8 @@ const filasUnidad = ref<FilaUnidad[]>(
             detalle_entrega_id: r.detalle_entrega_id,
             incluir: false,
             condicion: 'funcionando',
+            evidencia: null,
+            evidencia_origen: null,
         })),
 );
 
@@ -147,8 +157,15 @@ const form = useForm<{
         detalle_entrega_id: number;
         cantidad: number;
         condicion: string;
+        evidencia: File | null;
+        evidencia_origen: OrigenEvidencia;
     }[];
-    unidades: { detalle_entrega_id: number; condicion: string }[];
+    unidades: {
+        detalle_entrega_id: number;
+        condicion: string;
+        evidencia: File | null;
+        evidencia_origen: OrigenEvidencia;
+    }[];
 }>({
     entrega_uniforme_id: props.entrega?.id ?? '',
     almacen_id: props.entrega?.almacen_id ?? null,
@@ -199,15 +216,19 @@ function enviar(): void {
             detalle_entrega_id: f.detalle_entrega_id,
             cantidad: f.cantidad,
             condicion: f.condicion,
+            evidencia: f.evidencia,
+            evidencia_origen: f.evidencia_origen,
         }));
     form.unidades = filasUnidad.value
         .filter((f) => f.incluir)
         .map((f) => ({
             detalle_entrega_id: f.detalle_entrega_id,
             condicion: f.condicion,
+            evidencia: f.evidencia,
+            evidencia_origen: f.evidencia_origen,
         }));
 
-    form.post('/devoluciones');
+    form.post('/devoluciones', { forceFormData: true });
 }
 </script>
 
@@ -361,6 +382,13 @@ function enviar(): void {
                         "
                         :disabled="!fila.incluir"
                     />
+                    <div v-if="fila.incluir" class="sm:col-span-full">
+                        <CapturaEvidencia
+                            v-model="fila.evidencia"
+                            v-model:origen="fila.evidencia_origen"
+                            etiqueta="Agregar foto de la condición"
+                        />
+                    </div>
                 </div>
 
                 <div
@@ -394,6 +422,13 @@ function enviar(): void {
                         "
                         :disabled="!fila.incluir"
                     />
+                    <div v-if="fila.incluir" class="sm:col-span-full">
+                        <CapturaEvidencia
+                            v-model="fila.evidencia"
+                            v-model:origen="fila.evidencia_origen"
+                            etiqueta="Agregar foto de la condición"
+                        />
+                    </div>
                 </div>
 
                 <p

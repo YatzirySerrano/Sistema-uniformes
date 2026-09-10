@@ -38,6 +38,7 @@ class RegistrarEntregaFirmada
      * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string}>  $activos
      * @param  array<int, array{unidad_activo_id: int|string}>  $unidades
      * @param  array<int, array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>}>  $conjuntos
+     * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias
      */
     public function ejecutar(
         int $colaboradorId,
@@ -54,11 +55,12 @@ class RegistrarEntregaFirmada
         bool $aceptacion,
         ?string $ip,
         ?string $userAgent,
+        array $evidencias = [],
     ): AcuseRecepcion {
         /** @var array{entrega: EntregaUniforme, acuse: AcuseRecepcion} $resultado */
         $resultado = DB::transaction(function () use (
             $colaboradorId, $almacenId, $encargadoId, $fechaEntrega,
-            $activos, $unidades, $conjuntos, $notas, $servicioId,
+            $activos, $unidades, $conjuntos, $notas, $servicioId, $evidencias,
             $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent,
         ): array {
             $entrega = $this->crearEntrega->ejecutar(
@@ -71,6 +73,7 @@ class RegistrarEntregaFirmada
                 $conjuntos,
                 $notas,
                 $servicioId,
+                $evidencias,
             );
 
             $acuse = $this->confirmarAcuse->confirmarEnTransaccion(

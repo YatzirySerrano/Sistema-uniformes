@@ -4,17 +4,22 @@ namespace App\Http\Controllers;
 
 use App\Acciones\ConfirmarAcuseRecepcion;
 use App\Acciones\RegistrarEntregaFirmada;
+use App\Acciones\SubirDocumentoExpediente;
 use App\Enums\CategoriaDocumentoExpediente;
 use App\Enums\EstadoEntrega;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Entregas\GuardarEntregaRequest;
+use App\Http\Requests\Entregas\GuardarIdentidadEntregaRequest;
 use App\Models\Colaborador;
+use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
 use App\Models\DocumentoExpediente;
 use App\Models\EntregaUniforme;
+use App\Models\Evidencia;
 use App\Models\SaldoInventario;
 use App\Models\User;
+use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioExpediente;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -179,7 +184,7 @@ class EntregaController extends Controller
      * transacción — si algo falla, se revierte todo y no queda una entrega
      * "pendiente de firma". El PDF y el correo se materializan tras el commit.
      */
-    public function store(GuardarEntregaRequest $request, RegistrarEntregaFirmada $accion): RedirectResponse
+    public function store(GuardarEntregaRequest $request, RegistrarEntregaFirmada $accion, ServicioEvidencias $evidenciasSvc): RedirectResponse
     {
         $colaborador = Colaborador::findOrFail($request->integer('colaborador_id'));
         abort_unless($request->user()->puedeAccederEmpresa($colaborador->empresa_id), 403, 'No tienes acceso a la empresa de ese colaborador.');
@@ -191,6 +196,37 @@ class EntregaController extends Controller
         $clave = $datos['idempotency_key'] ?? null;
         if ($clave !== null && ! Cache::add("entregas:idempotencia:{$clave}", true, now()->addMinutes(10))) {
             throw new ExcepcionDeNegocioSimple('Esta entrega ya se registró o se está procesando. Revisa el listado de entregas.');
+        }
+
+        // Evidencia fotográfica OPCIONAL por renglón: se guarda en disco privado
+        // ANTES de la transacción (mismo patrón que la firma). `$metasEvidencia`
+        // permite borrar los archivos huérfanos si la operación falla.
+        $evidencias = [];
+        $metasEvidencia = [];
+        try {
+            foreach (array_keys($datos['activos'] ?? []) as $i) {
+                $archivo = $request->file("activos.{$i}.evidencia");
+                if ($archivo !== null) {
+                    $meta = $evidenciasSvc->guardarPendiente($archivo, "evidencias/entregas/{$colaborador->empresa_id}", $datos['activos'][$i]['evidencia_origen'] ?? 'archivo');
+                    $evidencias["activo:{$i}"] = $meta;
+                    $metasEvidencia[] = $meta;
+                }
+            }
+            foreach (array_keys($datos['unidades'] ?? []) as $i) {
+                $archivo = $request->file("unidades.{$i}.evidencia");
+                if ($archivo !== null) {
+                    $meta = $evidenciasSvc->guardarPendiente($archivo, "evidencias/entregas/{$colaborador->empresa_id}", $datos['unidades'][$i]['evidencia_origen'] ?? 'archivo');
+                    $evidencias["unidad:{$i}"] = $meta;
+                    $metasEvidencia[] = $meta;
+                }
+            }
+        } catch (Throwable $e) {
+            $evidenciasSvc->descartar($metasEvidencia);
+            if ($clave !== null) {
+                Cache::forget("entregas:idempotencia:{$clave}");
+            }
+
+            throw $e;
         }
 
         try {
@@ -214,12 +250,15 @@ class EntregaController extends Controller
                 true, // aceptación (validada por la regla `accepted`)
                 $request->ip(),
                 $request->userAgent(),
+                $evidencias,
             );
         } catch (Throwable $e) {
-            // Falló: se libera la clave para permitir un reintento legítimo.
+            // Falló: se libera la clave para permitir un reintento legítimo y se
+            // borran los archivos de evidencia huérfanos.
             if ($clave !== null) {
                 Cache::forget("entregas:idempotencia:{$clave}");
             }
+            $evidenciasSvc->descartar($metasEvidencia);
 
             throw $e;
         }
@@ -323,6 +362,7 @@ class EntregaController extends Controller
             'detalles.activo:id,nombre',
             'detalles.talla:id,valor',
             'detalles.unidadActivo:id,codigo,public_token,estado,condicion',
+            'detalles.evidencias:id,evidenciable_id,evidenciable_type,mime,origen',
             'colaborador:id,nombre_completo,numero_empleado,usuario_id',
             'sucursal:id,nombre',
             'empresa:id,nombre_comercial',
@@ -359,6 +399,10 @@ class EntregaController extends Controller
                     'activo' => $d->activo_nombre_snapshot,
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
+                    'evidencias' => $d->evidencias->map(fn (Evidencia $e): array => [
+                        'url' => route('entregas.evidencias.ver', $e),
+                        'mime' => $e->mime,
+                    ])->all(),
                     'unidad_codigo' => $d->unidadActivo?->codigo,
                     'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
                     'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
@@ -385,5 +429,53 @@ class EntregaController extends Controller
                 'devolver' => $entrega->estado !== EstadoEntrega::Anulada && $request->user()->can('create', Devolucion::class),
             ],
         ]);
+    }
+
+    /**
+     * Sirve, en streaming, la imagen de evidencia de un renglón de entrega.
+     * Se autoriza contra la ENTREGA dueña del renglón (mismo criterio que el
+     * resto del detalle) — nunca por un id enumerable sin revalidar (anti-IDOR).
+     */
+    public function verEvidencia(Request $request, Evidencia $evidencia): StreamedResponse
+    {
+        abort_unless($evidencia->evidenciable_type === DetalleEntrega::class, 404);
+
+        $detalle = DetalleEntrega::query()->with('entrega')->find($evidencia->evidenciable_id);
+        abort_if($detalle === null || $detalle->entrega === null, 404);
+
+        $this->authorize('view', $detalle->entrega);
+        abort_unless(Storage::disk($evidencia->disco)->exists($evidencia->ruta), 404);
+
+        return Storage::disk($evidencia->disco)->response($evidencia->ruta, 'evidencia.'.$evidencia->extension, [
+            'Content-Type' => $evidencia->mime,
+            'Content-Disposition' => 'inline; filename="evidencia.'.$evidencia->extension.'"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /**
+     * Sube una identificación oficial faltante al EXPEDIENTE del colaborador
+     * durante el flujo de entrega. Autorización de mínimo privilegio (ver
+     * `autorizarConsultaIdentidad()`): basta poder registrar entregas y tener
+     * al colaborador en el alcance de empresa. NO permite reemplazar una INE
+     * ya existente (eso vive en el módulo de expediente y exige
+     * `colaboradores.expediente-administrar`).
+     */
+    public function guardarDocumentoIdentidad(GuardarIdentidadEntregaRequest $request, Colaborador $colaborador, SubirDocumentoExpediente $accion): JsonResponse
+    {
+        if ($this->documentoDeIdentidad($colaborador) !== null) {
+            throw new ExcepcionDeNegocioSimple('Este colaborador ya tiene una identificación en su expediente. El reemplazo se hace desde su expediente.');
+        }
+
+        $accion->ejecutar(
+            $colaborador,
+            CategoriaDocumentoExpediente::Identificacion,
+            'Identificación oficial',
+            'Capturada durante una entrega',
+            $request->file('archivo'),
+            $request->user(),
+        );
+
+        return response()->json(['ok' => true]);
     }
 }

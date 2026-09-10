@@ -8,6 +8,7 @@ use Database\Factories\DetalleDevolucionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
  * `detalle_entrega_id` liga esta línea al renglón de la entrega original que
@@ -94,5 +95,16 @@ class DetalleDevolucion extends Model
     public function unidadActivo(): BelongsTo
     {
         return $this->belongsTo(UnidadActivo::class);
+    }
+
+    /**
+     * Evidencia fotográfica opcional de este renglón devuelto (contenido
+     * histórico una vez firmada la devolución).
+     *
+     * @return MorphMany<Evidencia, $this>
+     */
+    public function evidencias(): MorphMany
+    {
+        return $this->morphMany(Evidencia::class, 'evidenciable');
     }
 }
