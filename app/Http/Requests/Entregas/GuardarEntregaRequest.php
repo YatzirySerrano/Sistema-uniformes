@@ -9,6 +9,7 @@ use App\Models\Colaborador;
 use App\Models\Conjunto;
 use App\Models\EntregaUniforme;
 use App\Models\SaldoInventario;
+use App\Models\Talla;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -199,9 +200,12 @@ class GuardarEntregaRequest extends FormRequest
                 $solicitado = $solicitadoPorClave[$clave] ?? 0;
 
                 if ($solicitado > $disponible) {
+                    $tallaTxt = $tallaId !== null
+                        ? ' talla '.(Talla::query()->whereKey($tallaId)->value('valor') ?? '')
+                        : '';
                     $validator->errors()->add(
                         "activos.{$i}.cantidad",
-                        "No hay existencias suficientes de {$activo->nombre} en este almacén. Disponible: {$disponible}.",
+                        "Solo hay {$disponible} unidades disponibles de {$activo->nombre}{$tallaTxt} en este almacén.",
                     );
                 }
             }

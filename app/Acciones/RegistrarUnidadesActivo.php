@@ -13,23 +13,28 @@ use App\Models\Empresa;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
-use App\Soporte\ServicioGeneradorCodigos;
+use App\Soporte\NormalizadorNombre;
+use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
  * Alta de N unidades de seguimiento individual (identificación individual).
- * El usuario NUNCA captura el código: lo genera `ServicioGeneradorCodigos`
- * (race-safe, único, estable). Cada unidad genera un movimiento propio vía
- * `ServicioInventario::registrarMovimientoUnidad()`, que NO toca
- * `saldos_inventario`. Si una unidad falla, toda la operación se revierte
- * (atómica).
+ * El usuario NUNCA captura el código: lo genera el sistema (race-safe, único,
+ * estable). El código VISIBLE es `NOMBRE-ACTIVO-000001` con secuencia GLOBAL
+ * por nombre normalizado (`unidad:{slug}` en `secuencias_codigo_globales`) —
+ * independiente de Empresa/Sucursal/Almacén: dos empresas con un activo "Tablet"
+ * comparten la misma secuencia `TABLET-######` y nunca colisionan. El
+ * `public_token` y el QR NO dependen del código. Cada unidad genera un
+ * movimiento propio vía `ServicioInventario::registrarMovimientoUnidad()`, que
+ * NO toca `saldos_inventario`. Si una unidad falla, toda la operación se
+ * revierte (atómica).
  */
 class RegistrarUnidadesActivo
 {
     public function __construct(
-        private readonly ServicioGeneradorCodigos $codigos,
+        private readonly ServicioGeneradorCodigosGlobal $codigos,
         private readonly ServicioInventario $inventario,
         private readonly ServicioAuditoria $auditoria,
     ) {}
@@ -62,7 +67,9 @@ class RegistrarUnidadesActivo
             throw new ExcepcionDeNegocioSimple('Indica una cantidad de unidades mayor a cero.');
         }
 
-        return DB::transaction(function () use ($empresa, $activo, $almacen, $cantidad, $motivo, $realizadoPor, $cargaInicial): Collection {
+        $slug = NormalizadorNombre::codigoActivo($activo->nombre);
+
+        return DB::transaction(function () use ($empresa, $activo, $almacen, $cantidad, $motivo, $realizadoPor, $cargaInicial, $slug): Collection {
             $unidades = new Collection;
 
             for ($i = 0; $i < $cantidad; $i++) {
@@ -70,7 +77,7 @@ class RegistrarUnidadesActivo
                     'empresa_id' => $empresa->id,
                     'activo_id' => $activo->id,
                     'almacen_id' => $almacen->id,
-                    'codigo' => $this->codigos->siguiente($empresa),
+                    'codigo' => $this->codigos->siguiente("unidad:{$slug}", $slug, 6),
                     'public_token' => (string) Str::uuid(),
                     'estado' => EstadoUnidadActivo::EnAlmacen,
                     'condicion' => CondicionUnidadActivo::Funcionando,

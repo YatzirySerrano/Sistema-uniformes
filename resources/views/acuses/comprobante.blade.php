@@ -72,7 +72,7 @@
             </tr>
             <tr>
                 <td><strong>Fecha y hora de firma:</strong></td>
-                <td>{{ $acuse->firmado_en->format('d/m/Y H:i') }}</td>
+                <td>{{ \App\Soporte\FechaHora::local($acuse->firmado_en) }}</td>
                 <td><strong>IP de firma:</strong></td>
                 <td>{{ $acuse->ip_firma ?? 's/d' }}</td>
             </tr>
@@ -119,7 +119,7 @@
     @if ($acuse->aceptacion_titular && $acuse->texto_aceptado_snapshot)
         <div class="caja">
             <strong>Consentimiento aceptado:</strong> "{{ $acuse->texto_aceptado_snapshot }}"
-            <div class="muted">Aceptado el {{ optional($acuse->aceptado_en)->format('d/m/Y H:i') }}</div>
+            <div class="muted">Aceptado el {{ \App\Soporte\FechaHora::local($acuse->aceptado_en) }}</div>
         </div>
     @endif
 

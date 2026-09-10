@@ -106,6 +106,17 @@ function quitar(): void {
     origen.value = null;
     if (inputEl.value) inputEl.value.value = '';
 }
+
+// Si el consumidor limpia el modelo desde fuera (p. ej. al cambiar el activo /
+// la unidad del renglón), hay que resetear el estado interno: si no, queda un
+// `pendiente` viejo y el `<input type=file>` conserva su valor, así que
+// re-elegir el MISMO archivo no dispararía `@change`.
+watch(archivo, (nuevo) => {
+    if (nuevo === null) {
+        pendiente.value = null;
+        if (inputEl.value) inputEl.value.value = '';
+    }
+});
 </script>
 
 <template>

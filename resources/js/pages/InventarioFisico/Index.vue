@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
+import { fechaHora } from '@/lib/fecha';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Ronda = {
@@ -112,7 +113,7 @@ function limpiarFiltros(): void {
 }
 
 function fecha(valor: string | null): string {
-    return valor ? new Date(valor).toLocaleString() : '—';
+    return fechaHora(valor);
 }
 
 // Tabla ↔ Tarjetas: sólo cambia la presentación; el dataset (misma query,

@@ -339,6 +339,64 @@ it('el endpoint registra el traspaso y lo audita nombrando origen y destino', fu
     expect($entrada->descripcion)->toContain($traspaso->folio);
 });
 
+it('el listado de Movimientos expone la referencia legible (folio del traspaso) y datos para las cards', function () {
+    $this->datos['activoA']->update(['nombre' => 'Camisa']);
+    ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $this->datos['activoA']->id, $this->datos['tallaA']->id, 100);
+
+    $traspaso = ($this->traspasar)([
+        'empresa_origen_id' => $this->datos['empresaA']->id, 'almacen_origen_id' => $this->datos['almacenA']->id,
+        'empresa_destino_id' => $this->datos['empresaA']->id, 'almacen_destino_id' => $this->almacenA2->id,
+        'renglones' => [['control' => 'cantidad', 'activo_origen_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 10]],
+    ]);
+
+    $this->actingAs($this->admin)
+        ->get('/inventario/movimientos')
+        ->assertInertia(fn ($p) => $p
+            ->component('Inventario/Movimientos')
+            ->where('movimientos.data', fn ($filas) => collect($filas)->contains(fn ($m) => $m['referencia'] === "Traspaso {$traspaso->folio}"
+                && $m['tipo_etiqueta'] !== null
+                && $m['activo'] === 'Camisa'
+                && $m['direccion'] !== null
+                && $m['existencia_anterior'] !== null)));
+});
+
+it('el selector de unidad de Traspasos con solo_disponibles=1 excluye asignadas / en reparación / etc. y trae datos descriptivos', function () {
+    $activo = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create(['nombre' => 'Tablet']);
+    $disponible = UnidadActivo::factory()->for($this->datos['empresaA'])->for($activo)->for($this->datos['almacenA'])->create(['observaciones' => 'Negra 10 pulgadas']);
+    UnidadActivo::factory()->for($this->datos['empresaA'])->for($activo)->for($this->datos['almacenA'])->create(['estado' => 'asignada']);
+    UnidadActivo::factory()->for($this->datos['empresaA'])->for($activo)->for($this->datos['almacenA'])->create(['condicion' => 'en_reparacion']);
+
+    $unidades = $this->actingAs($this->admin)
+        ->getJson("/activos/unidades/buscar?activo_id={$activo->id}&almacen_id={$this->datos['almacenA']->id}&solo_disponibles=1")
+        ->assertOk()
+        ->json('unidades');
+
+    expect(collect($unidades)->pluck('id')->all())->toBe([$disponible->id]);
+    expect($unidades[0])->toMatchArray([
+        'codigo' => $disponible->codigo,
+        'activo' => 'Tablet',
+        'observaciones' => 'Negra 10 pulgadas',
+    ]);
+    expect($unidades[0]['estado_visible_etiqueta'])->not->toBeNull();
+
+    // Búsqueda por observaciones y por nombre de activo.
+    expect($this->actingAs($this->admin)->getJson("/activos/unidades/buscar?activo_id={$activo->id}&solo_disponibles=1&q=Negra")->json('unidades'))->toHaveCount(1);
+    expect($this->actingAs($this->admin)->getJson("/activos/unidades/buscar?activo_id={$activo->id}&solo_disponibles=1&q=Tablet")->json('unidades'))->toHaveCount(1);
+});
+
+it('sin solo_disponibles el selector de unidad sigue devolviendo las no entregables marcadas (entregas)', function () {
+    $activo = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
+    UnidadActivo::factory()->for($this->datos['empresaA'])->for($activo)->for($this->datos['almacenA'])->create();
+    UnidadActivo::factory()->for($this->datos['empresaA'])->for($activo)->for($this->datos['almacenA'])->create(['condicion' => 'en_reparacion']);
+
+    $unidades = $this->actingAs($this->admin)
+        ->getJson("/activos/unidades/buscar?activo_id={$activo->id}&almacen_id={$this->datos['almacenA']->id}")
+        ->assertOk()->json('unidades');
+
+    expect($unidades)->toHaveCount(2)
+        ->and(collect($unidades)->firstWhere('entregable', false)['motivo_no_entregable'])->toBe('En reparación');
+});
+
 it('un usuario sin acceso a la empresa destino no puede traspasar hacia ella', function () {
     $supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaA']]);
     $supervisor->givePermissionTo('inventario.transferir');

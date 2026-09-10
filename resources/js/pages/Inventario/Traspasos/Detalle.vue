@@ -3,6 +3,7 @@ import { Head, Link } from '@inertiajs/vue3';
 import { ArrowLeft, ArrowRight } from '@lucide/vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { fechaHora } from '@/lib/fecha';
 
 type Renglon = {
     id: number;
@@ -47,7 +48,7 @@ defineOptions({
 });
 
 function fecha(iso: string): string {
-    return new Date(iso).toLocaleString('es-MX');
+    return fechaHora(iso);
 }
 </script>
 

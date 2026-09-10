@@ -38,6 +38,16 @@ final class ContextoExportacion
     }
 
     /**
+     * Marca "Generado:" ya convertida a la zona de presentación
+     * (`config('uniformes.zona_horaria')`). Los blades PDF deben usar esto en
+     * lugar de `->generadoEn->format(...)`, que imprimiría la hora en UTC.
+     */
+    public function generadoEnLocal(string $formato = 'd/m/Y H:i'): string
+    {
+        return FechaHora::local($this->generadoEn, $formato);
+    }
+
+    /**
      * Ruta absoluta en disco del logo, sólo para formatos que PhpSpreadsheet
      * puede incrustar como imagen (PNG/JPG). Los SVG no se dibujan: el
      * export sigue funcionando, sólo omite el logotipo (nunca un 500).

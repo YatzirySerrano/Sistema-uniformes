@@ -5,11 +5,14 @@ import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import { Button } from '@/components/ui/button';
+import { fechaHora } from '@/lib/fecha';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Movimiento = {
@@ -24,7 +27,9 @@ type Movimiento = {
     sucursal: string | null;
     activo: string;
     talla: string;
+    unidad_codigo: string | null;
     motivo: string | null;
+    referencia: string | null;
     realizado_por: string | null;
     ocurrido_en: string;
 };
@@ -101,8 +106,12 @@ watch(
 );
 
 function fecha(iso: string) {
-    return new Date(iso).toLocaleString('es-MX');
+    return fechaHora(iso);
 }
+
+// Tabla ↔ Cards: misma query, paginación y filtros; sólo cambia la
+// representación. Preferencia recordada por dispositivo.
+const vista = useVistaPreferida('movimientos', 'tabla');
 </script>
 
 <template>
@@ -164,6 +173,7 @@ function fecha(iso: string) {
             <div class="w-40">
                 <DatePicker v-model="f.hasta" placeholder="Hasta" />
             </div>
+            <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
         <EstadoVacio
@@ -171,6 +181,62 @@ function fecha(iso: string) {
             titulo="Sin movimientos"
             descripcion="No hay movimientos que coincidan con los filtros."
         />
+
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+            <article
+                v-for="m in movimientos.data"
+                :key="m.id"
+                class="flex flex-col gap-2 rounded-xl border p-4 text-sm"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <span class="font-medium">{{ m.tipo_etiqueta }}</span>
+                    <span
+                        class="font-semibold whitespace-nowrap"
+                        :class="
+                            m.direccion === 'entrada'
+                                ? 'text-emerald-600'
+                                : 'text-rose-600'
+                        "
+                    >
+                        {{ m.direccion === 'entrada' ? '+' : '−'
+                        }}{{ m.cantidad }}
+                    </span>
+                </div>
+                <p>
+                    {{ m.activo }}
+                    <span class="text-muted-foreground">· {{ m.talla }}</span>
+                    <span
+                        v-if="m.unidad_codigo"
+                        class="text-muted-foreground font-mono text-xs"
+                    >
+                        · {{ m.unidad_codigo }}</span
+                    >
+                </p>
+                <p class="text-muted-foreground text-xs">
+                    Existencia: {{ m.existencia_anterior }} →
+                    {{ m.existencia_resultante }}
+                </p>
+                <p class="text-muted-foreground text-xs">
+                    {{ m.empresa ?? '—' }} · {{ m.almacen ?? '—'
+                    }}<span v-if="m.sucursal"> · {{ m.sucursal }}</span>
+                </p>
+                <p v-if="m.referencia" class="text-muted-foreground text-xs">
+                    {{ m.referencia }}
+                </p>
+                <p v-if="m.motivo" class="text-muted-foreground text-xs italic">
+                    {{ m.motivo }}
+                </p>
+                <div
+                    class="text-muted-foreground mt-auto flex items-center justify-between pt-1 text-xs"
+                >
+                    <span>{{ fecha(m.ocurrido_en) }}</span>
+                    <span>{{ m.realizado_por ?? '—' }}</span>
+                </div>
+            </article>
+        </div>
 
         <div v-else class="overflow-x-auto rounded-xl border">
             <table class="w-full min-w-[820px] text-sm">

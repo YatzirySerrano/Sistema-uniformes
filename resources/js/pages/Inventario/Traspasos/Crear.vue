@@ -34,6 +34,11 @@ type OpcionActivo = {
 type OpcionUnidad = {
     id: number;
     codigo: string;
+    activo: string | null;
+    almacen: string | null;
+    observaciones: string | null;
+    estado_visible_etiqueta: string | null;
+    condicion_etiqueta: string | null;
     entregable: boolean;
     motivo_no_entregable: string | null;
 };
@@ -182,7 +187,7 @@ function buscarUnidadesFila(i: number) {
         const activoId = filas[i].activoSel?.id;
         if (!activoId || !almacenOrigen.value) return [];
         const res = await fetch(
-            `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenOrigen.value.id}&q=${encodeURIComponent(q)}`,
+            `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenOrigen.value.id}&solo_disponibles=1&q=${encodeURIComponent(q)}`,
             {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
@@ -770,8 +775,20 @@ function enviar(): void {
                                           'No disponible')
                             "
                             :etiqueta="(u) => (u as OpcionUnidad).codigo"
-                            placeholder="Agregar unidad por código…"
-                            placeholder-busqueda="Buscar por código"
+                            :descripcion="
+                                (u) =>
+                                    [
+                                        (u as OpcionUnidad).activo,
+                                        (u as OpcionUnidad).observaciones,
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' · ') ||
+                                    ((u as OpcionUnidad)
+                                        .estado_visible_etiqueta ??
+                                        '')
+                            "
+                            placeholder="Agregar unidad por código o descripción…"
+                            placeholder-busqueda="Buscar por código, descripción o activo"
                             sin-resultados="Sin unidades disponibles de este activo en el almacén origen."
                             @update:model-value="
                                 (v) =>
@@ -787,7 +804,12 @@ function enviar(): void {
                                 :key="u.id"
                                 class="bg-muted flex items-center gap-1 rounded-md px-2 py-1 text-xs"
                             >
-                                {{ u.codigo }}
+                                <span class="font-mono">{{ u.codigo }}</span>
+                                <span
+                                    v-if="u.observaciones"
+                                    class="text-muted-foreground"
+                                    >· {{ u.observaciones }}</span
+                                >
                                 <button
                                     type="button"
                                     :aria-label="`Quitar unidad ${u.codigo}`"

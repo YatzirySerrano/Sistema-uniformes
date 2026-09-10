@@ -85,8 +85,8 @@ function alElegirAlmacen(a: OpcionAlmacen | null) {
     form.almacen_id = a?.id ?? null;
 }
 
-// Previsualización (no autoritativa) de cuántas unidades entrarán al snapshot.
-const universo = ref<number | null>(null);
+// Previsualización (no autoritativa) del universo del snapshot.
+const universo = ref<{ total: number; existencias: number } | null>(null);
 const cargandoUniverso = ref(false);
 let universoToken = 0;
 
@@ -94,21 +94,24 @@ watch(
     () => [form.empresa_id, form.almacen_id],
     async () => {
         universo.value = null;
-        if (!form.empresa_id) return;
+        if (!form.empresa_id || !form.almacen_id) return;
         const token = ++universoToken;
         cargandoUniverso.value = true;
         try {
             const params = new URLSearchParams({
                 empresa_id: String(form.empresa_id),
+                almacen_id: String(form.almacen_id),
             });
-            if (form.almacen_id)
-                params.set('almacen_id', String(form.almacen_id));
             const res = await fetch(`/inventarios-fisicos/universo?${params}`, {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
             });
             const data = await res.json();
-            if (token === universoToken) universo.value = data.total ?? 0;
+            if (token === universoToken)
+                universo.value = {
+                    total: data.total ?? 0,
+                    existencias: data.existencias ?? 0,
+                };
         } catch {
             if (token === universoToken) universo.value = null;
         } finally {
@@ -138,7 +141,7 @@ function enviar(): void {
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Nueva ronda de inventario físico"
-            descripcion="Al iniciar la ronda se congela el universo de unidades identificadas esperadas. Las unidades registradas después ya no cuentan como esperadas (aparecen como «no esperadas» si se escanean)."
+            descripcion="La ronda comprueba lo que debería estar físicamente en un almacén: unidades identificadas disponibles (por QR o marca manual) y artículos por cantidad. Al iniciar se congela ese universo — lo que cambie después no altera la ronda."
         />
 
         <form class="flex flex-col gap-5" @submit.prevent="enviar">
@@ -180,24 +183,24 @@ function enviar(): void {
             </div>
 
             <div class="grid gap-1.5">
-                <Label>Almacén (opcional)</Label>
+                <Label>Almacén</Label>
                 <BuscadorAsync
                     :model-value="almacenSel"
                     :buscar="buscarAlmacenes"
                     :etiqueta="(a) => String(a.nombre)"
                     :dependencia="empresaId || ''"
                     :disabled="!form.empresa_id"
-                    placeholder="Toda la empresa"
+                    :invalido="!!form.errors.almacen_id"
+                    placeholder="Selecciona el almacén a inventariar"
                     placeholder-busqueda="Buscar almacén…"
                     @update:model-value="
                         (v) => alElegirAlmacen(v as OpcionAlmacen | null)
                     "
                 />
                 <p class="text-muted-foreground text-xs">
-                    Déjalo vacío para incluir todas las unidades de la empresa.
-                    Con un almacén, la ronda se limita a las unidades cuyo
-                    almacén de resguardo es ése (las asignadas a un colaborador
-                    conservan su almacén, así que también entran).
+                    Se incluyen sólo las unidades identificadas disponibles en
+                    ese almacén (en almacén, funcionando, sin asignar) y las
+                    existencias por cantidad con saldo mayor a cero.
                 </p>
                 <InputError :message="form.errors.almacen_id" />
             </div>
@@ -217,16 +220,19 @@ function enviar(): void {
                 class="bg-muted/40 rounded-lg border p-3 text-sm"
                 aria-live="polite"
             >
-                <template v-if="!form.empresa_id">
-                    Elige una empresa para ver cuántas unidades entrarán en la
-                    ronda.
+                <template v-if="!form.empresa_id || !form.almacen_id">
+                    Elige empresa y almacén para ver qué entrará en la ronda.
                 </template>
                 <template v-else-if="cargandoUniverso">Calculando…</template>
                 <template v-else-if="universo !== null">
                     Se incluirán
-                    <strong class="tabular-nums">{{ universo }}</strong>
-                    unidad(es) identificada(s) en el snapshot inicial (se
-                    excluyen las dadas de baja).
+                    <strong class="tabular-nums">{{ universo.total }}</strong>
+                    unidad(es) identificada(s) disponible(s) +
+                    <strong class="tabular-nums">{{
+                        universo.existencias
+                    }}</strong>
+                    renglón(es) de artículos por cantidad en el snapshot
+                    inicial.
                 </template>
                 <template v-else>
                     No se pudo calcular el universo ahora; podrás iniciar la
@@ -243,6 +249,7 @@ function enviar(): void {
                     :disabled="
                         form.processing ||
                         !form.empresa_id ||
+                        !form.almacen_id ||
                         !form.nombre.trim()
                     "
                 >

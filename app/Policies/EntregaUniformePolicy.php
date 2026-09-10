@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Enums\EstadoEntrega;
 use App\Models\EntregaUniforme;
 use App\Models\User;
 
@@ -34,8 +35,15 @@ class EntregaUniformePolicy
         return $user->can('acuses.firmar') || $esTitular;
     }
 
+    /**
+     * Una entrega FIRMADA (o corregida, o anulada) es un documento histórico
+     * inmutable: no se corrige. Sólo una entrega todavía `PendienteFirma`
+     * (camino de firma diferida legado) admite corrección administrativa.
+     */
     public function corregir(User $user, EntregaUniforme $entrega): bool
     {
-        return $user->can('entregas.corregir') && $user->puedeAccederEmpresa($entrega->empresa_id);
+        return $user->can('entregas.corregir')
+            && $user->puedeAccederEmpresa($entrega->empresa_id)
+            && $entrega->estado === EstadoEntrega::PendienteFirma;
     }
 }

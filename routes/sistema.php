@@ -170,6 +170,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventarios-fisicos/{inventarioFisico}', [InventarioFisicoController::class, 'show'])->name('inventarios-fisicos.show');
     Route::get('inventarios-fisicos/{inventarioFisico}/exportar', [InventarioFisicoController::class, 'exportar'])->name('inventarios-fisicos.exportar');
     Route::post('inventarios-fisicos/{inventarioFisico}/escanear', [InventarioFisicoController::class, 'escanear'])->name('inventarios-fisicos.escanear');
+    Route::post('inventarios-fisicos/{inventarioFisico}/unidades/{unidad}/presente', [InventarioFisicoController::class, 'marcarUnidadPresente'])->name('inventarios-fisicos.unidades.presente');
+    Route::post('inventarios-fisicos/{inventarioFisico}/existencias/{existencia}', [InventarioFisicoController::class, 'verificarExistencia'])->name('inventarios-fisicos.existencias.verificar');
     Route::post('inventarios-fisicos/{inventarioFisico}/finalizar', [InventarioFisicoController::class, 'finalizar'])->name('inventarios-fisicos.finalizar');
 
     // Entregas

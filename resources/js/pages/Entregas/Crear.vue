@@ -402,6 +402,11 @@ function alElegirActivo(i: number, o: OpcionActivo | null): void {
     activosUI[i].sel = o;
     form.activos[i].activo_id = o?.id ?? '';
     form.activos[i].talla_id = null;
+    // El renglón vuelve a empezar: nada de arrastrar cantidad ni la foto del
+    // artículo anterior (la evidencia siempre pertenece a un elemento real).
+    form.activos[i].cantidad = 1;
+    form.activos[i].evidencia = null;
+    form.activos[i].evidencia_origen = null;
     form.clearErrors(`activos.${i}.activo_id`, `activos.${i}.talla_id`);
 }
 
@@ -485,12 +490,20 @@ function alElegirActivoUnidad(i: number, o: OpcionActivo | null): void {
     unidadesUI[i].unidadSel = null;
     form.unidades[i].activo_id = o?.id ?? '';
     form.unidades[i].unidad_activo_id = '';
+    // La foto corresponde a una unidad física concreta: al cambiar de activo
+    // (y por tanto de unidad) no se arrastra.
+    form.unidades[i].evidencia = null;
+    form.unidades[i].evidencia_origen = null;
     form.clearErrors(`unidades.${i}.unidad_activo_id`);
 }
 
 function alElegirUnidad(i: number, o: OpcionUnidad | null): void {
     unidadesUI[i].unidadSel = o;
     form.unidades[i].unidad_activo_id = o?.id ?? '';
+    // La evidencia era de la unidad anterior: nunca asociarla en silencio a
+    // otra unidad.
+    form.unidades[i].evidencia = null;
+    form.unidades[i].evidencia_origen = null;
     form.clearErrors(`unidades.${i}.unidad_activo_id`);
 }
 
@@ -675,7 +688,54 @@ const esPdfIne = computed(() => docIdentidad.value?.mime === 'application/pdf');
 const puedeAvanzarPaso1 = computed(
     () => form.colaborador_id !== '' && form.almacen_id !== null,
 );
-const puedeAvanzarPaso2 = computed(() => totalRenglones.value > 0);
+
+// Bloqueo del paso 2 con MENSAJE (no sólo botón deshabilitado): cada frase
+// dice exactamente qué corregir. El backend siempre revalida el stock real
+// bajo lock; esto es sólo UX.
+const problemasPaso2 = computed<string[]>(() => {
+    const problemas: string[] = [];
+
+    form.activos.forEach((fila, i) => {
+        if (fila.activo_id === '') return;
+        const sel = activosUI[i]?.sel;
+        const nombre = sel?.nombre ?? 'Artículo';
+
+        if (sel?.usa_variantes && fila.talla_id === null) {
+            problemas.push(`«${nombre}»: elige la talla.`);
+            return;
+        }
+        if (fila.cantidad < 1) {
+            problemas.push(`«${nombre}»: la cantidad debe ser al menos 1.`);
+            return;
+        }
+        const disp = disponibleDe(fila.activo_id, fila.talla_id);
+        if (disp !== null && fila.cantidad > disp) {
+            const talla = sel?.tallas.find(
+                (t) => t.id === fila.talla_id,
+            )?.valor;
+            problemas.push(
+                `«${nombre}»${talla ? ` ${talla}` : ''}: solicitaste ${fila.cantidad} y sólo hay ${disp} disponibles.`,
+            );
+        }
+    });
+
+    form.conjuntos.forEach((fila, i) => {
+        if (fila.conjunto_id === '') return;
+        const sel = conjuntosUI[i]?.sel;
+        const disp = sel?.disponible ?? 0;
+        if (fila.cantidad > disp) {
+            problemas.push(
+                `Conjunto «${sel?.nombre ?? ''}»: sólo hay ${disp} completos.`,
+            );
+        }
+    });
+
+    return problemas;
+});
+
+const puedeAvanzarPaso2 = computed(
+    () => totalRenglones.value > 0 && problemasPaso2.value.length === 0,
+);
 
 const faltantesFirma = computed<string[]>(() => {
     const faltan: string[] = [];
@@ -971,6 +1031,18 @@ function enviar(): void {
 
                 <InputError :message="erroresLaxos['items']" />
 
+                <div
+                    v-if="problemasPaso2.length"
+                    class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                >
+                    <p class="font-medium">
+                        Revisa lo siguiente antes de continuar:
+                    </p>
+                    <ul class="mt-1 list-disc space-y-0.5 pl-5">
+                        <li v-for="m in problemasPaso2" :key="m">{{ m }}</li>
+                    </ul>
+                </div>
+
                 <!-- Artículos por cantidad -->
                 <section class="space-y-3 rounded-xl border p-4">
                     <div class="flex items-start justify-between gap-2">
@@ -1084,20 +1156,66 @@ function enviar(): void {
                                         fila.talla_id,
                                     ) !== null
                                 "
-                                class="text-muted-foreground mt-0.5 text-[11px]"
+                                class="mt-0.5 text-[11px]"
                                 :class="
                                     (disponibleDe(
                                         fila.activo_id,
                                         fila.talla_id,
                                     ) ?? 0) < fila.cantidad
                                         ? 'text-destructive'
-                                        : ''
+                                        : 'text-muted-foreground'
                                 "
                             >
-                                Disponible:
-                                {{
-                                    disponibleDe(fila.activo_id, fila.talla_id)
-                                }}
+                                <template
+                                    v-if="
+                                        fila.cantidad >= 1 &&
+                                        fila.cantidad <=
+                                            (disponibleDe(
+                                                fila.activo_id,
+                                                fila.talla_id,
+                                            ) ?? 0)
+                                    "
+                                >
+                                    {{ fila.cantidad }} de
+                                    {{
+                                        disponibleDe(
+                                            fila.activo_id,
+                                            fila.talla_id,
+                                        )
+                                    }}
+                                    disponibles · quedarán
+                                    {{
+                                        (disponibleDe(
+                                            fila.activo_id,
+                                            fila.talla_id,
+                                        ) ?? 0) - fila.cantidad
+                                    }}
+                                </template>
+                                <template v-else>
+                                    Solo hay
+                                    {{
+                                        disponibleDe(
+                                            fila.activo_id,
+                                            fila.talla_id,
+                                        )
+                                    }}
+                                    unidades disponibles de
+                                    {{ activosUI[i]?.sel?.nombre }}
+                                    <template
+                                        v-if="
+                                            activosUI[i]?.sel?.tallas.find(
+                                                (t) => t.id === fila.talla_id,
+                                            )
+                                        "
+                                    >
+                                        talla
+                                        {{
+                                            activosUI[i]?.sel?.tallas.find(
+                                                (t) => t.id === fila.talla_id,
+                                            )?.valor
+                                        }} </template
+                                    >en este almacén.
+                                </template>
                             </p>
                             <InputError
                                 :message="erroresLaxos[`activos.${i}.cantidad`]"
@@ -1112,7 +1230,10 @@ function enviar(): void {
                         >
                             <Trash2 class="size-4" />
                         </Button>
-                        <div class="sm:col-span-full">
+                        <div
+                            v-if="fila.activo_id !== ''"
+                            class="sm:col-span-full"
+                        >
                             <CapturaEvidencia
                                 v-model="fila.evidencia"
                                 v-model:origen="fila.evidencia_origen"
@@ -1228,7 +1349,10 @@ function enviar(): void {
                         >
                             <Trash2 class="size-4" />
                         </Button>
-                        <div class="sm:col-span-full">
+                        <div
+                            v-if="fila.unidad_activo_id !== ''"
+                            class="sm:col-span-full"
+                        >
                             <CapturaEvidencia
                                 v-model="fila.evidencia"
                                 v-model:origen="fila.evidencia_origen"
@@ -1327,6 +1451,23 @@ function enviar(): void {
                                     "
                                     class="h-9"
                                 />
+                                <p
+                                    v-if="
+                                        conjuntosUI[i].sel &&
+                                        conjuntosUI[i].sel?.disponible != null
+                                    "
+                                    class="mt-0.5 text-[11px]"
+                                    :class="
+                                        fila.cantidad >
+                                        (conjuntosUI[i].sel?.disponible ?? 0)
+                                            ? 'text-destructive'
+                                            : 'text-muted-foreground'
+                                    "
+                                >
+                                    Disponibles:
+                                    {{ conjuntosUI[i].sel?.disponible }}
+                                    conjuntos completos
+                                </p>
                                 <InputError
                                     :message="
                                         erroresLaxos[`conjuntos.${i}.cantidad`]

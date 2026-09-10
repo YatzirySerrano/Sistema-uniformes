@@ -25,6 +25,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -324,21 +325,35 @@ class UnidadActivoController extends Controller
 
         $almacenId = $request->filled('almacen_id') ? (int) $request->query('almacen_id') : null;
         $termino = trim((string) $request->query('q', ''));
+        // El flujo de Traspasos pide sólo unidades realmente disponibles (en
+        // almacén, funcionando, sin asignar). Entregas NO manda el flag: ahí
+        // se muestran también las no entregables, deshabilitadas con el motivo.
+        $soloDisponibles = $request->boolean('solo_disponibles');
 
-        // Se devuelven también las NO entregables (asignadas, en reparación,
-        // perdidas…) en vez de ocultarlas sin explicación — el selector las
-        // muestra deshabilitadas con el motivo. Entregables primero.
         $unidades = UnidadActivo::query()
             ->where('activo_id', $activoId)
             ->when($almacenId !== null, fn (Builder $q) => $q->where('almacen_id', $almacenId))
-            ->when($termino !== '', fn (Builder $q) => $q->where('codigo', 'like', "%{$termino}%"))
+            ->when($soloDisponibles, fn (Builder $q) => $q
+                ->where('estado', EstadoUnidadActivo::EnAlmacen->value)
+                ->where('condicion', CondicionUnidadActivo::Funcionando->value)
+                ->whereNull('colaborador_id'))
+            ->when($termino !== '', fn (Builder $q) => $q->where(fn (Builder $s) => $s
+                ->where('codigo', 'like', "%{$termino}%")
+                ->orWhere('observaciones', 'like', "%{$termino}%")
+                ->orWhereHas('activo', fn (Builder $a) => $a->where('nombre', 'like', "%{$termino}%"))))
             ->orderByRaw("case when estado = 'en_almacen' and condicion = 'funcionando' then 0 else 1 end")
             ->orderBy('codigo')
             ->limit(30)
-            ->get(['id', 'codigo', 'estado', 'condicion'])
+            ->with(['activo:id,nombre', 'almacen:id,nombre'])
+            ->get(['id', 'codigo', 'estado', 'condicion', 'activo_id', 'almacen_id', 'colaborador_id', 'observaciones'])
             ->map(fn (UnidadActivo $u): array => [
                 'id' => $u->id,
                 'codigo' => $u->codigo,
+                'activo' => $u->activo?->nombre,
+                'almacen' => $u->almacen?->nombre,
+                'observaciones' => Str::limit((string) $u->observaciones, 60) ?: null,
+                'estado_visible_etiqueta' => $u->estadoVisible()->etiqueta(),
+                'condicion_etiqueta' => $u->condicion->etiqueta(),
                 'entregable' => $u->esEntregable(),
                 'motivo_no_entregable' => $u->esEntregable() ? null : $this->motivoNoEntregable($u),
             ]);
@@ -426,7 +441,7 @@ class UnidadActivoController extends Controller
         $unidades = UnidadActivo::query()
             ->whereIn('id', $ids)
             ->whereIn('empresa_id', $idsAutorizadas)
-            ->with(['activo:id,nombre', 'empresa:id,codigo'])
+            ->with(['activo:id,nombre', 'empresa:id,nombre_comercial'])
             ->get();
 
         abort_if($unidades->isEmpty(), 404);

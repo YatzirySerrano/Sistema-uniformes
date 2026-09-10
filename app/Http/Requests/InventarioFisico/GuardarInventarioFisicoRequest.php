@@ -33,7 +33,7 @@ class GuardarInventarioFisicoRequest extends FormRequest
             'empresa_id' => ['required', 'integer'],
             'nombre' => ['required', 'string', 'max:255'],
             'almacen_id' => [
-                'nullable', 'integer',
+                'required', 'integer',
                 Rule::exists('almacen_empresa', 'almacen_id')->where('empresa_id', $empresaId),
             ],
             'observaciones' => ['nullable', 'string', 'max:2000'],
@@ -48,6 +48,7 @@ class GuardarInventarioFisicoRequest extends FormRequest
         return [
             'empresa_id.required' => 'Selecciona la empresa de la ronda.',
             'nombre.required' => 'Ponle un nombre a la ronda (por ejemplo «Inventario diciembre 2026 – DASTI»).',
+            'almacen_id.required' => 'Selecciona el almacén que vas a inventariar.',
             'almacen_id.exists' => 'El almacén seleccionado no abastece a esta empresa.',
         ];
     }

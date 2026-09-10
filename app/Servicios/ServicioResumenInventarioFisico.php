@@ -3,6 +3,7 @@
 namespace App\Servicios;
 
 use App\Models\InventarioFisico;
+use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -58,6 +59,21 @@ class ServicioResumenInventarioFisico
         $encontradosEsperados = (int) ($r->encontrados_esperados ?? 0);
         $noEsperados = (int) ($r->no_esperados ?? 0);
 
+        // Artículos por cantidad (comprobación manual) — bloque separado, NO se
+        // mezcla con el conteo de unidades QR.
+        $c = DB::table('inventario_fisico_existencias')
+            ->where('inventario_fisico_id', $ronda->id)
+            ->selectRaw('
+                count(*) as renglones,
+                sum(case when cantidad_contada is not null then 1 else 0 end) as verificados,
+                sum(case when cantidad_contada is null then 1 else 0 end) as pendientes,
+                sum(case when cantidad_contada is not null and cantidad_contada = cantidad_esperada then 1 else 0 end) as coinciden,
+                sum(case when cantidad_contada is not null and cantidad_contada <> cantidad_esperada then 1 else 0 end) as con_diferencia,
+                coalesce(sum(cantidad_esperada), 0) as esperada_total,
+                coalesce(sum(cantidad_contada), 0) as contada_total
+            ')
+            ->first();
+
         return [
             // "Todos" = universo REGISTRADO en la ronda: cada unidad es
             // `esperada` o `!esperada` (mutuamente excluyentes, una fila por
@@ -68,6 +84,52 @@ class ServicioResumenInventarioFisico
             'encontrados' => $encontradosEsperados + $noEsperados,
             'pendientes' => $esperados - $encontradosEsperados,
             'no_esperados' => $noEsperados,
+
+            'cantidad_renglones' => (int) ($c->renglones ?? 0),
+            'cantidad_verificados' => (int) ($c->verificados ?? 0),
+            'cantidad_pendientes' => (int) ($c->pendientes ?? 0),
+            'cantidad_coinciden' => (int) ($c->coinciden ?? 0),
+            'cantidad_con_diferencia' => (int) ($c->con_diferencia ?? 0),
+            'cantidad_esperada_total' => (int) ($c->esperada_total ?? 0),
+            'cantidad_contada_total' => (int) ($c->contada_total ?? 0),
+        ];
+    }
+
+    /**
+     * Renglones de comprobación manual de existencias por cantidad de la ronda.
+     * `$filtro`: `todos` | `pendientes` | `con_diferencia`.
+     *
+     * @return Builder<InventarioFisicoExistencia>
+     */
+    public function consultaExistencias(InventarioFisico $ronda, string $filtro = 'todos'): Builder
+    {
+        $consulta = InventarioFisicoExistencia::query()
+            ->where('inventario_fisico_id', $ronda->id)
+            ->with(['activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name'])
+            ->orderBy('id');
+
+        return match ($filtro) {
+            'pendientes' => $consulta->whereNull('cantidad_contada'),
+            'con_diferencia' => $consulta->whereNotNull('cantidad_contada')->whereColumn('cantidad_contada', '<>', 'cantidad_esperada'),
+            default => $consulta,
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function filaExistencia(InventarioFisicoExistencia $fila): array
+    {
+        return [
+            'id' => $fila->id,
+            'activo' => $fila->activo?->nombre,
+            'talla' => $fila->talla?->valor,
+            'cantidad_esperada' => $fila->cantidad_esperada,
+            'cantidad_contada' => $fila->cantidad_contada,
+            'diferencia' => $fila->diferencia(),
+            'resultado' => $fila->resultado(),
+            'verificada_por' => $fila->verificadaPor?->name,
+            'verificada_en' => $fila->verificada_en?->toIso8601String(),
         ];
     }
 
@@ -106,7 +168,7 @@ class ServicioResumenInventarioFisico
             'clasificacion' => $fila->clasificacion(),
             'clasificacion_etiqueta' => self::CLASIFICACION_ETIQUETA[$fila->clasificacion()] ?? $fila->clasificacion(),
             'esperada' => $fila->esperada,
-            'escaneado_en' => $fila->escaneado_en?->toDateTimeString(),
+            'escaneado_en' => $fila->escaneado_en?->toIso8601String(),
             'escaneado_por' => $fila->escaneadoPor?->name,
             'codigo' => $unidad?->codigo,
             'activo' => $unidad?->activo?->nombre,

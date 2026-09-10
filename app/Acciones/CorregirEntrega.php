@@ -17,9 +17,11 @@ use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Corrección administrativa de una entrega ya firmada (o pendiente). Conserva la
- * entrega original y el acuse inmutable: registra el antes/después, compensa el
- * inventario con movimientos de corrección y deja constancia en auditoría.
+ * Corrección administrativa de una entrega TODAVÍA pendiente de firma (camino
+ * de firma diferida legado). Una entrega firmada, corregida o anulada es un
+ * documento histórico inmutable — el acuse, el snapshot y el hash no se tocan.
+ * Registra el antes/después, compensa el inventario con movimientos de
+ * corrección y deja constancia en auditoría.
  */
 class CorregirEntrega
 {
@@ -40,6 +42,10 @@ class CorregirEntrega
 
         if ($entrega->estado === EstadoEntrega::Anulada) {
             throw new ExcepcionDeNegocioSimple('No se puede corregir una entrega anulada.');
+        }
+
+        if ($entrega->estado->estaFirmada()) {
+            throw new ExcepcionDeNegocioSimple('Una entrega firmada no puede modificarse.');
         }
 
         $entrega->loadMissing('detalles');

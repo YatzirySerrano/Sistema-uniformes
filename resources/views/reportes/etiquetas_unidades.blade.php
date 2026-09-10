@@ -24,9 +24,9 @@
         .etiqueta-qr { display: table-cell; width: 24mm; vertical-align: middle; }
         .etiqueta-qr img { width: 22mm; height: 22mm; }
         .etiqueta-texto { display: table-cell; vertical-align: middle; padding-left: 2mm; }
-        .etiqueta-empresa { font-size: 6.5pt; color: #777; text-transform: uppercase; letter-spacing: 0.3pt; }
-        .etiqueta-nombre { font-size: 9pt; font-weight: bold; line-height: 1.15; margin: 0.5mm 0; }
-        .etiqueta-codigo { font-size: 8.5pt; font-family: "Courier New", monospace; color: #222; }
+        .etiqueta-nombre { font-size: 9pt; font-weight: bold; line-height: 1.15; margin: 0 0 0.5mm; }
+        .etiqueta-codigo { font-size: 9pt; font-weight: bold; font-family: "Courier New", monospace; color: #111; }
+        .etiqueta-empresa { font-size: 6pt; color: #999; text-transform: uppercase; letter-spacing: 0.3pt; margin-top: 1mm; }
     </style>
 </head>
 <body>
@@ -41,9 +41,9 @@
                                     <img src="{{ $qr->pngDataUri($unidad) }}" alt="QR">
                                 </div>
                                 <div class="etiqueta-texto">
-                                    <div class="etiqueta-empresa">{{ $unidad->empresa->codigo }}</div>
                                     <p class="etiqueta-nombre">{{ $unidad->activo->nombre }}</p>
                                     <div class="etiqueta-codigo">{{ $unidad->codigo }}</div>
+                                    <div class="etiqueta-empresa">{{ $unidad->empresa->nombre_comercial }}</div>
                                 </div>
                             </div>
                         </div>

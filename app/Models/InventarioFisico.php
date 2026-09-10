@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -29,6 +30,7 @@ use Illuminate\Support\Carbon;
  * @property EstadoInventarioFisico $estado
  * @property string|null $observaciones
  * @property Carbon|null $finalizado_en
+ * @property-read InventarioFisicoFirma|null $firma
  */
 class InventarioFisico extends Model
 {
@@ -83,5 +85,25 @@ class InventarioFisico extends Model
     public function unidades(): HasMany
     {
         return $this->hasMany(InventarioFisicoUnidad::class);
+    }
+
+    /**
+     * Renglones de comprobación manual de existencias por cantidad.
+     *
+     * @return HasMany<InventarioFisicoExistencia, $this>
+     */
+    public function existencias(): HasMany
+    {
+        return $this->hasMany(InventarioFisicoExistencia::class);
+    }
+
+    /**
+     * Firma de conformidad de cierre (existe sólo si la ronda se finalizó).
+     *
+     * @return HasOne<InventarioFisicoFirma, $this>
+     */
+    public function firma(): HasOne
+    {
+        return $this->hasOne(InventarioFisicoFirma::class);
     }
 }

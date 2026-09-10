@@ -1,9 +1,11 @@
 <?php
 
+use App\Acciones\CrearEntregaUniforme;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\RolSistema;
 use App\Enums\TipoMovimiento;
+use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
 use App\Models\Almacen;
@@ -11,6 +13,7 @@ use App\Models\Colaborador;
 use App\Models\Conjunto;
 use App\Models\Empresa;
 use App\Models\EntregaUniforme;
+use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\Sucursal;
 use App\Models\Talla;
@@ -540,4 +543,35 @@ it('39. una fila de conjunto dejada vacía ("+ Agregar conjunto" sin seleccionar
     ])->assertSessionHasErrors(['conjuntos.0.conjunto_id' => 'Selecciona un conjunto.']);
 
     expect(EntregaUniforme::count())->toBe(0);
+});
+
+it('si el stock baja entre la previsualización y la firma, la acción revierte todo con el mensaje "El stock disponible cambió"', function () {
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $this->datos['activoA']->id, tallaId: $this->datos['tallaA']->id,
+        tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+
+    // La acción de creación no pasa por el Form Request: es la autoridad final
+    // que re-lee el saldo bajo lock. Con saldo 5 y una entrega de 8 → revienta
+    // dentro de `registrarComponenteCantidad`.
+    try {
+        app(CrearEntregaUniforme::class)->ejecutar(
+            $this->datos['colaboradorA']->id,
+            $this->datos['almacenA']->id,
+            $this->admin->id,
+            now()->toDateString(),
+            [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 8]],
+            [], [],
+        );
+        $this->fail('Se esperaba un error de negocio por stock insuficiente.');
+    } catch (ExcepcionDeNegocioSimple $e) {
+        expect($e->getMessage())->toStartWith('El stock disponible cambió.')
+            ->and($e->getMessage())->toContain('8')
+            ->and($e->getMessage())->toContain('5');
+    }
+
+    expect(EntregaUniforme::count())->toBe(0)
+        ->and(SaldoInventario::first()->cantidad)->toBe(5)
+        ->and(MovimientoInventario::where('tipo', TipoMovimiento::Entrega->value)->count())->toBe(0);
 });

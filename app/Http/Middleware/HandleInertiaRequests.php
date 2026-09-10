@@ -56,6 +56,10 @@ class HandleInertiaRequests extends Middleware
             // contexto de empresa se elige en cada formulario / filtro. Esta
             // lista alimenta esos combobox en el cliente.
             'empresasAutorizadas' => $empresasAutorizadas,
+            // Zona horaria de presentación (los timestamps se guardan en UTC).
+            // El cliente la usa para formatear fechas/horas de forma idéntica
+            // al PDF, sin depender de la zona del navegador de quien mira.
+            'zonaHoraria' => config('uniformes.zona_horaria'),
             // Personalización visual GLOBAL (nunca por empresa): custom
             // properties CSS aplicadas en el cliente tras cada navegación /
             // guardado, además del <style> ya renderizado por el servidor en

@@ -8,7 +8,7 @@ import {
     Keyboard,
     XCircle,
 } from '@lucide/vue';
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -24,9 +24,11 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
+import PadFirma from '@/components/sistema/PadFirma.vue';
 import { Input } from '@/components/ui/input';
 import { useEscanerQr } from '@/composables/useEscanerQr';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
+import { fechaHora } from '@/lib/fecha';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 
 type Seccion = 'todos' | 'encontrados' | 'faltantes' | 'no_esperados';
@@ -38,6 +40,13 @@ type Contadores = {
     encontrados: number;
     pendientes: number;
     no_esperados: number;
+    cantidad_renglones: number;
+    cantidad_verificados: number;
+    cantidad_pendientes: number;
+    cantidad_coinciden: number;
+    cantidad_con_diferencia: number;
+    cantidad_esperada_total: number;
+    cantidad_contada_total: number;
 };
 
 type FilaUnidad = {
@@ -55,6 +64,18 @@ type FilaUnidad = {
     estado_visible_etiqueta: string | null;
 };
 
+type FilaExistencia = {
+    id: number;
+    activo: string | null;
+    talla: string | null;
+    cantidad_esperada: number;
+    cantidad_contada: number | null;
+    diferencia: number | null;
+    resultado: 'pendiente' | 'coincide' | 'faltante' | 'sobrante';
+    verificada_por: string | null;
+    verificada_en: string | null;
+};
+
 const props = defineProps<{
     ronda: {
         id: number;
@@ -68,6 +89,11 @@ const props = defineProps<{
         observaciones: string | null;
         iniciado_en: string | null;
         finalizado_en: string | null;
+        firma: {
+            nombre_firmante: string;
+            hash_firma: string;
+            aceptado_en: string | null;
+        } | null;
     };
     contadores: Contadores;
     seccion: Seccion;
@@ -76,7 +102,9 @@ const props = defineProps<{
         links: { url: string | null; label: string; active: boolean }[];
         total: number;
     };
-    permisos: { administrar: boolean };
+    existencias: FilaExistencia[];
+    textoAceptacion: string;
+    permisos: { administrar: boolean; finalizar: boolean };
 }>();
 
 defineOptions({
@@ -198,7 +226,7 @@ async function enviarCodigo(texto: string): Promise<void> {
             ETIQUETA_RESULTADO[data.resultado] ?? ETIQUETA_RESULTADO.encontrada;
         ultimo.value = {
             ...base,
-            detalle: `${data.unidad.codigo ?? ''} · ${data.unidad.activo ?? ''} — ${base.detalle}`,
+            detalle: `${data.unidad.codigo ?? ''} · ${data.unidad.activo ?? ''} — ${data.contexto ?? base.detalle}`,
         };
         recientes.value = [
             { ...data.unidad, resultado: data.resultado, _k: Date.now() },
@@ -275,18 +303,160 @@ function cambiarSeccion(s: Seccion): void {
 // la presentación.
 const vista = useVistaPreferida('inventario-fisico-detalle', 'tabla');
 
+/* ---------- Artículos por cantidad (comprobación manual) ---------- */
+const existencias = ref<FilaExistencia[]>(
+    props.existencias.map((e) => ({ ...e })),
+);
+watch(
+    () => props.existencias,
+    (nuevas) => {
+        existencias.value = nuevas.map((e) => ({ ...e }));
+    },
+);
+// Borrador editable del conteo por renglón (input controlado).
+const borrador = reactive<Record<number, number | ''>>({});
+const guardandoExistencia = ref<number | null>(null);
+
+const ETIQUETA_EXISTENCIA: Record<
+    FilaExistencia['resultado'],
+    { texto: string; clase: string }
+> = {
+    pendiente: {
+        texto: 'Pendiente',
+        clase: 'text-muted-foreground border-muted-foreground/30',
+    },
+    coincide: {
+        texto: 'Coincide',
+        clase: 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400',
+    },
+    faltante: {
+        texto: 'Faltante',
+        clase: 'border-red-500/40 text-red-700 dark:text-red-400',
+    },
+    sobrante: {
+        texto: 'Sobrante',
+        clase: 'border-amber-500/40 text-amber-700 dark:text-amber-400',
+    },
+};
+
+async function verificarExistencia(
+    fila: FilaExistencia,
+    cantidad: number,
+): Promise<void> {
+    if (cantidad < 0 || guardandoExistencia.value !== null) return;
+    guardandoExistencia.value = fila.id;
+    try {
+        const res = await fetch(
+            `/inventarios-fisicos/${props.ronda.id}/existencias/${fila.id}`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': xsrf(),
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify({ cantidad_contada: cantidad }),
+            },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            ultimo.value = {
+                ok: false,
+                titulo: 'No se registró',
+                detalle: data.message ?? 'No se pudo guardar la cantidad.',
+                tono: 'error',
+            };
+            return;
+        }
+        const i = existencias.value.findIndex((e) => e.id === fila.id);
+        if (i !== -1) existencias.value[i] = data.existencia;
+        delete borrador[fila.id];
+        Object.assign(contadores, data.contadores);
+    } catch {
+        ultimo.value = {
+            ok: false,
+            titulo: 'Error de conexión',
+            detalle: 'No se pudo contactar al servidor.',
+            tono: 'error',
+        };
+    } finally {
+        guardandoExistencia.value = null;
+    }
+}
+
+/* ---------- Marcar unidad presente (sin QR) ---------- */
+const marcandoPresente = ref<number | null>(null);
+async function marcarPresente(fila: FilaUnidad): Promise<void> {
+    if (marcandoPresente.value !== null) return;
+    marcandoPresente.value = fila.id;
+    try {
+        const res = await fetch(
+            `/inventarios-fisicos/${props.ronda.id}/unidades/${fila.id}/presente`,
+            {
+                method: 'POST',
+                headers: { Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() },
+                credentials: 'same-origin',
+            },
+        );
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            ultimo.value = {
+                ok: false,
+                titulo: 'No se registró',
+                detalle: data.message ?? 'No se pudo marcar la unidad.',
+                tono: 'error',
+            };
+            return;
+        }
+        Object.assign(contadores, data.contadores);
+        programarRefresco();
+    } catch {
+        ultimo.value = {
+            ok: false,
+            titulo: 'Error de conexión',
+            detalle: 'No se pudo contactar al servidor.',
+            tono: 'error',
+        };
+    } finally {
+        marcandoPresente.value = null;
+    }
+}
+
 /* ---------- Finalizar ---------- */
 const dialogoFinalizar = ref(false);
 const finalizando = ref(false);
+const padFinalizar = ref<InstanceType<typeof PadFirma> | null>(null);
+const firmaVacia = ref(true);
+const aceptaFinalizar = ref(false);
+
+const puedeFinalizarDialog = computed(
+    () =>
+        !firmaVacia.value &&
+        aceptaFinalizar.value &&
+        contadores.cantidad_pendientes === 0 &&
+        !finalizando.value,
+);
+
+watch(dialogoFinalizar, (abierto) => {
+    if (abierto) {
+        void nextTick(() => padFinalizar.value?.recalibrar());
+    }
+});
+
 function finalizar(): void {
+    const firma = padFinalizar.value?.obtenerDataUrl() ?? '';
+    if (!firma || !aceptaFinalizar.value) return;
     finalizando.value = true;
     router.post(
         `/inventarios-fisicos/${props.ronda.id}/finalizar`,
-        {},
+        { firma, aceptacion: aceptaFinalizar.value },
         {
             preserveScroll: true,
             onFinish: () => {
                 finalizando.value = false;
+            },
+            onSuccess: () => {
                 dialogoFinalizar.value = false;
             },
         },
@@ -294,7 +464,7 @@ function finalizar(): void {
 }
 
 function fecha(valor: string | null): string {
-    return valor ? new Date(valor).toLocaleString() : '—';
+    return fechaHora(valor);
 }
 
 function claseClasificacion(c: FilaUnidad['clasificacion']): string {
@@ -367,41 +537,101 @@ onBeforeUnmount(() => {
             {{ ronda.observaciones }}
         </p>
 
-        <!-- Contadores -->
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div class="rounded-xl border p-3">
-                <p class="text-muted-foreground text-xs">
-                    Esperados en sistema
-                </p>
-                <p class="text-2xl font-semibold tabular-nums">
-                    {{ contadores.esperados }}
-                </p>
-            </div>
-            <div class="rounded-xl border p-3">
-                <p class="text-muted-foreground text-xs">Encontrados</p>
-                <p
-                    class="text-2xl font-semibold text-emerald-600 tabular-nums dark:text-emerald-400"
-                >
-                    {{ contadores.encontrados }}
-                </p>
-            </div>
-            <div class="rounded-xl border p-3">
-                <p class="text-muted-foreground text-xs">Pendientes</p>
-                <p
-                    class="text-2xl font-semibold text-red-600 tabular-nums dark:text-red-400"
-                >
-                    {{ contadores.pendientes }}
-                </p>
-            </div>
-            <div class="rounded-xl border p-3">
-                <p class="text-muted-foreground text-xs">No esperados</p>
-                <p
-                    class="text-2xl font-semibold text-amber-600 tabular-nums dark:text-amber-400"
-                >
-                    {{ contadores.no_esperados }}
-                </p>
-            </div>
+        <div
+            v-if="ronda.firma"
+            class="rounded-lg border border-emerald-500/40 bg-emerald-50/50 p-3 text-sm dark:bg-emerald-950/20"
+        >
+            Ronda cerrada y firmada por
+            <strong>{{ ronda.firma.nombre_firmante }}</strong>
+            el {{ fecha(ronda.firma.aceptado_en) }} ·
+            <span class="text-muted-foreground font-mono text-xs">
+                Huella SHA-256 {{ ronda.firma.hash_firma }}
+            </span>
         </div>
+
+        <!-- Resumen: unidades identificadas / QR -->
+        <section class="space-y-2">
+            <h2 class="text-sm font-semibold">Unidades identificadas / QR</h2>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Esperadas</p>
+                    <p class="text-2xl font-semibold tabular-nums">
+                        {{ contadores.esperados }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Encontradas</p>
+                    <p
+                        class="text-2xl font-semibold text-emerald-600 tabular-nums dark:text-emerald-400"
+                    >
+                        {{ contadores.encontrados }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Faltantes</p>
+                    <p
+                        class="text-2xl font-semibold text-red-600 tabular-nums dark:text-red-400"
+                    >
+                        {{ contadores.pendientes }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">No esperadas</p>
+                    <p
+                        class="text-2xl font-semibold text-amber-600 tabular-nums dark:text-amber-400"
+                    >
+                        {{ contadores.no_esperados }}
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Resumen: artículos por cantidad -->
+        <section v-if="contadores.cantidad_renglones > 0" class="space-y-2">
+            <h2 class="text-sm font-semibold">Artículos por cantidad</h2>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Renglones</p>
+                    <p class="text-2xl font-semibold tabular-nums">
+                        {{ contadores.cantidad_renglones }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Verificados</p>
+                    <p class="text-2xl font-semibold tabular-nums">
+                        {{ contadores.cantidad_verificados }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Pendientes</p>
+                    <p
+                        class="text-2xl font-semibold text-red-600 tabular-nums dark:text-red-400"
+                    >
+                        {{ contadores.cantidad_pendientes }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Coinciden</p>
+                    <p
+                        class="text-2xl font-semibold text-emerald-600 tabular-nums dark:text-emerald-400"
+                    >
+                        {{ contadores.cantidad_coinciden }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Con diferencia</p>
+                    <p
+                        class="text-2xl font-semibold text-amber-600 tabular-nums dark:text-amber-400"
+                    >
+                        {{ contadores.cantidad_con_diferencia }}
+                    </p>
+                </div>
+            </div>
+            <p class="text-muted-foreground text-xs">
+                Esperado total: {{ contadores.cantidad_esperada_total }} ·
+                Contado total: {{ contadores.cantidad_contada_total }}
+            </p>
+        </section>
 
         <!-- Escaneo (sólo mientras la ronda está en proceso) -->
         <div
@@ -684,6 +914,22 @@ onBeforeUnmount(() => {
                                     por {{ f.escaneado_por }}
                                 </span>
                             </template>
+                            <div
+                                v-else-if="
+                                    puedeEscanear &&
+                                    f.esperada &&
+                                    f.clasificacion === 'faltante'
+                                "
+                            >
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    :disabled="marcandoPresente === f.id"
+                                    @click="marcarPresente(f)"
+                                >
+                                    <CheckCircle2 class="size-4" /> Presente
+                                </Button>
+                            </div>
                             <span v-else>No localizada</span>
                         </td>
                     </tr>
@@ -742,27 +988,195 @@ onBeforeUnmount(() => {
                     </template>
                     <span v-else>Escaneada: — · Por: —</span>
                 </div>
+                <Button
+                    v-if="
+                        puedeEscanear &&
+                        f.esperada &&
+                        f.clasificacion === 'faltante'
+                    "
+                    size="sm"
+                    variant="outline"
+                    class="w-fit"
+                    :disabled="marcandoPresente === f.id"
+                    @click="marcarPresente(f)"
+                >
+                    <CheckCircle2 class="size-4" /> Presente
+                </Button>
             </div>
         </div>
 
         <Paginacion :links="unidades.links" :total="unidades.total" />
 
+        <!-- Artículos por cantidad (comprobación manual) -->
+        <section
+            v-if="existencias.length"
+            class="space-y-3 rounded-xl border p-4"
+        >
+            <div>
+                <h2 class="text-sm font-semibold">
+                    Artículos por cantidad · comprobación manual
+                </h2>
+                <p class="text-muted-foreground mt-0.5 text-xs">
+                    Prendas y consumibles sin QR individual. Marca «Coincide» si
+                    el conteo cuadra con lo esperado, o captura la cantidad real
+                    contada. Esto sólo compara: no ajusta el inventario.
+                </p>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full min-w-[640px] text-sm">
+                    <thead class="text-muted-foreground text-left">
+                        <tr>
+                            <th class="py-1.5">Activo</th>
+                            <th class="py-1.5">Talla</th>
+                            <th class="py-1.5 text-right">Esperado</th>
+                            <th class="py-1.5 text-right">Contado</th>
+                            <th class="py-1.5 text-right">Diferencia</th>
+                            <th class="py-1.5">Resultado</th>
+                            <th v-if="puedeEscanear" class="py-1.5">
+                                Verificar
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="e in existencias"
+                            :key="e.id"
+                            class="border-t"
+                        >
+                            <td class="py-1.5">{{ e.activo ?? '—' }}</td>
+                            <td class="py-1.5">{{ e.talla ?? '—' }}</td>
+                            <td class="py-1.5 text-right tabular-nums">
+                                {{ e.cantidad_esperada }}
+                            </td>
+                            <td class="py-1.5 text-right tabular-nums">
+                                {{ e.cantidad_contada ?? '—' }}
+                            </td>
+                            <td
+                                class="py-1.5 text-right tabular-nums"
+                                :class="
+                                    (e.diferencia ?? 0) < 0
+                                        ? 'text-red-600 dark:text-red-400'
+                                        : (e.diferencia ?? 0) > 0
+                                          ? 'text-amber-600 dark:text-amber-400'
+                                          : ''
+                                "
+                            >
+                                {{
+                                    e.diferencia === null
+                                        ? '—'
+                                        : e.diferencia > 0
+                                          ? `+${e.diferencia}`
+                                          : e.diferencia
+                                }}
+                            </td>
+                            <td class="py-1.5">
+                                <Badge
+                                    variant="outline"
+                                    class="text-xs"
+                                    :class="
+                                        ETIQUETA_EXISTENCIA[e.resultado].clase
+                                    "
+                                >
+                                    {{ ETIQUETA_EXISTENCIA[e.resultado].texto }}
+                                </Badge>
+                            </td>
+                            <td v-if="puedeEscanear" class="py-1.5">
+                                <div class="flex items-center gap-1.5">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        :disabled="guardandoExistencia !== null"
+                                        @click="
+                                            verificarExistencia(
+                                                e,
+                                                e.cantidad_esperada,
+                                            )
+                                        "
+                                    >
+                                        <CheckCircle2 class="size-4" /> Coincide
+                                    </Button>
+                                    <Input
+                                        v-model.number="borrador[e.id]"
+                                        type="number"
+                                        min="0"
+                                        class="h-8 w-20"
+                                        placeholder="Contado"
+                                    />
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        :disabled="
+                                            guardandoExistencia !== null ||
+                                            borrador[e.id] === '' ||
+                                            borrador[e.id] === undefined
+                                        "
+                                        @click="
+                                            verificarExistencia(
+                                                e,
+                                                Number(borrador[e.id]),
+                                            )
+                                        "
+                                    >
+                                        Guardar
+                                    </Button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <Dialog v-model:open="dialogoFinalizar">
-            <DialogContent>
+            <DialogContent class="max-h-[90dvh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Finalizar inventario físico</DialogTitle>
                     <DialogDescription>
-                        Después de finalizar no podrán agregarse nuevos escaneos
-                        a esta ronda. Los resultados quedan como registro
-                        histórico permanente.
+                        Al finalizar, la ronda queda cerrada e inmutable: no
+                        admitirá más escaneos, marcas «Presente» ni cambios de
+                        cantidad. Firma como responsable de lo registrado.
                     </DialogDescription>
                 </DialogHeader>
+
+                <p
+                    v-if="contadores.cantidad_pendientes > 0"
+                    class="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-sm text-amber-700 dark:text-amber-400"
+                >
+                    Aún hay {{ contadores.cantidad_pendientes }} renglón(es) de
+                    artículos por cantidad sin verificar. Verifícalos antes de
+                    cerrar la ronda. (Las unidades QR faltantes sí se pueden
+                    dejar así — son un resultado válido.)
+                </p>
+
+                <div class="space-y-2">
+                    <p class="text-sm font-medium">Firma del responsable</p>
+                    <PadFirma
+                        ref="padFinalizar"
+                        @cambio="(v: boolean) => (firmaVacia = v)"
+                    />
+                </div>
+
+                <label
+                    class="bg-muted/40 flex items-start gap-2 rounded-lg border p-3 text-sm"
+                >
+                    <input
+                        v-model="aceptaFinalizar"
+                        type="checkbox"
+                        class="mt-0.5 size-4 shrink-0"
+                    />
+                    <span>{{ textoAceptacion }}</span>
+                </label>
+
                 <DialogFooter>
                     <Button variant="ghost" @click="dialogoFinalizar = false">
                         Cancelar
                     </Button>
-                    <Button :disabled="finalizando" @click="finalizar">
-                        Finalizar
+                    <Button
+                        :disabled="!puedeFinalizarDialog"
+                        @click="finalizar"
+                    >
+                        Finalizar y firmar
                     </Button>
                 </DialogFooter>
             </DialogContent>

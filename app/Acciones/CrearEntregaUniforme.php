@@ -6,6 +6,7 @@ use App\Enums\EstadoEntrega;
 use App\Enums\TipoControlActivo;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
+use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\Conjunto;
@@ -172,19 +173,34 @@ class CrearEntregaUniforme
             'conjunto_nombre_snapshot' => $conjuntoNombre,
         ]);
 
-        $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-            empresaId: $empresaId,
-            almacenId: $almacenId,
-            activoId: $activo->id,
-            tallaId: $tallaId,
-            tipo: TipoMovimiento::Entrega,
-            cantidad: $cantidad,
-            realizadoPor: $encargadoId,
-            referenciaTipo: EntregaUniforme::class,
-            referenciaId: $entrega->getKey(),
-            motivo: 'Entrega '.$entrega->folio,
-            sucursalId: $sucursalId,
-        ));
+        try {
+            $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
+                empresaId: $empresaId,
+                almacenId: $almacenId,
+                activoId: $activo->id,
+                tallaId: $tallaId,
+                tipo: TipoMovimiento::Entrega,
+                cantidad: $cantidad,
+                realizadoPor: $encargadoId,
+                referenciaTipo: EntregaUniforme::class,
+                referenciaId: $entrega->getKey(),
+                motivo: 'Entrega '.$entrega->folio,
+                sucursalId: $sucursalId,
+            ));
+        } catch (ExistenciasInsuficientesException $e) {
+            // El saldo bajó entre la previsualización y la firma. Se reutiliza
+            // el dato que `ServicioInventario` leyó bajo `lockForUpdate` — sin
+            // una segunda consulta que pudiera devolver otra cifra. La
+            // transacción exterior revierte TODA la entrega.
+            throw new ExcepcionDeNegocioSimple(sprintf(
+                'El stock disponible cambió. Solicitaste %d unidades de %s%s%s, pero actualmente sólo hay %d disponibles.',
+                $e->solicitado,
+                $e->activo,
+                $e->talla !== '' && $e->talla !== 's/v' ? ' talla '.$e->talla : '',
+                $conjuntoNombre !== null ? ' (del conjunto «'.$conjuntoNombre.'»)' : '',
+                $e->disponible,
+            ));
+        }
 
         return $detalle;
     }

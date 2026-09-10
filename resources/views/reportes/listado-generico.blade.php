@@ -40,7 +40,7 @@
                         @foreach ($contexto->filtros as $etiqueta => $valor)
                             <span><b>{{ $etiqueta }}:</b> {{ $valor }}</span>
                         @endforeach
-                        <span><b>Generado:</b> {{ $contexto->generadoEn->format('d/m/Y H:i') }}</span>
+                        <span><b>Generado:</b> {{ $contexto->generadoEnLocal() }}</span>
                         <span><b>Registros:</b> {{ $contexto->total }}</span>
                     </div>
                 </td>

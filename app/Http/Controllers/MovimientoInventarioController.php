@@ -13,6 +13,7 @@ use App\Models\MovimientoInventario;
 use App\Models\TraspasoInventario;
 use App\Servicios\HomologadorActivo;
 use App\Soporte\ContextoExportacion;
+use App\Soporte\FechaHora;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -42,26 +43,31 @@ class MovimientoInventarioController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $filtros = $this->filtrosListado($request);
 
-        $movimientos = $this->consultaMovimientos($request, $filtros)
+        $paginador = $this->consultaMovimientos($request, $filtros)
             ->paginate($this->porPagina())
-            ->withQueryString()
-            ->through(fn (MovimientoInventario $m): array => [
-                'id' => $m->id,
-                'empresa' => $m->empresa?->nombre_comercial,
-                'tipo' => $m->tipo->value,
-                'tipo_etiqueta' => $m->tipo->etiqueta(),
-                'direccion' => $m->direccion->value,
-                'cantidad' => $m->cantidad,
-                'existencia_anterior' => $m->existencia_anterior,
-                'existencia_resultante' => $m->existencia_resultante,
-                'almacen' => $m->almacen?->nombre,
-                'sucursal' => $m->sucursal?->nombre,
-                'activo' => $m->activo?->nombre,
-                'talla' => $m->talla?->valor,
-                'motivo' => $m->motivo,
-                'realizado_por' => $m->realizadoPor?->name,
-                'ocurrido_en' => $m->ocurrido_en->toIso8601String(),
-            ]);
+            ->withQueryString();
+
+        $foliosTraspaso = $this->foliosTraspaso($paginador->getCollection());
+
+        $movimientos = $paginador->through(fn (MovimientoInventario $m): array => [
+            'id' => $m->id,
+            'empresa' => $m->empresa?->nombre_comercial,
+            'tipo' => $m->tipo->value,
+            'tipo_etiqueta' => $m->tipo->etiqueta(),
+            'direccion' => $m->direccion->value,
+            'cantidad' => $m->cantidad,
+            'existencia_anterior' => $m->existencia_anterior,
+            'existencia_resultante' => $m->existencia_resultante,
+            'almacen' => $m->almacen?->nombre,
+            'sucursal' => $m->sucursal?->nombre,
+            'activo' => $m->activo?->nombre,
+            'talla' => $m->talla?->valor,
+            'unidad_codigo' => $m->unidadActivo?->codigo,
+            'motivo' => $m->motivo,
+            'referencia' => $this->referenciaLegible($m, $foliosTraspaso),
+            'realizado_por' => $m->realizadoPor?->name,
+            'ocurrido_en' => $m->ocurrido_en->toIso8601String(),
+        ]);
 
         return Inertia::render('Inventario/Movimientos', [
             'movimientos' => $movimientos,
@@ -219,7 +225,7 @@ class MovimientoInventarioController extends Controller
         $movimientos = $this->consultaMovimientos($request, $filtros)->get();
 
         $filas = $movimientos->map(fn (MovimientoInventario $m): array => [
-            $m->ocurrido_en->format('d/m/Y H:i'),
+            FechaHora::local($m->ocurrido_en),
             $m->empresa?->nombre_comercial,
             $m->tipo->etiqueta(),
             $m->direccion->value,
@@ -297,7 +303,49 @@ class MovimientoInventarioController extends Controller
             ->when($filtros['tipo'] ?? null, fn (Builder $q, $t) => $q->where('tipo', $t))
             ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
             ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
-            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'realizadoPor:id,name'])
+            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'unidadActivo:id,codigo', 'realizadoPor:id,name'])
             ->latest('ocurrido_en');
+    }
+
+    /**
+     * Folios de los traspasos referenciados en una página de movimientos, en
+     * UNA consulta (evita N+1 al pintar la referencia en las cards).
+     *
+     * @param  Collection<int, MovimientoInventario>  $movimientos
+     * @return array<int, string>
+     */
+    private function foliosTraspaso(Collection $movimientos): array
+    {
+        $ids = $movimientos
+            ->where('referencia_tipo', TraspasoInventario::class)
+            ->pluck('referencia_id')
+            ->filter()
+            ->unique()
+            ->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return TraspasoInventario::query()->whereIn('id', $ids)->pluck('folio', 'id')->all();
+    }
+
+    /**
+     * Etiqueta legible de la referencia de un movimiento para las cards.
+     *
+     * @param  array<int, string>  $foliosTraspaso
+     */
+    private function referenciaLegible(MovimientoInventario $m, array $foliosTraspaso): ?string
+    {
+        if ($m->referencia_tipo === TraspasoInventario::class) {
+            $folio = $foliosTraspaso[$m->referencia_id] ?? null;
+
+            return $folio !== null ? "Traspaso {$folio}" : null;
+        }
+
+        return match ($m->referencia_tipo) {
+            'alta_unidad' => 'Alta de unidad',
+            default => null,
+        };
     }
 }

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { varianteBadgeEstadoDevolucion } from '@/lib/estadoDevolucion';
+import { fechaHora } from '@/lib/fecha';
 
 type Item = {
     activo: string | null;
@@ -57,10 +58,6 @@ defineOptions({
         ],
     },
 });
-
-function fechaHora(iso: string | null): string {
-    return iso ? new Date(iso).toLocaleString('es-MX') : '—';
-}
 </script>
 
 <template>

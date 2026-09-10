@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
+import { fechaHora } from '@/lib/fecha';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Cambio = { campo: string; antes: string; ahora: string };
@@ -114,10 +115,7 @@ function limpiar() {
 }
 
 function fecha(iso: string) {
-    return new Date(iso).toLocaleString('es-MX', {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-    });
+    return fechaHora(iso, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 const ICONOS_MODULO: Record<string, unknown> = {

@@ -5,14 +5,20 @@ namespace App\Http\Controllers;
 use App\Acciones\CrearRondaInventarioFisico;
 use App\Acciones\EscanearUnidadInventarioFisico;
 use App\Acciones\FinalizarRondaInventarioFisico;
+use App\Acciones\MarcarUnidadPresente;
+use App\Acciones\VerificarExistenciaInventarioFisico;
 use App\Enums\EstadoInventarioFisico;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\InventarioFisico\EscanearUnidadRequest;
+use App\Http\Requests\InventarioFisico\FinalizarRondaRequest;
 use App\Http\Requests\InventarioFisico\GuardarInventarioFisicoRequest;
+use App\Http\Requests\InventarioFisico\VerificarExistenciaRequest;
 use App\Models\Almacen;
 use App\Models\InventarioFisico;
+use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
+use App\Models\SaldoInventario;
 use App\Servicios\ServicioResumenInventarioFisico;
 use App\Soporte\ContextoExportacion;
 use Illuminate\Contracts\Support\Arrayable;
@@ -62,8 +68,8 @@ class InventarioFisicoController extends Controller
             'responsable' => $r->usuario?->name,
             'estado' => $r->estado->value,
             'estado_etiqueta' => $r->estado->etiqueta(),
-            'iniciado_en' => $r->created_at?->toDateTimeString(),
-            'finalizado_en' => $r->finalizado_en?->toDateTimeString(),
+            'iniciado_en' => $r->created_at?->toIso8601String(),
+            'finalizado_en' => $r->finalizado_en?->toIso8601String(),
             ...$contadoresPorRonda[$r->id] ?? $this->contadoresVacios(),
         ]);
 
@@ -111,8 +117,19 @@ class InventarioFisicoController extends Controller
             $almacenId = ($almacen !== null && $almacen->abasteceEmpresa($empresa->id)) ? $almacen->id : null;
         }
 
+        // El almacén es obligatorio para las rondas nuevas: sin él no hay
+        // universo que previsualizar.
+        if ($almacenId === null) {
+            return response()->json(['total' => 0, 'existencias' => 0]);
+        }
+
         return response()->json([
             'total' => CrearRondaInventarioFisico::universo($empresa->id, $almacenId)->count(),
+            'existencias' => SaldoInventario::query()
+                ->where('empresa_id', $empresa->id)
+                ->where('almacen_id', $almacenId)
+                ->where('cantidad', '>', 0)
+                ->count(),
         ]);
     }
 
@@ -120,9 +137,7 @@ class InventarioFisicoController extends Controller
     {
         $empresa = $request->empresaResuelta();
 
-        $almacen = $request->filled('almacen_id')
-            ? Almacen::query()->findOrFail($request->integer('almacen_id'))
-            : null;
+        $almacen = Almacen::query()->findOrFail($request->integer('almacen_id'));
 
         $ronda = $accion->ejecutar(
             $empresa,
@@ -147,7 +162,15 @@ class InventarioFisicoController extends Controller
             ->withQueryString()
             ->through(fn (InventarioFisicoUnidad $f): array => $this->resumen->filaResumen($f));
 
-        $inventarioFisico->load(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'usuario:id,name']);
+        $inventarioFisico->load(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'usuario:id,name', 'firma:id,inventario_fisico_id,nombre_firmante,hash_firma,aceptado_en']);
+
+        $contadores = $this->resumen->contadores($inventarioFisico);
+
+        // Los renglones de existencias por cantidad de una ronda son pocos (uno
+        // por activo+variante del almacén): se sirven completos, sin paginar.
+        $existencias = $this->resumen->consultaExistencias($inventarioFisico)->get()
+            ->map(fn (InventarioFisicoExistencia $e): array => $this->resumen->filaExistencia($e))
+            ->values();
 
         return Inertia::render('InventarioFisico/Detalle', [
             'ronda' => [
@@ -160,15 +183,61 @@ class InventarioFisicoController extends Controller
                 'almacen' => $inventarioFisico->almacen?->nombre,
                 'responsable' => $inventarioFisico->usuario?->name,
                 'observaciones' => $inventarioFisico->observaciones,
-                'iniciado_en' => $inventarioFisico->created_at?->toDateTimeString(),
-                'finalizado_en' => $inventarioFisico->finalizado_en?->toDateTimeString(),
+                'iniciado_en' => $inventarioFisico->created_at?->toIso8601String(),
+                'finalizado_en' => $inventarioFisico->finalizado_en?->toIso8601String(),
+                'firma' => $inventarioFisico->firma === null ? null : [
+                    'nombre_firmante' => $inventarioFisico->firma->nombre_firmante,
+                    'hash_firma' => $inventarioFisico->firma->hash_firma,
+                    'aceptado_en' => $inventarioFisico->firma->aceptado_en->toIso8601String(),
+                ],
             ],
-            'contadores' => $this->resumen->contadores($inventarioFisico),
+            'contadores' => $contadores,
             'seccion' => $seccion,
             'unidades' => $unidades,
+            'existencias' => $existencias,
+            'textoAceptacion' => FinalizarRondaInventarioFisico::TEXTO_ACEPTACION,
             'permisos' => [
                 'administrar' => $request->user()->can('administrar', $inventarioFisico),
+                'finalizar' => $request->user()->can('administrar', $inventarioFisico)
+                    && $inventarioFisico->estaEnProceso()
+                    && $contadores['cantidad_pendientes'] === 0,
             ],
+        ]);
+    }
+
+    public function verificarExistencia(
+        VerificarExistenciaRequest $request,
+        InventarioFisico $inventarioFisico,
+        InventarioFisicoExistencia $existencia,
+        VerificarExistenciaInventarioFisico $accion,
+    ): JsonResponse {
+        $fila = $accion->ejecutar(
+            $inventarioFisico,
+            $existencia,
+            (int) $request->integer('cantidad_contada'),
+            $request->user(),
+        );
+
+        return response()->json([
+            'existencia' => $this->resumen->filaExistencia($fila),
+            'contadores' => $this->resumen->contadores($inventarioFisico),
+        ]);
+    }
+
+    public function marcarUnidadPresente(
+        Request $request,
+        InventarioFisico $inventarioFisico,
+        InventarioFisicoUnidad $unidad,
+        MarcarUnidadPresente $accion,
+    ): JsonResponse {
+        abort_unless($request->user()->can('administrar', $inventarioFisico), 403);
+
+        $fila = $accion->ejecutar($inventarioFisico, $unidad, $request->user());
+        $fila->loadMissing(['unidad:id,codigo,activo_id,almacen_id,empresa_id,colaborador_id,estado,condicion', 'unidad.activo:id,nombre', 'unidad.almacen:id,nombre', 'unidad.colaborador:id,nombre_completo', 'escaneadoPor:id,name']);
+
+        return response()->json([
+            'unidad' => $this->resumen->filaResumen($fila),
+            'contadores' => $this->resumen->contadores($inventarioFisico),
         ]);
     }
 
@@ -185,13 +254,12 @@ class InventarioFisicoController extends Controller
         return response()->json($payload);
     }
 
-    public function finalizar(Request $request, InventarioFisico $inventarioFisico, FinalizarRondaInventarioFisico $accion): RedirectResponse
+    public function finalizar(FinalizarRondaRequest $request, InventarioFisico $inventarioFisico, FinalizarRondaInventarioFisico $accion): RedirectResponse
     {
-        $this->authorize('administrar', $inventarioFisico);
+        // Autorización (permiso + acceso a la empresa) en el Form Request.
+        $accion->ejecutar($inventarioFisico, $request->string('firma')->toString(), $request->user());
 
-        $accion->ejecutar($inventarioFisico, $request->user()?->id);
-
-        return back()->with('toast', ['type' => 'success', 'message' => 'Ronda de inventario físico finalizada.']);
+        return back()->with('toast', ['type' => 'success', 'message' => 'Ronda de inventario físico finalizada y firmada.']);
     }
 
     /**
@@ -245,14 +313,21 @@ class InventarioFisicoController extends Controller
     }
 
     /**
-     * Excel / PDF del resumen de una ronda, respetando el mismo filtro de
-     * sección que la pantalla (`todos` / `encontrados` / `faltantes` /
-     * `no_esperados`). Sin `->paginate()`: exporta la sección COMPLETA, no la
-     * página visible. Mismo permiso que `show()`.
+     * Excel / PDF del resumen de una ronda. `?tipo=unidades` (por defecto) =
+     * unidades identificadas, respetando el filtro de sección
+     * (`todos`/`encontrados`/`faltantes`/`no_esperados`). `?tipo=cantidad` =
+     * artículos por cantidad (esperado / contado / diferencia / resultado). Sin
+     * `->paginate()`: exporta la sección COMPLETA. Mismo permiso que `show()`.
      */
     public function exportar(Request $request, InventarioFisico $inventarioFisico): BinaryFileResponse|HttpResponse
     {
         $this->authorize('view', $inventarioFisico);
+
+        $inventarioFisico->loadMissing('empresa:id,nombre_comercial,logo_ruta');
+
+        if ($request->input('tipo') === 'cantidad') {
+            return $this->exportarCantidad($request, $inventarioFisico);
+        }
 
         $seccion = $request->input('seccion');
         $seccion = in_array($seccion, ServicioResumenInventarioFisico::SECCIONES, true) ? $seccion : 'todos';
@@ -273,20 +348,56 @@ class InventarioFisicoController extends Controller
                 ];
             })->all();
 
-        $inventarioFisico->loadMissing('empresa:id,nombre_comercial,logo_ruta');
-
         $contexto = new ContextoExportacion(
             'Inventario físico '.$inventarioFisico->folio,
             $inventarioFisico->empresa,
             array_filter([
                 'Ronda' => $inventarioFisico->nombre,
-                'Sección' => $seccion === 'todos' ? 'Todos' : ucfirst(str_replace('_', ' ', $seccion)),
+                'Sección' => 'Unidades identificadas · '.($seccion === 'todos' ? 'Todos' : ucfirst(str_replace('_', ' ', $seccion))),
             ]),
             count($filas),
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Clasificación', 'Código', 'Activo', 'Almacén', 'Asignada a', 'Estado actual', 'Escaneada en', 'Escaneada por',
+        ], $contexto);
+    }
+
+    private function exportarCantidad(Request $request, InventarioFisico $inventarioFisico): BinaryFileResponse|HttpResponse
+    {
+        $etiquetaResultado = [
+            InventarioFisicoExistencia::RESULTADO_PENDIENTE => 'Pendiente',
+            InventarioFisicoExistencia::RESULTADO_COINCIDE => 'Coincide',
+            InventarioFisicoExistencia::RESULTADO_FALTANTE => 'Faltante',
+            InventarioFisicoExistencia::RESULTADO_SOBRANTE => 'Sobrante',
+        ];
+
+        $filas = $this->resumen->consultaExistencias($inventarioFisico)->get()
+            ->map(function (InventarioFisicoExistencia $e) use ($etiquetaResultado): array {
+                $d = $this->resumen->filaExistencia($e);
+
+                return [
+                    $d['activo'],
+                    $d['talla'] ?? '—',
+                    $d['cantidad_esperada'],
+                    $d['cantidad_contada'] ?? 'Sin verificar',
+                    $d['diferencia'] ?? '—',
+                    $etiquetaResultado[$d['resultado']] ?? $d['resultado'],
+                ];
+            })->all();
+
+        $contexto = new ContextoExportacion(
+            'Inventario físico '.$inventarioFisico->folio,
+            $inventarioFisico->empresa,
+            array_filter([
+                'Ronda' => $inventarioFisico->nombre,
+                'Sección' => 'Artículos por cantidad',
+            ]),
+            count($filas),
+        );
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Activo', 'Talla', 'Esperado', 'Contado', 'Diferencia', 'Resultado',
         ], $contexto);
     }
 

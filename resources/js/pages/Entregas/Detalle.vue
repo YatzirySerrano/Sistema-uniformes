@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { Download, FileSignature, PenLine, Pencil, Undo2 } from '@lucide/vue';
+import { Download, FileSignature, PenLine, Undo2 } from '@lucide/vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { varianteBadgeEstadoEntrega } from '@/lib/estadoEntrega';
+import { fechaHora } from '@/lib/fecha';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 
 const props = defineProps<{
@@ -117,15 +118,6 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                 <a :href="`/acuses/${acuse.id}/firma-operador`" target="_blank">
                     <FileSignature class="size-4" /> Firma de quien entrega
                 </a>
-            </Button>
-            <Button
-                v-if="!pendiente && permisos.corregir"
-                variant="outline"
-                as-child
-            >
-                <Link :href="`/entregas/${entrega.id}/corregir`">
-                    <Pencil class="size-4" /> Corregir entrega
-                </Link>
             </Button>
             <Button v-if="permisos.devolver" variant="outline" as-child>
                 <Link :href="`/devoluciones/crear?entrega_id=${entrega.id}`">
@@ -275,7 +267,7 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                     <p>{{ c.motivo }}</p>
                     <p class="text-muted-foreground text-xs">
                         {{ c.por }} ·
-                        {{ new Date(c.fecha).toLocaleString('es-MX') }}
+                        {{ fechaHora(c.fecha) }}
                     </p>
                 </div>
             </CardContent>

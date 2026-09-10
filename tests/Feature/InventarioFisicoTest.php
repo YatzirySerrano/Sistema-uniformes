@@ -14,6 +14,7 @@ use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoUnidad;
 use App\Models\UnidadActivo;
 use App\Models\User;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -24,6 +25,7 @@ use Maatwebsite\Excel\Facades\Excel;
  * las unidades.
  */
 beforeEach(function () {
+    Storage::fake('local');
     sembrarRolesPermisos();
     $this->empresa = Empresa::factory()->create(['nombre_comercial' => 'DASTI']);
     $this->almacen = Almacen::factory()->paraEmpresa($this->empresa)->create();
@@ -48,6 +50,7 @@ it('crea una ronda en proceso con folio y congela el universo esperado', functio
     $this->actingAs($this->admin)
         ->post('/inventarios-fisicos', [
             'empresa_id' => $this->empresa->id,
+            'almacen_id' => $this->almacen->id,
             'nombre' => 'Inventario diciembre 2026 – DASTI',
         ])
         ->assertRedirect();
@@ -70,28 +73,29 @@ it('el snapshot excluye las unidades de otra empresa', function () {
     $activoOtra = Activo::factory()->for($otra)->seguimientoIndividual()->create();
     UnidadActivo::factory()->for($otra, 'empresa')->for($activoOtra)->for($almacenOtra)->create();
 
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     expect(InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->count())->toBe(1);
 });
 
-it('el snapshot excluye las unidades dadas de baja pero incluye perdidas / robadas / en reparación', function () {
-    ($this->unidad)();                                                   // disponible
-    ($this->unidad)(['estado' => 'baja', 'dado_de_baja_en' => now()]);   // baja → fuera
-    ($this->unidad)(['condicion' => CondicionUnidadActivo::Perdido]);    // perdida → dentro
-    ($this->unidad)(['condicion' => CondicionUnidadActivo::EnReparacion]); // reparación → dentro
-    ($this->unidad)()->update(['estado' => 'asignada']);                 // asignada → dentro
+it('el snapshot QR sólo incluye unidades disponibles: excluye baja, asignada, perdida, robada y en reparación', function () {
+    ($this->unidad)();                                                    // disponible → dentro
+    ($this->unidad)(['estado' => 'baja', 'dado_de_baja_en' => now()]);    // baja → fuera
+    ($this->unidad)(['condicion' => CondicionUnidadActivo::Perdido]);     // perdida → fuera
+    ($this->unidad)(['condicion' => CondicionUnidadActivo::Robado]);      // robada → fuera
+    ($this->unidad)(['condicion' => CondicionUnidadActivo::EnReparacion]); // reparación → fuera
+    ($this->unidad)()->update(['estado' => 'asignada']);                  // asignada → fuera
 
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
-    expect(InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->count())->toBe(4);
+    expect(InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->count())->toBe(1);
 });
 
 it('una unidad creada DESPUÉS de iniciar la ronda no infla el universo esperado', function () {
     ($this->unidad)();
     ($this->unidad)();
 
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     expect(InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->count())->toBe(2);
 
     ($this->unidad)(); // nueva unidad tras el snapshot
@@ -106,18 +110,19 @@ it('el alcance por almacén limita el snapshot a las unidades de ese almacén', 
     $otroAlmacen = Almacen::factory()->paraEmpresa($this->empresa)->create();
     UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($otroAlmacen)->create();
 
-    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen->id);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     expect(InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->count())->toBe(2);
 });
 
-it('la previsualización del universo cuenta las mismas unidades que el snapshot', function () {
+it('la previsualización del universo cuenta las mismas unidades disponibles que el snapshot', function () {
     ($this->unidad)();
     ($this->unidad)();
     ($this->unidad)(['estado' => 'baja', 'dado_de_baja_en' => now()]);
+    ($this->unidad)(['condicion' => CondicionUnidadActivo::Perdido]);
 
     $this->actingAs($this->admin)
-        ->getJson("/inventarios-fisicos/universo?empresa_id={$this->empresa->id}")
+        ->getJson("/inventarios-fisicos/universo?empresa_id={$this->empresa->id}&almacen_id={$this->almacen->id}")
         ->assertOk()
         ->assertJson(['total' => 2]);
 });
@@ -130,7 +135,7 @@ it('la previsualización del universo cuenta las mismas unidades que el snapshot
 
 it('escanea una unidad esperada por public_token y la marca como encontrada', function () {
     $unidad = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)
         ->postJson("/inventarios-fisicos/{$ronda->id}/escanear", ['codigo' => $unidad->public_token])
@@ -150,7 +155,7 @@ it('escanea una unidad esperada por public_token y la marca como encontrada', fu
 it('escanea por el código de unidad (entrada manual) y por la URL completa del QR', function () {
     $porCodigo = ($this->unidad)();
     $porUrl = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)
         ->postJson("/inventarios-fisicos/{$ronda->id}/escanear", ['codigo' => $porCodigo->codigo])
@@ -165,7 +170,7 @@ it('escanea por el código de unidad (entrada manual) y por la URL completa del 
 
 it('el doble escaneo no crea una segunda fila y responde "ya escaneada"', function () {
     $unidad = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)->postJson("/inventarios-fisicos/{$ronda->id}/escanear", ['codigo' => $unidad->public_token])->assertOk();
     $primera = InventarioFisicoUnidad::query()->where('unidad_activo_id', $unidad->id)->firstOrFail()->escaneado_en;
@@ -181,7 +186,7 @@ it('el doble escaneo no crea una segunda fila y responde "ya escaneada"', functi
 
 it('dos escaneos "simultáneos" de la misma unidad terminan con una sola fila (idempotente)', function () {
     $unidad = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $accion = app(EscanearUnidadInventarioFisico::class);
 
     $a = $accion->ejecutar($ronda, $unidad->public_token, $this->admin);
@@ -194,7 +199,7 @@ it('dos escaneos "simultáneos" de la misma unidad terminan con una sola fila (i
 
 it('escanear una unidad de la misma empresa que no estaba en el snapshot la registra como NO esperada', function () {
     ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $tardía = ($this->unidad)(); // creada después del snapshot
 
@@ -209,7 +214,7 @@ it('escanear una unidad de la misma empresa que no estaba en el snapshot la regi
 });
 
 it('escanear una unidad de OTRA empresa se rechaza sin filtrar información (IDOR)', function () {
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $otra = Empresa::factory()->create();
     $almacenOtra = Almacen::factory()->paraEmpresa($otra)->create();
@@ -225,7 +230,7 @@ it('escanear una unidad de OTRA empresa se rechaza sin filtrar información (IDO
 });
 
 it('un código inexistente responde 422 controlado, no un 500', function () {
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)
         ->postJson("/inventarios-fisicos/{$ronda->id}/escanear", ['codigo' => 'NO-EXISTE-123'])
@@ -234,9 +239,9 @@ it('un código inexistente responde 422 controlado, no un 500', function () {
 
 it('una ronda finalizada no acepta más escaneos', function () {
     $unidad = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
-    $this->actingAs($this->admin)->post("/inventarios-fisicos/{$ronda->id}/finalizar")->assertRedirect();
+    $this->actingAs($this->admin)->post("/inventarios-fisicos/{$ronda->id}/finalizar", ['firma' => firmaDemoBase64(), 'aceptacion' => true])->assertRedirect();
 
     $this->actingAs($this->admin)
         ->postJson("/inventarios-fisicos/{$ronda->id}/escanear", ['codigo' => $unidad->public_token])
@@ -248,10 +253,10 @@ it('una ronda finalizada no acepta más escaneos', function () {
 });
 
 it('finalizar dos veces la misma ronda es un error controlado', function () {
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
-    $this->actingAs($this->admin)->post("/inventarios-fisicos/{$ronda->id}/finalizar")->assertRedirect();
-    $this->actingAs($this->admin)->post("/inventarios-fisicos/{$ronda->id}/finalizar")->assertSessionHasErrors('negocio');
+    $this->actingAs($this->admin)->post("/inventarios-fisicos/{$ronda->id}/finalizar", ['firma' => firmaDemoBase64(), 'aceptacion' => true])->assertRedirect();
+    $this->actingAs($this->admin)->post("/inventarios-fisicos/{$ronda->id}/finalizar", ['firma' => firmaDemoBase64(), 'aceptacion' => true])->assertSessionHasErrors('negocio');
 });
 
 /*
@@ -263,7 +268,7 @@ it('finalizar dos veces la misma ronda es un error controlado', function () {
 it('el resumen deriva encontrados, faltantes y no esperados del snapshot', function () {
     $encontrada = ($this->unidad)();
     $faltante = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $noEsperada = ($this->unidad)();
 
     $accion = app(EscanearUnidadInventarioFisico::class);
@@ -287,9 +292,12 @@ it('el resumen deriva encontrados, faltantes y no esperados del snapshot', funct
         ->assertInertia(fn ($p) => $p->where('unidades.data', fn ($d) => count($d) === 2));
 });
 
-it('el resumen muestra el estado visible actual de cada unidad', function () {
-    $perdida = ($this->unidad)(['condicion' => CondicionUnidadActivo::Perdido]);
-    $ronda = crearRonda($this->admin, $this->empresa);
+it('el resumen muestra el estado visible ACTUAL de cada unidad, no el congelado', function () {
+    $unidad = ($this->unidad)(); // disponible al iniciar → entra al snapshot
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
+
+    // Después de iniciar, la unidad se reporta perdida por otra vía.
+    $unidad->update(['condicion' => CondicionUnidadActivo::Perdido]);
 
     $this->actingAs($this->admin)->get("/inventarios-fisicos/{$ronda->id}?seccion=faltantes")
         ->assertInertia(fn ($p) => $p->where('unidades.data.0.estado_visible', 'perdido'));
@@ -298,7 +306,7 @@ it('el resumen muestra el estado visible actual de cada unidad', function () {
 it('el listado histórico muestra contadores por ronda y respeta el alcance multiempresa', function () {
     ($this->unidad)();
     ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->first()->unidad->public_token, $this->admin);
 
     // Ronda de otra empresa, invisible para un supervisor de la nuestra.
@@ -331,7 +339,7 @@ it('sin permiso de ver, el módulo responde 403', function () {
 
 it('el rol Encargado ve pero no puede iniciar ni escanear', function () {
     $unidad = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $encargado = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
 
     $this->actingAs($encargado)->get("/inventarios-fisicos/{$ronda->id}")->assertOk();
@@ -339,12 +347,12 @@ it('el rol Encargado ve pero no puede iniciar ni escanear', function () {
     $this->actingAs($encargado)
         ->postJson("/inventarios-fisicos/{$ronda->id}/escanear", ['codigo' => $unidad->public_token])
         ->assertForbidden();
-    $this->actingAs($encargado)->post("/inventarios-fisicos/{$ronda->id}/finalizar")->assertForbidden();
+    $this->actingAs($encargado)->post("/inventarios-fisicos/{$ronda->id}/finalizar", ['firma' => firmaDemoBase64(), 'aceptacion' => true])->assertForbidden();
 });
 
 it('un usuario sin acceso a la empresa de la ronda no puede verla ni escanearla', function () {
     $unidad = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $otra = Empresa::factory()->create();
     $forastero = usuarioCon(RolSistema::Supervisor->value, [$otra]);
@@ -364,7 +372,7 @@ it('un usuario sin acceso a la empresa de la ronda no puede verla ni escanearla'
 it('escanear NO cambia el estado, condición, almacén ni asignación de la unidad', function () {
     $unidad = ($this->unidad)(['condicion' => CondicionUnidadActivo::Perdido]);
     $antes = $unidad->only(['estado', 'condicion', 'almacen_id', 'colaborador_id']);
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)->postJson("/inventarios-fisicos/{$ronda->id}/escanear", ['codigo' => $unidad->public_token])->assertOk();
 
@@ -380,7 +388,7 @@ it('escanear NO cambia el estado, condición, almacén ni asignación de la unid
 it('exporta el resumen de la ronda en Excel y PDF respetando la sección', function () {
     $encontrada = ($this->unidad)();
     ($this->unidad)(); // faltante
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, $encontrada->public_token, $this->admin);
 
     $this->actingAs($this->admin)
@@ -394,7 +402,7 @@ it('exporta el resumen de la ronda en Excel y PDF respetando la sección', funct
 });
 
 it('la exportación exige el mismo permiso que ver la ronda', function () {
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $forastero = usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]);
 
     $this->actingAs($forastero)->get("/inventarios-fisicos/{$ronda->id}/exportar?formato=xlsx")->assertForbidden();
@@ -409,7 +417,7 @@ it('la exportación exige el mismo permiso que ver la ronda', function () {
 it('la sección "todos" lista el universo registrado en la ronda sin recalcular UnidadActivo ni duplicar', function () {
     $encontrada = ($this->unidad)();
     $faltante = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $noEsperada = ($this->unidad)(); // creada tras el snapshot
 
     $accion = app(EscanearUnidadInventarioFisico::class);
@@ -441,7 +449,7 @@ it('la sección "todos" lista el universo registrado en la ronda sin recalcular 
 it('las secciones encontrados / faltantes / no_esperados siguen siendo correctas junto a "todos"', function () {
     $encontrada = ($this->unidad)();
     $faltante = ($this->unidad)();
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $noEsperada = ($this->unidad)();
 
     $accion = app(EscanearUnidadInventarioFisico::class);
@@ -465,7 +473,7 @@ it('exporta la sección "todos" con la columna Clasificación', function () {
     Excel::fake();
     $encontrada = ($this->unidad)();
     ($this->unidad)(); // faltante
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $noEsperada = ($this->unidad)();
     app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, $encontrada->public_token, $this->admin);
     app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, $noEsperada->public_token, $this->admin);
@@ -489,7 +497,7 @@ it('exportar una sección concreta sólo incluye sus filas y no se limita a la p
 
     $encontradas = collect(range(1, 3))->map(fn () => ($this->unidad)());
     collect(range(1, 5))->each(fn () => ($this->unidad)()); // 5 faltantes
-    $ronda = crearRonda($this->admin, $this->empresa);
+    $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
     $encontradas->each(fn ($u) => app(EscanearUnidadInventarioFisico::class)->ejecutar($ronda, $u->public_token, $this->admin));
 
     $archivo = 'inventario-fisico-'.Str::slug($ronda->folio).'-'.Str::slug($this->empresa->nombre_comercial).'-'.now()->toDateString().'.xlsx';
@@ -518,7 +526,7 @@ it('exportar una sección concreta sólo incluye sus filas y no se limita a la p
 */
 
 it('exporta el listado general de rondas en Excel y PDF', function () {
-    crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx')
         ->assertOk()
@@ -533,9 +541,9 @@ it('la exportación general NO se limita a la página visible', function () {
     config()->set('uniformes.por_pagina', 2);
     Excel::fake();
 
-    crearRonda($this->admin, $this->empresa);
-    crearRonda($this->admin, $this->empresa);
-    crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx')->assertOk();
 
@@ -549,8 +557,8 @@ it('la exportación general NO se limita a la página visible', function () {
 it('la exportación general respeta el filtro de empresa y el alcance multiempresa', function () {
     Excel::fake();
 
-    crearRonda($this->admin, $this->empresa);
-    crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $otra = Empresa::factory()->create(['nombre_comercial' => 'OtraCo']);
     InventarioFisico::factory()->for($otra)->create();
@@ -569,9 +577,9 @@ it('la exportación general respeta el filtro de empresa y el alcance multiempre
 it('la exportación general respeta el filtro de estado', function () {
     Excel::fake();
 
-    crearRonda($this->admin, $this->empresa);
-    $finalizada = crearRonda($this->admin, $this->empresa);
-    app(FinalizarRondaInventarioFisico::class)->ejecutar($finalizada, $this->admin->id);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
+    $finalizada = crearRonda($this->admin, $this->empresa, $this->almacen);
+    app(FinalizarRondaInventarioFisico::class)->ejecutar($finalizada, firmaDemoBase64(), $this->admin);
 
     $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx&estado=finalizado')->assertOk();
     Excel::assertDownloaded('inventarios-fisicos-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $e) use ($finalizada): bool {
@@ -586,8 +594,8 @@ it('la exportación general respeta el filtro de estado', function () {
 it('la exportación general respeta la búsqueda por folio / nombre', function () {
     Excel::fake();
 
-    $r1 = crearRonda($this->admin, $this->empresa);
-    crearRonda($this->admin, $this->empresa);
+    $r1 = crearRonda($this->admin, $this->empresa, $this->almacen);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
 
     $this->actingAs($this->admin)->get('/inventarios-fisicos/exportar?formato=xlsx&buscar='.$r1->folio)->assertOk();
     Excel::assertDownloaded('inventarios-fisicos-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $e) use ($r1): bool {
@@ -598,7 +606,7 @@ it('la exportación general respeta la búsqueda por folio / nombre', function (
 });
 
 it('un usuario no puede exportar el listado de rondas de una empresa fuera de su alcance', function () {
-    crearRonda($this->admin, $this->empresa);
+    crearRonda($this->admin, $this->empresa, $this->almacen);
     $forastero = usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]);
 
     // El filtro de empresa ajena se ignora y el resultado queda acotado a SU
@@ -619,14 +627,15 @@ it('sin permiso de ver, la exportación general responde 403', function () {
 });
 
 /**
- * Helper: crea una ronda vía la acción real (snapshot incluido).
+ * Helper: crea una ronda vía la acción real (snapshot incluido). El almacén es
+ * obligatorio para las rondas nuevas.
  */
-function crearRonda(User $usuario, Empresa $empresa, ?int $almacenId = null): InventarioFisico
+function crearRonda(User $usuario, Empresa $empresa, Almacen $almacen): InventarioFisico
 {
     return app(CrearRondaInventarioFisico::class)->ejecutar(
         $empresa,
         'Ronda de prueba',
-        $almacenId !== null ? Almacen::query()->find($almacenId) : null,
+        $almacen,
         null,
         $usuario->id,
     );
