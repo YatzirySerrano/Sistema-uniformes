@@ -63,15 +63,14 @@ class CrearEntregaUniforme
         ?int $servicioId = null,
         array $evidencias = [],
     ): EntregaUniforme {
-        $colaborador = Colaborador::query()->findOr($colaboradorId, fn () => throw new ExcepcionDeNegocioSimple('El colaborador indicado no existe.'));
+        // Validación rápida (NO autoritativa): existencia + que el colaborador
+        // esté activo. La empresa/sucursal definitivas se leen de la fila
+        // BLOQUEADA dentro de la transacción.
+        $colaboradorPreliminar = Colaborador::query()->findOr($colaboradorId, fn () => throw new ExcepcionDeNegocioSimple('El colaborador indicado no existe.'));
 
-        if (! $colaborador->activo) {
+        if (! $colaboradorPreliminar->activo) {
             throw new ExcepcionDeNegocioSimple('El colaborador está inactivo y no puede recibir entregas.');
         }
-
-        $empresaId = $colaborador->empresa_id;
-        $sucursalId = $colaborador->sucursal_id;
-        $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId), $almacenId);
 
         // Los renglones con evidencia NO se consolidan: cada uno debe quedar
         // como su propio DetalleEntrega para poder ligarle su imagen 1:1.
@@ -85,7 +84,22 @@ class CrearEntregaUniforme
             throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
         }
 
-        return DB::transaction(function () use ($empresaId, $sucursalId, $almacen, $colaborador, $encargadoId, $fechaEntrega, $activosConsolidados, $activosConEvidencia, $unidades, $conjuntos, $notas, $servicioId, $evidencias): EntregaUniforme {
+        return DB::transaction(function () use ($colaboradorId, $almacenId, $encargadoId, $fechaEntrega, $activosConsolidados, $activosConEvidencia, $unidades, $conjuntos, $notas, $servicioId, $evidencias): EntregaUniforme {
+            // Candado sobre el colaborador: mismo orden de locks
+            // (Colaborador → Entrega/Inventario) que `CambiarEmpresaColaborador`.
+            // Una transferencia de empresa y esta entrega se serializan: si
+            // gana la transferencia, aquí se lee ya la empresa nueva; si gana
+            // la entrega, la transferencia detecta la custodia y aborta.
+            $colaborador = Colaborador::query()->whereKey($colaboradorId)->lockForUpdate()->firstOrFail();
+
+            if (! $colaborador->activo) {
+                throw new ExcepcionDeNegocioSimple('El colaborador está inactivo y no puede recibir entregas.');
+            }
+
+            $empresaId = $colaborador->empresa_id;
+            $sucursalId = $colaborador->sucursal_id;
+            $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId), $almacenId);
+
             $entrega = EntregaUniforme::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA),
                 'empresa_id' => $empresaId,

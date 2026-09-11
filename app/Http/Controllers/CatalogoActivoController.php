@@ -32,13 +32,14 @@ class CatalogoActivoController extends Controller
             ]);
 
         $categorias = CategoriaActivo::query()
-            ->with('tipoActivo:id,nombre')
+            ->with(['tipoActivo:id,nombre', 'perfilTecnico:id,categoria_activo_id,perfil'])
             ->withCount('activos')
             ->orderBy('nombre')
             ->get()
             ->map(fn (CategoriaActivo $c): array => [
                 'id' => $c->id,
                 'nombre' => $c->nombre,
+                'perfil_tecnico' => $c->perfilTecnico?->perfil->value,
                 'tipo_activo_id' => $c->tipo_activo_id,
                 'tipo' => $c->tipoActivo?->nombre,
                 'activa' => $c->activa,

@@ -7,6 +7,7 @@ use App\Models\Colaborador;
 use App\Models\DocumentoExpediente;
 use App\Models\User;
 use App\Models\VersionDocumentoExpediente;
+use App\Models\VersionExpedienteEmpresa;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -50,7 +51,7 @@ class SubirDocumentoExpediente
                     'creado_por' => $usuario->getKey(),
                 ]);
 
-                VersionDocumentoExpediente::query()->create([
+                $version = VersionDocumentoExpediente::query()->create([
                     'documento_expediente_id' => $documento->getKey(),
                     'version' => 1,
                     'ruta' => $ruta,
@@ -60,6 +61,14 @@ class SubirDocumentoExpediente
                     'peso_bytes' => $archivo->getSize() ?: 0,
                     'hash_sha256' => $hash,
                     'subido_por' => $usuario->getKey(),
+                ]);
+
+                // Empresa de ORIGEN de esta versión (llave de visibilidad de las
+                // categorías empresariales tras un traslado). Se escribe siempre,
+                // también para categorías personales, como trazabilidad.
+                VersionExpedienteEmpresa::query()->create([
+                    'documento_expediente_version_id' => $version->getKey(),
+                    'empresa_id' => $colaborador->empresa_id,
                 ]);
 
                 $this->auditoria->registrar('colaboradores', 'expediente-subir', [

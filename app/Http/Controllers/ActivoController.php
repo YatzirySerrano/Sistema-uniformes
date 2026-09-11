@@ -25,6 +25,7 @@ use App\Models\TipoActivo;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Soporte\ResolverPerfilTecnicoUnidad;
 use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -300,6 +301,7 @@ class ActivoController extends Controller
                 existenciaInicial: $this->existenciaInicialDesdeRequest($request, $tallaIds),
                 cantidadUnidades: (int) $request->input('cantidad_inicial', 0),
                 realizadoPor: $request->user()?->id,
+                especificaciones: array_values((array) $request->input('especificaciones', [])),
             );
         });
         $activo = $resultado['activo'];
@@ -450,9 +452,10 @@ class ActivoController extends Controller
     {
         $this->authorize('view', $activo);
 
-        $activo->load('tipoActivo:id,nombre', 'empresa:id,nombre_comercial');
+        $activo->load('tipoActivo:id,nombre', 'categoriaActivo.perfilTecnico', 'empresa:id,nombre_comercial');
 
         $esIndividual = $activo->tipo_control === TipoControlActivo::SeguimientoIndividual;
+        $perfilTecnico = app(ResolverPerfilTecnicoUnidad::class)->paraActivo($activo);
 
         $saldos = $esIndividual ? collect() : SaldoInventario::query()
             ->where('empresa_id', $activo->empresa_id)
@@ -482,6 +485,8 @@ class ActivoController extends Controller
                 'tipo' => $activo->tipoActivo?->nombre,
                 'tipo_control' => $activo->tipo_control->value,
                 'tipo_control_etiqueta' => $activo->tipo_control->etiqueta(),
+                'perfil_tecnico' => $perfilTecnico?->value,
+                'perfil_tecnico_etiqueta' => $perfilTecnico?->etiqueta(),
                 'imagen_url' => $activo->imagen_ruta ? Storage::disk('public')->url($activo->imagen_ruta) : null,
                 'tallas' => $activo->tallas()->pluck('valor'),
             ],
@@ -538,6 +543,7 @@ class ActivoController extends Controller
                 cantidad: $request->integer('cantidad'),
                 motivo: $motivo,
                 realizadoPor: $request->user()?->id,
+                especificaciones: array_values((array) $request->input('especificaciones', [])),
             );
 
             if ($request->boolean('abrir_etiquetas')) {

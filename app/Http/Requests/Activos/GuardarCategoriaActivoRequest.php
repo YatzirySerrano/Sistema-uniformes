@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Activos;
 
+use App\Enums\PerfilTecnicoUnidad;
 use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Models\CategoriaActivo;
 use Illuminate\Foundation\Http\FormRequest;
@@ -38,6 +39,9 @@ class GuardarCategoriaActivoRequest extends FormRequest
         return [
             'nombre' => ['required', 'string', 'max:120'],
             'tipo_activo_id' => ['nullable', 'integer', Rule::exists('tipos_activo', 'id')],
+            // Clave semántica estable para las unidades identificadas de esta
+            // categoría (Celular / Computadora / Tablet). Se guarda en `codigo`.
+            'perfil_tecnico' => ['nullable', Rule::enum(PerfilTecnicoUnidad::class)],
             'activa' => ['boolean'],
         ];
     }

@@ -57,6 +57,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::put('colaboradores/{colaborador}', [ColaboradorController::class, 'update'])->name('colaboradores.update');
     Route::post('colaboradores/{colaborador}/estado', [ColaboradorController::class, 'toggle'])->name('colaboradores.toggle');
     Route::post('colaboradores/{colaborador}/servicio', [ColaboradorController::class, 'cambiarServicio'])->name('colaboradores.cambiar-servicio');
+    Route::get('colaboradores/{colaborador}/custodia', [ColaboradorController::class, 'custodiaPendiente'])->name('colaboradores.custodia');
+    Route::post('colaboradores/{colaborador}/cambiar-empresa', [ColaboradorController::class, 'cambiarEmpresa'])->name('colaboradores.cambiar-empresa');
 
     // Expediente digital del colaborador
     Route::get('colaboradores/{colaborador}/expediente', [DocumentoExpedienteController::class, 'index'])->name('colaboradores.expediente.index');
@@ -100,6 +102,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('activos/unidades/exportar', [UnidadActivoController::class, 'exportar'])->name('unidades-activo.exportar');
     Route::get('activos/unidades/{unidad:public_token}', [UnidadActivoController::class, 'show'])->name('unidades-activo.show');
     Route::get('activos/unidades/{unidad:public_token}/qr', [UnidadActivoController::class, 'qr'])->name('unidades-activo.qr');
+    Route::patch('activos/unidades/{unidad:public_token}/especificacion', [UnidadActivoController::class, 'actualizarEspecificacion'])->name('unidades-activo.especificacion');
     Route::post('activos/unidades/{unidad:public_token}/baja', [UnidadActivoController::class, 'darDeBaja'])->name('unidades-activo.baja');
     Route::post('activos/unidades/{unidad:public_token}/incidencia', [UnidadActivoController::class, 'marcarIncidencia'])->name('unidades-activo.incidencia');
     Route::post('activos/unidades/{unidad:public_token}/recuperar', [UnidadActivoController::class, 'recuperar'])->name('unidades-activo.recuperar');
@@ -171,6 +174,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventarios-fisicos/{inventarioFisico}/exportar', [InventarioFisicoController::class, 'exportar'])->name('inventarios-fisicos.exportar');
     Route::post('inventarios-fisicos/{inventarioFisico}/escanear', [InventarioFisicoController::class, 'escanear'])->name('inventarios-fisicos.escanear');
     Route::post('inventarios-fisicos/{inventarioFisico}/unidades/{unidad}/presente', [InventarioFisicoController::class, 'marcarUnidadPresente'])->name('inventarios-fisicos.unidades.presente');
+    Route::delete('inventarios-fisicos/{inventarioFisico}/unidades/{unidad}/presente', [InventarioFisicoController::class, 'desmarcarUnidadPresente'])->name('inventarios-fisicos.unidades.desmarcar-presente');
     Route::post('inventarios-fisicos/{inventarioFisico}/existencias/{existencia}', [InventarioFisicoController::class, 'verificarExistencia'])->name('inventarios-fisicos.existencias.verificar');
     Route::post('inventarios-fisicos/{inventarioFisico}/finalizar', [InventarioFisicoController::class, 'finalizar'])->name('inventarios-fisicos.finalizar');
 

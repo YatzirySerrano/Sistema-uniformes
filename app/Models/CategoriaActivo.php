@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * Categoría de activo del **catálogo compartido de plataforma** (Camisola,
@@ -51,6 +52,18 @@ class CategoriaActivo extends Model
     public function tipoActivo(): BelongsTo
     {
         return $this->belongsTo(TipoActivo::class);
+    }
+
+    /**
+     * Perfil técnico (Celular / Computadora / Tablet) para las unidades
+     * identificadas de esta categoría. Fila lateral 1:1; ausente = sin perfil.
+     * Independiente de `codigo` (identificador operativo del catálogo).
+     *
+     * @return HasOne<CategoriaActivoPerfilTecnico, $this>
+     */
+    public function perfilTecnico(): HasOne
+    {
+        return $this->hasOne(CategoriaActivoPerfilTecnico::class, 'categoria_activo_id');
     }
 
     /**

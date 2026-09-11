@@ -35,6 +35,7 @@ class CrearActivoConExistencias
      * @param  array<string, mixed>  $datosActivo  columnas de `activos` (sin empresa_id, se pasa aparte)
      * @param  array<int, int>  $tallaIds  variantes asociadas al activo (activo_talla, sólo control=cantidad)
      * @param  array<int, array{talla_id: int|null, cantidad: int}>  $existenciaInicial  filas de stock inicial (sólo control=cantidad)
+     * @param  list<array{marca?: string|null, modelo?: string|null, imei?: string|null, numero_telefonico?: string|null, operador?: string|null, plan?: string|null}>  $especificaciones  datos técnicos por unidad (sólo control=individual con perfil técnico)
      * @return array{activo: Activo, unidades: Collection<int, UnidadActivo>}
      */
     public function ejecutar(
@@ -45,8 +46,9 @@ class CrearActivoConExistencias
         array $existenciaInicial,
         int $cantidadUnidades,
         ?int $realizadoPor,
+        array $especificaciones = [],
     ): array {
-        return DB::transaction(function () use ($empresaId, $datosActivo, $tallaIds, $almacenId, $existenciaInicial, $cantidadUnidades, $realizadoPor): array {
+        return DB::transaction(function () use ($empresaId, $datosActivo, $tallaIds, $almacenId, $existenciaInicial, $cantidadUnidades, $realizadoPor, $especificaciones): array {
             $activo = Activo::query()->create([...$datosActivo, 'empresa_id' => $empresaId]);
             $unidades = new Collection;
 
@@ -77,6 +79,7 @@ class CrearActivoConExistencias
                     motivo: 'Alta inicial del activo',
                     realizadoPor: $realizadoPor,
                     cargaInicial: true,
+                    especificaciones: $especificaciones,
                 );
             }
 

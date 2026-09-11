@@ -28,6 +28,8 @@ defineProps<{
         tipo: string | null;
         tipo_control: 'cantidad' | 'individual';
         tipo_control_etiqueta: string;
+        perfil_tecnico: 'celular' | 'computadora' | 'tablet' | null;
+        perfil_tecnico_etiqueta: string | null;
         imagen_url: string | null;
         tallas: string[];
     };
@@ -368,6 +370,7 @@ const dialogoExistencias = ref(false);
             :empresa-id="activo.empresa.id"
             :usa-variantes="usaVariantes"
             :es-seguimiento-individual="activo.tipo_control === 'individual'"
+            :perfil-tecnico="activo.perfil_tecnico"
         />
     </div>
 </template>

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Acciones\CrearRondaInventarioFisico;
+use App\Acciones\DesmarcarUnidadPresente;
 use App\Acciones\EscanearUnidadInventarioFisico;
 use App\Acciones\FinalizarRondaInventarioFisico;
 use App\Acciones\MarcarUnidadPresente;
@@ -233,11 +234,41 @@ class InventarioFisicoController extends Controller
         abort_unless($request->user()->can('administrar', $inventarioFisico), 403);
 
         $fila = $accion->ejecutar($inventarioFisico, $unidad, $request->user());
+
+        return $this->respuestaFilaUnidad($inventarioFisico, $fila);
+    }
+
+    /**
+     * Revierte la marca de "presente" de una unidad esperada antes de que la
+     * ronda se finalice (corrección de un clic accidental / re-comprobación
+     * física). Backend es la autoridad: `DesmarcarUnidadPresente` valida el
+     * estado de la ronda y la pertenencia del renglón bajo lock.
+     */
+    public function desmarcarUnidadPresente(
+        Request $request,
+        InventarioFisico $inventarioFisico,
+        InventarioFisicoUnidad $unidad,
+        DesmarcarUnidadPresente $accion,
+    ): JsonResponse {
+        abort_unless($request->user()->can('administrar', $inventarioFisico), 403);
+
+        $fila = $accion->ejecutar($inventarioFisico, $unidad);
+
+        return $this->respuestaFilaUnidad($inventarioFisico, $fila);
+    }
+
+    /**
+     * Respuesta JSON común de marcar / desmarcar: la fila actualizada (para que
+     * el frontend refleje el estado real sin recargar) + los contadores
+     * derivados del servidor (nunca un `++` a ciegas en el cliente).
+     */
+    private function respuestaFilaUnidad(InventarioFisico $ronda, InventarioFisicoUnidad $fila): JsonResponse
+    {
         $fila->loadMissing(['unidad:id,codigo,activo_id,almacen_id,empresa_id,colaborador_id,estado,condicion', 'unidad.activo:id,nombre', 'unidad.almacen:id,nombre', 'unidad.colaborador:id,nombre_completo', 'escaneadoPor:id,name']);
 
         return response()->json([
             'unidad' => $this->resumen->filaResumen($fila),
-            'contadores' => $this->resumen->contadores($inventarioFisico),
+            'contadores' => $this->resumen->contadores($ronda),
         ]);
     }
 
@@ -340,6 +371,7 @@ class InventarioFisicoController extends Controller
                     $d['clasificacion_etiqueta'],
                     $d['codigo'],
                     $d['activo'],
+                    $d['marca_modelo'],
                     $d['almacen'],
                     $d['colaborador'],
                     $d['estado_visible_etiqueta'],
@@ -359,7 +391,7 @@ class InventarioFisicoController extends Controller
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'Clasificación', 'Código', 'Activo', 'Almacén', 'Asignada a', 'Estado actual', 'Escaneada en', 'Escaneada por',
+            'Clasificación', 'Código', 'Activo', 'Marca / Modelo', 'Almacén', 'Asignada a', 'Estado actual', 'Escaneada en', 'Escaneada por',
         ], $contexto);
     }
 

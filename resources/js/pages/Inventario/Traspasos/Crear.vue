@@ -37,6 +37,9 @@ type OpcionUnidad = {
     activo: string | null;
     almacen: string | null;
     observaciones: string | null;
+    marca_modelo: string | null;
+    imei_mascara: string | null;
+    numero_telefonico: string | null;
     estado_visible_etiqueta: string | null;
     condicion_etiqueta: string | null;
     entregable: boolean;
@@ -806,7 +809,17 @@ function enviar(): void {
                             >
                                 <span class="font-mono">{{ u.codigo }}</span>
                                 <span
-                                    v-if="u.observaciones"
+                                    v-if="u.marca_modelo"
+                                    class="text-muted-foreground"
+                                    >· {{ u.marca_modelo }}</span
+                                >
+                                <span
+                                    v-if="u.imei_mascara"
+                                    class="text-muted-foreground"
+                                    >· IMEI {{ u.imei_mascara }}</span
+                                >
+                                <span
+                                    v-else-if="u.observaciones"
                                     class="text-muted-foreground"
                                     >· {{ u.observaciones }}</span
                                 >

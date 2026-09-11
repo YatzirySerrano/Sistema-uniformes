@@ -16,6 +16,7 @@ use App\Servicios\ServicioInventario;
 use App\Soporte\NormalizadorNombre;
 use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -40,6 +41,7 @@ class RegistrarUnidadesActivo
     ) {}
 
     /**
+     * @param  list<array{marca?: string|null, modelo?: string|null, imei?: string|null, numero_telefonico?: string|null, operador?: string|null, plan?: string|null}>  $especificaciones  datos técnicos por unidad (índice 0..N-1), sólo para activos con perfil técnico
      * @return Collection<int, UnidadActivo>
      */
     public function ejecutar(
@@ -50,6 +52,7 @@ class RegistrarUnidadesActivo
         string $motivo,
         ?int $realizadoPor,
         bool $cargaInicial = false,
+        array $especificaciones = [],
     ): Collection {
         if ($activo->empresa_id !== $empresa->id) {
             throw new ExcepcionDeNegocioSimple('El activo no pertenece a esta empresa.');
@@ -69,7 +72,7 @@ class RegistrarUnidadesActivo
 
         $slug = NormalizadorNombre::codigoActivo($activo->nombre);
 
-        return DB::transaction(function () use ($empresa, $activo, $almacen, $cantidad, $motivo, $realizadoPor, $cargaInicial, $slug): Collection {
+        return DB::transaction(function () use ($empresa, $activo, $almacen, $cantidad, $motivo, $realizadoPor, $cargaInicial, $slug, $especificaciones): Collection {
             $unidades = new Collection;
 
             for ($i = 0; $i < $cantidad; $i++) {
@@ -83,6 +86,8 @@ class RegistrarUnidadesActivo
                     'condicion' => CondicionUnidadActivo::Funcionando,
                     'registrado_por' => $realizadoPor,
                 ]);
+
+                $this->guardarEspecificacion($unidad, $especificaciones[$i] ?? []);
 
                 $this->inventario->registrarMovimientoUnidad(
                     unidad: $unidad,
@@ -102,5 +107,34 @@ class RegistrarUnidadesActivo
 
             return $unidades;
         });
+    }
+
+    /**
+     * Crea la fila de datos técnicos de la unidad si vienen valores. La
+     * constraint UNIQUE de `imei` es la última defensa contra un IMEI repetido
+     * en una alta concurrente; se traduce a un mensaje en español.
+     *
+     * @param  array{marca?: string|null, modelo?: string|null, imei?: string|null, numero_telefonico?: string|null, operador?: string|null, plan?: string|null}  $datos
+     */
+    private function guardarEspecificacion(UnidadActivo $unidad, array $datos): void
+    {
+        $campos = ['marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan'];
+        $valores = [];
+
+        foreach ($campos as $campo) {
+            $valor = $datos[$campo] ?? null;
+            $valor = is_string($valor) ? trim($valor) : $valor;
+            $valores[$campo] = ($valor === '' || $valor === null) ? null : $valor;
+        }
+
+        if (array_filter($valores, fn ($v): bool => $v !== null) === []) {
+            return;
+        }
+
+        try {
+            $unidad->especificacion()->create($valores);
+        } catch (UniqueConstraintViolationException) {
+            throw new ExcepcionDeNegocioSimple('Ya existe una unidad registrada con el IMEI '.($valores['imei'] ?? '').'.');
+        }
     }
 }

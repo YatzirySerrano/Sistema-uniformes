@@ -19,11 +19,22 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { EmpresaAutorizada } from '@/types/sistema';
+import {
+    type CampoEspecificacion,
+    ETIQUETA_CAMPO,
+    ETIQUETA_PERFIL,
+    type EspecificacionUnidad,
+    camposRequeridos,
+    camposVisibles,
+    especificacionVacia,
+    aPerfilTecnico,
+} from '@/lib/perfilTecnicoUnidad';
 
 type OpcionTipo = { id: number; nombre: string };
 type OpcionCategoria = {
     id: number;
     nombre: string;
+    perfil_tecnico?: string | null;
     tipo_activo_id: number | null;
     tipo?: string | null;
 };
@@ -152,6 +163,9 @@ const form = useForm<{
     // desde el alta), sólo si al guardar se abre el PDF de etiquetas para
     // imprimirlas ahora.
     abrir_etiquetas: boolean;
+    // Datos técnicos por unidad (sólo alta de seguimiento individual con
+    // perfil técnico). El backend valida el perfil por `codigo`.
+    especificaciones: EspecificacionUnidad[];
     _method?: string;
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
@@ -168,7 +182,50 @@ const form = useForm<{
     cantidad_inicial: 0,
     existencias: [],
     abrir_etiquetas: false,
+    especificaciones: [],
 });
+
+/* --- Perfil técnico (Celular / Computadora / Tablet) resuelto por `codigo` --- */
+const perfilTecnico = computed(() =>
+    aPerfilTecnico(categoriaSel.value?.perfil_tecnico),
+);
+const mostrarEspecificaciones = computed(
+    () =>
+        !esEdicion &&
+        form.tipo_control === 'individual' &&
+        perfilTecnico.value !== null &&
+        form.cantidad_inicial > 0,
+);
+const camposDelPerfil = computed<CampoEspecificacion[]>(() =>
+    perfilTecnico.value ? camposVisibles(perfilTecnico.value) : [],
+);
+function campoRequerido(campo: CampoEspecificacion): boolean {
+    return perfilTecnico.value
+        ? camposRequeridos(perfilTecnico.value).includes(campo)
+        : false;
+}
+
+// Mantiene `form.especificaciones` con una fila por unidad a registrar.
+watch(
+    () => [
+        mostrarEspecificaciones.value,
+        form.cantidad_inicial,
+        perfilTecnico.value,
+    ],
+    () => {
+        if (!mostrarEspecificaciones.value) {
+            form.especificaciones = [];
+            return;
+        }
+        const n = form.cantidad_inicial;
+        const actual = form.especificaciones;
+        form.especificaciones = Array.from(
+            { length: n },
+            (_, i) => actual[i] ?? especificacionVacia(),
+        );
+    },
+    { immediate: true },
+);
 
 // --- Código de activo: lo genera el backend, nunca lo escribe el usuario.
 // Esto sólo previsualiza (no reserva) el código; el valor definitivo se
@@ -899,6 +956,67 @@ function enviar() {
                             etiqueta="Ayuda sobre etiquetas QR"
                         />
                     </label>
+                </div>
+
+                <!-- Datos técnicos por unidad (Celular / Computadora / Tablet) -->
+                <div
+                    v-if="mostrarEspecificaciones && perfilTecnico"
+                    class="grid gap-3"
+                >
+                    <div>
+                        <p class="text-sm font-medium">
+                            Datos del equipo ·
+                            {{ ETIQUETA_PERFIL[perfilTecnico] }}
+                        </p>
+                        <p class="text-muted-foreground text-xs">
+                            Captura los datos de cada unidad. El código se
+                            genera al guardar.
+                        </p>
+                    </div>
+                    <InputError :message="form.errors.especificaciones" />
+                    <div
+                        v-for="(esp, i) in form.especificaciones"
+                        :key="i"
+                        class="grid gap-2 rounded-lg border p-3"
+                    >
+                        <p class="text-xs font-medium">Unidad {{ i + 1 }}</p>
+                        <div class="grid gap-2 sm:grid-cols-2">
+                            <div
+                                v-for="campo in camposDelPerfil"
+                                :key="campo"
+                                class="grid gap-1"
+                            >
+                                <Label
+                                    :for="`esp-${i}-${campo}`"
+                                    class="text-xs"
+                                >
+                                    {{ ETIQUETA_CAMPO[campo] }}
+                                    <span
+                                        v-if="campoRequerido(campo)"
+                                        class="text-destructive"
+                                        >*</span
+                                    >
+                                </Label>
+                                <Input
+                                    :id="`esp-${i}-${campo}`"
+                                    v-model="esp[campo]"
+                                    :placeholder="
+                                        campo === 'imei'
+                                            ? '15 dígitos'
+                                            : undefined
+                                    "
+                                    autocomplete="off"
+                                />
+                                <InputError
+                                    :message="
+                                        erroresLaxos[
+                                            `especificaciones.${i}.${campo}`
+                                        ]
+                                    "
+                                />
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div v-else-if="!esSeguimientoIndividual" class="grid gap-1.5">

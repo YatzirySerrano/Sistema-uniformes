@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { Camera, FileText, ImagePlus, RefreshCw, Upload, X } from '@lucide/vue';
+import {
+    Camera,
+    FileText,
+    ImagePlus,
+    RefreshCw,
+    SwitchCamera,
+    Upload,
+    X,
+} from '@lucide/vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import { useCamaraFoto } from '@/composables/useCamaraFoto';
 import { Button } from '@/components/ui/button';
@@ -214,7 +222,7 @@ watch(archivo, (nuevo) => {
                     >
                         {{ camara.mensajeError.value }}
                     </p>
-                    <div class="flex gap-2">
+                    <div class="flex flex-wrap gap-2">
                         <Button
                             type="button"
                             class="flex-1"
@@ -222,6 +230,17 @@ watch(archivo, (nuevo) => {
                             @click="tomarFoto"
                         >
                             <Camera class="size-4" /> Capturar
+                        </Button>
+                        <Button
+                            v-if="camara.puedeCambiarCamara.value"
+                            type="button"
+                            variant="outline"
+                            aria-label="Cambiar de cámara"
+                            title="Cambiar de cámara"
+                            :disabled="camara.estado.value !== 'activa'"
+                            @click="camara.cambiarCamara()"
+                        >
+                            <SwitchCamera class="size-4" /> Cambiar cámara
                         </Button>
                         <Button
                             type="button"

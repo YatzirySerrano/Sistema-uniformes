@@ -75,6 +75,7 @@ final class Permisos
                 'colaboradores.ver' => 'Ver colaboradores',
                 'colaboradores.crear' => 'Crear colaboradores',
                 'colaboradores.editar' => 'Editar colaboradores',
+                'colaboradores.cambiar-empresa' => 'Transferir un colaborador a otra empresa / razón social',
                 'colaboradores.desactivar' => 'Activar / desactivar colaboradores',
                 'colaboradores.importar' => 'Importar colaboradores desde Excel',
                 'colaboradores.expediente-ver' => 'Ver el expediente digital del colaborador',

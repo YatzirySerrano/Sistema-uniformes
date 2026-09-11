@@ -24,26 +24,49 @@ class CategoriaActivoController extends Controller
 
     public function store(GuardarCategoriaActivoRequest $request): RedirectResponse
     {
-        $this->crear(
+        $categoria = $this->crear(
             $request->validated('nombre'),
             $request->integer('tipo_activo_id') ?: null,
             $request->boolean('activa', true),
         );
+        $this->sincronizarPerfilTecnico($categoria, $request->validated('perfil_tecnico'));
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Categoría creada.']);
     }
 
     public function update(GuardarCategoriaActivoRequest $request, CategoriaActivo $categoria): RedirectResponse
     {
+        // `codigo` NO se toca aquí: es el identificador operativo del catálogo,
+        // independiente del perfil técnico (que vive en su fila lateral 1:1).
         $categoria->update([
             'nombre' => $request->validated('nombre'),
             'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
             'activa' => $request->boolean('activa', $categoria->activa),
         ]);
+        $this->sincronizarPerfilTecnico($categoria, $request->validated('perfil_tecnico'));
 
         $this->auditar('categoria_editar', $categoria, 'Edición de categoría '.$categoria->nombre);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Categoría actualizada.']);
+    }
+
+    /**
+     * Crea / actualiza / elimina la fila lateral `categoria_activo_perfil_tecnico`
+     * según el selector "Perfil técnico". Vacío ("Sin perfil técnico") elimina
+     * la fila si existe. Nunca toca `categorias_activo.codigo`.
+     */
+    private function sincronizarPerfilTecnico(CategoriaActivo $categoria, ?string $perfil): void
+    {
+        if ($perfil === null || $perfil === '') {
+            $categoria->perfilTecnico()->delete();
+
+            return;
+        }
+
+        $categoria->perfilTecnico()->updateOrCreate(
+            ['categoria_activo_id' => $categoria->getKey()],
+            ['perfil' => $perfil],
+        );
     }
 
     public function toggle(CategoriaActivo $categoria): RedirectResponse
@@ -92,12 +115,14 @@ class CategoriaActivoController extends Controller
 
         $categorias = $consulta
             ->when($termino !== '', fn (Builder $q) => $q->where('nombre', 'like', "%{$termino}%"))
+            ->with('perfilTecnico:id,categoria_activo_id,perfil')
             ->orderBy('nombre')
             ->limit(20)
             ->get(['id', 'nombre', 'tipo_activo_id'])
             ->map(fn (CategoriaActivo $c): array => [
                 'id' => $c->id,
                 'nombre' => $c->nombre,
+                'perfil_tecnico' => $c->perfilTecnico?->perfil->value,
                 'tipo_activo_id' => $c->tipo_activo_id,
                 'tipo' => $c->tipoActivo?->nombre,
             ]);

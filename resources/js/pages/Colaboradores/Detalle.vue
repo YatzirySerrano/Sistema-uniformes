@@ -2,6 +2,7 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeft,
+    ArrowLeftRight,
     Building2,
     Camera,
     FileText,
@@ -16,6 +17,7 @@ import {
     Truck,
 } from '@lucide/vue';
 import { ref } from 'vue';
+import CambiarEmpresaDialog from '@/components/colaboradores/CambiarEmpresaDialog.vue';
 import CambiarFotoDialog from '@/components/colaboradores/CambiarFotoDialog.vue';
 import DialogCambiarServicio from '@/components/colaboradores/DialogCambiarServicio.vue';
 import ExpedienteExplorer from '@/components/colaboradores/ExpedienteExplorer.vue';
@@ -71,6 +73,7 @@ const props = defineProps<{
     };
     puedeEditar: boolean;
     puedeEliminar: boolean;
+    puedeCambiarEmpresa: boolean;
     puedeVerExpediente: boolean;
     expediente: ExpedientePayload | null;
 }>();
@@ -137,6 +140,9 @@ const modalFoto = ref(false);
 
 // --- Cambiar servicio (ubicación operativa vigente) ---
 const modalServicio = ref(false);
+
+// --- Transferir a otra empresa ---
+const modalEmpresa = ref(false);
 </script>
 
 <template>
@@ -221,6 +227,15 @@ const modalServicio = ref(false);
                     @click="modalServicio = true"
                 >
                     <MapPin class="size-3.5" /> Cambiar servicio
+                </Button>
+                <Button
+                    v-if="puedeCambiarEmpresa"
+                    variant="outline"
+                    size="sm"
+                    @click="modalEmpresa = true"
+                >
+                    <ArrowLeftRight class="size-3.5" /> Transferir a otra
+                    empresa
                 </Button>
                 <Button
                     v-if="puedeEliminar"
@@ -453,6 +468,14 @@ const modalServicio = ref(false);
             :colaborador-id="colaborador.id"
             :empresa-id="colaborador.empresa_id"
             :servicio-actual="colaborador.servicio_actual"
+        />
+
+        <CambiarEmpresaDialog
+            v-if="puedeCambiarEmpresa"
+            v-model:open="modalEmpresa"
+            :colaborador-id="colaborador.id"
+            :empresa-actual-id="colaborador.empresa_id"
+            :empresa-actual-nombre="colaborador.empresa_nombre"
         />
     </div>
 </template>

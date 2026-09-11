@@ -6,6 +6,8 @@ import {
     CheckCircle2,
     CircleAlert,
     Keyboard,
+    SwitchCamera,
+    Undo2,
     XCircle,
 } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
@@ -121,6 +123,26 @@ const puedeEscanear = computed(
     () => enProceso.value && props.permisos.administrar,
 );
 
+/* ---------- Filas visibles (copia local reactiva) ----------
+ * Se itera esta copia y no `props.unidades.data` para poder reflejar de
+ * inmediato el resultado de marcar / desmarcar una unidad (la respuesta del
+ * servidor trae la fila fresca) sin recargar toda la página. */
+const filas = ref<FilaUnidad[]>(props.unidades.data.map((f) => ({ ...f })));
+watch(
+    () => props.unidades,
+    (nuevas) => {
+        filas.value = nuevas.data.map((f) => ({ ...f }));
+    },
+);
+
+function aplicarFilaActualizada(u: FilaUnidad | undefined): void {
+    if (!u) return;
+    const i = filas.value.findIndex((f) => f.id === u.id);
+    if (i !== -1) {
+        filas.value[i] = { ...filas.value[i], ...u };
+    }
+}
+
 /* ---------- Contadores en vivo ---------- */
 const contadores = reactive<Contadores>({ ...props.contadores });
 watch(
@@ -168,18 +190,32 @@ const ETIQUETA_RESULTADO: Record<string, Ultimo> = {
 };
 
 let reloadPendiente: ReturnType<typeof setTimeout> | undefined;
+let reloadDeadline: number | undefined;
+/**
+ * Red de seguridad para paginación / cambios desde otro dispositivo: NO es la
+ * fuente de verdad de la fila ni del contador (esos vienen en la respuesta de
+ * cada acción). Debounce de 1.2 s pero con tope de espera de 4 s: aunque el
+ * usuario haga clics seguidos, la lista se re-sincroniza como muy tarde a los
+ * 4 s en lugar de posponerse indefinidamente.
+ */
 function programarRefresco(): void {
+    const ahora = Date.now();
+    if (reloadDeadline === undefined) reloadDeadline = ahora + 4000;
     clearTimeout(reloadPendiente);
+    const espera = Math.max(0, Math.min(1200, reloadDeadline - ahora));
     reloadPendiente = setTimeout(() => {
+        reloadDeadline = undefined;
         router.reload({ only: ['unidades', 'contadores'] });
-    }, 1200);
+    }, espera);
 }
 
 const {
     estado: estadoEscaner,
     mensajeError: errorEscaner,
+    puedeCambiarCamara: puedeCambiarCamaraEscaner,
     iniciar: iniciarEscaner,
     detener: detenerEscaner,
+    cambiarCamara: cambiarCamaraEscaner,
     desbloquear: desbloquearEscaner,
 } = useEscanerQr((texto) => {
     void enviarCodigo(texto);
@@ -222,6 +258,7 @@ async function enviarCodigo(texto: string): Promise<void> {
         }
 
         Object.assign(contadores, data.contadores);
+        aplicarFilaActualizada(data.unidad);
         const base =
             ETIQUETA_RESULTADO[data.resultado] ?? ETIQUETA_RESULTADO.encontrada;
         ultimo.value = {
@@ -385,16 +422,24 @@ async function verificarExistencia(
     }
 }
 
-/* ---------- Marcar unidad presente (sin QR) ---------- */
-const marcandoPresente = ref<number | null>(null);
-async function marcarPresente(fila: FilaUnidad): Promise<void> {
-    if (marcandoPresente.value !== null) return;
-    marcandoPresente.value = fila.id;
+/* ---------- Marcar / desmarcar unidad presente (sin QR) ----------
+ * Candado POR FILA (no global): dos filas distintas se pueden marcar en
+ * paralelo, pero una fila con una petición en vuelo queda deshabilitada hasta
+ * que responde. El backend es idempotente y la respuesta trae la fila + los
+ * contadores reales; nunca se incrementa un contador a ciegas. */
+const filasEnCurso = reactive(new Set<number>());
+
+async function mutarPresente(
+    fila: FilaUnidad,
+    metodo: 'POST' | 'DELETE',
+): Promise<void> {
+    if (filasEnCurso.has(fila.id) || !puedeEscanear.value) return;
+    filasEnCurso.add(fila.id);
     try {
         const res = await fetch(
             `/inventarios-fisicos/${props.ronda.id}/unidades/${fila.id}/presente`,
             {
-                method: 'POST',
+                method: metodo,
                 headers: { Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() },
                 credentials: 'same-origin',
             },
@@ -404,11 +449,16 @@ async function marcarPresente(fila: FilaUnidad): Promise<void> {
             ultimo.value = {
                 ok: false,
                 titulo: 'No se registró',
-                detalle: data.message ?? 'No se pudo marcar la unidad.',
+                detalle:
+                    data.message ??
+                    (metodo === 'POST'
+                        ? 'No se pudo marcar la unidad.'
+                        : 'No se pudo revertir la marca.'),
                 tono: 'error',
             };
             return;
         }
+        aplicarFilaActualizada(data.unidad);
         Object.assign(contadores, data.contadores);
         programarRefresco();
     } catch {
@@ -419,9 +469,12 @@ async function marcarPresente(fila: FilaUnidad): Promise<void> {
             tono: 'error',
         };
     } finally {
-        marcandoPresente.value = null;
+        filasEnCurso.delete(fila.id);
     }
 }
+
+const marcarPresente = (fila: FilaUnidad) => mutarPresente(fila, 'POST');
+const desmarcarPresente = (fila: FilaUnidad) => mutarPresente(fila, 'DELETE');
 
 /* ---------- Finalizar ---------- */
 const dialogoFinalizar = ref(false);
@@ -653,6 +706,19 @@ onBeforeUnmount(() => {
                                 : 'Iniciar cámara'
                         }}
                     </Button>
+                    <Button
+                        v-if="
+                            estadoEscaner === 'activo' &&
+                            puedeCambiarCamaraEscaner
+                        "
+                        type="button"
+                        variant="outline"
+                        aria-label="Cambiar de cámara"
+                        title="Cambiar de cámara"
+                        @click="cambiarCamaraEscaner()"
+                    >
+                        <SwitchCamera class="size-4" /> Cambiar cámara
+                    </Button>
                     <span
                         v-if="estadoEscaner === 'iniciando'"
                         class="text-muted-foreground text-sm"
@@ -832,8 +898,14 @@ onBeforeUnmount(() => {
             <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
+        <p v-if="puedeEscanear" class="text-muted-foreground -mt-1 text-xs">
+            «Presente» marca una unidad faltante como encontrada físicamente
+            (equivale a escanear su QR). «Deshacer» revierte la marca mientras
+            la ronda siga abierta.
+        </p>
+
         <EstadoVacio
-            v-if="!unidades.data.length"
+            v-if="!filas.length"
             titulo="Sin unidades en esta sección"
             :descripcion="
                 seccion === 'faltantes'
@@ -868,7 +940,7 @@ onBeforeUnmount(() => {
                 </thead>
                 <tbody>
                     <tr
-                        v-for="f in unidades.data"
+                        v-for="f in filas"
                         :key="f.id"
                         class="hover:bg-muted/40 border-t transition-colors"
                     >
@@ -909,10 +981,27 @@ onBeforeUnmount(() => {
                         </td>
                         <td class="text-muted-foreground px-3 py-2 text-xs">
                             <template v-if="f.escaneado_en">
-                                {{ fecha(f.escaneado_en) }}
+                                <span
+                                    class="flex items-center gap-1 text-emerald-700 dark:text-emerald-400"
+                                >
+                                    <CheckCircle2 class="size-3.5" /> Presente
+                                </span>
+                                <span class="block">{{
+                                    fecha(f.escaneado_en)
+                                }}</span>
                                 <span v-if="f.escaneado_por" class="block">
                                     por {{ f.escaneado_por }}
                                 </span>
+                                <Button
+                                    v-if="puedeEscanear && f.esperada"
+                                    size="sm"
+                                    variant="ghost"
+                                    class="mt-1 h-7 px-2 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                                    :disabled="filasEnCurso.has(f.id)"
+                                    @click="desmarcarPresente(f)"
+                                >
+                                    <Undo2 class="size-3.5" /> Deshacer
+                                </Button>
                             </template>
                             <div
                                 v-else-if="
@@ -924,7 +1013,7 @@ onBeforeUnmount(() => {
                                 <Button
                                     size="sm"
                                     variant="outline"
-                                    :disabled="marcandoPresente === f.id"
+                                    :disabled="filasEnCurso.has(f.id)"
                                     @click="marcarPresente(f)"
                                 >
                                     <CheckCircle2 class="size-4" /> Presente
@@ -942,7 +1031,7 @@ onBeforeUnmount(() => {
             class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
         >
             <div
-                v-for="f in unidades.data"
+                v-for="f in filas"
                 :key="f.id"
                 class="flex flex-col gap-2 rounded-xl border p-4 text-sm"
             >
@@ -988,20 +1077,34 @@ onBeforeUnmount(() => {
                     </template>
                     <span v-else>Escaneada: — · Por: —</span>
                 </div>
-                <Button
+                <div
                     v-if="
                         puedeEscanear &&
                         f.esperada &&
-                        f.clasificacion === 'faltante'
+                        (f.clasificacion === 'faltante' || f.escaneado_en)
                     "
-                    size="sm"
-                    variant="outline"
-                    class="w-fit"
-                    :disabled="marcandoPresente === f.id"
-                    @click="marcarPresente(f)"
                 >
-                    <CheckCircle2 class="size-4" /> Presente
-                </Button>
+                    <Button
+                        v-if="f.clasificacion === 'faltante'"
+                        size="sm"
+                        variant="outline"
+                        class="w-fit"
+                        :disabled="filasEnCurso.has(f.id)"
+                        @click="marcarPresente(f)"
+                    >
+                        <CheckCircle2 class="size-4" /> Presente
+                    </Button>
+                    <Button
+                        v-else
+                        size="sm"
+                        variant="ghost"
+                        class="w-fit text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                        :disabled="filasEnCurso.has(f.id)"
+                        @click="desmarcarPresente(f)"
+                    >
+                        <Undo2 class="size-4" /> Deshacer presente
+                    </Button>
+                </div>
             </div>
         </div>
 

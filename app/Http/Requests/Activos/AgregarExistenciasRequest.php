@@ -2,6 +2,8 @@
 
 namespace App\Http\Requests\Activos;
 
+use App\Enums\TipoControlActivo;
+use App\Http\Requests\Concerns\ValidaEspecificacionUnidad;
 use App\Models\Activo;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -16,6 +18,8 @@ use Illuminate\Validation\Validator;
  */
 class AgregarExistenciasRequest extends FormRequest
 {
+    use ValidaEspecificacionUnidad;
+
     public function authorize(): bool
     {
         /** @var Activo $activo */
@@ -48,6 +52,8 @@ class AgregarExistenciasRequest extends FormRequest
             // No controla la existencia del QR (permanente desde el alta), sólo
             // si al guardar se abre el PDF de etiquetas para imprimirlas ahora.
             'abrir_etiquetas' => ['boolean'],
+            'especificaciones' => ['nullable', 'array'],
+            ...self::reglasEspecificacion(),
         ];
     }
 
@@ -67,6 +73,23 @@ class AgregarExistenciasRequest extends FormRequest
                 $validator->errors()->add('talla_id', 'Esa variante no corresponde al activo o está desactivada.');
             }
         });
+
+        // Datos técnicos por unidad al agregar unidades a un activo de
+        // seguimiento individual con perfil técnico.
+        $validator->after(function (Validator $validator): void {
+            /** @var Activo $activo */
+            $activo = $this->route('activo');
+
+            if ($activo->tipo_control !== TipoControlActivo::SeguimientoIndividual) {
+                return;
+            }
+
+            $this->validarEspecificacionesPorPerfil(
+                $validator,
+                $this->perfilTecnicoDeEntrada($activo, null),
+                $this->integer('cantidad'),
+            );
+        });
     }
 
     /**
@@ -75,6 +98,7 @@ class AgregarExistenciasRequest extends FormRequest
     public function messages(): array
     {
         return [
+            ...self::mensajesEspecificacion(),
             'almacen_id.required' => 'Selecciona el almacén donde vas a registrar la existencia.',
             'almacen_id.exists' => 'El almacén no abastece a esta empresa o está desactivado.',
             'cantidad.required' => 'Ingresa una cantidad mayor a 0.',

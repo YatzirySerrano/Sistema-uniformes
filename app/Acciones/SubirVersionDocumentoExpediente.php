@@ -5,6 +5,7 @@ namespace App\Acciones;
 use App\Models\DocumentoExpediente;
 use App\Models\User;
 use App\Models\VersionDocumentoExpediente;
+use App\Models\VersionExpedienteEmpresa;
 use App\Servicios\ServicioAuditoria;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -69,6 +70,14 @@ class SubirVersionDocumentoExpediente
                     'hash_sha256' => $hash,
                     'comentario' => $comentario,
                     'subido_por' => $usuario->getKey(),
+                ]);
+
+                // Empresa vigente del colaborador al subir ESTA versión: si el
+                // colaborador ya fue trasladado, la versión nueva queda ligada a
+                // la empresa nueva; las anteriores conservan su empresa de origen.
+                VersionExpedienteEmpresa::query()->create([
+                    'documento_expediente_version_id' => $version->getKey(),
+                    'empresa_id' => $documento->colaborador->empresa_id,
                 ]);
 
                 $this->auditoria->registrar('colaboradores', 'expediente-nueva-version', [

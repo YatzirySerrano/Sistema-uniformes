@@ -37,7 +37,9 @@ class DocumentoExpedienteController extends Controller
 
     public function index(Colaborador $colaborador, Request $request): Response
     {
-        $this->authorize('verExpediente', $colaborador);
+        // Lectura del expediente: acceso a la empresa ACTUAL del colaborador o
+        // acceso histórico a la empresa de origen de alguna versión empresarial.
+        abort_unless($this->expediente->puedeAbrirExpediente($request->user(), $colaborador, 'ver'), 403);
 
         return Inertia::render('Colaboradores/Expediente', [
             'colaborador' => [
@@ -118,11 +120,11 @@ class DocumentoExpedienteController extends Controller
 
     public function descargar(Request $request, Colaborador $colaborador, DocumentoExpediente $documento): StreamedResponse
     {
-        $this->authorize('descargarExpediente', $colaborador);
+        abort_unless($this->expediente->puedeAbrirExpediente($request->user(), $colaborador, 'descargar'), 403);
         $this->verificarPertenece($colaborador, $documento);
         $this->verificarVisible($colaborador, $documento, $request->user());
 
-        $version = $documento->versionActual;
+        $version = $this->expediente->versionVigenteVisible($request->user(), $documento);
         abort_if($version === null, 404);
         abort_unless(Storage::disk('local')->exists($version->ruta), 404);
 
@@ -133,11 +135,11 @@ class DocumentoExpedienteController extends Controller
 
     public function ver(Request $request, Colaborador $colaborador, DocumentoExpediente $documento): StreamedResponse
     {
-        $this->authorize('descargarExpediente', $colaborador);
+        abort_unless($this->expediente->puedeAbrirExpediente($request->user(), $colaborador, 'descargar'), 403);
         $this->verificarPertenece($colaborador, $documento);
         $this->verificarVisible($colaborador, $documento, $request->user());
 
-        $version = $documento->versionActual;
+        $version = $this->expediente->versionVigenteVisible($request->user(), $documento);
         abort_if($version === null, 404);
         abort_unless(ServicioExpediente::esPrevisualizable($version->mime), 415);
         abort_unless(Storage::disk('local')->exists($version->ruta), 404);
@@ -148,15 +150,14 @@ class DocumentoExpedienteController extends Controller
         ]);
     }
 
-    public function versiones(Colaborador $colaborador, DocumentoExpediente $documento): JsonResponse
+    public function versiones(Request $request, Colaborador $colaborador, DocumentoExpediente $documento): JsonResponse
     {
-        $this->authorize('verExpediente', $colaborador);
+        abort_unless($this->expediente->puedeAbrirExpediente($request->user(), $colaborador, 'ver'), 403);
         $this->verificarPertenece($colaborador, $documento);
 
-        $versiones = $documento->versiones()
-            ->with('subidoPor:id,name')
-            ->orderByDesc('version')
-            ->get()
+        $documento->load(['versiones' => fn ($q) => $q->with(['subidoPor:id,name', 'origenEmpresa:id,documento_expediente_version_id,empresa_id'])]);
+
+        $versiones = $this->expediente->versionesVisibles($request->user(), $documento)
             ->map(fn (VersionDocumentoExpediente $v): array => [
                 'version' => $v->version,
                 'nombre_archivo_original' => $v->nombre_archivo_original,
@@ -173,10 +174,14 @@ class DocumentoExpedienteController extends Controller
 
     public function descargarVersion(Request $request, Colaborador $colaborador, DocumentoExpediente $documento, VersionDocumentoExpediente $version): StreamedResponse
     {
-        $this->authorize('descargarExpediente', $colaborador);
+        abort_unless($this->expediente->puedeAbrirExpediente($request->user(), $colaborador, 'descargar'), 403);
         $this->verificarPertenece($colaborador, $documento);
         $this->verificarVisible($colaborador, $documento, $request->user());
         abort_unless($version->documento_expediente_id === $documento->id, 404);
+        // Aislamiento por versión: una versión subida bajo otra empresa no se
+        // descarga aunque se conozca su id (categorías empresariales).
+        $version->loadMissing('origenEmpresa:id,documento_expediente_version_id,empresa_id');
+        abort_unless($this->expediente->usuarioPuedeVerVersion($request->user(), $documento, $version), 404);
         abort_unless(Storage::disk('local')->exists($version->ruta), 404);
 
         return Storage::disk('local')->download($version->ruta, 'v'.$version->version.'-'.$version->nombre_archivo_original, [

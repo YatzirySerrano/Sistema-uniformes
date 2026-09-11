@@ -30,4 +30,19 @@ enum CategoriaDocumentoExpediente: string
             self::Otros => 'Otros',
         };
     }
+
+    /**
+     * ¿Los documentos de esta carpeta pertenecen a la PERSONA y la acompañan
+     * si cambia de empresa? Identidad y datos de gobierno viajan; el resto es
+     * documentación de la relación laboral con una empresa concreta y su
+     * visibilidad queda CONGELADA a la empresa bajo la que se incorporó cada
+     * versión (ver `documento_expediente_version_empresa` + `ServicioExpediente`).
+     */
+    public function viajaConLaPersona(): bool
+    {
+        return match ($this) {
+            self::Identificacion, self::Fiscal, self::SeguridadSocial => true,
+            default => false,
+        };
+    }
 }

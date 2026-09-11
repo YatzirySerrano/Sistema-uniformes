@@ -5,10 +5,13 @@ namespace App\Models;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\EstadoVisibleUnidad;
+use App\Enums\PerfilTecnicoUnidad;
+use App\Soporte\ResolverPerfilTecnicoUnidad;
 use Database\Factories\UnidadActivoFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
@@ -124,6 +127,68 @@ class UnidadActivo extends Model
     public function incidenciaRegistradaPor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'incidencia_registrada_por');
+    }
+
+    /**
+     * Datos técnicos del equipo (marca / modelo / IMEI / número / operador /
+     * plan). Sólo aplica a unidades cuyo activo tiene perfil técnico
+     * (`perfilTecnico()` no nulo); en el resto no se muestra ni se pide.
+     *
+     * @return HasOne<UnidadActivoEspecificacion, $this>
+     */
+    public function especificacion(): HasOne
+    {
+        return $this->hasOne(UnidadActivoEspecificacion::class);
+    }
+
+    /**
+     * Perfil técnico del activo de esta unidad (Celular / Computadora / Tablet
+     * / null). Fuente única: `ResolverPerfilTecnicoUnidad` (por `codigo` de
+     * categoría/tipo, nunca por nombre).
+     */
+    public function perfilTecnico(): ?PerfilTecnicoUnidad
+    {
+        $this->loadMissing('activo');
+
+        if ($this->activo === null) {
+            return null;
+        }
+
+        return app(ResolverPerfilTecnicoUnidad::class)->paraActivo($this->activo);
+    }
+
+    /**
+     * Datos del equipo listos para pintar: sólo los campos del perfil, con su
+     * etiqueta y valor (`null` → "Sin especificar" lo resuelve la UI). Lista
+     * vacía si la unidad no tiene perfil técnico.
+     *
+     * @return list<array{campo: string, etiqueta: string, valor: string|null}>
+     */
+    public function datosEquipo(): array
+    {
+        $perfil = $this->perfilTecnico();
+
+        if ($perfil === null) {
+            return [];
+        }
+
+        $this->loadMissing('especificacion');
+        $esp = $this->especificacion;
+
+        $etiquetas = [
+            'marca' => 'Marca',
+            'modelo' => 'Modelo',
+            'imei' => 'IMEI',
+            'numero_telefonico' => 'Número telefónico',
+            'operador' => 'Operador',
+            'plan' => 'Plan',
+        ];
+
+        return array_map(fn (string $campo): array => [
+            'campo' => $campo,
+            'etiqueta' => $etiquetas[$campo],
+            'valor' => $esp?->{$campo},
+        ], $perfil->camposVisibles());
     }
 
     /**

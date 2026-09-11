@@ -37,6 +37,8 @@ type Unidad = {
     estado_visible: string;
     estado_visible_etiqueta: string;
     entregable: boolean;
+    marca_modelo: string | null;
+    imei_mascara: string | null;
 };
 
 const props = defineProps<{
@@ -430,6 +432,17 @@ const vista = useVistaPreferida('unidades-activo');
                             </p>
                             <p class="text-muted-foreground truncate text-xs">
                                 {{ u.activo ?? '—' }}
+                            </p>
+                            <p
+                                v-if="u.marca_modelo || u.imei_mascara"
+                                class="text-muted-foreground truncate text-xs"
+                            >
+                                {{ u.marca_modelo
+                                }}<span v-if="u.marca_modelo && u.imei_mascara">
+                                    · </span
+                                ><span v-if="u.imei_mascara"
+                                    >IMEI {{ u.imei_mascara }}</span
+                                >
                             </p>
                         </div>
                     </label>

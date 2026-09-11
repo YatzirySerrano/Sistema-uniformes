@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,6 +14,16 @@ import {
 import InputError from '@/components/InputError.vue';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+    type CampoEspecificacion,
+    ETIQUETA_CAMPO,
+    ETIQUETA_PERFIL,
+    type EspecificacionUnidad,
+    type PerfilTecnico,
+    camposRequeridos,
+    camposVisibles,
+    especificacionVacia,
+} from '@/lib/perfilTecnicoUnidad';
 
 type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
 type OpcionVariante = { id: number; valor: string };
@@ -24,6 +34,8 @@ const props = defineProps<{
     empresaId: number;
     usaVariantes: boolean;
     esSeguimientoIndividual: boolean;
+    /** Perfil técnico del activo (Celular / Computadora / Tablet), o null. */
+    perfilTecnico?: PerfilTecnico | null;
 }>();
 
 const emit = defineEmits<{ 'update:open': [boolean] }>();
@@ -34,13 +46,49 @@ const form = useForm<{
     cantidad: number;
     motivo: string;
     abrir_etiquetas: boolean;
+    especificaciones: EspecificacionUnidad[];
 }>({
     almacen_id: null,
     talla_id: null,
     cantidad: 1,
     motivo: '',
     abrir_etiquetas: false,
+    especificaciones: [],
 });
+
+const mostrarEspecificaciones = computed(
+    () =>
+        props.esSeguimientoIndividual &&
+        !!props.perfilTecnico &&
+        form.cantidad > 0,
+);
+const camposDelPerfil = computed<CampoEspecificacion[]>(() =>
+    props.perfilTecnico ? camposVisibles(props.perfilTecnico) : [],
+);
+function campoRequerido(campo: CampoEspecificacion): boolean {
+    return props.perfilTecnico
+        ? camposRequeridos(props.perfilTecnico).includes(campo)
+        : false;
+}
+const erroresLaxos = computed(
+    () => form.errors as unknown as Record<string, string>,
+);
+
+watch(
+    () => [mostrarEspecificaciones.value, form.cantidad],
+    () => {
+        if (!mostrarEspecificaciones.value) {
+            form.especificaciones = [];
+            return;
+        }
+        const actual = form.especificaciones;
+        form.especificaciones = Array.from(
+            { length: form.cantidad },
+            (_, i) => actual[i] ?? especificacionVacia(),
+        );
+    },
+    { immediate: true },
+);
 
 const almacenSel = ref<OpcionAlmacen | null>(null);
 const tallaSel = ref<OpcionVariante | null>(null);
@@ -180,6 +228,52 @@ function enviar(): void {
                         step="1"
                     />
                     <InputError :message="form.errors.cantidad" />
+                </div>
+
+                <div
+                    v-if="mostrarEspecificaciones && perfilTecnico"
+                    class="grid max-h-64 gap-2 overflow-y-auto"
+                >
+                    <p class="text-xs font-medium">
+                        Datos del equipo · {{ ETIQUETA_PERFIL[perfilTecnico] }}
+                    </p>
+                    <InputError :message="form.errors.especificaciones" />
+                    <div
+                        v-for="(esp, i) in form.especificaciones"
+                        :key="i"
+                        class="grid gap-1.5 rounded-lg border p-2"
+                    >
+                        <p class="text-muted-foreground text-xs">
+                            Unidad {{ i + 1 }}
+                        </p>
+                        <div
+                            v-for="campo in camposDelPerfil"
+                            :key="campo"
+                            class="grid gap-1"
+                        >
+                            <Label :for="`ae-${i}-${campo}`" class="text-xs">
+                                {{ ETIQUETA_CAMPO[campo] }}
+                                <span
+                                    v-if="campoRequerido(campo)"
+                                    class="text-destructive"
+                                    >*</span
+                                >
+                            </Label>
+                            <Input
+                                :id="`ae-${i}-${campo}`"
+                                v-model="esp[campo]"
+                                class="h-8"
+                                autocomplete="off"
+                            />
+                            <InputError
+                                :message="
+                                    erroresLaxos[
+                                        `especificaciones.${i}.${campo}`
+                                    ]
+                                "
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 <div v-if="esSeguimientoIndividual" class="space-y-1">

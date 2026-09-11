@@ -27,6 +27,16 @@ class ColaboradorPolicy
         return $user->can('colaboradores.editar') && $user->puedeAccederEmpresa($colaborador->empresa_id);
     }
 
+    /**
+     * Transferir a otra empresa / razón social. Aquí sólo se comprueba el
+     * permiso + acceso a la empresa ORIGEN (la del registro); el acceso a la
+     * empresa DESTINO lo valida el Form Request y lo revalida la acción.
+     */
+    public function cambiarEmpresa(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('colaboradores.cambiar-empresa') && $user->puedeAccederEmpresa($colaborador->empresa_id);
+    }
+
     public function desactivar(User $user, Colaborador $colaborador): bool
     {
         return $user->can('colaboradores.desactivar') && $user->puedeAccederEmpresa($colaborador->empresa_id);

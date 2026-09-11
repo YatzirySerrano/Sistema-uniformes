@@ -58,6 +58,7 @@ export type VersionActual = {
 export type Documento = {
     id: number;
     categoria: string;
+    categoria_bloqueada: boolean;
     nombre: string;
     descripcion: string | null;
     activo: boolean;
@@ -293,6 +294,10 @@ function abrirEditar(documento: Documento): void {
     formEditar.descripcion = documento.descripcion ?? '';
     modalEditar.value = true;
 }
+
+const categoriaEditarBloqueada = computed(
+    () => documentoEditar.value?.categoria_bloqueada ?? false,
+);
 
 function enviarEditar(): void {
     if (!documentoEditar.value) return;
@@ -879,7 +884,19 @@ function abrirHistorial(documento: Documento): void {
                         <Label for="ee-categoria-editar"
                             >Carpeta / categoría</Label
                         >
+                        <template v-if="categoriaEditarBloqueada">
+                            <p
+                                class="border-input bg-muted/40 text-muted-foreground rounded-md border px-3 py-2 text-sm"
+                            >
+                                {{ etiquetaCategoria(formEditar.categoria) }}
+                            </p>
+                            <p class="text-muted-foreground text-xs">
+                                Esta categoría queda fija después de registrar
+                                la primera versión del documento.
+                            </p>
+                        </template>
                         <SelectSimple
+                            v-else
                             id="ee-categoria-editar"
                             v-model="formEditar.categoria"
                             :opciones="categorias"

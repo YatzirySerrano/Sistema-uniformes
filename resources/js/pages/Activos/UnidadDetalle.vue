@@ -60,6 +60,21 @@ const props = defineProps<{
             | { tipo: 'baja' };
         registrado_por: string | null;
         creada_en: string | null;
+        perfil_tecnico: string | null;
+        perfil_tecnico_etiqueta: string | null;
+        datos_equipo: {
+            campo: string;
+            etiqueta: string;
+            valor: string | null;
+        }[];
+        especificacion: {
+            marca: string | null;
+            modelo: string | null;
+            imei: string | null;
+            numero_telefonico: string | null;
+            operador: string | null;
+            plan: string | null;
+        } | null;
     };
     movimientos: {
         tipo: string;
@@ -156,6 +171,48 @@ function darDeBaja(): void {
             form.reset();
         },
     });
+}
+
+/* --- Editar datos del equipo --- */
+type CampoEquipo =
+    | 'marca'
+    | 'modelo'
+    | 'imei'
+    | 'numero_telefonico'
+    | 'operador'
+    | 'plan';
+const dialogoEquipo = ref(false);
+const formEquipo = useForm({
+    marca: props.unidad.especificacion?.marca ?? '',
+    modelo: props.unidad.especificacion?.modelo ?? '',
+    imei: props.unidad.especificacion?.imei ?? '',
+    numero_telefonico: props.unidad.especificacion?.numero_telefonico ?? '',
+    operador: props.unidad.especificacion?.operador ?? '',
+    plan: props.unidad.especificacion?.plan ?? '',
+});
+
+function abrirEditarEquipo(): void {
+    formEquipo.defaults({
+        marca: props.unidad.especificacion?.marca ?? '',
+        modelo: props.unidad.especificacion?.modelo ?? '',
+        imei: props.unidad.especificacion?.imei ?? '',
+        numero_telefonico: props.unidad.especificacion?.numero_telefonico ?? '',
+        operador: props.unidad.especificacion?.operador ?? '',
+        plan: props.unidad.especificacion?.plan ?? '',
+    });
+    formEquipo.reset();
+    formEquipo.clearErrors();
+    dialogoEquipo.value = true;
+}
+
+function guardarEquipo(): void {
+    formEquipo.patch(
+        `/activos/unidades/${props.unidad.public_token}/especificacion`,
+        {
+            preserveScroll: true,
+            onSuccess: () => (dialogoEquipo.value = false),
+        },
+    );
 }
 </script>
 
@@ -345,6 +402,34 @@ function darDeBaja(): void {
                             Motivo de baja
                         </dt>
                         <dd>{{ unidad.motivo_baja }}</dd>
+                    </div>
+                </dl>
+            </section>
+
+            <section v-if="unidad.perfil_tecnico" class="rounded-xl border p-4">
+                <div class="mb-3 flex items-center justify-between gap-2">
+                    <h2 class="flex items-center gap-2 text-sm font-semibold">
+                        <ScrollText class="text-muted-foreground size-4" />
+                        Información del equipo ·
+                        {{ unidad.perfil_tecnico_etiqueta }}
+                    </h2>
+                    <Button
+                        v-if="permisos.administrar"
+                        variant="outline"
+                        size="sm"
+                        @click="abrirEditarEquipo"
+                    >
+                        Editar
+                    </Button>
+                </div>
+                <dl class="grid gap-3 text-sm sm:grid-cols-2">
+                    <div v-for="d in unidad.datos_equipo" :key="d.campo">
+                        <dt class="text-muted-foreground text-xs">
+                            {{ d.etiqueta }}
+                        </dt>
+                        <dd :class="{ 'text-muted-foreground': !d.valor }">
+                            {{ d.valor ?? 'Sin especificar' }}
+                        </dd>
                     </div>
                 </dl>
             </section>
@@ -573,6 +658,52 @@ function darDeBaja(): void {
                             :disabled="formRecuperar.processing"
                         >
                             Recuperar
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog v-model:open="dialogoEquipo">
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Editar datos del equipo</DialogTitle>
+                    <DialogDescription>
+                        No cambia el código ni el QR de la unidad.
+                    </DialogDescription>
+                </DialogHeader>
+                <form class="grid gap-3" @submit.prevent="guardarEquipo">
+                    <div
+                        v-for="d in unidad.datos_equipo"
+                        :key="d.campo"
+                        class="grid gap-1"
+                    >
+                        <Label :for="`eq-${d.campo}`" class="text-xs">
+                            {{ d.etiqueta }}
+                        </Label>
+                        <Input
+                            :id="`eq-${d.campo}`"
+                            v-model="formEquipo[d.campo as CampoEquipo]"
+                            autocomplete="off"
+                        />
+                        <InputError
+                            :message="
+                                (formEquipo.errors as Record<string, string>)[
+                                    d.campo
+                                ]
+                            "
+                        />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            @click="dialogoEquipo = false"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button type="submit" :disabled="formEquipo.processing">
+                            Guardar
                         </Button>
                     </DialogFooter>
                 </form>

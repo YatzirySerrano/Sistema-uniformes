@@ -180,6 +180,8 @@ class MovimientoInventarioController extends Controller
             'renglones.activoOrigen:id,nombre,codigo',
             'renglones.activoDestino:id,nombre,codigo',
             'renglones.talla:id,valor',
+            'renglones.unidadActivo:id,codigo',
+            'renglones.unidadActivo.especificacion',
         ]);
 
         return Inertia::render('Inventario/Traspasos/Detalle', [
@@ -206,6 +208,8 @@ class MovimientoInventarioController extends Controller
                     'talla' => $r->talla_valor_snapshot,
                     'cantidad' => $r->cantidad,
                     'unidad_codigo' => $r->unidad_codigo_snapshot,
+                    'unidad_marca_modelo' => $r->unidadActivo?->especificacion?->marcaModelo(),
+                    'unidad_imei_mascara' => $r->unidadActivo?->especificacion?->imeiMascara(),
                     'movimiento_salida_id' => $r->movimiento_salida_id,
                     'movimiento_entrada_id' => $r->movimiento_entrada_id,
                 ]),

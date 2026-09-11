@@ -145,6 +145,7 @@ class ServicioResumenInventarioFisico
                 'unidad.activo:id,nombre',
                 'unidad.almacen:id,nombre',
                 'unidad.colaborador:id,nombre_completo',
+                'unidad.especificacion',
                 'escaneadoPor:id,name',
             ]);
 
@@ -176,6 +177,9 @@ class ServicioResumenInventarioFisico
             'colaborador' => $unidad?->colaborador?->nombre_completo,
             'estado_visible' => $unidad?->estadoVisible()->value,
             'estado_visible_etiqueta' => $unidad?->estadoVisible()->etiqueta(),
+            // Ayuda a reconocer el equipo físico en la ronda (D26).
+            'marca_modelo' => $unidad?->especificacion?->marcaModelo(),
+            'imei_mascara' => $unidad?->especificacion?->imeiMascara(),
         ];
     }
 }

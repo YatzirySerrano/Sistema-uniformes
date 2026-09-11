@@ -17,6 +17,11 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+    ETIQUETA_PERFIL,
+    type PerfilTecnico,
+    aPerfilTecnico,
+} from '@/lib/perfilTecnicoUnidad';
 
 type Tipo = {
     id: number;
@@ -28,11 +33,33 @@ type Tipo = {
 type Categoria = {
     id: number;
     nombre: string;
+    /** Perfil técnico (relación 1:1). Independiente de cualquier `codigo`. */
+    perfil_tecnico: string | null;
     tipo_activo_id: number | null;
     tipo: string | null;
     activa: boolean;
     activos_count: number;
 };
+
+const OPCIONES_PERFIL = [
+    { valor: '', etiqueta: 'Sin perfil técnico' },
+    { valor: 'celular', etiqueta: 'Celular' },
+    { valor: 'computadora', etiqueta: 'Computadora' },
+    { valor: 'tablet', etiqueta: 'Tablet' },
+];
+
+/** Sugerencia NO autoritativa a partir del nombre; el perfil real lo fija el administrador. */
+function perfilSugerido(nombre: string): PerfilTecnico | null {
+    const n = nombre
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '');
+    if (/\bcelular|telefono|smartphone\b/.test(n)) return 'celular';
+    if (/\b(computadora|laptop|pc|notebook|equipo de computo)\b/.test(n))
+        return 'computadora';
+    if (/\btablet\b/.test(n)) return 'tablet';
+    return null;
+}
 type OpcionTipo = { id: number; nombre: string };
 
 const props = defineProps<{
@@ -116,7 +143,8 @@ const tipoForm = useForm<{ nombre: string }>({ nombre: '' });
 const categoriaForm = useForm<{
     nombre: string;
     tipo_activo_id: number | '';
-}>({ nombre: '', tipo_activo_id: '' });
+    perfil_tecnico: '' | PerfilTecnico;
+}>({ nombre: '', tipo_activo_id: '', perfil_tecnico: '' });
 const categoriaFormTipoSel = ref<OpcionTipo | null>(null);
 
 function crearTipo() {
@@ -154,6 +182,7 @@ const editandoCategoria = ref<number | null>(null);
 const categoriaEdit = useForm({
     nombre: '',
     tipo_activo_id: '' as number | '',
+    perfil_tecnico: '' as '' | PerfilTecnico,
     activa: true,
 });
 const categoriaEditTipoSel = ref<OpcionTipo | null>(null);
@@ -162,6 +191,7 @@ function abrirEdicionCategoria(c: Categoria) {
     categoriaEdit.defaults({
         nombre: c.nombre,
         tipo_activo_id: c.tipo_activo_id ?? '',
+        perfil_tecnico: aPerfilTecnico(c.perfil_tecnico) ?? '',
         activa: c.activa,
     });
     categoriaEdit.reset();
@@ -439,6 +469,38 @@ function confirmarEstado() {
                             "
                         />
                     </div>
+                    <div class="grid gap-1.5">
+                        <Label>Perfil técnico (unidades identificadas)</Label>
+                        <SelectSimple
+                            v-model="categoriaForm.perfil_tecnico"
+                            :opciones="OPCIONES_PERFIL"
+                        />
+                        <p class="text-muted-foreground text-xs">
+                            Define qué datos se piden por unidad (Celular: IMEI,
+                            número, operador, plan; Computadora / Tablet: marca
+                            y modelo). Se guarda como clave estable.
+                        </p>
+                        <button
+                            v-if="
+                                perfilSugerido(categoriaForm.nombre) &&
+                                categoriaForm.perfil_tecnico === ''
+                            "
+                            type="button"
+                            class="text-primary w-fit text-xs underline"
+                            @click="
+                                categoriaForm.perfil_tecnico = perfilSugerido(
+                                    categoriaForm.nombre,
+                                )!
+                            "
+                        >
+                            Parece
+                            {{
+                                ETIQUETA_PERFIL[
+                                    perfilSugerido(categoriaForm.nombre)!
+                                ]
+                            }}. Asignar perfil técnico.
+                        </button>
+                    </div>
                     <div class="flex items-center justify-between gap-2">
                         <p class="text-muted-foreground text-xs">
                             Se crea en el catálogo compartido, disponible para
@@ -533,6 +595,15 @@ function confirmarEstado() {
                                         }
                                     "
                                 />
+                                <div class="grid gap-1">
+                                    <Label class="text-xs"
+                                        >Perfil técnico</Label
+                                    >
+                                    <SelectSimple
+                                        v-model="categoriaEdit.perfil_tecnico"
+                                        :opciones="OPCIONES_PERFIL"
+                                    />
+                                </div>
                                 <div class="flex flex-wrap items-center gap-2">
                                     <label
                                         class="flex items-center gap-1.5 text-xs"
@@ -579,6 +650,21 @@ function confirmarEstado() {
                                             }}
                                         </Badge>
                                         <span>Tipo: {{ c.tipo ?? '—' }}</span>
+                                        <Badge
+                                            v-if="
+                                                aPerfilTecnico(c.perfil_tecnico)
+                                            "
+                                            variant="outline"
+                                            class="text-xs"
+                                        >
+                                            {{
+                                                ETIQUETA_PERFIL[
+                                                    aPerfilTecnico(
+                                                        c.perfil_tecnico,
+                                                    )!
+                                                ]
+                                            }}
+                                        </Badge>
                                         <span
                                             >Se usa en
                                             {{ c.activos_count }} activos</span

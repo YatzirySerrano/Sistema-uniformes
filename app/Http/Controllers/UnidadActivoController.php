@@ -10,6 +10,7 @@ use App\Enums\EstadoUnidadActivo;
 use App\Enums\EstadoVisibleUnidad;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Requests\Activos\ActualizarEspecificacionUnidadRequest;
 use App\Http\Requests\Activos\DarDeBajaUnidadRequest;
 use App\Http\Requests\Activos\MarcarIncidenciaUnidadRequest;
 use App\Http\Requests\Activos\RecuperarUnidadRequest;
@@ -17,6 +18,7 @@ use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\MovimientoInventario;
 use App\Models\UnidadActivo;
+use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioEtiquetasQr;
 use App\Soporte\ContextoExportacion;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -68,6 +70,8 @@ class UnidadActivoController extends Controller
                 'estado_visible' => $u->estadoVisible()->value,
                 'estado_visible_etiqueta' => $u->estadoVisible()->etiqueta(),
                 'entregable' => $u->esEntregable(),
+                'marca_modelo' => $u->especificacion?->marcaModelo(),
+                'imei_mascara' => $u->especificacion?->imeiMascara(),
             ]);
 
         return Inertia::render('Activos/Unidades', [
@@ -111,6 +115,8 @@ class UnidadActivoController extends Controller
                 default => null,
             };
 
+            $esp = $u->especificacion;
+
             return [
                 $u->codigo,
                 $u->activo?->nombre,
@@ -120,6 +126,12 @@ class UnidadActivoController extends Controller
                 $u->estadoVisible()->etiqueta(),
                 $u->estado->etiqueta(),
                 $u->condicion->etiqueta(),
+                $esp?->marca,
+                $esp?->modelo,
+                $esp?->imei,
+                $esp?->numero_telefonico,
+                $esp?->operador,
+                $esp?->plan,
             ];
         })->all();
 
@@ -136,6 +148,7 @@ class UnidadActivoController extends Controller
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Activo', 'Almacén', 'Colaborador', 'Servicio', 'Estado', 'Posesión', 'Condición',
+            'Marca', 'Modelo', 'IMEI', 'Número', 'Operador', 'Plan',
         ], $contexto);
     }
 
@@ -173,11 +186,17 @@ class UnidadActivoController extends Controller
                 'colaborador:id,nombre_completo,servicio_actual_id',
                 'colaborador.servicioActual:id,nombre,contrato_id',
                 'colaborador.servicioActual.contrato:id,nombre',
+                'especificacion',
             ])
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
                 $q->where(function (Builder $sub) use ($buscar): void {
                     $sub->where('codigo', 'like', "%{$buscar}%")
-                        ->orWhereHas('activo', fn (Builder $a) => $a->where('nombre', 'like', "%{$buscar}%"));
+                        ->orWhereHas('activo', fn (Builder $a) => $a->where('nombre', 'like', "%{$buscar}%"))
+                        ->orWhereHas('especificacion', fn (Builder $e) => $e
+                            ->where('imei', 'like', "%{$buscar}%")
+                            ->orWhere('numero_telefonico', 'like', "%{$buscar}%")
+                            ->orWhere('marca', 'like', "%{$buscar}%")
+                            ->orWhere('modelo', 'like', "%{$buscar}%"));
                 });
             })
             ->when($filtros['activo_id'] ?? null, fn (Builder $q, $v) => $q->where('activo_id', $v))
@@ -222,12 +241,17 @@ class UnidadActivoController extends Controller
         $this->authorize('view', $unidad);
 
         $unidad->load([
-            'activo:id,nombre,codigo,tipo_control', 'almacen:id,nombre', 'empresa:id,nombre_comercial',
+            'activo:id,nombre,codigo,tipo_control,categoria_id',
+            'activo.categoriaActivo.perfilTecnico',
+            'almacen:id,nombre', 'empresa:id,nombre_comercial',
             'colaborador:id,nombre_completo,servicio_actual_id',
             'colaborador.servicioActual:id,nombre,contrato_id',
             'colaborador.servicioActual.contrato:id,nombre',
             'registradoPor:id,name',
+            'especificacion',
         ]);
+
+        $perfil = $unidad->perfilTecnico();
 
         $movimientos = MovimientoInventario::query()
             ->where('unidad_activo_id', $unidad->id)
@@ -265,6 +289,13 @@ class UnidadActivoController extends Controller
                 'ubicacion_operativa' => $unidad->ubicacionOperativa(),
                 'registrado_por' => $unidad->registradoPor?->name,
                 'creada_en' => $unidad->created_at?->toDateTimeString(),
+                // Datos técnicos del equipo (Celular / Computadora / Tablet).
+                'perfil_tecnico' => $perfil?->value,
+                'perfil_tecnico_etiqueta' => $perfil?->etiqueta(),
+                'datos_equipo' => $unidad->datosEquipo(),
+                'especificacion' => $perfil === null || $unidad->especificacion === null ? null : $unidad->especificacion->only([
+                    'marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan',
+                ]),
             ],
             'movimientos' => $movimientos,
             'condicionesIncidencia' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => $c->esIncidencia())->values()
@@ -340,11 +371,16 @@ class UnidadActivoController extends Controller
             ->when($termino !== '', fn (Builder $q) => $q->where(fn (Builder $s) => $s
                 ->where('codigo', 'like', "%{$termino}%")
                 ->orWhere('observaciones', 'like', "%{$termino}%")
-                ->orWhereHas('activo', fn (Builder $a) => $a->where('nombre', 'like', "%{$termino}%"))))
+                ->orWhereHas('activo', fn (Builder $a) => $a->where('nombre', 'like', "%{$termino}%"))
+                ->orWhereHas('especificacion', fn (Builder $e) => $e
+                    ->where('imei', 'like', "%{$termino}%")
+                    ->orWhere('numero_telefonico', 'like', "%{$termino}%")
+                    ->orWhere('marca', 'like', "%{$termino}%")
+                    ->orWhere('modelo', 'like', "%{$termino}%"))))
             ->orderByRaw("case when estado = 'en_almacen' and condicion = 'funcionando' then 0 else 1 end")
             ->orderBy('codigo')
             ->limit(30)
-            ->with(['activo:id,nombre', 'almacen:id,nombre'])
+            ->with(['activo:id,nombre', 'almacen:id,nombre', 'especificacion'])
             ->get(['id', 'codigo', 'estado', 'condicion', 'activo_id', 'almacen_id', 'colaborador_id', 'observaciones'])
             ->map(fn (UnidadActivo $u): array => [
                 'id' => $u->id,
@@ -352,6 +388,9 @@ class UnidadActivoController extends Controller
                 'activo' => $u->activo?->nombre,
                 'almacen' => $u->almacen?->nombre,
                 'observaciones' => Str::limit((string) $u->observaciones, 60) ?: null,
+                'marca_modelo' => $u->especificacion?->marcaModelo(),
+                'imei_mascara' => $u->especificacion?->imeiMascara(),
+                'numero_telefonico' => $u->especificacion?->numero_telefonico,
                 'estado_visible_etiqueta' => $u->estadoVisible()->etiqueta(),
                 'condicion_etiqueta' => $u->condicion->etiqueta(),
                 'entregable' => $u->esEntregable(),
@@ -372,6 +411,36 @@ class UnidadActivoController extends Controller
             $unidad->condicion === CondicionUnidadActivo::Inservible => 'Inservible',
             default => 'No disponible',
         };
+    }
+
+    /**
+     * Edita los datos técnicos (marca / modelo / IMEI / número / operador /
+     * plan) de una unidad. No toca `codigo` / `public_token` / `estado` /
+     * `condicion` — el QR y el código son permanentes.
+     */
+    public function actualizarEspecificacion(
+        ActualizarEspecificacionUnidadRequest $request,
+        UnidadActivo $unidad,
+        ServicioAuditoria $auditoria,
+    ): RedirectResponse {
+        $unidad->loadMissing('especificacion');
+        $datos = $request->validated();
+        $datos = array_map(fn ($v) => is_string($v) && trim($v) === '' ? null : $v, $datos);
+
+        $anteriores = $unidad->especificacion?->only(array_keys($datos)) ?? [];
+
+        $unidad->especificacion()->updateOrCreate(['unidad_activo_id' => $unidad->id], $datos);
+
+        $auditoria->registrar('activos', 'unidad_especificacion', [
+            'tipo_entidad' => UnidadActivo::class,
+            'entidad_id' => $unidad->id,
+            'empresa_id' => $unidad->empresa_id,
+            'descripcion' => 'Datos técnicos actualizados de la unidad '.$unidad->codigo,
+            'valores_anteriores' => $anteriores,
+            'valores_nuevos' => $datos,
+        ]);
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Datos del equipo actualizados.']);
     }
 
     public function darDeBaja(DarDeBajaUnidadRequest $request, UnidadActivo $unidad, DarDeBajaUnidadActivo $accion): RedirectResponse

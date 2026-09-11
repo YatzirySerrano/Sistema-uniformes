@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Acciones\CambiarEmpresaColaborador;
 use App\Acciones\CambiarServicioColaborador;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Colaboradores\ActualizarFotoColaboradorRequest;
+use App\Http\Requests\Colaboradores\CambiarEmpresaColaboradorRequest;
 use App\Http\Requests\Colaboradores\CambiarServicioColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Area;
@@ -13,6 +15,7 @@ use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioExpediente;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\GeneradorNumeroEmpleado;
@@ -262,7 +265,17 @@ class ColaboradorController extends Controller
         $this->authorize('view', $colaborador);
 
         $colaborador->load(['sucursal:id,nombre', 'departamento:id,nombre', 'empresa:id,nombre_comercial', 'servicioActual.contrato']);
-        $colaborador->loadCount(['entregas', 'devoluciones', 'documentosExpediente', 'unidadesActivo']);
+
+        // Aislamiento histórico: los KPIs sólo cuentan lo que el usuario puede
+        // efectivamente abrir. Tras un traslado DASTI→SIESA, un usuario con
+        // acceso sólo a SIESA no debe ver — ni siquiera como número — la
+        // historia DASTI del colaborador. Para alcance global no cambia nada.
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $colaborador->loadCount([
+            'entregas as entregas_count' => fn ($q) => $q->whereIn('empresa_id', $idsAutorizadas),
+            'devoluciones as devoluciones_count' => fn ($q) => $q->whereIn('empresa_id', $idsAutorizadas),
+            'unidadesActivo as unidades_activo_count' => fn ($q) => $q->whereIn('empresa_id', $idsAutorizadas),
+        ]);
 
         $usuario = $request->user();
         $puedeVerExpediente = $usuario->can('verExpediente', $colaborador);
@@ -282,13 +295,14 @@ class ColaboradorController extends Controller
                 'foto_url' => $fotoUrl,
             ],
             'kpis' => [
-                'documentos' => $colaborador->documentos_expediente_count,
+                'documentos' => $puedeVerExpediente ? $servicioExpediente->contarSlotsVisibles($colaborador, $usuario) : 0,
                 'entregas' => $colaborador->entregas_count,
                 'devoluciones' => $colaborador->devoluciones_count,
                 'activos_asignados' => $colaborador->unidades_activo_count,
             ],
             'puedeEditar' => $usuario->can('update', $colaborador),
             'puedeEliminar' => $usuario->can('desactivar', $colaborador),
+            'puedeCambiarEmpresa' => $usuario->can('cambiarEmpresa', $colaborador),
             'puedeVerExpediente' => $puedeVerExpediente,
             'expediente' => $puedeVerExpediente ? [
                 'id' => $colaborador->id,
@@ -408,6 +422,47 @@ class ColaboradorController extends Controller
         $accion->ejecutar($colaborador, $datos['servicio_id'] ?? null, $datos['motivo'] ?? null);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Servicio actualizado correctamente.']);
+    }
+
+    /**
+     * Custodia pendiente del colaborador (unidades identificadas asignadas +
+     * artículos por cantidad sin devolver), para la previsualización del
+     * wizard de transferencia. Sólo lectura; nunca crea devoluciones.
+     */
+    public function custodiaPendiente(Request $request, Colaborador $colaborador, ServicioCustodiaColaborador $custodia): JsonResponse
+    {
+        $this->authorize('cambiarEmpresa', $colaborador);
+
+        $colaborador->loadMissing('empresa:id,nombre_comercial');
+        $pendientes = $custodia->pendientes($colaborador);
+
+        return response()->json([
+            'empresa_actual' => $colaborador->empresa?->nombre_comercial,
+            'tiene_pendientes' => $pendientes !== [],
+            'pendientes' => $pendientes,
+        ]);
+    }
+
+    /**
+     * Transfiere al colaborador a otra empresa / razón social conservando el
+     * mismo registro. Operación DISTINTA del cambio de servicio: bloquea si
+     * hay custodia pendiente, genera número de empleado nuevo y deja el
+     * servicio sin asignar — ver `App\Acciones\CambiarEmpresaColaborador`.
+     */
+    public function cambiarEmpresa(CambiarEmpresaColaboradorRequest $request, Colaborador $colaborador, CambiarEmpresaColaborador $accion): RedirectResponse
+    {
+        $datos = $request->validated();
+
+        $accion->ejecutar(
+            $colaborador,
+            (int) $datos['empresa_destino_id'],
+            (int) $datos['sucursal_destino_id'],
+            isset($datos['area_destino_id']) ? (int) $datos['area_destino_id'] : null,
+            (string) $datos['motivo'],
+        );
+
+        return to_route('colaboradores.show', $colaborador)
+            ->with('toast', ['type' => 'success', 'message' => 'Colaborador transferido a la nueva empresa.']);
     }
 
     /**

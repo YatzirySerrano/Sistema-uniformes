@@ -5,6 +5,7 @@ namespace App\Http\Requests\Activos;
 use App\Enums\TipoControlActivo;
 use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Http\Requests\Concerns\ResuelveEmpresa;
+use App\Http\Requests\Concerns\ValidaEspecificacionUnidad;
 use App\Models\Activo;
 use App\Models\CategoriaActivo;
 use Illuminate\Foundation\Http\FormRequest;
@@ -19,7 +20,7 @@ use Illuminate\Validation\Validator;
  */
 class GuardarActivoRequest extends FormRequest
 {
-    use NormalizaEntrada, ResuelveEmpresa;
+    use NormalizaEntrada, ResuelveEmpresa, ValidaEspecificacionUnidad;
 
     public function authorize(): bool
     {
@@ -67,6 +68,11 @@ class GuardarActivoRequest extends FormRequest
                 // es permanente desde el alta), sólo si al guardar se abre el
                 // PDF de etiquetas para imprimirlas ahora.
                 'abrir_etiquetas' => ['boolean'],
+                // Datos técnicos por unidad (sólo si la categoría/tipo tiene
+                // perfil técnico). El backend decide el perfil por `codigo`,
+                // nunca el frontend.
+                'especificaciones' => ['nullable', 'array'],
+                ...self::reglasEspecificacion(),
             ] : []),
             'nombre' => ['required', 'string', 'max:255'],
             'descripcion' => ['nullable', 'string', 'max:2000'],
@@ -184,6 +190,22 @@ class GuardarActivoRequest extends FormRequest
                 $validator->errors()->add('almacen_id', 'Selecciona el almacén donde vas a registrar la existencia inicial.');
             }
         });
+
+        // Datos técnicos por unidad: sólo en alta de seguimiento individual con
+        // perfil técnico resuelto (por `codigo`, nunca por nombre).
+        $validator->after(function (Validator $validator): void {
+            if ($this->route('activo') instanceof Activo
+                || $this->input('tipo_control') !== TipoControlActivo::SeguimientoIndividual->value) {
+                return;
+            }
+
+            $perfil = $this->perfilTecnicoDeEntrada(
+                null,
+                $this->integer('categoria_id') ?: null,
+            );
+
+            $this->validarEspecificacionesPorPerfil($validator, $perfil, (int) $this->input('cantidad_inicial', 0));
+        });
     }
 
     /**
@@ -192,6 +214,7 @@ class GuardarActivoRequest extends FormRequest
     public function messages(): array
     {
         return [
+            ...self::mensajesEspecificacion(),
             'empresa_id.required' => 'Selecciona la empresa del activo.',
             'almacen_id.exists' => 'El almacén no abastece a esta empresa o está desactivado.',
             'existencias.*.cantidad.min' => 'La cantidad no puede ser negativa.',
