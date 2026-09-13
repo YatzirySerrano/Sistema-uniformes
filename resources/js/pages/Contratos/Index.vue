@@ -8,7 +8,6 @@ import {
     Pencil,
     Plus,
     Search,
-    SquareArrowOutUpRight,
     X,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
@@ -16,10 +15,12 @@ import type { ContratoEditable } from '@/components/contratos/FormularioContrato
 import FormularioContrato from '@/components/contratos/FormularioContrato.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type ContratoFila = ContratoEditable & {
@@ -175,6 +177,8 @@ function verDetalle(c: ContratoFila): void {
     router.visit(`/contratos/${c.id}`);
 }
 
+const vista = useVistaPreferida('contratos');
+
 function irAServicios(c: ContratoFila): void {
     router.visit(`/servicios?contrato_id=${c.id}`);
 }
@@ -294,6 +298,8 @@ function alternarEstado(c: ContratoFila): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
@@ -318,7 +324,7 @@ function alternarEstado(c: ContratoFila): void {
             </template>
         </EstadoVacio>
 
-        <TooltipProvider v-else :delay-duration="150">
+        <TooltipProvider v-else-if="vista === 'cards'" :delay-duration="150">
             <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div
                     v-for="c in contratos.data"
@@ -417,14 +423,7 @@ function alternarEstado(c: ContratoFila): void {
                     </div>
 
                     <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            @click.stop="verDetalle(c)"
-                        >
-                            <SquareArrowOutUpRight class="size-3.5" />
-                            Ver detalles
-                        </Button>
+                        <BotonVer @click.stop="verDetalle(c)" />
                         <Button
                             v-if="permisos.editar"
                             variant="ghost"
@@ -445,6 +444,75 @@ function alternarEstado(c: ContratoFila): void {
                 </div>
             </div>
         </TooltipProvider>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[640px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Contrato</th>
+                        <th class="px-3 py-2 font-medium">Empresa</th>
+                        <th class="px-3 py-2 font-medium">Servicios activos</th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="c in contratos.data"
+                        :key="c.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
+                        <td class="px-3 py-2">
+                            <p class="font-medium">{{ c.nombre }}</p>
+                            <p class="text-muted-foreground font-mono text-xs">
+                                {{ c.codigo ?? '—' }}
+                            </p>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ c.empresa.nombre_comercial }}
+                        </td>
+                        <td class="px-3 py-2">
+                            <button
+                                type="button"
+                                class="text-primary hover:underline"
+                                @click="irAServicios(c)"
+                            >
+                                {{ c.servicios_activos }} /
+                                {{ c.servicios_total }}
+                            </button>
+                        </td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                :variant="c.activo ? 'success' : 'secondary'"
+                            >
+                                {{ c.activo ? 'Activo' : 'Eliminado' }}
+                            </Badge>
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex justify-end gap-2">
+                                <BotonVer @click="verDetalle(c)" />
+                                <Button
+                                    v-if="permisos.editar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="editar(c)"
+                                >
+                                    <Pencil class="size-3.5" /> Editar
+                                </Button>
+                                <Button
+                                    v-if="permisos.administrar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="alternarEstado(c)"
+                                >
+                                    {{ c.activo ? 'Eliminar' : 'Restaurar' }}
+                                </Button>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
 
         <Paginacion :links="contratos.links" :total="contratos.total" />
 

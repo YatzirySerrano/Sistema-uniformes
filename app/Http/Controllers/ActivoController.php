@@ -25,6 +25,7 @@ use App\Models\TipoActivo;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Servicios\ServicioEvidencias;
 use App\Soporte\ResolverPerfilTecnicoUnidad;
 use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
@@ -35,6 +36,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Throwable;
 
 /**
  * Catálogo de activos por empresa. La empresa llega como filtro (listado) o
@@ -271,7 +273,7 @@ class ActivoController extends Controller
         ]);
     }
 
-    public function store(GuardarActivoRequest $request, CrearActivoConExistencias $accion): RedirectResponse
+    public function store(GuardarActivoRequest $request, CrearActivoConExistencias $accion, ServicioEvidencias $evidenciasSvc): RedirectResponse
     {
         $empresa = $request->empresaResuelta();
 
@@ -280,30 +282,54 @@ class ActivoController extends Controller
             : null;
 
         $tallaIds = array_map('intval', $request->input('tallas', []));
+        $cantidadUnidades = (int) $request->input('cantidad_inicial', 0);
 
-        $resultado = $this->crearConCodigoUnico(function () use ($request, $empresa, $rutaImagen, $tallaIds, $accion): array {
-            $datosActivo = [
-                'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
-                ...$this->datosCategoria($request, $empresa->id),
-                'nombre' => $request->string('nombre'),
-                'descripcion' => $request->input('descripcion'),
-                'tipo_control' => (string) $request->string('tipo_control'),
-                'codigo' => $this->generarCodigo($empresa),
-                'activo' => $request->boolean('activo', true),
-                'imagen_ruta' => $rutaImagen,
-            ];
+        // Foto OPCIONAL por unidad (alta múltiple): cada archivo se escribe a
+        // disco ANTES de la transacción y se asocia por ÍNDICE, nunca por
+        // nombre de archivo — mismo servicio ya auditado que usan las
+        // evidencias de entrega/devolución. Si la transacción falla, se
+        // descartan aquí mismo (el filesystem no hace rollback automático).
+        $metasImagenes = [];
+        try {
+            for ($i = 0; $i < $cantidadUnidades; $i++) {
+                $archivo = $request->file("imagenes.{$i}");
+                if ($archivo !== null) {
+                    $metasImagenes[$i] = $evidenciasSvc->guardarPendiente($archivo, "unidades/{$empresa->id}", (string) $request->input("imagenes_origen.{$i}", 'archivo'));
+                }
+            }
 
-            return $accion->ejecutar(
-                empresaId: $empresa->id,
-                datosActivo: $datosActivo,
-                tallaIds: $tallaIds,
-                almacenId: $request->integer('almacen_id') ?: null,
-                existenciaInicial: $this->existenciaInicialDesdeRequest($request, $tallaIds),
-                cantidadUnidades: (int) $request->input('cantidad_inicial', 0),
-                realizadoPor: $request->user()?->id,
-                especificaciones: array_values((array) $request->input('especificaciones', [])),
-            );
-        });
+            $resultado = $this->crearConCodigoUnico(function () use ($request, $empresa, $rutaImagen, $tallaIds, $cantidadUnidades, $metasImagenes, $accion): array {
+                $datosActivo = [
+                    'tipo_activo_id' => $request->integer('tipo_activo_id') ?: null,
+                    ...$this->datosCategoria($request, $empresa->id),
+                    'nombre' => $request->string('nombre'),
+                    'descripcion' => $request->input('descripcion'),
+                    'tipo_control' => (string) $request->string('tipo_control'),
+                    'codigo' => $this->generarCodigo($empresa),
+                    'activo' => $request->boolean('activo', true),
+                    'imagen_ruta' => $rutaImagen,
+                ];
+
+                return $accion->ejecutar(
+                    empresaId: $empresa->id,
+                    datosActivo: $datosActivo,
+                    tallaIds: $tallaIds,
+                    almacenId: $request->integer('almacen_id') ?: null,
+                    existenciaInicial: $this->existenciaInicialDesdeRequest($request, $tallaIds),
+                    cantidadUnidades: $cantidadUnidades,
+                    realizadoPor: $request->user()?->id,
+                    especificaciones: array_values((array) $request->input('especificaciones', [])),
+                    imagenes: $this->imagenesIndexadas($metasImagenes, $cantidadUnidades),
+                );
+            });
+        } catch (Throwable $e) {
+            $evidenciasSvc->descartar(array_values($metasImagenes));
+            if ($rutaImagen !== null) {
+                Storage::disk('public')->delete($rutaImagen);
+            }
+
+            throw $e;
+        }
         $activo = $resultado['activo'];
 
         $this->auditoria->registrar('activos', 'crear', [
@@ -478,6 +504,15 @@ class ActivoController extends Controller
                 $fila->estado->value => (int) $fila->getAttribute('total'),
             ]);
 
+        // "En almacén" = presencia física (incluye unidades no entregables);
+        // "no_disponibles" desglosa cuántas de esas NO pueden asignarse ahora
+        // (condición distinta de Funcionando) — nunca se resta de "en_almacen",
+        // sólo aclara la cifra. Misma regla central que `esEntregable()`.
+        $noDisponiblesEnAlmacen = ! $esIndividual ? 0 : $activo->unidades()
+            ->where('estado', EstadoUnidadActivo::EnAlmacen)
+            ->where('condicion', '!=', CondicionUnidadActivo::Funcionando)
+            ->count();
+
         return Inertia::render('Activos/Detalle', [
             'activo' => [
                 ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'categoria', 'activo']),
@@ -494,6 +529,7 @@ class ActivoController extends Controller
             'usaVariantes' => $activo->tallas()->exists(),
             'resumenUnidades' => $resumenUnidades === null ? null : [
                 'en_almacen' => (int) ($resumenUnidades['en_almacen'] ?? 0),
+                'no_disponibles' => $noDisponiblesEnAlmacen,
                 'asignada' => (int) ($resumenUnidades['asignada'] ?? 0),
                 'baja' => (int) ($resumenUnidades['baja'] ?? 0),
             ],
@@ -532,19 +568,37 @@ class ActivoController extends Controller
         Activo $activo,
         RegistrarEntradaInventario $registrarEntrada,
         RegistrarUnidadesActivo $registrarUnidades,
+        ServicioEvidencias $evidenciasSvc,
     ): RedirectResponse {
         $motivo = $request->input('motivo') ?: 'Existencias adicionales';
 
         if ($activo->tipo_control === TipoControlActivo::SeguimientoIndividual) {
-            $unidades = $registrarUnidades->ejecutar(
-                empresa: $activo->empresa,
-                activo: $activo,
-                almacen: Almacen::query()->findOrFail($request->integer('almacen_id')),
-                cantidad: $request->integer('cantidad'),
-                motivo: $motivo,
-                realizadoPor: $request->user()?->id,
-                especificaciones: array_values((array) $request->input('especificaciones', [])),
-            );
+            $cantidad = $request->integer('cantidad');
+
+            $metasImagenes = [];
+            try {
+                for ($i = 0; $i < $cantidad; $i++) {
+                    $archivo = $request->file("imagenes.{$i}");
+                    if ($archivo !== null) {
+                        $metasImagenes[$i] = $evidenciasSvc->guardarPendiente($archivo, "unidades/{$activo->empresa_id}", (string) $request->input("imagenes_origen.{$i}", 'archivo'));
+                    }
+                }
+
+                $unidades = $registrarUnidades->ejecutar(
+                    empresa: $activo->empresa,
+                    activo: $activo,
+                    almacen: Almacen::query()->findOrFail($request->integer('almacen_id')),
+                    cantidad: $cantidad,
+                    motivo: $motivo,
+                    realizadoPor: $request->user()?->id,
+                    especificaciones: array_values((array) $request->input('especificaciones', [])),
+                    imagenes: $this->imagenesIndexadas($metasImagenes, $cantidad),
+                );
+            } catch (Throwable $e) {
+                $evidenciasSvc->descartar(array_values($metasImagenes));
+
+                throw $e;
+            }
 
             if ($request->boolean('abrir_etiquetas')) {
                 return back()
@@ -632,6 +686,26 @@ class ActivoController extends Controller
                 'cantidad' => (int) ($existencias->get($tallaId)['cantidad'] ?? 0),
             ])
             ->all();
+    }
+
+    /**
+     * Convierte el mapa disperso {índice => meta} (sólo trae entradas para las
+     * unidades que SÍ recibieron foto) en una lista contigua 0..N-1 con
+     * `null` en los huecos, alineada exactamente con las unidades que crea
+     * `RegistrarUnidadesActivo` en el mismo orden.
+     *
+     * @param  array<int, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string}>  $metasPorIndice
+     * @return list<array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string}|null>
+     */
+    private function imagenesIndexadas(array $metasPorIndice, int $cantidad): array
+    {
+        $lista = [];
+
+        for ($i = 0; $i < $cantidad; $i++) {
+            $lista[] = $metasPorIndice[$i] ?? null;
+        }
+
+        return $lista;
     }
 
     /**

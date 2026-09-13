@@ -2,6 +2,7 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -309,11 +310,7 @@ const vista = useVistaPreferida('entregas', 'tabla');
                             >
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <Link
-                                :href="`/entregas/${e.id}`"
-                                class="text-primary text-sm hover:underline"
-                                >Ver</Link
-                            >
+                            <BotonVer :href="`/entregas/${e.id}`" />
                         </td>
                     </tr>
                 </tbody>

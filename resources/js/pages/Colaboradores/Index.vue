@@ -4,6 +4,7 @@ import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import FormularioColaborador from '@/components/colaboradores/FormularioColaborador.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -352,11 +353,14 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <Link
-                                :href="`/colaboradores/${c.id}/editar`"
-                                class="text-primary text-sm hover:underline"
-                                >Editar</Link
-                            >
+                            <div class="flex justify-end gap-2">
+                                <BotonVer :href="`/colaboradores/${c.id}`" />
+                                <Link
+                                    :href="`/colaboradores/${c.id}/editar`"
+                                    class="text-primary text-sm hover:underline"
+                                    >Editar</Link
+                                >
+                            </div>
                         </td>
                     </tr>
                 </tbody>

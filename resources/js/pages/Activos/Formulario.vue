@@ -4,6 +4,7 @@ import { Plus } from '@lucide/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SubidaArchivo from '@/components/sistema/SubidaArchivo.vue';
 import InputError from '@/components/InputError.vue';
@@ -166,6 +167,11 @@ const form = useForm<{
     // Datos técnicos por unidad (sólo alta de seguimiento individual con
     // perfil técnico). El backend valida el perfil por `codigo`.
     especificaciones: EspecificacionUnidad[];
+    // Foto OPCIONAL por unidad — nunca depende del perfil técnico, aplica a
+    // cualquier unidad de seguimiento individual (celular, radio,
+    // herramienta…). Alineada por índice con `especificaciones`.
+    imagenes: (File | null)[];
+    imagenes_origen: ('camara' | 'archivo' | null)[];
     _method?: string;
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
@@ -183,18 +189,27 @@ const form = useForm<{
     existencias: [],
     abrir_etiquetas: false,
     especificaciones: [],
+    imagenes: [],
+    imagenes_origen: [],
 });
 
 /* --- Perfil técnico (Celular / Computadora / Tablet) resuelto por `codigo` --- */
 const perfilTecnico = computed(() =>
     aPerfilTecnico(categoriaSel.value?.perfil_tecnico),
 );
-const mostrarEspecificaciones = computed(
+// Gate del bloque "Unidad N": aplica a CUALQUIER activo de seguimiento
+// individual con cantidad a crear, tenga o no perfil técnico — la foto por
+// unidad nunca depende de eso (celular, radio, herramienta, equipo…).
+const mostrarUnidades = computed(
     () =>
         !esEdicion &&
         form.tipo_control === 'individual' &&
-        perfilTecnico.value !== null &&
         form.cantidad_inicial > 0,
+);
+// Sub-bloque de datos técnicos (marca/modelo/IMEI…) dentro de cada card,
+// sólo cuando el perfil técnico aplica.
+const mostrarEspecificaciones = computed(
+    () => mostrarUnidades.value && perfilTecnico.value !== null,
 );
 const camposDelPerfil = computed<CampoEspecificacion[]>(() =>
     perfilTecnico.value ? camposVisibles(perfilTecnico.value) : [],
@@ -205,23 +220,37 @@ function campoRequerido(campo: CampoEspecificacion): boolean {
         : false;
 }
 
-// Mantiene `form.especificaciones` con una fila por unidad a registrar.
+// Mantiene `form.especificaciones`/`form.imagenes`/`form.imagenes_origen`
+// con una fila por unidad a registrar — misma longitud, mismo índice.
 watch(
     () => [
+        mostrarUnidades.value,
         mostrarEspecificaciones.value,
         form.cantidad_inicial,
         perfilTecnico.value,
     ],
     () => {
-        if (!mostrarEspecificaciones.value) {
+        if (!mostrarUnidades.value) {
             form.especificaciones = [];
+            form.imagenes = [];
+            form.imagenes_origen = [];
             return;
         }
         const n = form.cantidad_inicial;
-        const actual = form.especificaciones;
-        form.especificaciones = Array.from(
+
+        form.especificaciones = mostrarEspecificaciones.value
+            ? Array.from(
+                  { length: n },
+                  (_, i) => form.especificaciones[i] ?? especificacionVacia(),
+              )
+            : [];
+        form.imagenes = Array.from(
             { length: n },
-            (_, i) => actual[i] ?? especificacionVacia(),
+            (_, i) => form.imagenes[i] ?? null,
+        );
+        form.imagenes_origen = Array.from(
+            { length: n },
+            (_, i) => form.imagenes_origen[i] ?? null,
         );
     },
     { immediate: true },
@@ -958,12 +987,9 @@ function enviar() {
                     </label>
                 </div>
 
-                <!-- Datos técnicos por unidad (Celular / Computadora / Tablet) -->
-                <div
-                    v-if="mostrarEspecificaciones && perfilTecnico"
-                    class="grid gap-3"
-                >
-                    <div>
+                <!-- Unidad por unidad: datos técnicos (si el perfil aplica) + foto opcional (siempre, independiente del perfil) -->
+                <div v-if="mostrarUnidades" class="grid gap-3">
+                    <div v-if="mostrarEspecificaciones && perfilTecnico">
                         <p class="text-sm font-medium">
                             Datos del equipo ·
                             {{ ETIQUETA_PERFIL[perfilTecnico] }}
@@ -975,12 +1001,15 @@ function enviar() {
                     </div>
                     <InputError :message="form.errors.especificaciones" />
                     <div
-                        v-for="(esp, i) in form.especificaciones"
+                        v-for="(_imagen, i) in form.imagenes"
                         :key="i"
-                        class="grid gap-2 rounded-lg border p-3"
+                        class="grid gap-3 rounded-lg border p-3"
                     >
                         <p class="text-xs font-medium">Unidad {{ i + 1 }}</p>
-                        <div class="grid gap-2 sm:grid-cols-2">
+                        <div
+                            v-if="mostrarEspecificaciones && perfilTecnico"
+                            class="grid gap-2 sm:grid-cols-2"
+                        >
                             <div
                                 v-for="campo in camposDelPerfil"
                                 :key="campo"
@@ -999,7 +1028,7 @@ function enviar() {
                                 </Label>
                                 <Input
                                     :id="`esp-${i}-${campo}`"
-                                    v-model="esp[campo]"
+                                    v-model="form.especificaciones[i][campo]"
                                     :placeholder="
                                         campo === 'imei'
                                             ? '15 dígitos'
@@ -1015,6 +1044,23 @@ function enviar() {
                                     "
                                 />
                             </div>
+                        </div>
+                        <div class="grid gap-1">
+                            <Label :for="`img-${i}`" class="text-xs">
+                                Foto
+                                <span class="text-muted-foreground"
+                                    >(opcional)</span
+                                >
+                            </Label>
+                            <CapturaEvidencia
+                                :id="`img-${i}`"
+                                v-model="form.imagenes[i]"
+                                v-model:origen="form.imagenes_origen[i]"
+                                etiqueta="Tomar foto / Subir archivo"
+                            />
+                            <InputError
+                                :message="erroresLaxos[`imagenes.${i}`]"
+                            />
                         </div>
                     </div>
                 </div>
@@ -1069,6 +1115,7 @@ function enviar() {
                         :peso-maximo-mb="PESO_MAXIMO_MB"
                         :archivo-actual-url="activo?.imagen_url"
                         :invalido="!!form.errors.imagen"
+                        permite-camara
                     />
                     <InputError :message="form.errors.imagen" />
                 </div>

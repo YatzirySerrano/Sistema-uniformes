@@ -12,7 +12,9 @@ use App\Http\Requests\Colaboradores\CambiarServicioColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Area;
 use App\Models\Colaborador;
+use App\Models\Devolucion;
 use App\Models\Empresa;
+use App\Models\EntregaUniforme;
 use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCustodiaColaborador;
@@ -24,6 +26,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -281,6 +284,16 @@ class ColaboradorController extends Controller
         $puedeVerExpediente = $usuario->can('verExpediente', $colaborador);
         $fotoUrl = $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null;
 
+        // Sólo Admin/Superadmin (alcance global) ven el desglose por empresa
+        // de origen del histórico — evita que un total agregado (p. ej.
+        // "Entregas: 5") se lea como si perteneciera todo a la empresa
+        // ACTUAL del colaborador tras un traslado. El total ya visible en
+        // `kpis` no cambia; esto sólo lo hace trazable. Restringidos siguen
+        // sin ver nada fuera de `$idsAutorizadas` (ya aplicado arriba).
+        $historicoPorEmpresa = $usuario->tieneAlcanceGlobal()
+            ? $this->historicoPorEmpresa($colaborador, $idsAutorizadas)
+            : null;
+
         return Inertia::render('Colaboradores/Detalle', [
             'colaborador' => [
                 ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
@@ -298,8 +311,13 @@ class ColaboradorController extends Controller
                 'documentos' => $puedeVerExpediente ? $servicioExpediente->contarSlotsVisibles($colaborador, $usuario) : 0,
                 'entregas' => $colaborador->entregas_count,
                 'devoluciones' => $colaborador->devoluciones_count,
+                // SIEMPRE situación ACTUAL: `unidadesActivo()` filtra por
+                // `colaborador_id`, y una unidad devuelta pierde ese valor al
+                // confirmarse (`ServicioUnidadesActivo::devolver()`) — nunca
+                // incluye asignaciones históricas de una empresa anterior.
                 'activos_asignados' => $colaborador->unidades_activo_count,
             ],
+            'historicoPorEmpresa' => $historicoPorEmpresa,
             'puedeEditar' => $usuario->can('update', $colaborador),
             'puedeEliminar' => $usuario->can('desactivar', $colaborador),
             'puedeCambiarEmpresa' => $usuario->can('cambiarEmpresa', $colaborador),
@@ -574,6 +592,50 @@ class ColaboradorController extends Controller
         return response()->json([
             'numero_empleado' => $this->generadorNumeroEmpleado->previsualizar($empresa, $nombreCompleto),
         ]);
+    }
+
+    /**
+     * Desglosa entregas/devoluciones del colaborador por empresa de ORIGEN
+     * (sólo dentro de `$idsAutorizadas`, ya resuelto por el llamador — nunca
+     * se llama para un usuario restringido). Sólo incluye empresas donde
+     * realmente hay historial, para no listar ceros irrelevantes.
+     *
+     * @param  Collection<int, int>  $idsAutorizadas
+     * @return list<array{empresa_id: int, empresa: string, entregas: int, devoluciones: int}>
+     */
+    private function historicoPorEmpresa(Colaborador $colaborador, Collection $idsAutorizadas): array
+    {
+        $entregasPorEmpresa = EntregaUniforme::query()
+            ->where('colaborador_id', $colaborador->getKey())
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->selectRaw('empresa_id, count(*) as total')
+            ->groupBy('empresa_id')
+            ->pluck('total', 'empresa_id');
+
+        $devolucionesPorEmpresa = Devolucion::query()
+            ->where('colaborador_id', $colaborador->getKey())
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->selectRaw('empresa_id, count(*) as total')
+            ->groupBy('empresa_id')
+            ->pluck('total', 'empresa_id');
+
+        $idsConHistorial = $entregasPorEmpresa->keys()->merge($devolucionesPorEmpresa->keys())->unique();
+
+        if ($idsConHistorial->isEmpty()) {
+            return [];
+        }
+
+        $nombresEmpresa = Empresa::query()->whereIn('id', $idsConHistorial)->pluck('nombre_comercial', 'id');
+
+        return array_values($idsConHistorial
+            ->map(fn ($id): array => [
+                'empresa_id' => (int) $id,
+                'empresa' => (string) ($nombresEmpresa[$id] ?? '—'),
+                'entregas' => (int) ($entregasPorEmpresa[$id] ?? 0),
+                'devoluciones' => (int) ($devolucionesPorEmpresa[$id] ?? 0),
+            ])
+            ->sortByDesc(fn (array $f): int => $f['entregas'] + $f['devoluciones'])
+            ->all());
     }
 
     /**

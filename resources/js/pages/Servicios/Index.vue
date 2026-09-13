@@ -7,17 +7,18 @@ import {
     Pencil,
     Plus,
     Search,
-    SquareArrowOutUpRight,
     X,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import type { ServicioEditable } from '@/components/servicios/FormularioServicio.vue';
 import FormularioServicio from '@/components/servicios/FormularioServicio.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type ContratoOpcion = { id: number; nombre: string; activo: boolean };
@@ -192,6 +194,8 @@ function verDetalle(s: ServicioFila): void {
     router.visit(`/servicios/${s.id}`);
 }
 
+const vista = useVistaPreferida('servicios');
+
 const confirmando = ref<ServicioFila | null>(null);
 const procesandoEstado = ref(false);
 
@@ -323,6 +327,8 @@ function alternarEstado(s: ServicioFila): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
@@ -347,7 +353,10 @@ function alternarEstado(s: ServicioFila): void {
             </template>
         </EstadoVacio>
 
-        <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
             <div
                 v-for="s in servicios.data"
                 :key="s.id"
@@ -404,14 +413,7 @@ function alternarEstado(s: ServicioFila): void {
                 </p>
 
                 <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        @click.stop="verDetalle(s)"
-                    >
-                        <SquareArrowOutUpRight class="size-3.5" />
-                        Ver detalles
-                    </Button>
+                    <BotonVer @click.stop="verDetalle(s)" />
                     <Button
                         v-if="permisos.editar"
                         variant="ghost"
@@ -430,6 +432,77 @@ function alternarEstado(s: ServicioFila): void {
                     </Button>
                 </div>
             </div>
+        </div>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[640px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Servicio</th>
+                        <th class="px-3 py-2 font-medium">Contrato</th>
+                        <th class="px-3 py-2 font-medium">
+                            Empresa / Sucursal
+                        </th>
+                        <th class="px-3 py-2 font-medium">Estado</th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="s in servicios.data"
+                        :key="s.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
+                        <td class="px-3 py-2">
+                            <p class="font-medium">{{ s.nombre }}</p>
+                            <p class="text-muted-foreground font-mono text-xs">
+                                {{ s.codigo ?? '—' }}
+                            </p>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ s.contrato.nombre }}
+                            <Badge
+                                v-if="!s.contrato.activo"
+                                variant="secondary"
+                                class="ml-1"
+                                >Contrato inactivo</Badge
+                            >
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ s.empresa.nombre_comercial }} · Sucursal
+                            {{ s.sucursal.nombre }}
+                        </td>
+                        <td class="px-3 py-2">
+                            <Badge
+                                :variant="s.activo ? 'success' : 'secondary'"
+                            >
+                                {{ s.activo ? 'Activo' : 'Eliminado' }}
+                            </Badge>
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex justify-end gap-2">
+                                <BotonVer @click="verDetalle(s)" />
+                                <Button
+                                    v-if="permisos.editar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="editar(s)"
+                                >
+                                    <Pencil class="size-3.5" /> Editar
+                                </Button>
+                                <Button
+                                    v-if="permisos.administrar"
+                                    variant="ghost"
+                                    size="sm"
+                                    @click="alternarEstado(s)"
+                                >
+                                    {{ s.activo ? 'Eliminar' : 'Restaurar' }}
+                                </Button>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
 
         <Paginacion :links="servicios.links" :total="servicios.total" />

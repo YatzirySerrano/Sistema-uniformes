@@ -149,10 +149,18 @@ class RegistrarDevolucion
             return null;
         }
 
-        $yaDevuelto = (int) DetalleDevolucion::query()
+        // OJO: este tope cuenta TODA devolución ya solicitada de este renglón
+        // sin importar su estado (confirmada o todavía pendiente_firma) —
+        // a propósito distinto de `ServicioCustodiaColaborador::pendienteDeDetalle()`
+        // (que sólo cuenta confirmadas, para decidir qué mostrar/seleccionar).
+        // Aquí es el tope de "cuánto queda por SOLICITAR": impide exceder lo
+        // entregado aunque una solicitud previa siga sin firmar — el mismo
+        // lock de fila de arriba serializa intentos concurrentes sobre este
+        // renglón (recalculado DESPUÉS de tomar el lock).
+        $yaSolicitado = (int) DetalleDevolucion::query()
             ->where('detalle_entrega_id', $detalleOriginal->getKey())
             ->sum('cantidad');
-        $pendiente = (int) $detalleOriginal->cantidad - $yaDevuelto;
+        $pendiente = (int) $detalleOriginal->cantidad - $yaSolicitado;
 
         if ($cantidad > $pendiente) {
             throw new ExcepcionDeNegocioSimple(sprintf(

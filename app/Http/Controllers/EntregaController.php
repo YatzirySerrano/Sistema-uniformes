@@ -19,6 +19,7 @@ use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Models\SaldoInventario;
 use App\Models\User;
+use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioExpediente;
 use Illuminate\Http\JsonResponse;
@@ -145,23 +146,27 @@ class EntregaController extends Controller
 
     /**
      * Búsqueda de entregas para originar una devolución (`Devoluciones/Crear`
-     * sin `?entrega_id=` precargado). Devuelve entregas no anuladas de las
-     * empresas autorizadas; el detalle de renglones pendientes se resuelve al
-     * cargar la entrega concreta.
+     * sin `?entrega_id=` precargado). Devuelve SÓLO entregas de las empresas
+     * autorizadas que todavía tienen custodia pendiente real (no basta con
+     * "no anulada": una entrega totalmente devuelta y confirmada no debe
+     * volver a ofrecerse — ver `ServicioCustodiaColaborador::filtrarConPendiente()`,
+     * fuente única de este cálculo).
      */
-    public function buscar(Request $request): JsonResponse
+    public function buscar(Request $request, ServicioCustodiaColaborador $custodia): JsonResponse
     {
         $this->authorize('create', Devolucion::class);
 
         $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $termino = trim((string) $request->query('q', ''));
 
-        $entregas = EntregaUniforme::query()
-            ->whereIn('empresa_id', $idsAutorizadas)
-            ->where('estado', '!=', EstadoEntrega::Anulada)
-            ->when($termino !== '', fn ($q) => $q->where(fn ($s) => $s
-                ->where('folio', 'like', "%{$termino}%")
-                ->orWhereHas('colaborador', fn ($c) => $c->where('nombre_completo', 'like', "%{$termino}%")->orWhere('numero_empleado', 'like', "%{$termino}%"))))
+        $entregas = $custodia->filtrarConPendiente(
+            EntregaUniforme::query()
+                ->whereIn('empresa_id', $idsAutorizadas)
+                ->where('estado', '!=', EstadoEntrega::Anulada)
+                ->when($termino !== '', fn ($q) => $q->where(fn ($s) => $s
+                    ->where('folio', 'like', "%{$termino}%")
+                    ->orWhereHas('colaborador', fn ($c) => $c->where('nombre_completo', 'like', "%{$termino}%")->orWhere('numero_empleado', 'like', "%{$termino}%"))))
+        )
             ->with(['colaborador:id,nombre_completo,numero_empleado', 'empresa:id,nombre_comercial'])
             ->latest()
             ->limit(20)

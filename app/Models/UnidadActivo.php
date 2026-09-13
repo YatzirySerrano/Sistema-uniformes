@@ -142,6 +142,18 @@ class UnidadActivo extends Model
     }
 
     /**
+     * Foto OPCIONAL 1:1 de la unidad — nunca depende del perfil técnico:
+     * cualquier unidad de seguimiento individual puede tener la suya
+     * (celular, radio, herramienta, equipo…).
+     *
+     * @return HasOne<ImagenUnidadActivo, $this>
+     */
+    public function imagen(): HasOne
+    {
+        return $this->hasOne(ImagenUnidadActivo::class);
+    }
+
+    /**
      * Perfil técnico del activo de esta unidad (Celular / Computadora / Tablet
      * / null). Fuente única: `ResolverPerfilTecnicoUnidad` (por `codigo` de
      * categoría/tipo, nunca por nombre).

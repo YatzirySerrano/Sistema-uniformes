@@ -48,12 +48,80 @@ type Entrega = {
     renglones: Renglon[];
 };
 
+type PendienteFila = {
+    tipo: 'unidad' | 'cantidad';
+    tipo_etiqueta: string;
+    activo: string;
+    talla: string | null;
+    cantidad: number;
+    referencia: string | null;
+    entrega_id: number | null;
+    entrega_folio: string | null;
+    detalle_entrega_id: number | null;
+    unidad_activo_id: number | null;
+};
+
+type ColaboradorContexto = {
+    id: number;
+    nombre: string;
+    pendientes: PendienteFila[];
+};
+
 const props = defineProps<{
     entrega: Entrega | null;
+    colaboradorContexto: ColaboradorContexto | null;
     condiciones: { valor: string; etiqueta: string }[];
     condicionesUnidad: { valor: string; etiqueta: string }[];
     textoConsentimiento: string;
 }>();
+
+// ------------------------------------------------------------------
+// Contexto "Transferencia → Devoluciones": agrupa los pendientes REALES
+// del colaborador (IDs, no folios) por entrega de origen para poder
+// procesarlos uno por uno sin volver al perfil entre cada uno.
+// ------------------------------------------------------------------
+type GrupoPendiente = {
+    entregaId: number | null;
+    folio: string;
+    filas: PendienteFila[];
+};
+
+const gruposPendientes = computed<GrupoPendiente[]>(() => {
+    const mapa = new Map<string, GrupoPendiente>();
+    for (const fila of props.colaboradorContexto?.pendientes ?? []) {
+        const clave =
+            fila.entrega_id !== null
+                ? String(fila.entrega_id)
+                : `sin-entrega-${fila.referencia}`;
+        if (!mapa.has(clave)) {
+            mapa.set(clave, {
+                entregaId: fila.entrega_id,
+                folio: fila.entrega_folio ?? 'Sin folio',
+                filas: [],
+            });
+        }
+        mapa.get(clave)!.filas.push(fila);
+    }
+    return Array.from(mapa.values());
+});
+
+function procesarGrupo(grupo: GrupoPendiente): void {
+    if (grupo.entregaId === null || !props.colaboradorContexto) return;
+    router.get(
+        '/devoluciones/crear',
+        {
+            colaborador_id: props.colaboradorContexto.id,
+            entrega_id: grupo.entregaId,
+        },
+        { preserveState: false },
+    );
+}
+
+const hrefCancelar = computed(() =>
+    props.colaboradorContexto
+        ? `/devoluciones/crear?colaborador_id=${props.colaboradorContexto.id}`
+        : '/devoluciones',
+);
 
 defineOptions({
     layout: {
@@ -163,6 +231,7 @@ const almacenSel = ref<OpcionAlmacen | null>(
 
 const form = useForm<{
     entrega_uniforme_id: number | '';
+    colaborador_id: number | null;
     almacen_id: number | null;
     fecha: string;
     motivo: string;
@@ -185,6 +254,7 @@ const form = useForm<{
     aceptacion: boolean;
 }>({
     entrega_uniforme_id: props.entrega?.id ?? '',
+    colaborador_id: props.colaboradorContexto?.id ?? null,
     almacen_id: props.entrega?.almacen_id ?? null,
     fecha: hoy,
     motivo: '',
@@ -372,7 +442,73 @@ function enviar(): void {
             descripcion="Registrar y firmar son un solo proceso: la devolución no queda concluida hasta que quien devuelve y quien recibe firman. Sólo los activos reutilizables reingresan al inventario del almacén destino."
         />
 
-        <template v-if="!entrega">
+        <template v-if="!entrega && colaboradorContexto">
+            <div class="bg-muted/40 space-y-1 rounded-lg border p-3 text-sm">
+                <p class="font-medium">
+                    Devoluciones pendientes para completar la transferencia de
+                    {{ colaboradorContexto.nombre }}
+                </p>
+                <p class="text-muted-foreground text-xs">
+                    Elige una entrega para procesarla. Al confirmar cada
+                    devolución volverás aquí automáticamente hasta que ya no
+                    quede nada pendiente.
+                </p>
+            </div>
+
+            <template v-if="gruposPendientes.length">
+                <div
+                    v-for="grupo in gruposPendientes"
+                    :key="grupo.entregaId ?? grupo.folio"
+                    class="space-y-2 rounded-xl border p-4"
+                >
+                    <div
+                        class="flex flex-wrap items-center justify-between gap-2"
+                    >
+                        <h3 class="text-sm font-semibold">
+                            {{ grupo.folio }}
+                        </h3>
+                        <Button
+                            v-if="grupo.entregaId !== null"
+                            size="sm"
+                            @click="procesarGrupo(grupo)"
+                        >
+                            Procesar esta entrega
+                        </Button>
+                    </div>
+                    <ul class="text-muted-foreground space-y-0.5 text-sm">
+                        <li v-for="(fila, i) in grupo.filas" :key="i">
+                            <template v-if="fila.tipo === 'unidad'">
+                                Unidad identificada:
+                                {{ fila.activo }} · {{ fila.referencia }}
+                            </template>
+                            <template v-else>
+                                {{ fila.activo
+                                }}<span v-if="fila.talla">
+                                    ({{ fila.talla }})</span
+                                >
+                                · pendiente {{ fila.cantidad }}
+                            </template>
+                        </li>
+                    </ul>
+                </div>
+            </template>
+            <p
+                v-else
+                class="text-muted-foreground rounded-xl border p-4 text-sm"
+            >
+                Ya no quedan devoluciones pendientes de
+                {{ colaboradorContexto.nombre }}. Puedes completar la
+                transferencia desde su perfil.
+            </p>
+
+            <Button variant="ghost" as-child class="w-fit">
+                <Link :href="`/colaboradores/${colaboradorContexto.id}`"
+                    >Volver al perfil del colaborador</Link
+                >
+            </Button>
+        </template>
+
+        <template v-else-if="!entrega">
             <div class="grid gap-1.5">
                 <Label for="entrega">Entrega de origen</Label>
                 <BuscadorAsync
@@ -403,6 +539,15 @@ function enviar(): void {
         </template>
 
         <template v-else>
+            <div
+                v-if="colaboradorContexto"
+                class="bg-muted/40 rounded-lg border p-3 text-sm"
+            >
+                Parte de la transferencia pendiente de
+                <strong>{{ colaboradorContexto.nombre }}</strong
+                >. Al confirmar volverás a sus pendientes automáticamente.
+            </div>
+
             <!-- Indicador de pasos -->
             <ol class="flex flex-wrap items-center gap-2 text-sm">
                 <li
@@ -909,7 +1054,7 @@ function enviar(): void {
                     </Button>
 
                     <Button variant="ghost" as-child>
-                        <Link href="/devoluciones">Cancelar</Link>
+                        <Link :href="hrefCancelar">Cancelar</Link>
                     </Button>
                 </div>
             </form>

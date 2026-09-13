@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import InputError from '@/components/InputError.vue';
 import { Badge } from '@/components/ui/badge';
@@ -26,6 +27,7 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 
 type Rol = {
     id: number;
@@ -86,6 +88,8 @@ function limpiarFiltros(): void {
     buscar.value = '';
     tipo.value = '';
 }
+
+const vista = useVistaPreferida('roles');
 
 const filtrosExport = computed(() => ({
     buscar: buscar.value || undefined,
@@ -273,6 +277,8 @@ function confirmarEliminar() {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
 
             <EstadoVacio
@@ -294,7 +300,10 @@ function confirmarEliminar() {
                 </template>
             </EstadoVacio>
 
-            <div v-else class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <div
+                v-else-if="vista === 'cards'"
+                class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"
+            >
                 <div
                     v-for="r in roles"
                     :key="r.id"
@@ -369,6 +378,94 @@ function confirmarEliminar() {
                         </Tooltip>
                     </div>
                 </div>
+            </div>
+
+            <div v-else class="overflow-x-auto rounded-xl border">
+                <table class="w-full min-w-[560px] text-sm">
+                    <thead class="bg-muted/50 text-muted-foreground text-left">
+                        <tr>
+                            <th class="px-3 py-2 font-medium">Rol</th>
+                            <th class="px-3 py-2 font-medium">Tipo</th>
+                            <th class="px-3 py-2 font-medium">Usuarios</th>
+                            <th class="px-3 py-2 font-medium">Permisos</th>
+                            <th class="px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="r in roles"
+                            :key="r.id"
+                            class="hover:bg-muted/40 border-t transition-colors"
+                        >
+                            <td class="px-3 py-2 font-medium capitalize">
+                                {{ r.etiqueta }}
+                            </td>
+                            <td class="px-3 py-2">
+                                <Badge v-if="r.base" variant="secondary"
+                                    >Base</Badge
+                                >
+                                <span v-else class="text-muted-foreground"
+                                    >Personalizado</span
+                                >
+                            </td>
+                            <td class="px-3 py-2">{{ r.usuarios }}</td>
+                            <td class="px-3 py-2">{{ r.permisos.length }}</td>
+                            <td class="px-3 py-2 text-right">
+                                <div
+                                    class="flex items-center justify-end gap-1"
+                                >
+                                    <Button
+                                        v-if="permisos.editar"
+                                        variant="outline"
+                                        size="sm"
+                                        @click="editar(r)"
+                                    >
+                                        Editar permisos
+                                    </Button>
+                                    <Tooltip
+                                        v-if="
+                                            permisos.editar &&
+                                            !r.base &&
+                                            r.usuarios === 0
+                                        "
+                                    >
+                                        <TooltipTrigger as-child>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                aria-label="Eliminar rol"
+                                                class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                                @click="pedirEliminar(r)"
+                                            >
+                                                <Trash2 class="size-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent
+                                            >Eliminar rol</TooltipContent
+                                        >
+                                    </Tooltip>
+                                    <Tooltip
+                                        v-else-if="
+                                            permisos.editar && r.usuarios > 0
+                                        "
+                                    >
+                                        <TooltipTrigger as-child>
+                                            <span
+                                                class="text-muted-foreground inline-flex size-8 items-center justify-center"
+                                            >
+                                                <ShieldAlert class="size-4" />
+                                            </span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            No se puede eliminar: tiene usuarios
+                                            asignados.
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
 
             <!-- Editor de permisos -->

@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import {
     AlertTriangle,
     ArrowLeft,
+    ImagePlus,
     Package,
     QrCode,
     RotateCcw,
     ScrollText,
     Trash2,
 } from '@lucide/vue';
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import InputError from '@/components/InputError.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
@@ -75,6 +77,7 @@ const props = defineProps<{
             operador: string | null;
             plan: string | null;
         } | null;
+        imagen_url: string | null;
     };
     movimientos: {
         tipo: string;
@@ -83,10 +86,17 @@ const props = defineProps<{
     }[];
     condicionesIncidencia: { valor: string; etiqueta: string }[];
     condicionesRecuperacion: { valor: string; etiqueta: string }[];
+    condicionesRestauracion: { valor: string; etiqueta: string }[];
     permisos: { administrar: boolean };
 }>();
 
 const esIncidencia = ['perdido', 'robado'].includes(props.unidad.condicion);
+// No entregable por condición (en reparación / inservible) pero SIN ser
+// pérdida/robo: se restaura con su propio flujo, nunca con "Recuperar unidad"
+// (ese es exclusivo de incidencias) — misma unidad, nunca cambia su almacén.
+const noEntregablePorCondicion =
+    ['en_reparacion', 'inservible'].includes(props.unidad.condicion) &&
+    props.unidad.estado === 'en_almacen';
 
 const dialogoIncidencia = ref(false);
 const formIncidencia = useForm({
@@ -148,6 +158,57 @@ function recuperarUnidad(): void {
             },
         },
     );
+}
+
+const dialogoRestaurar = ref(false);
+const formRestaurar = useForm<{
+    condicion_resultante: string;
+    notas: string;
+}>({
+    condicion_resultante: 'funcionando',
+    notas: '',
+});
+
+function restaurarCondicion(): void {
+    formRestaurar.post(
+        `/activos/unidades/${props.unidad.public_token}/restaurar-condicion`,
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                dialogoRestaurar.value = false;
+                formRestaurar.reset();
+            },
+        },
+    );
+}
+
+/* --- Foto de la unidad (opcional, 1:1): subir/reemplazar/quitar. Nunca
+   cambia codigo/public_token/IMEI/estado/condicion. --- */
+const formImagen = useForm<{ imagen: File | null }>({ imagen: null });
+const origenImagen = ref<'camara' | 'archivo' | null>(null);
+
+watch(
+    () => formImagen.imagen,
+    (archivo) => {
+        if (!archivo) return;
+        formImagen.post(
+            `/activos/unidades/${props.unidad.public_token}/imagen`,
+            {
+                forceFormData: true,
+                preserveScroll: true,
+                onFinish: () => {
+                    formImagen.imagen = null;
+                    origenImagen.value = null;
+                },
+            },
+        );
+    },
+);
+
+function quitarImagenUnidad(): void {
+    router.delete(`/activos/unidades/${props.unidad.public_token}/imagen`, {
+        preserveScroll: true,
+    });
 }
 
 defineOptions({
@@ -313,6 +374,14 @@ function guardarEquipo(): void {
                     <RotateCcw class="size-3.5" /> Recuperar unidad
                 </Button>
                 <Button
+                    v-if="permisos.administrar && noEntregablePorCondicion"
+                    variant="outline"
+                    size="sm"
+                    @click="dialogoRestaurar = true"
+                >
+                    <RotateCcw class="size-3.5" /> Restaurar condición
+                </Button>
+                <Button
                     v-if="permisos.administrar && unidad.estado !== 'baja'"
                     variant="destructive"
                     size="sm"
@@ -350,7 +419,67 @@ function guardarEquipo(): void {
             </p>
         </div>
 
+        <div
+            v-if="noEntregablePorCondicion"
+            class="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-400"
+        >
+            <p class="flex items-center gap-1.5 font-medium">
+                <AlertTriangle class="size-4" />
+                Unidad {{ unidad.condicion_etiqueta }}: no se puede seleccionar
+                en una nueva entrega
+            </p>
+            <p class="mt-1">
+                Sigue siendo la misma unidad física (mismo código y QR) y
+                permanece en el almacén, pero no es entregable mientras su
+                condición no vuelva a ser «Funcionando». Usa «Restaurar
+                condición» cuando ya esté lista para operar de nuevo.
+            </p>
+        </div>
+
         <div class="grid gap-4 lg:grid-cols-2">
+            <section class="rounded-xl border p-4">
+                <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
+                    <ImagePlus class="text-muted-foreground size-4" />
+                    Foto
+                </h2>
+                <img
+                    v-if="unidad.imagen_url"
+                    :src="unidad.imagen_url"
+                    :alt="`Foto de la unidad ${unidad.codigo}`"
+                    class="mb-3 max-h-56 w-full rounded-md border object-contain"
+                />
+                <p v-else class="text-muted-foreground mb-3 text-sm">
+                    Esta unidad no tiene foto.
+                </p>
+                <div
+                    v-if="permisos.administrar"
+                    class="flex flex-wrap items-center gap-2"
+                >
+                    <CapturaEvidencia
+                        v-model="formImagen.imagen"
+                        v-model:origen="origenImagen"
+                        :etiqueta="
+                            unidad.imagen_url
+                                ? 'Reemplazar foto'
+                                : 'Agregar foto'
+                        "
+                        :disabled="formImagen.processing"
+                    />
+                    <Button
+                        v-if="unidad.imagen_url"
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        class="text-destructive"
+                        :disabled="formImagen.processing"
+                        @click="quitarImagenUnidad"
+                    >
+                        <Trash2 class="size-3.5" /> Quitar imagen
+                    </Button>
+                </div>
+                <InputError :message="formImagen.errors.imagen" />
+            </section>
+
             <section class="rounded-xl border p-4">
                 <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
                     <Package class="text-muted-foreground size-4" />
@@ -658,6 +787,68 @@ function guardarEquipo(): void {
                             :disabled="formRecuperar.processing"
                         >
                             Recuperar
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog v-model:open="dialogoRestaurar">
+            <DialogContent class="sm:max-w-sm">
+                <DialogHeader>
+                    <DialogTitle>Restaurar condición</DialogTitle>
+                    <DialogDescription>
+                        La unidad sigue en el mismo almacén; sólo cambia su
+                        condición. Conserva código, QR e historial.
+                    </DialogDescription>
+                </DialogHeader>
+                <form class="grid gap-3" @submit.prevent="restaurarCondicion">
+                    <div class="grid gap-1.5">
+                        <Label for="restaurar-condicion">Nueva condición</Label>
+                        <SelectSimple
+                            id="restaurar-condicion"
+                            v-model="formRestaurar.condicion_resultante"
+                            :opciones="
+                                condicionesRestauracion.map((c) => ({
+                                    valor: c.valor,
+                                    etiqueta: c.etiqueta,
+                                }))
+                            "
+                            :invalido="
+                                !!formRestaurar.errors.condicion_resultante
+                            "
+                        />
+                        <InputError
+                            :message="formRestaurar.errors.condicion_resultante"
+                        />
+                    </div>
+                    <div class="grid gap-1.5">
+                        <Label for="restaurar-notas"
+                            >Notas
+                            <span class="text-muted-foreground"
+                                >(opcional)</span
+                            ></Label
+                        >
+                        <Input
+                            id="restaurar-notas"
+                            v-model="formRestaurar.notas"
+                            placeholder="Ej. reparado por proveedor X, folio de servicio Y"
+                        />
+                        <InputError :message="formRestaurar.errors.notas" />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            @click="dialogoRestaurar = false"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            type="submit"
+                            :disabled="formRestaurar.processing"
+                        >
+                            Restaurar
                         </Button>
                     </DialogFooter>
                 </form>

@@ -1,6 +1,22 @@
 <script setup lang="ts">
-import { FileText, Loader2, Upload, X } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import {
+    Camera,
+    FileText,
+    Loader2,
+    SwitchCamera,
+    Upload,
+    X,
+} from '@lucide/vue';
+import { computed, nextTick, ref, watch } from 'vue';
+import { useCamaraFoto } from '@/composables/useCamaraFoto';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 
 /**
  * Subida de archivo reusable: botón claro + arrastrar y soltar, muestra el
@@ -45,6 +61,8 @@ const props = withDefaults(
         cargando?: boolean;
         disabled?: boolean;
         id?: string;
+        /** Muestra también "Tomar foto" (sólo aplica con `tipo="imagen"`). Reutiliza `useCamaraFoto` — nunca abre la cámara sola, sólo al pulsar el botón. */
+        permiteCamara?: boolean;
     }>(),
     { tipo: 'documento', tamano: 'normal', eliminar: false },
 );
@@ -145,6 +163,32 @@ const miniaturaClase = computed(
             large: 'h-28 w-28',
         })[props.tamano],
 );
+
+/* --- Tomar foto (opcional, sólo tipo="imagen"): reutiliza useCamaraFoto,
+   nunca duplica getUserMedia. Cerrar el diálogo detiene el stream. --- */
+const dialogoCamara = ref(false);
+const videoEl = ref<HTMLVideoElement | null>(null);
+const camara = useCamaraFoto();
+
+watch(dialogoCamara, (abierto) => {
+    if (!abierto) camara.detener();
+});
+
+async function abrirCamara(): Promise<void> {
+    if (deshabilitado.value) return;
+    dialogoCamara.value = true;
+    await nextTick();
+    if (videoEl.value) await camara.iniciar(videoEl.value);
+}
+
+async function capturarFoto(): Promise<void> {
+    const archivo = await camara.capturar();
+    if (archivo) {
+        establecerArchivo(archivo);
+        camara.detener();
+        dialogoCamara.value = false;
+    }
+}
 </script>
 
 <template>
@@ -204,7 +248,7 @@ const miniaturaClase = computed(
                         'Archivo actual'
                     }}</span>
                 </p>
-                <div class="flex gap-2">
+                <div class="flex flex-wrap justify-center gap-2">
                     <button
                         type="button"
                         class="text-primary text-xs underline"
@@ -212,6 +256,15 @@ const miniaturaClase = computed(
                         @click.stop="elegir"
                     >
                         Cambiar
+                    </button>
+                    <button
+                        v-if="permiteCamara && tipo === 'imagen'"
+                        type="button"
+                        class="text-primary flex items-center gap-1 text-xs underline"
+                        :disabled="deshabilitado"
+                        @click.stop="abrirCamara"
+                    >
+                        <Camera class="size-3" /> Tomar foto
                     </button>
                     <button
                         type="button"
@@ -267,12 +320,26 @@ const miniaturaClase = computed(
                             >Selecciona un archivo</span
                         >
                         o arrástralo aquí
+                        <template v-if="permiteCamara && tipo === 'imagen'">
+                            ·
+                            <button
+                                type="button"
+                                class="text-primary underline"
+                                :disabled="deshabilitado"
+                                @click.stop="abrirCamara"
+                            >
+                                toma una foto</button
+                            >.
+                        </template>
                     </span>
                     <span v-else class="text-muted-foreground"
                         >o usa los botones de abajo</span
                     >
                 </p>
-                <div v-if="tamano === 'large'" class="mt-1 flex gap-2">
+                <div
+                    v-if="tamano === 'large'"
+                    class="mt-1 flex flex-wrap justify-center gap-2"
+                >
                     <button
                         type="button"
                         class="border-input hover:bg-accent rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
@@ -280,6 +347,15 @@ const miniaturaClase = computed(
                         @click.stop="elegir"
                     >
                         Buscar archivos
+                    </button>
+                    <button
+                        v-if="permiteCamara && tipo === 'imagen'"
+                        type="button"
+                        class="border-input hover:bg-accent flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors"
+                        :disabled="deshabilitado"
+                        @click.stop="abrirCamara"
+                    >
+                        <Camera class="size-3.5" /> Tomar foto
                     </button>
                     <button
                         type="button"
@@ -308,5 +384,60 @@ const miniaturaClase = computed(
         <p v-if="mensajeError" class="text-destructive text-xs">
             {{ mensajeError }}
         </p>
+
+        <Dialog
+            v-if="permiteCamara && tipo === 'imagen'"
+            v-model:open="dialogoCamara"
+        >
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Tomar foto</DialogTitle>
+                    <DialogDescription>
+                        Encuadra la foto y pulsa "Capturar".
+                    </DialogDescription>
+                </DialogHeader>
+                <div class="grid gap-2">
+                    <video
+                        ref="videoEl"
+                        class="w-full rounded-md border bg-black"
+                        playsinline
+                    />
+                    <p
+                        v-if="camara.mensajeError.value"
+                        class="text-destructive text-xs"
+                    >
+                        {{ camara.mensajeError.value }}
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <Button
+                            type="button"
+                            class="flex-1"
+                            :disabled="camara.estado.value !== 'activa'"
+                            @click="capturarFoto"
+                        >
+                            <Camera class="size-4" /> Capturar
+                        </Button>
+                        <Button
+                            v-if="camara.puedeCambiarCamara.value"
+                            type="button"
+                            variant="outline"
+                            aria-label="Cambiar de cámara"
+                            title="Cambiar de cámara"
+                            :disabled="camara.estado.value !== 'activa'"
+                            @click="camara.cambiarCamara()"
+                        >
+                            <SwitchCamera class="size-4" /> Cambiar cámara
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            @click="dialogoCamara = false"
+                        >
+                            Cancelar
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
     </div>
 </template>

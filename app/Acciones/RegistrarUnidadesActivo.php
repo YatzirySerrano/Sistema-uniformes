@@ -10,6 +10,7 @@ use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Empresa;
+use App\Models\ImagenUnidadActivo;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
@@ -42,6 +43,7 @@ class RegistrarUnidadesActivo
 
     /**
      * @param  list<array{marca?: string|null, modelo?: string|null, imei?: string|null, numero_telefonico?: string|null, operador?: string|null, plan?: string|null}>  $especificaciones  datos técnicos por unidad (índice 0..N-1), sólo para activos con perfil técnico
+     * @param  list<array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string}|null>  $imagenes  foto OPCIONAL por unidad (índice 0..N-1, alineado por posición — nunca por nombre de archivo), ya escrita en disco por `ServicioEvidencias::guardarPendiente()` antes de llamar aquí; si la transacción falla, el llamador debe descartar los archivos con `ServicioEvidencias::descartar()`
      * @return Collection<int, UnidadActivo>
      */
     public function ejecutar(
@@ -53,6 +55,7 @@ class RegistrarUnidadesActivo
         ?int $realizadoPor,
         bool $cargaInicial = false,
         array $especificaciones = [],
+        array $imagenes = [],
     ): Collection {
         if ($activo->empresa_id !== $empresa->id) {
             throw new ExcepcionDeNegocioSimple('El activo no pertenece a esta empresa.');
@@ -72,7 +75,7 @@ class RegistrarUnidadesActivo
 
         $slug = NormalizadorNombre::codigoActivo($activo->nombre);
 
-        return DB::transaction(function () use ($empresa, $activo, $almacen, $cantidad, $motivo, $realizadoPor, $cargaInicial, $slug, $especificaciones): Collection {
+        return DB::transaction(function () use ($empresa, $activo, $almacen, $cantidad, $motivo, $realizadoPor, $cargaInicial, $slug, $especificaciones, $imagenes): Collection {
             $unidades = new Collection;
 
             for ($i = 0; $i < $cantidad; $i++) {
@@ -88,6 +91,7 @@ class RegistrarUnidadesActivo
                 ]);
 
                 $this->guardarEspecificacion($unidad, $especificaciones[$i] ?? []);
+                $this->guardarImagen($unidad, $imagenes[$i] ?? null, $realizadoPor);
 
                 $this->inventario->registrarMovimientoUnidad(
                     unidad: $unidad,
@@ -136,5 +140,32 @@ class RegistrarUnidadesActivo
         } catch (UniqueConstraintViolationException) {
             throw new ExcepcionDeNegocioSimple('Ya existe una unidad registrada con el IMEI '.($valores['imei'] ?? '').'.');
         }
+    }
+
+    /**
+     * Crea la fila de imagen de ESTA unidad (unidad recién creada: nunca hay
+     * una foto anterior que reemplazar/borrar aquí). Alineado por índice, no
+     * por nombre de archivo — cada `$meta` ya viene ligada a su posición
+     * desde el llamador.
+     *
+     * @param  array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string}|null  $meta
+     */
+    private function guardarImagen(UnidadActivo $unidad, ?array $meta, ?int $subidoPor): void
+    {
+        if ($meta === null) {
+            return;
+        }
+
+        ImagenUnidadActivo::query()->create([
+            'unidad_activo_id' => $unidad->getKey(),
+            'disco' => 'local',
+            'ruta' => $meta['ruta'],
+            'nombre_original' => $meta['nombre_original'],
+            'mime' => $meta['mime'],
+            'extension' => $meta['extension'],
+            'peso_bytes' => $meta['peso_bytes'],
+            'hash_sha256' => $meta['hash_sha256'],
+            'subido_por' => $subidoPor,
+        ]);
     }
 }

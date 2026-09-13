@@ -318,7 +318,8 @@ function confirmar(): void {
                             </li>
                         </ul>
                         <Button as-child variant="outline" size="sm">
-                            <Link href="/devoluciones/crear"
+                            <Link
+                                :href="`/devoluciones/crear?colaborador_id=${props.colaboradorId}`"
                                 >Ir a Devoluciones</Link
                             >
                         </Button>

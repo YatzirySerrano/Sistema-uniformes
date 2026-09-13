@@ -40,6 +40,11 @@ class GuardarDevolucionRequest extends FormRequest
 
         return [
             'entrega_uniforme_id' => ['required', 'integer'],
+            // Sólo para redirigir de vuelta al contexto de pendientes del
+            // colaborador (flujo Transferencia → Devoluciones); el backend
+            // revalida que coincida con el dueño real de la entrega antes de
+            // usarlo — nunca se confía para autorización.
+            'colaborador_id' => ['nullable', 'integer'],
             'almacen_id' => [
                 'required', 'integer',
                 Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),

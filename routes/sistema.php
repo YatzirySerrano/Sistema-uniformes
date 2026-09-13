@@ -106,6 +106,10 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('activos/unidades/{unidad:public_token}/baja', [UnidadActivoController::class, 'darDeBaja'])->name('unidades-activo.baja');
     Route::post('activos/unidades/{unidad:public_token}/incidencia', [UnidadActivoController::class, 'marcarIncidencia'])->name('unidades-activo.incidencia');
     Route::post('activos/unidades/{unidad:public_token}/recuperar', [UnidadActivoController::class, 'recuperar'])->name('unidades-activo.recuperar');
+    Route::post('activos/unidades/{unidad:public_token}/restaurar-condicion', [UnidadActivoController::class, 'restaurarCondicion'])->name('unidades-activo.restaurar-condicion');
+    Route::get('activos/unidades/{unidad:public_token}/imagen', [UnidadActivoController::class, 'imagen'])->name('unidades-activo.imagen');
+    Route::post('activos/unidades/{unidad:public_token}/imagen', [UnidadActivoController::class, 'guardarImagen'])->name('unidades-activo.imagen.guardar');
+    Route::delete('activos/unidades/{unidad:public_token}/imagen', [UnidadActivoController::class, 'quitarImagen'])->name('unidades-activo.imagen.quitar');
 
     Route::get('activos/{activo}', [ActivoController::class, 'show'])->name('activos.show');
     Route::get('activos/{activo}/editar', [ActivoController::class, 'edit'])->name('activos.edit');

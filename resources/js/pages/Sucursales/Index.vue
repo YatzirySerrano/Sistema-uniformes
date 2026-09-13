@@ -8,7 +8,6 @@ import {
     Phone,
     Plus,
     Search,
-    SquareArrowOutUpRight,
     Store,
     Users,
     X,
@@ -18,6 +17,7 @@ import type { SucursalEditable } from '@/components/sucursales/FormularioSucursa
 import FormularioSucursal from '@/components/sucursales/FormularioSucursal.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -452,14 +452,7 @@ const vista = useVistaPreferida('sucursales');
                     </div>
 
                     <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            @click.stop="verDetalle(s)"
-                        >
-                            <SquareArrowOutUpRight class="size-3.5" />
-                            Ver detalles
-                        </Button>
+                        <BotonVer @click.stop="verDetalle(s)" />
                         <Button
                             v-if="permisos.editar"
                             variant="ghost"
@@ -536,12 +529,7 @@ const vista = useVistaPreferida('sucursales');
                         </td>
                         <td class="px-3 py-2 text-right">
                             <div class="flex justify-end gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    @click="verDetalle(s)"
-                                    >Ver</Button
-                                >
+                                <BotonVer @click="verDetalle(s)" />
                                 <Button
                                     v-if="permisos.editar"
                                     variant="ghost"

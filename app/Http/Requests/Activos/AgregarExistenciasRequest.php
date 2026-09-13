@@ -54,6 +54,11 @@ class AgregarExistenciasRequest extends FormRequest
             'abrir_etiquetas' => ['boolean'],
             'especificaciones' => ['nullable', 'array'],
             ...self::reglasEspecificacion(),
+            // Foto OPCIONAL por unidad, alineada por índice con `especificaciones`.
+            'imagenes' => ['nullable', 'array'],
+            'imagenes.*' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'imagenes_origen' => ['nullable', 'array'],
+            'imagenes_origen.*' => ['nullable', 'in:camara,archivo'],
         ];
     }
 

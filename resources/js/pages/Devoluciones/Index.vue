@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Eye, Plus } from '@lucide/vue';
+import { Plus } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -147,11 +148,11 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                 <p class="text-muted-foreground text-xs">
                     Registró: {{ d.registrada_por }}
                 </p>
-                <Button variant="outline" size="sm" as-child class="mt-1 w-fit">
-                    <Link :href="`/devoluciones/${d.id}`">
-                        <Eye class="size-4" /> Ver detalle
-                    </Link>
-                </Button>
+                <BotonVer
+                    :href="`/devoluciones/${d.id}`"
+                    etiqueta="Ver detalle"
+                    class="mt-1 w-fit"
+                />
             </div>
         </div>
 
@@ -198,11 +199,7 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                             {{ d.registrada_por }}
                         </td>
                         <td class="px-3 py-2">
-                            <Button variant="ghost" size="sm" as-child>
-                                <Link :href="`/devoluciones/${d.id}`">
-                                    <Eye class="size-4" /> Ver
-                                </Link>
-                            </Button>
+                            <BotonVer :href="`/devoluciones/${d.id}`" />
                         </td>
                     </tr>
                 </tbody>

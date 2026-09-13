@@ -2,6 +2,7 @@
 import { useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -47,6 +48,8 @@ const form = useForm<{
     motivo: string;
     abrir_etiquetas: boolean;
     especificaciones: EspecificacionUnidad[];
+    imagenes: (File | null)[];
+    imagenes_origen: ('camara' | 'archivo' | null)[];
 }>({
     almacen_id: null,
     talla_id: null,
@@ -54,13 +57,17 @@ const form = useForm<{
     motivo: '',
     abrir_etiquetas: false,
     especificaciones: [],
+    imagenes: [],
+    imagenes_origen: [],
 });
 
+// Gate del bloque "Unidad N": aplica a cualquier alta de unidades, tenga o
+// no perfil técnico — la foto nunca depende de eso.
+const mostrarUnidades = computed(
+    () => props.esSeguimientoIndividual && form.cantidad > 0,
+);
 const mostrarEspecificaciones = computed(
-    () =>
-        props.esSeguimientoIndividual &&
-        !!props.perfilTecnico &&
-        form.cantidad > 0,
+    () => mostrarUnidades.value && !!props.perfilTecnico,
 );
 const camposDelPerfil = computed<CampoEspecificacion[]>(() =>
     props.perfilTecnico ? camposVisibles(props.perfilTecnico) : [],
@@ -75,16 +82,27 @@ const erroresLaxos = computed(
 );
 
 watch(
-    () => [mostrarEspecificaciones.value, form.cantidad],
+    () => [mostrarUnidades.value, mostrarEspecificaciones.value, form.cantidad],
     () => {
-        if (!mostrarEspecificaciones.value) {
+        if (!mostrarUnidades.value) {
             form.especificaciones = [];
+            form.imagenes = [];
+            form.imagenes_origen = [];
             return;
         }
-        const actual = form.especificaciones;
-        form.especificaciones = Array.from(
+        form.especificaciones = mostrarEspecificaciones.value
+            ? Array.from(
+                  { length: form.cantidad },
+                  (_, i) => form.especificaciones[i] ?? especificacionVacia(),
+              )
+            : [];
+        form.imagenes = Array.from(
             { length: form.cantidad },
-            (_, i) => actual[i] ?? especificacionVacia(),
+            (_, i) => form.imagenes[i] ?? null,
+        );
+        form.imagenes_origen = Array.from(
+            { length: form.cantidad },
+            (_, i) => form.imagenes_origen[i] ?? null,
         );
     },
     { immediate: true },
@@ -136,6 +154,7 @@ watch(
 
 function enviar(): void {
     form.post(`/activos/${props.activoId}/existencias`, {
+        forceFormData: true,
         preserveScroll: true,
         onSuccess: () => emit('update:open', false),
     });
@@ -231,46 +250,73 @@ function enviar(): void {
                 </div>
 
                 <div
-                    v-if="mostrarEspecificaciones && perfilTecnico"
+                    v-if="mostrarUnidades"
                     class="grid max-h-64 gap-2 overflow-y-auto"
                 >
-                    <p class="text-xs font-medium">
+                    <p
+                        v-if="mostrarEspecificaciones && perfilTecnico"
+                        class="text-xs font-medium"
+                    >
                         Datos del equipo · {{ ETIQUETA_PERFIL[perfilTecnico] }}
                     </p>
                     <InputError :message="form.errors.especificaciones" />
                     <div
-                        v-for="(esp, i) in form.especificaciones"
+                        v-for="(_imagen, i) in form.imagenes"
                         :key="i"
                         class="grid gap-1.5 rounded-lg border p-2"
                     >
                         <p class="text-muted-foreground text-xs">
                             Unidad {{ i + 1 }}
                         </p>
-                        <div
-                            v-for="campo in camposDelPerfil"
-                            :key="campo"
-                            class="grid gap-1"
+                        <template
+                            v-if="mostrarEspecificaciones && perfilTecnico"
                         >
-                            <Label :for="`ae-${i}-${campo}`" class="text-xs">
-                                {{ ETIQUETA_CAMPO[campo] }}
-                                <span
-                                    v-if="campoRequerido(campo)"
-                                    class="text-destructive"
-                                    >*</span
+                            <div
+                                v-for="campo in camposDelPerfil"
+                                :key="campo"
+                                class="grid gap-1"
+                            >
+                                <Label
+                                    :for="`ae-${i}-${campo}`"
+                                    class="text-xs"
+                                >
+                                    {{ ETIQUETA_CAMPO[campo] }}
+                                    <span
+                                        v-if="campoRequerido(campo)"
+                                        class="text-destructive"
+                                        >*</span
+                                    >
+                                </Label>
+                                <Input
+                                    :id="`ae-${i}-${campo}`"
+                                    v-model="form.especificaciones[i][campo]"
+                                    class="h-8"
+                                    autocomplete="off"
+                                />
+                                <InputError
+                                    :message="
+                                        erroresLaxos[
+                                            `especificaciones.${i}.${campo}`
+                                        ]
+                                    "
+                                />
+                            </div>
+                        </template>
+                        <div class="grid gap-1">
+                            <Label :for="`ae-img-${i}`" class="text-xs">
+                                Foto
+                                <span class="text-muted-foreground"
+                                    >(opcional)</span
                                 >
                             </Label>
-                            <Input
-                                :id="`ae-${i}-${campo}`"
-                                v-model="esp[campo]"
-                                class="h-8"
-                                autocomplete="off"
+                            <CapturaEvidencia
+                                :id="`ae-img-${i}`"
+                                v-model="form.imagenes[i]"
+                                v-model:origen="form.imagenes_origen[i]"
+                                etiqueta="Tomar foto / Subir archivo"
                             />
                             <InputError
-                                :message="
-                                    erroresLaxos[
-                                        `especificaciones.${i}.${campo}`
-                                    ]
-                                "
+                                :message="erroresLaxos[`imagenes.${i}`]"
                             />
                         </div>
                     </div>

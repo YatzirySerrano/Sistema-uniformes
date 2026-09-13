@@ -3,8 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Acciones\DarDeBajaUnidadActivo;
+use App\Acciones\GuardarImagenUnidadActivo;
 use App\Acciones\MarcarUnidadIncidencia;
+use App\Acciones\QuitarImagenUnidadActivo;
 use App\Acciones\RecuperarUnidadActivo;
+use App\Acciones\RestaurarCondicionUnidadActivo;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\EstadoVisibleUnidad;
@@ -12,14 +15,17 @@ use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Activos\ActualizarEspecificacionUnidadRequest;
 use App\Http\Requests\Activos\DarDeBajaUnidadRequest;
+use App\Http\Requests\Activos\GuardarImagenUnidadRequest;
 use App\Http\Requests\Activos\MarcarIncidenciaUnidadRequest;
 use App\Http\Requests\Activos\RecuperarUnidadRequest;
+use App\Http\Requests\Activos\RestaurarCondicionUnidadRequest;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\MovimientoInventario;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioEtiquetasQr;
+use App\Servicios\ServicioEvidencias;
 use App\Soporte\ContextoExportacion;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
@@ -27,12 +33,15 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
+use Throwable;
 
 /**
  * Unidades de seguimiento individual. Vive dentro del hub de Activos (no es
@@ -249,6 +258,7 @@ class UnidadActivoController extends Controller
             'colaborador.servicioActual.contrato:id,nombre',
             'registradoPor:id,name',
             'especificacion',
+            'imagen',
         ]);
 
         $perfil = $unidad->perfilTecnico();
@@ -296,11 +306,16 @@ class UnidadActivoController extends Controller
                 'especificacion' => $perfil === null || $unidad->especificacion === null ? null : $unidad->especificacion->only([
                     'marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan',
                 ]),
+                'imagen_url' => $unidad->imagen === null ? null : route('unidades-activo.imagen', $unidad),
             ],
             'movimientos' => $movimientos,
             'condicionesIncidencia' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => $c->esIncidencia())->values()
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'condicionesRecuperacion' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
+                ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
+            // Mismo conjunto que "recuperación" (nunca pérdida/robo): la
+            // unidad ya está en almacén, sólo cambia su condición.
+            'condicionesRestauracion' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'permisos' => [
                 'administrar' => $request->user()->can('administrar', $unidad),
@@ -487,6 +502,77 @@ class UnidadActivoController extends Controller
         );
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Unidad recuperada.']);
+    }
+
+    /**
+     * Único camino explícito para que una unidad "En reparación"/"Inservible"
+     * vuelva a una condición operativa — ver `App\Acciones\RestaurarCondicionUnidadActivo`.
+     */
+    public function restaurarCondicion(RestaurarCondicionUnidadRequest $request, UnidadActivo $unidad, RestaurarCondicionUnidadActivo $accion): RedirectResponse
+    {
+        $datos = $request->validated();
+
+        $accion->ejecutar(
+            $unidad,
+            CondicionUnidadActivo::from($datos['condicion_resultante']),
+            $datos['notas'] ?? null,
+            $request->user()?->id,
+        );
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Condición de la unidad actualizada.']);
+    }
+
+    /**
+     * Sirve la foto privada de la unidad. Autorizada contra la unidad dueña
+     * (anti-IDOR): un usuario sin acceso a su empresa nunca la ve por URL
+     * directa, aunque adivine el id del archivo.
+     */
+    public function imagen(UnidadActivo $unidad): SymfonyResponse
+    {
+        $this->authorize('view', $unidad);
+
+        $imagen = $unidad->imagen;
+        abort_if($imagen === null, 404);
+        abort_unless(Storage::disk($imagen->disco)->exists($imagen->ruta), 404);
+
+        return Storage::disk($imagen->disco)->response($imagen->ruta, 'imagen.'.$imagen->extension, [
+            'Content-Type' => $imagen->mime,
+            'Content-Disposition' => 'inline; filename="imagen.'.$imagen->extension.'"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /**
+     * Sube o reemplaza la foto de la unidad. Nunca cambia codigo/public_token/
+     * estado/condicion.
+     */
+    public function guardarImagen(GuardarImagenUnidadRequest $request, UnidadActivo $unidad, ServicioEvidencias $evidenciasSvc, GuardarImagenUnidadActivo $accion): RedirectResponse
+    {
+        /** @var UploadedFile $archivo */
+        $archivo = $request->file('imagen');
+        $meta = $evidenciasSvc->guardarPendiente($archivo, "unidades/{$unidad->empresa_id}", 'archivo');
+
+        try {
+            $accion->ejecutar($unidad, $meta, $request->user()?->id);
+        } catch (Throwable $e) {
+            $evidenciasSvc->descartar([$meta]);
+
+            throw $e;
+        }
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Foto de la unidad actualizada.']);
+    }
+
+    /**
+     * Quita la foto de la unidad (sin dejar archivo huérfano).
+     */
+    public function quitarImagen(Request $request, UnidadActivo $unidad, QuitarImagenUnidadActivo $accion): RedirectResponse
+    {
+        $this->authorize('administrar', $unidad);
+
+        $accion->ejecutar($unidad, $request->user()?->id);
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Foto de la unidad eliminada.']);
     }
 
     /**

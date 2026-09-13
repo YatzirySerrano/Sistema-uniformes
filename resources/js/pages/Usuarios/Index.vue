@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Plus, Search, X } from '@lucide/vue';
+import { Pencil, Plus, Search, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Usuario = {
@@ -133,6 +135,8 @@ function limpiarFiltros(): void {
     estado.value = '';
     empresaSeleccionada.value = null;
 }
+
+const vista = useVistaPreferida('usuarios', 'tabla');
 
 const filtrosExport = computed(() => ({
     buscar: buscar.value || undefined,
@@ -253,10 +257,71 @@ function confirmarEstado(): void {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
             </div>
         </div>
 
-        <div class="overflow-x-auto rounded-xl border">
+        <p
+            v-if="!usuarios.data.length"
+            class="text-muted-foreground rounded-xl border p-8 text-center text-sm"
+        >
+            Ningún usuario coincide con la búsqueda o los filtros aplicados.
+        </p>
+
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+            <div
+                v-for="u in usuarios.data"
+                :key="u.id"
+                class="flex flex-col gap-2 rounded-xl border p-4"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="truncate font-medium">{{ u.name }}</p>
+                        <p class="text-muted-foreground truncate text-xs">
+                            {{ u.email }}
+                        </p>
+                    </div>
+                    <Badge :variant="u.activo ? 'success' : 'secondary'">
+                        {{ u.activo ? 'Activo' : 'Eliminado' }}
+                    </Badge>
+                </div>
+                <p v-if="!u.verificado" class="text-xs text-amber-600">
+                    Correo sin verificar
+                </p>
+                <div v-if="u.roles.length" class="flex flex-wrap gap-1">
+                    <span
+                        v-for="r in u.roles"
+                        :key="r"
+                        class="bg-muted rounded px-1.5 py-0.5 text-[11px] capitalize"
+                        >{{ r }}</span
+                    >
+                </div>
+                <p class="text-muted-foreground text-xs">
+                    {{ u.empresas.join(', ') || 'Sin empresas asignadas' }}
+                </p>
+                <div class="mt-auto flex flex-wrap gap-2 pt-1">
+                    <Button variant="ghost" size="sm" as-child>
+                        <Link :href="`/usuarios/${u.id}/editar`">
+                            <Pencil class="size-3.5" /> Editar
+                        </Link>
+                    </Button>
+                    <Button
+                        v-if="u.puedeCambiarEstado"
+                        variant="ghost"
+                        size="sm"
+                        @click="toggle(u)"
+                    >
+                        {{ u.activo ? 'Eliminar' : 'Restaurar' }}
+                    </Button>
+                </div>
+            </div>
+        </div>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
             <table class="w-full min-w-[760px] text-sm">
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
@@ -269,15 +334,6 @@ function confirmarEstado(): void {
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-if="!usuarios.data.length" class="border-t">
-                        <td
-                            colspan="6"
-                            class="text-muted-foreground px-3 py-8 text-center text-sm"
-                        >
-                            Ningún usuario coincide con la búsqueda o los
-                            filtros aplicados.
-                        </td>
-                    </tr>
                     <tr
                         v-for="u in usuarios.data"
                         :key="u.id"

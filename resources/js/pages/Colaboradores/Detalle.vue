@@ -63,6 +63,13 @@ type ExpedientePayload = {
     filtroEstado: string;
 };
 
+type HistoricoEmpresa = {
+    empresa_id: number;
+    empresa: string;
+    entregas: number;
+    devoluciones: number;
+};
+
 const props = defineProps<{
     colaborador: ColaboradorPerfil;
     kpis: {
@@ -71,6 +78,7 @@ const props = defineProps<{
         devoluciones: number;
         activos_asignados: number;
     };
+    historicoPorEmpresa: HistoricoEmpresa[] | null;
     puedeEditar: boolean;
     puedeEliminar: boolean;
     puedeCambiarEmpresa: boolean;
@@ -284,6 +292,30 @@ const modalEmpresa = ref(false);
                     {{ kpis.activos_asignados }}
                 </p>
             </div>
+        </div>
+
+        <div
+            v-if="historicoPorEmpresa && historicoPorEmpresa.length > 0"
+            class="rounded-xl border p-3 text-sm"
+        >
+            <p
+                class="text-muted-foreground mb-2 flex items-center gap-1 text-xs"
+            >
+                <Building2 class="size-3" /> Histórico por empresa de origen
+            </p>
+            <ul class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+                <li
+                    v-for="fila in historicoPorEmpresa"
+                    :key="fila.empresa_id"
+                    class="flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5"
+                >
+                    <span class="font-medium">{{ fila.empresa }}</span>
+                    <span class="text-muted-foreground text-xs">
+                        {{ fila.entregas }} entregas ·
+                        {{ fila.devoluciones }} devoluciones
+                    </span>
+                </li>
+            </ul>
         </div>
 
         <div

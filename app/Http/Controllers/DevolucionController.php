@@ -11,10 +11,12 @@ use App\Enums\EstadoUnidadActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Devoluciones\GuardarDevolucionRequest;
+use App\Models\Colaborador;
 use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
+use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
@@ -38,6 +40,8 @@ class DevolucionController extends Controller
 {
     use ConEmpresa;
     use ExportaListado;
+
+    public function __construct(private readonly ServicioCustodiaColaborador $custodia) {}
 
     public function index(Request $request): Response
     {
@@ -116,6 +120,13 @@ class DevolucionController extends Controller
             ->latest();
     }
 
+    /**
+     * `?colaborador_id=` contextualiza la pantalla con los pendientes REALES
+     * de ese colaborador (agrupados por entrega de origen), típicamente
+     * llegando desde "Transferir a otra empresa" — nunca hace falta que el
+     * usuario memorice folios. `?entrega_id=` (con o sin colaborador_id)
+     * precarga directamente una entrega concreta para procesarla.
+     */
     public function create(Request $request): Response
     {
         $this->authorize('create', Devolucion::class);
@@ -131,8 +142,24 @@ class DevolucionController extends Controller
             }
         }
 
+        $colaboradorContexto = null;
+        $colaboradorId = $request->integer('colaborador_id');
+
+        if ($colaboradorId > 0) {
+            $colaborador = Colaborador::find($colaboradorId);
+
+            if ($colaborador !== null && $request->user()->puedeAccederEmpresa($colaborador->empresa_id)) {
+                $colaboradorContexto = [
+                    'id' => $colaborador->id,
+                    'nombre' => $colaborador->nombre_completo,
+                    'pendientes' => $this->custodia->pendientes($colaborador),
+                ];
+            }
+        }
+
         return Inertia::render('Devoluciones/Crear', [
             'entrega' => $entrega === null ? null : $this->presentarEntrega($entrega),
+            'colaboradorContexto' => $colaboradorContexto,
             'condiciones' => collect(CondicionDevolucion::cases())->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'condicionesUnidad' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
@@ -145,6 +172,10 @@ class DevolucionController extends Controller
      */
     private function presentarEntrega(EntregaUniforme $entrega): array
     {
+        $pendientePorDetalle = $this->custodia->pendientesPorDetalle(
+            $entrega->detalles->whereNull('unidad_activo_id')
+        );
+
         return [
             'id' => $entrega->id,
             'folio' => $entrega->folio,
@@ -153,22 +184,26 @@ class DevolucionController extends Controller
             'colaborador' => $entrega->colaborador?->nombre_completo,
             'almacen_id' => $entrega->almacen_id,
             'almacen' => $entrega->almacen?->nombre,
-            'renglones' => $entrega->detalles->map(function ($d): array {
-                $yaDevuelto = (int) DetalleDevolucion::query()->where('detalle_entrega_id', $d->id)->sum('cantidad');
-
-                return [
+            // Sólo renglones con algo TODAVÍA pendiente: una vez que un
+            // renglón por cantidad llega a 0, o la unidad ya no está
+            // Asignada, deja de ofrecerse aquí (devoluciones parciales).
+            'renglones' => $entrega->detalles
+                ->filter(fn ($d) => $d->unidad_activo_id === null
+                    ? ($pendientePorDetalle[$d->id] ?? 0) > 0
+                    : $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada)
+                ->values()
+                ->map(fn ($d): array => [
                     'detalle_entrega_id' => $d->id,
                     'activo' => $d->activo_nombre_snapshot,
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
-                    'pendiente' => $d->unidad_activo_id === null ? max($d->cantidad - $yaDevuelto, 0) : null,
+                    'pendiente' => $d->unidad_activo_id === null ? $pendientePorDetalle[$d->id] ?? 0 : null,
                     'es_unidad' => $d->unidad_activo_id !== null,
                     'unidad_codigo' => $d->unidadActivo?->codigo,
                     'unidad_disponible' => $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada,
                     'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
                     'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
-                ];
-            }),
+                ]),
         ];
     }
 
@@ -225,6 +260,30 @@ class DevolucionController extends Controller
         }
 
         $acuse->loadMissing('devolucion:id,folio');
+
+        // Continuidad del flujo Transferencia → Devoluciones: el frontend
+        // manda `colaborador_id` sólo quien llegó desde ese contexto; el
+        // backend revalida que sea realmente el dueño de la entrega antes de
+        // usarlo (nunca se confía el ID recibido para decidir a quién
+        // pertenece el resto de la custodia).
+        $colaboradorId = $datos['colaborador_id'] ?? null;
+        if ($colaboradorId !== null && (int) $colaboradorId === $entrega->colaborador_id) {
+            $colaborador = $entrega->colaborador;
+
+            if ($colaborador !== null && $this->custodia->tienePendientes($colaborador)) {
+                return to_route('devoluciones.create', ['colaborador_id' => $colaborador->id])->with('toast', [
+                    'type' => 'success',
+                    'message' => "Devolución {$acuse->devolucion?->folio} confirmada. Quedan pendientes por procesar para completar la transferencia de {$colaborador->nombre_completo}.",
+                ]);
+            }
+
+            if ($colaborador !== null) {
+                return to_route('colaboradores.show', $colaborador->id)->with('toast', [
+                    'type' => 'success',
+                    'message' => "Devolución {$acuse->devolucion?->folio} confirmada. Ya no quedan pendientes: puedes completar la transferencia de {$colaborador->nombre_completo}.",
+                ]);
+            }
+        }
 
         return to_route('devoluciones.show', $acuse->devolucion_id)->with('toast', [
             'type' => 'success', 'message' => "Devolución {$acuse->devolucion?->folio} confirmada correctamente.",
