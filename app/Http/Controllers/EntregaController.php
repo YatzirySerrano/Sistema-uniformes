@@ -4,8 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Acciones\ConfirmarAcuseRecepcion;
 use App\Acciones\RegistrarEntregaFirmada;
-use App\Acciones\SubirDocumentoExpediente;
-use App\Enums\CategoriaDocumentoExpediente;
 use App\Enums\EstadoEntrega;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
@@ -14,19 +12,17 @@ use App\Http\Requests\Entregas\GuardarIdentidadEntregaRequest;
 use App\Models\Colaborador;
 use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
-use App\Models\DocumentoExpediente;
 use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Models\SaldoInventario;
 use App\Models\User;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
-use App\Servicios\ServicioExpediente;
+use App\Servicios\ServicioIdentidadColaborador;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -284,25 +280,17 @@ class EntregaController extends Controller
      * y su URL de consulta privada. Autorización de mínimo privilegio (ver
      * `autorizarConsultaIdentidad()`).
      */
-    public function documentoIdentidad(Request $request, Colaborador $colaborador): JsonResponse
+    public function documentoIdentidad(Request $request, Colaborador $colaborador, ServicioIdentidadColaborador $identidad): JsonResponse
     {
         $this->autorizarConsultaIdentidad($request->user(), $colaborador);
 
-        $documento = $this->documentoDeIdentidad($colaborador);
-        $version = $documento?->versionActual;
+        $meta = $identidad->metadata($colaborador);
 
-        if ($documento === null || $version === null) {
-            return response()->json(['disponible' => false]);
+        if (! $meta['disponible']) {
+            return response()->json($meta);
         }
 
-        return response()->json([
-            'disponible' => true,
-            'nombre' => $documento->nombre,
-            'mime' => $version->mime,
-            'previsualizable' => ServicioExpediente::esPrevisualizable($version->mime),
-            'actualizado_en' => $version->created_at?->toIso8601String(),
-            'url' => route('entregas.documento-identidad.ver', $colaborador),
-        ]);
+        return response()->json([...$meta, 'url' => route('entregas.documento-identidad.ver', $colaborador)]);
     }
 
     /**
@@ -311,40 +299,11 @@ class EntregaController extends Controller
      * ruta en disco ni genera una URL pública/predecible; se consulta
      * inline únicamente para la verificación visual del encargado.
      */
-    public function verDocumentoIdentidad(Request $request, Colaborador $colaborador): StreamedResponse
+    public function verDocumentoIdentidad(Request $request, Colaborador $colaborador, ServicioIdentidadColaborador $identidad): StreamedResponse
     {
         $this->autorizarConsultaIdentidad($request->user(), $colaborador);
 
-        $documento = $this->documentoDeIdentidad($colaborador);
-        abort_if($documento === null, 404, 'No hay un documento de identidad en el expediente de este colaborador.');
-
-        $version = $documento->versionActual;
-        abort_if($version === null, 404, 'No hay un documento de identidad en el expediente de este colaborador.');
-        abort_unless(ServicioExpediente::esPrevisualizable($version->mime), 415, 'El documento de identidad no puede previsualizarse; consúltalo desde el expediente del colaborador.');
-        abort_unless(Storage::disk('local')->exists($version->ruta), 404);
-
-        return Storage::disk('local')->response($version->ruta, 'identificacion.'.$version->extension, [
-            'Content-Type' => $version->mime,
-            'Content-Disposition' => 'inline; filename="identificacion.'.$version->extension.'"',
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
-    }
-
-    /**
-     * El documento de identidad = el documento ACTIVO más reciente del
-     * colaborador en la categoría `Identificacion` del expediente (INE /
-     * identificación oficial / credencial de elector). Nada hardcodeado por
-     * id: se usa el catálogo `CategoriaDocumentoExpediente` y el propio
-     * historial de versiones (`versionActual` = la de número más alto).
-     */
-    private function documentoDeIdentidad(Colaborador $colaborador): ?DocumentoExpediente
-    {
-        return $colaborador->documentosExpediente()
-            ->where('categoria', CategoriaDocumentoExpediente::Identificacion)
-            ->where('activo', true)
-            ->with('versionActual')
-            ->latest('id')
-            ->first();
+        return $identidad->streamDocumento($colaborador);
     }
 
     /**
@@ -467,47 +426,13 @@ class EntregaController extends Controller
      * ya existente (eso vive en el módulo de expediente y exige
      * `colaboradores.expediente-administrar`).
      */
-    public function guardarDocumentoIdentidad(GuardarIdentidadEntregaRequest $request, Colaborador $colaborador, SubirDocumentoExpediente $accion): JsonResponse
+    public function guardarDocumentoIdentidad(GuardarIdentidadEntregaRequest $request, Colaborador $colaborador, ServicioIdentidadColaborador $identidad): JsonResponse
     {
-        if ($this->documentoDeIdentidad($colaborador) !== null) {
-            throw new ExcepcionDeNegocioSimple('Este colaborador ya tiene una identificación en su expediente. El reemplazo se hace desde su expediente.');
-        }
-
-        $accion->ejecutar(
-            $colaborador,
-            CategoriaDocumentoExpediente::Identificacion,
-            'Identificación oficial',
-            'Capturada durante una entrega',
-            $request->file('archivo'),
-            $request->user(),
-        );
-
-        // Verificación de persistencia real: `ok:true` sólo si el documento, su
-        // versión 1 y el archivo físico existen tras el commit. Un fallo
-        // parcial NO se reporta como éxito.
-        $documento = $this->documentoDeIdentidad($colaborador->fresh() ?? $colaborador);
-        $version = $documento?->versionActual;
-
-        if ($documento === null || $version === null || ! Storage::disk('local')->exists($version->ruta)) {
-            Log::error('INE durante entrega: el documento no persistió correctamente', [
-                'colaborador_id' => $colaborador->id,
-                'documento_id' => $documento?->id,
-                'tiene_version' => $version !== null,
-            ]);
-
-            throw new ExcepcionDeNegocioSimple('No se pudo guardar la identificación. Inténtalo de nuevo.');
-        }
+        $documento = $identidad->guardarFaltante($colaborador, $request->file('archivo'), $request->user(), 'una entrega');
 
         return response()->json([
             'ok' => true,
-            'documento' => [
-                'disponible' => true,
-                'nombre' => $documento->nombre,
-                'mime' => $version->mime,
-                'previsualizable' => ServicioExpediente::esPrevisualizable($version->mime),
-                'actualizado_en' => $version->created_at?->toIso8601String(),
-                'url' => route('entregas.documento-identidad.ver', $colaborador),
-            ],
+            'documento' => [...$identidad->payload($documento), 'url' => route('entregas.documento-identidad.ver', $colaborador)],
         ]);
     }
 }

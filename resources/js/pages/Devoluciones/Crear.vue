@@ -5,6 +5,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
+import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
@@ -346,6 +347,9 @@ const padColaborador = ref<InstanceType<typeof PadFirma> | null>(null);
 const padOperador = ref<InstanceType<typeof PadFirma> | null>(null);
 const firmaColaboradorVacia = ref(true);
 const firmaOperadorVacia = ref(true);
+const bloqueIdentidad = ref<InstanceType<
+    typeof DocumentoIdentidadColaborador
+> | null>(null);
 
 const faltantesFirma = computed<string[]>(() => {
     const faltan: string[] = [];
@@ -374,6 +378,12 @@ watch(paso, (p) => {
             padColaborador.value?.recalibrar();
             padOperador.value?.recalibrar();
         });
+
+        // Siempre recarga al entrar al paso: la entrega de origen puede
+        // haber cambiado desde la última vez (volver al paso 1 y elegir
+        // otra), así que nunca debe quedar la identidad de un colaborador
+        // distinto pintada por accidente.
+        void bloqueIdentidad.value?.cargar();
     }
 });
 
@@ -957,13 +967,24 @@ function enviar(): void {
                         </table>
                     </section>
 
+                    <DocumentoIdentidadColaborador
+                        ref="bloqueIdentidad"
+                        :url-metadata="`/devoluciones/documento-identidad/${entrega.id}`"
+                        :url-ver="`/devoluciones/documento-identidad/${entrega.id}/ver`"
+                        :url-guardar="`/devoluciones/documento-identidad/${entrega.id}`"
+                        nota-captura="Se guardará en el expediente del colaborador (carpeta Identificación) y quedará disponible para ésta y futuras operaciones. La devolución no se bloquea si decides continuar sin ella."
+                    />
+
                     <section class="space-y-3 rounded-xl border p-4">
                         <h2 class="text-sm font-semibold">
                             Firma de quien devuelve
                         </h2>
                         <p class="text-muted-foreground text-sm">
-                            Firma del colaborador ({{ entrega.colaborador }})
-                            que regresa los activos descritos.
+                            Firma del colaborador que devuelve ({{
+                                entrega.colaborador
+                            }}) los activos descritos. La verificación de
+                            identidad y firma es responsabilidad de quien
+                            procesa la devolución.
                         </p>
                         <PadFirma
                             ref="padColaborador"

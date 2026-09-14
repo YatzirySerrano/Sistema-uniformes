@@ -1,29 +1,16 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import {
-    ChevronLeft,
-    ChevronRight,
-    ExternalLink,
-    IdCard,
-    Plus,
-    Trash2,
-} from '@lucide/vue';
+import { ChevronLeft, ChevronRight, Plus, Trash2 } from '@lucide/vue';
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
+import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -83,15 +70,6 @@ type OpcionConjunto = {
     codigo: string | null;
     componentes_variante_libre: ComponenteVarianteLibre[];
     disponible: number | null;
-};
-
-type DocIdentidad = {
-    disponible: boolean;
-    nombre?: string;
-    mime?: string;
-    previsualizable?: boolean;
-    actualizado_en?: string | null;
-    url?: string;
 };
 
 const props = defineProps<{
@@ -224,7 +202,6 @@ function alElegirColaborador(o: OpcionColaborador | null): void {
     colaboradorSel.value = o;
     form.colaborador_id = o?.id ?? '';
     form.clearErrors('colaborador_id');
-    docIdentidad.value = null;
 }
 
 const avisoAlmacenCambiado = ref(false);
@@ -557,112 +534,16 @@ const padColaborador = ref<InstanceType<typeof PadFirma> | null>(null);
 const padOperador = ref<InstanceType<typeof PadFirma> | null>(null);
 const firmaColaboradorVacia = ref(true);
 const firmaOperadorVacia = ref(true);
-
-const docIdentidad = ref<DocIdentidad | null>(null);
-const docIdentidadCargando = ref(false);
-const inePreviewAbierto = ref(false);
-
-async function cargarDocIdentidad(): Promise<void> {
-    if (form.colaborador_id === '') return;
-    docIdentidadCargando.value = true;
-    docIdentidad.value = null;
-    try {
-        const res = await fetch(
-            `/entregas/documento-identidad/${form.colaborador_id}`,
-            {
-                headers: { Accept: 'application/json' },
-                credentials: 'same-origin',
-            },
-        );
-        docIdentidad.value = res.ok ? await res.json() : { disponible: false };
-    } catch {
-        docIdentidad.value = { disponible: false };
-    } finally {
-        docIdentidadCargando.value = false;
-    }
-}
-
-// --- Captura de INE faltante (se guarda en el EXPEDIENTE del colaborador) ---
-// Es una subida lateral: no navega ni recrea la página (perdería el estado del
-// wizard), así que va por `fetch` como el resto de llamadas de esta pantalla.
-// El backend SIEMPRE persiste bien (verificado end-to-end); el fallo que se
-// veía era de feedback: un archivo grande rechazado por el límite se mostraba
-// en un texto diminuto mientras el archivo seguía "seleccionado", y un guardado
-// correcto no daba ninguna confirmación.
-const INE_MAX_MB = 10;
-const ineArchivo = ref<File | null>(null);
-const ineGuardando = ref(false);
-const ineError = ref<string | null>(null);
-const ineExito = ref<string | null>(null);
-
-function xsrf(): string {
-    const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
-    return m ? decodeURIComponent(m[1]) : '';
-}
-
-async function guardarIne(): Promise<void> {
-    if (form.colaborador_id === '' || ineArchivo.value === null) return;
-    ineError.value = null;
-    ineExito.value = null;
-
-    // Guarda en cliente: un archivo demasiado grande se rechaza ANTES de
-    // enviarlo (no debe verse "aceptado" y luego fallar en silencio).
-    if (ineArchivo.value.size > INE_MAX_MB * 1024 * 1024) {
-        ineError.value = `El archivo pesa demasiado. El máximo permitido es ${INE_MAX_MB} MB. Toma una foto con la cámara o sube una versión más ligera.`;
-        return;
-    }
-
-    ineGuardando.value = true;
-    const cuerpo = new FormData();
-    cuerpo.append('archivo', ineArchivo.value);
-    try {
-        const res = await fetch(
-            `/entregas/documento-identidad/${form.colaborador_id}`,
-            {
-                method: 'POST',
-                headers: { Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() },
-                credentials: 'same-origin',
-                body: cuerpo,
-            },
-        );
-        const j = (await res.json().catch(() => ({}))) as {
-            ok?: boolean;
-            message?: string;
-            documento?: DocIdentidad;
-            errors?: { archivo?: string[] };
-        };
-
-        if (!res.ok) {
-            if (res.status === 403) {
-                ineError.value =
-                    'No tienes permiso para agregar la identificación de este colaborador.';
-            } else {
-                ineError.value =
-                    j.errors?.archivo?.[0] ??
-                    j.message ??
-                    'No se pudo guardar la identificación.';
-            }
-            return;
-        }
-
-        ineArchivo.value = null;
-        ineExito.value =
-            'Identificación guardada correctamente en el expediente.';
-        // Refleja de inmediato el nuevo estado con el documento que devuelve el
-        // backend, sin depender de una segunda petición (evita carreras).
-        docIdentidad.value = j.documento ?? { disponible: true };
-        void cargarDocIdentidad();
-    } catch {
-        ineError.value =
-            'No se pudo guardar la identificación. Revisa tu conexión e inténtalo de nuevo.';
-    } finally {
-        ineGuardando.value = false;
-    }
-}
+const bloqueIdentidad = ref<InstanceType<
+    typeof DocumentoIdentidadColaborador
+> | null>(null);
 
 watch(paso, (p) => {
-    if (p === 3 && docIdentidad.value === null && !docIdentidadCargando.value) {
-        void cargarDocIdentidad();
+    // Siempre recarga al entrar al paso: el colaborador pudo haber cambiado
+    // desde la última vez (volver al paso 1 y elegir otro), así que nunca debe
+    // quedar la identidad de un colaborador distinto pintada por accidente.
+    if (p === 3) {
+        void bloqueIdentidad.value?.cargar();
     }
 
     // Los PadFirma viven dentro del contenedor del paso 3 (`v-show`), así que
@@ -676,11 +557,6 @@ watch(paso, (p) => {
         });
     }
 });
-
-const esImagenIne = computed(() =>
-    (docIdentidad.value?.mime ?? '').startsWith('image/'),
-);
-const esPdfIne = computed(() => docIdentidad.value?.mime === 'application/pdf');
 
 // ------------------------------------------------------------------
 // Navegación entre pasos + envío
@@ -1662,91 +1538,13 @@ function enviar(): void {
                         </dl>
                     </div>
 
-                    <!-- Documento de identidad -->
-                    <div class="bg-muted/30 rounded-lg border p-3">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <IdCard class="text-muted-foreground size-4" />
-                            <span class="text-sm font-medium"
-                                >Documento de identidad</span
-                            >
-                            <Button
-                                v-if="docIdentidad?.disponible"
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                class="ml-auto"
-                                @click="inePreviewAbierto = true"
-                            >
-                                <ExternalLink class="size-3.5" /> Ver INE
-                            </Button>
-                        </div>
-                        <p
-                            v-if="docIdentidadCargando"
-                            class="text-muted-foreground mt-2 text-xs"
-                        >
-                            Buscando el documento en el expediente…
-                        </p>
-                        <template v-else-if="docIdentidad?.disponible">
-                            <p class="text-muted-foreground mt-2 text-xs">
-                                Consulta el documento registrado en el
-                                expediente del colaborador para realizar una
-                                verificación visual antes de solicitar su firma.
-                            </p>
-                            <p
-                                class="text-muted-foreground mt-1 text-[11px] italic"
-                            >
-                                La revisión de identidad y firma es
-                                responsabilidad del encargado que realiza la
-                                entrega.
-                            </p>
-                        </template>
-                        <template v-else>
-                            <p
-                                class="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500"
-                            >
-                                No se encontró una identificación en el
-                                expediente de este colaborador.
-                            </p>
-                            <div class="mt-2 flex flex-wrap items-center gap-2">
-                                <CapturaEvidencia
-                                    v-model="ineArchivo"
-                                    permite-pdf
-                                    etiqueta="Tomar foto o subir INE"
-                                />
-                                <Button
-                                    v-if="ineArchivo"
-                                    type="button"
-                                    size="sm"
-                                    :disabled="ineGuardando"
-                                    @click="guardarIne"
-                                >
-                                    {{
-                                        ineGuardando
-                                            ? 'Guardando…'
-                                            : 'Guardar en el expediente'
-                                    }}
-                                </Button>
-                            </div>
-                            <p
-                                v-if="ineError"
-                                class="border-destructive/40 bg-destructive/10 text-destructive mt-2 rounded-md border p-2 text-sm"
-                            >
-                                {{ ineError }}
-                            </p>
-                            <p
-                                v-if="ineExito"
-                                class="mt-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2 text-sm text-emerald-700 dark:text-emerald-400"
-                            >
-                                {{ ineExito }}
-                            </p>
-                            <p class="text-muted-foreground mt-1 text-[11px]">
-                                Se guardará en el expediente del colaborador
-                                (carpeta Identificación) y quedará disponible
-                                para ésta y futuras entregas. La entrega no se
-                                bloquea si decides continuar sin ella.
-                            </p>
-                        </template>
-                    </div>
+                    <DocumentoIdentidadColaborador
+                        ref="bloqueIdentidad"
+                        :url-metadata="`/entregas/documento-identidad/${form.colaborador_id}`"
+                        :url-ver="`/entregas/documento-identidad/${form.colaborador_id}/ver`"
+                        :url-guardar="`/entregas/documento-identidad/${form.colaborador_id}`"
+                        nota-captura="Se guardará en el expediente del colaborador (carpeta Identificación) y quedará disponible para ésta y futuras entregas. La entrega no se bloquea si decides continuar sin ella."
+                    />
 
                     <div class="grid gap-1.5">
                         <Label>Firma del colaborador</Label>
@@ -1869,50 +1667,5 @@ function enviar(): void {
                 </Button>
             </div>
         </form>
-
-        <!-- Diálogo de previsualización del INE -->
-        <Dialog v-model:open="inePreviewAbierto">
-            <DialogContent
-                class="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-auto sm:max-w-3xl"
-            >
-                <DialogHeader>
-                    <DialogTitle>Documento de identidad</DialogTitle>
-                    <DialogDescription>
-                        Verificación visual a cargo del encargado. Este
-                        documento no se adjunta al acuse ni al correo.
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div class="mt-2">
-                    <img
-                        v-if="
-                            docIdentidad?.disponible &&
-                            docIdentidad.url &&
-                            esImagenIne
-                        "
-                        :src="docIdentidad.url"
-                        alt="Documento de identidad del colaborador"
-                        class="mx-auto max-h-[70dvh] w-auto rounded-md border"
-                    />
-                    <iframe
-                        v-else-if="
-                            docIdentidad?.disponible &&
-                            docIdentidad.url &&
-                            esPdfIne
-                        "
-                        :src="docIdentidad.url"
-                        title="Documento de identidad del colaborador"
-                        class="h-[70dvh] w-full rounded-md border"
-                    />
-                    <p
-                        v-else
-                        class="text-muted-foreground py-8 text-center text-sm"
-                    >
-                        Este documento no puede previsualizarse aquí. Consúltalo
-                        desde el expediente del colaborador.
-                    </p>
-                </div>
-            </DialogContent>
-        </Dialog>
     </div>
 </template>

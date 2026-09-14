@@ -32,8 +32,6 @@ class ServicioReportes
             ->when($filtros['colaborador_id'] ?? null, fn ($q, $v) => $q->where('colaborador_id', $v))
             ->when($filtros['encargado_id'] ?? null, fn ($q, $v) => $q->where('encargado_id', $v))
             ->when($filtros['estado'] ?? null, fn ($q, $v) => $q->where('estado', $v))
-            ->when(($filtros['firmado'] ?? null) === 'si', fn ($q) => $q->whereIn('estado', ['firmada', 'corregida']))
-            ->when(($filtros['firmado'] ?? null) === 'no', fn ($q) => $q->where('estado', 'pendiente_firma'))
             ->when($filtros['desde'] ?? null, fn ($q, $v) => $q->whereDate('fecha_entrega', '>=', $v))
             ->when($filtros['hasta'] ?? null, fn ($q, $v) => $q->whereDate('fecha_entrega', '<=', $v))
             ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->whereHas('detalles', fn ($d) => $d->where('activo_id', $v)))
@@ -59,7 +57,7 @@ class ServicioReportes
      * @param  array<string, mixed>  $filtros
      * @param  Collection<int, int>|array<int, int>  $empresaIds
      * @param  Collection<int, int>|array<int, int>  $sucursalesPermitidas
-     * @return array{entregas: int, activos: int, pendientes_firma: int}
+     * @return array{entregas: int, activos: int}
      */
     public function totalesEntregas($empresaIds, $sucursalesPermitidas, array $filtros): array
     {
@@ -68,7 +66,6 @@ class ServicioReportes
         return [
             'entregas' => $ids->count(),
             'activos' => (int) DetalleEntrega::query()->whereIn('entrega_uniforme_id', $ids)->sum('cantidad'),
-            'pendientes_firma' => EntregaUniforme::query()->whereIn('id', $ids)->where('estado', 'pendiente_firma')->count(),
         ];
     }
 

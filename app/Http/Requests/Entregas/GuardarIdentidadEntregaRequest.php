@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Entregas;
 
+use App\Http\Requests\Concerns\ReglasArchivoIdentidad;
 use App\Models\Colaborador;
 use App\Models\EntregaUniforme;
 use Illuminate\Foundation\Http\FormRequest;
@@ -16,6 +17,8 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class GuardarIdentidadEntregaRequest extends FormRequest
 {
+    use ReglasArchivoIdentidad;
+
     public function authorize(): bool
     {
         $colaborador = $this->route('colaborador');
@@ -32,9 +35,7 @@ class GuardarIdentidadEntregaRequest extends FormRequest
      */
     public function rules(): array
     {
-        return [
-            'archivo' => ['required', 'file', 'mimes:jpg,jpeg,png,webp,pdf', 'max:10240'],
-        ];
+        return $this->reglasArchivoIdentidad();
     }
 
     /**
@@ -42,10 +43,6 @@ class GuardarIdentidadEntregaRequest extends FormRequest
      */
     public function messages(): array
     {
-        return [
-            'archivo.required' => 'Adjunta la foto o el archivo de la identificación.',
-            'archivo.mimes' => 'La identificación debe ser una imagen (JPG, PNG, WebP) o un PDF.',
-            'archivo.max' => 'El archivo de la identificación no puede superar los 10 MB.',
-        ];
+        return $this->mensajesArchivoIdentidad();
     }
 }

@@ -149,6 +149,88 @@ it('el Excel de inventario sigue funcionando tras añadir el PDF', function () {
         ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 });
 
+it('el payload de Reportes/Entregas ya NO expone pendientes_firma (KPI retirado)', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    EntregaUniforme::factory()->for($empresa)->for($sucursal)->create(['almacen_id' => $almacen->id]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    $this->actingAs($admin)->get('/reportes')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('totales.entregas', 1)
+            ->where('totales.activos', 0)
+            ->missing('totales.pendientes_firma'));
+});
+
+it('un ?firmado= en la URL ya no filtra nada (filtro retirado, deja de validarse)', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    EntregaUniforme::factory()->for($empresa)->for($sucursal)->create(['almacen_id' => $almacen->id, 'estado' => 'pendiente_firma']);
+    EntregaUniforme::factory()->for($empresa)->for($sucursal)->create(['almacen_id' => $almacen->id, 'estado' => 'firmada']);
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    // Antes habría acotado a 1 (pendiente_firma); ahora `firmado` ya no es un
+    // filtro válido, así que se ignora y siguen apareciendo ambas.
+    $this->actingAs($admin)
+        ->get('/reportes?firmado=no')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('totales.entregas', 2));
+});
+
+it('la exportación de PDF de Entregas respeta el filtro de empresa activo', function () {
+    sembrarRolesPermisos();
+    $empresaA = Empresa::factory()->create();
+    $sucursalA = Sucursal::factory()->for($empresaA)->create();
+    $almacenA = Almacen::factory()->paraEmpresa($empresaA)->create();
+    EntregaUniforme::factory()->for($empresaA)->for($sucursalA)->create(['almacen_id' => $almacenA->id]);
+
+    $empresaB = Empresa::factory()->create();
+    $sucursalB = Sucursal::factory()->for($empresaB)->create();
+    $almacenB = Almacen::factory()->paraEmpresa($empresaB)->create();
+    EntregaUniforme::factory()->for($empresaB)->for($sucursalB)->create(['almacen_id' => $almacenB->id]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresaA, $empresaB]);
+
+    $respuesta = $this->actingAs($admin)
+        ->get("/reportes/entregas/exportar?empresa_id={$empresaA->id}&formato=pdf");
+    $respuesta->assertOk()->assertHeader('content-type', 'application/pdf');
+    expect(substr($respuesta->getContent(), 0, 4))->toBe('%PDF');
+});
+
+it('REGRESIÓN: el literal solo_bajo_minimo=false (string) rompe la validación — el frontend/export NUNCA debe mandarlo, sólo omitir el parámetro', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    $activo = Activo::factory()->for($empresa)->create();
+    SaldoInventario::factory()->for($empresa)->for($almacen)->for($activo)->create(['cantidad' => 50, 'minimo' => 5]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    // `Rule::boolean` de Laravel sólo acepta true/false/0/1/"0"/"1" — la
+    // cadena literal "false" (lo que produciría un botón de exportar que
+    // mandara `solo_bajo_minimo=false` en vez de omitirlo) FALLA la
+    // validación y redirige con error en vez de exportar. Por eso
+    // `filtrosExportar` en Reportes/Index.vue convierte el checkbox a `1` o
+    // `undefined`, nunca a `false` literal.
+    $this->actingAs($admin)
+        ->get('/reportes/inventario/exportar?formato=xlsx&solo_bajo_minimo=false')
+        ->assertRedirect()
+        ->assertSessionHasErrors('solo_bajo_minimo');
+
+    // Omitir el parámetro por completo (el contrato real de `filtrosExportar`) sí exporta.
+    $this->actingAs($admin)
+        ->get('/reportes/inventario/exportar?formato=xlsx')
+        ->assertOk()
+        ->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+});
+
 it('un usuario sin reportes.exportar no puede descargar el PDF de inventario aunque arme la URL', function () {
     sembrarRolesPermisos();
     $empresa = Empresa::factory()->create();

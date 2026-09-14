@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { Download, X } from '@lucide/vue';
+import { X } from '@lucide/vue';
 import { computed, reactive, ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -14,7 +15,7 @@ import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 const props = defineProps<{
     tab: 'entregas' | 'inventario';
     filtros: Record<string, string | number | boolean | undefined>;
-    totales?: { entregas: number; activos: number; pendientes_firma: number };
+    totales?: { entregas: number; activos: number };
     entregas?: Paginado<{
         folio: string;
         fecha_entrega: string;
@@ -50,7 +51,6 @@ const f = reactive({
     tab: props.tab,
     empresa_id: props.filtros.empresa_id ?? '',
     estado: String(props.filtros.estado ?? ''),
-    firmado: props.filtros.firmado ?? '',
     desde: String(props.filtros.desde ?? ''),
     hasta: String(props.filtros.hasta ?? ''),
     solo_bajo_minimo: !!props.filtros.solo_bajo_minimo,
@@ -102,27 +102,27 @@ function limpiarFiltros(): void {
     empresaSel.value = null;
     f.empresa_id = '';
     f.estado = '';
-    f.firmado = '';
     f.desde = '';
     f.hasta = '';
     f.solo_bajo_minimo = false;
 }
 
-function urlExport(formato: string) {
-    const base =
-        f.tab === 'inventario'
-            ? '/reportes/inventario/exportar'
-            : '/reportes/entregas/exportar';
-    const params = new URLSearchParams({
-        ...Object.fromEntries(
-            Object.entries(f).filter(
-                ([k, v]) => v !== '' && v !== false && k !== 'tab',
-            ) as [string, string][],
-        ),
-        formato,
-    });
-    return `${base}?${params.toString()}`;
-}
+// Mismos filtros que ve la pantalla (sin `tab`, que no es un filtro de la
+// consulta): `BotonesExportar` arma `?<filtros>&formato=xlsx|pdf` contra el
+// endpoint del tab activo.
+const endpointExportar = computed(() =>
+    f.tab === 'inventario'
+        ? '/reportes/inventario/exportar'
+        : '/reportes/entregas/exportar',
+);
+const filtrosExportar = computed(() => {
+    const { tab: _tab, solo_bajo_minimo, ...resto } = f;
+    // El backend interpreta CUALQUIER string no vacío (incluido "false") como
+    // verdadero (`$filtros['solo_bajo_minimo'] ?? false`), así que igual que
+    // en el `watch` de abajo, el filtro se omite por completo cuando está
+    // desmarcado — nunca se manda `solo_bajo_minimo=false`.
+    return { ...resto, solo_bajo_minimo: solo_bajo_minimo ? 1 : undefined };
+});
 </script>
 
 <template>
@@ -197,24 +197,17 @@ function urlExport(formato: string) {
                 >
                     <X class="size-3.5" /> Limpiar filtros
                 </Button>
-                <template v-if="puedeExportar">
-                    <Button size="sm" variant="outline" as-child>
-                        <a :href="urlExport('xlsx')"
-                            ><Download class="size-4" /> Excel</a
-                        >
-                    </Button>
-                    <Button size="sm" variant="outline" as-child>
-                        <a :href="urlExport('pdf')"
-                            ><Download class="size-4" /> PDF</a
-                        >
-                    </Button>
-                </template>
+                <BotonesExportar
+                    v-if="puedeExportar"
+                    :endpoint="endpointExportar"
+                    :filtros="filtrosExportar"
+                />
             </CardContent>
         </Card>
 
         <div
             v-if="f.tab === 'entregas' && totales"
-            class="grid gap-3 sm:grid-cols-3"
+            class="grid gap-3 sm:grid-cols-2"
         >
             <Card
                 ><CardContent class="pt-6">
@@ -227,16 +220,6 @@ function urlExport(formato: string) {
                     <p class="text-2xl font-semibold">{{ totales.activos }}</p>
                     <p class="text-muted-foreground text-xs">
                         Activos entregadas
-                    </p>
-                </CardContent></Card
-            >
-            <Card
-                ><CardContent class="pt-6">
-                    <p class="text-2xl font-semibold">
-                        {{ totales.pendientes_firma }}
-                    </p>
-                    <p class="text-muted-foreground text-xs">
-                        Pendientes de firma
                     </p>
                 </CardContent></Card
             >

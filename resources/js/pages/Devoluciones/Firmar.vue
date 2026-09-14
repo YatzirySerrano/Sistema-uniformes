@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import { Button } from '@/components/ui/button';
@@ -45,6 +46,13 @@ const padOperador = ref<InstanceType<typeof PadFirma> | null>(null);
 const vacioColaborador = ref(true);
 const vacioOperador = ref(true);
 const aceptacion = ref(false);
+const bloqueIdentidad = ref<InstanceType<
+    typeof DocumentoIdentidadColaborador
+> | null>(null);
+
+onMounted(() => {
+    void bloqueIdentidad.value?.cargar();
+});
 
 const form = useForm({ firma: '', firma_operador: '', aceptacion: false });
 
@@ -163,15 +171,23 @@ function confirmar() {
             </CardContent>
         </Card>
 
+        <DocumentoIdentidadColaborador
+            ref="bloqueIdentidad"
+            :url-metadata="`/devoluciones/${devolucion.id}/documento-identidad`"
+            :url-ver="`/devoluciones/${devolucion.id}/documento-identidad/ver`"
+            :url-guardar="`/devoluciones/${devolucion.id}/documento-identidad`"
+        />
+
         <Card data-tour="firma-colaborador">
             <CardHeader>
                 <CardTitle class="text-base">Firma de quien devuelve</CardTitle>
             </CardHeader>
             <CardContent class="space-y-3">
                 <p class="text-muted-foreground text-sm">
-                    Firma del colaborador ({{
+                    Firma del colaborador que devuelve ({{
                         devolucion.colaborador?.nombre_completo
-                    }}) que hace la devolución de los activos descritos.
+                    }}) los activos descritos. Verifica su identidad antes de
+                    solicitar la firma.
                 </p>
                 <PadFirma
                     ref="padColaborador"

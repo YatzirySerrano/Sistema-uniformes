@@ -603,7 +603,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Resumen: unidades identificadas / QR -->
-        <section class="space-y-2">
+        <section class="space-y-2" data-tour="resumen-conteo">
             <h2 class="text-sm font-semibold">Unidades identificadas / QR</h2>
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <div class="rounded-xl border p-3">
@@ -640,7 +640,11 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- Resumen: artículos por cantidad -->
-        <section v-if="contadores.cantidad_renglones > 0" class="space-y-2">
+        <section
+            v-if="contadores.cantidad_renglones > 0"
+            class="space-y-2"
+            data-tour="cantidad-articulos"
+        >
             <h2 class="text-sm font-semibold">Artículos por cantidad</h2>
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
                 <div class="rounded-xl border p-3">
@@ -689,6 +693,7 @@ onBeforeUnmount(() => {
         <!-- Escaneo (sólo mientras la ronda está en proceso) -->
         <div
             v-if="puedeEscanear"
+            data-tour="escaneo-qr"
             class="grid gap-4 rounded-xl border p-4 lg:grid-cols-[minmax(0,1fr)_320px]"
         >
             <div class="flex flex-col gap-3">
@@ -867,6 +872,7 @@ onBeforeUnmount(() => {
                 </div>
 
                 <Button
+                    data-tour="finalizar-ronda"
                     variant="outline"
                     class="border-red-600/30 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
                     @click="dialogoFinalizar = true"

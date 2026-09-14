@@ -1,14 +1,17 @@
 <?php
 
+use App\Enums\CategoriaDocumentoExpediente;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Colaborador;
+use App\Models\DocumentoExpediente;
 use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Models\User;
 use Database\Seeders\RolesPermisosSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 /*
@@ -148,4 +151,26 @@ function firmaDemoBase64(): string
     imagedestroy($img);
 
     return 'data:image/png;base64,'.base64_encode($binario);
+}
+
+/**
+ * Sube un documento de identidad (categoría `Identificacion`) al expediente
+ * del colaborador, como administrador. Devuelve el `DocumentoExpediente`.
+ * Compartido entre las pruebas de identidad de Entregas y Devoluciones
+ * (`App\Servicios\ServicioIdentidadColaborador`): ambos flujos consultan el
+ * mismo slot del expediente y necesitan poder dejarlo prellenado por igual.
+ */
+function subirIdentificacion(TestCase $test, User $admin, int $colaboradorId, string $archivo = 'ine.jpg'): DocumentoExpediente
+{
+    $upload = str_ends_with($archivo, '.pdf')
+        ? UploadedFile::fake()->create($archivo, 120, 'application/pdf')
+        : UploadedFile::fake()->image($archivo);
+
+    $test->actingAs($admin)->post("/colaboradores/{$colaboradorId}/expediente", [
+        'categoria' => CategoriaDocumentoExpediente::Identificacion->value,
+        'nombre' => 'INE',
+        'archivo' => $upload,
+    ])->assertRedirect();
+
+    return DocumentoExpediente::query()->where('colaborador_id', $colaboradorId)->latest('id')->firstOrFail();
 }

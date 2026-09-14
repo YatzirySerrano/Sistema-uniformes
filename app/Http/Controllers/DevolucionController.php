@@ -11,15 +11,19 @@ use App\Enums\EstadoUnidadActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Devoluciones\GuardarDevolucionRequest;
+use App\Http\Requests\Devoluciones\GuardarIdentidadDevolucionRequest;
 use App\Models\Colaborador;
 use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
+use App\Models\User;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
+use App\Servicios\ServicioIdentidadColaborador;
 use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -418,5 +422,80 @@ class DevolucionController extends Controller
             'Content-Disposition' => 'inline; filename="evidencia.'.$evidencia->extension.'"',
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    /**
+     * Metadata del documento de identidad del COLABORADOR QUE DEVUELVE, para
+     * el paso de firma del wizard de una devolución nueva (todavía no existe
+     * el registro `Devolucion`, igual que en Entregas). Se resuelve SIEMPRE
+     * desde la ENTREGA REAL que origina la devolución — nunca desde un
+     * colaborador_id suelto — para que un usuario autorizado a registrar
+     * devoluciones de una empresa no pueda usar este endpoint como acceso
+     * lateral a la identificación de cualquier colaborador de esa empresa
+     * (ver `autorizarConsultaIdentidad()`).
+     */
+    public function documentoIdentidad(Request $request, EntregaUniforme $entrega, ServicioIdentidadColaborador $identidad): JsonResponse
+    {
+        $colaborador = $this->autorizarConsultaIdentidad($request->user(), $entrega);
+
+        $meta = $identidad->metadata($colaborador);
+
+        if (! $meta['disponible']) {
+            return response()->json($meta);
+        }
+
+        return response()->json([...$meta, 'url' => route('devoluciones.documento-identidad.ver', $entrega)]);
+    }
+
+    /**
+     * Sirve, en streaming y sólo tras validar la autorización, la ÚLTIMA
+     * versión del documento de identidad del colaborador dueño de la entrega.
+     */
+    public function verDocumentoIdentidad(Request $request, EntregaUniforme $entrega, ServicioIdentidadColaborador $identidad): StreamedResponse
+    {
+        $colaborador = $this->autorizarConsultaIdentidad($request->user(), $entrega);
+
+        return $identidad->streamDocumento($colaborador);
+    }
+
+    /**
+     * Sube una identificación oficial faltante al EXPEDIENTE del colaborador
+     * dueño de la entrega, durante el wizard de una devolución nueva.
+     * Autorización de mínimo privilegio (ver `autorizarConsultaIdentidad()`).
+     * NO permite reemplazar una INE ya existente (eso vive en el módulo de
+     * expediente).
+     */
+    public function guardarDocumentoIdentidad(GuardarIdentidadDevolucionRequest $request, EntregaUniforme $entrega, ServicioIdentidadColaborador $identidad): JsonResponse
+    {
+        $colaborador = $this->autorizarConsultaIdentidad($request->user(), $entrega);
+
+        $documento = $identidad->guardarFaltante($colaborador, $request->file('archivo'), $request->user(), 'una devolución');
+
+        return response()->json([
+            'ok' => true,
+            'documento' => [...$identidad->payload($documento), 'url' => route('devoluciones.documento-identidad.ver', $entrega)],
+        ]);
+    }
+
+    /**
+     * Autorización de MÍNIMO PRIVILEGIO para consultar/capturar la
+     * identificación del colaborador que devuelve DURANTE el wizard de una
+     * devolución nueva: basta poder registrar devoluciones y tener acceso a
+     * la empresa de la ENTREGA que la origina — nunca la empresa de un
+     * colaborador_id arbitrario. El colaborador consultado es SIEMPRE
+     * `$entrega->colaborador` (anti-IDOR: no hay forma de pedir la
+     * identificación de alguien ajeno a esa entrega). Devuelve el colaborador
+     * ya resuelto para que el llamador no vuelva a tocar la relación. NO
+     * concede acceso a navegar ni descargar el resto del expediente.
+     */
+    private function autorizarConsultaIdentidad(User $usuario, EntregaUniforme $entrega): Colaborador
+    {
+        abort_unless($usuario->can('create', Devolucion::class), 403);
+        abort_unless($usuario->puedeAccederEmpresa($entrega->empresa_id), 403, 'No tienes acceso a la empresa de esa entrega.');
+
+        $colaborador = $entrega->colaborador;
+        abort_if($colaborador === null, 404);
+
+        return $colaborador;
     }
 }

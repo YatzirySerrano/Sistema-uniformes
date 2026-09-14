@@ -150,11 +150,6 @@ class ReporteController extends Controller
         return array_filter([
             'Sucursal' => ($filtros['sucursal_id'] ?? null) ? Sucursal::query()->find((int) $filtros['sucursal_id'])?->nombre : null,
             'Estado' => ($filtros['estado'] ?? null) ? (EstadoEntrega::tryFrom($filtros['estado'])?->etiqueta() ?? $filtros['estado']) : null,
-            'Firmado' => match ($filtros['firmado'] ?? null) {
-                'si' => 'Sí',
-                'no' => 'No',
-                default => null,
-            },
             'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
             'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
         ]);
@@ -186,7 +181,6 @@ class ReporteController extends Controller
             'activo_id' => ['nullable', 'integer'],
             'talla_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'string'],
-            'firmado' => ['nullable', 'in:si,no'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
             'solo_bajo_minimo' => ['nullable', 'boolean'],

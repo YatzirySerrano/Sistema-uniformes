@@ -4,11 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Acciones\ConfirmarAcuseDevolucion;
 use App\Enums\EstadoDevolucion;
+use App\Http\Requests\Devoluciones\GuardarIdentidadAcuseDevolucionRequest;
 use App\Models\AcuseDevolucion;
 use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
 use App\Models\Evidencia;
 use App\Servicios\ServicioAcuseDevolucionPdf;
+use App\Servicios\ServicioIdentidadColaborador;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -138,5 +141,55 @@ class AcuseDevolucionController extends Controller
         $accion->regenerarPdf($acuse);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Comprobante regenerado.']);
+    }
+
+    /**
+     * Metadata del documento de identidad del COLABORADOR QUE DEVUELVE, para
+     * la pantalla de firma de una devolución YA REGISTRADA (flujo legado). El
+     * colaborador se resuelve SIEMPRE desde `Devolucion->colaborador`, nunca
+     * desde un id de la URL (anti-IDOR); la autorización es la misma que
+     * firmar/confirmar la devolución.
+     */
+    public function documentoIdentidad(Devolucion $devolucion, ServicioIdentidadColaborador $identidad): JsonResponse
+    {
+        $this->authorize('confirmar', $devolucion);
+        abort_if($devolucion->colaborador === null, 404);
+
+        $meta = $identidad->metadata($devolucion->colaborador);
+
+        if (! $meta['disponible']) {
+            return response()->json($meta);
+        }
+
+        return response()->json([...$meta, 'url' => route('devoluciones.acuse.documento-identidad.ver', $devolucion)]);
+    }
+
+    /**
+     * Sirve, en streaming, la ÚLTIMA versión del documento de identidad del
+     * colaborador que devuelve.
+     */
+    public function verDocumentoIdentidad(Devolucion $devolucion, ServicioIdentidadColaborador $identidad): StreamedResponse
+    {
+        $this->authorize('confirmar', $devolucion);
+        abort_if($devolucion->colaborador === null, 404);
+
+        return $identidad->streamDocumento($devolucion->colaborador);
+    }
+
+    /**
+     * Sube una identificación oficial faltante al expediente del colaborador
+     * que devuelve, durante la firma de una devolución ya registrada.
+     */
+    public function guardarDocumentoIdentidad(GuardarIdentidadAcuseDevolucionRequest $request, Devolucion $devolucion, ServicioIdentidadColaborador $identidad): JsonResponse
+    {
+        $colaborador = $devolucion->colaborador;
+        abort_if($colaborador === null, 404);
+
+        $documento = $identidad->guardarFaltante($colaborador, $request->file('archivo'), $request->user(), 'una devolución');
+
+        return response()->json([
+            'ok' => true,
+            'documento' => [...$identidad->payload($documento), 'url' => route('devoluciones.acuse.documento-identidad.ver', $devolucion)],
+        ]);
     }
 }

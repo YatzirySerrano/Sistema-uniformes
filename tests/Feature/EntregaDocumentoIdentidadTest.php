@@ -2,40 +2,20 @@
 
 use App\Acciones\ConfirmarAcuseRecepcion;
 use App\Acciones\CrearEntregaUniforme;
-use App\Enums\CategoriaDocumentoExpediente;
 use App\Enums\RolSistema;
 use App\Enums\TipoMovimiento;
 use App\Mail\ComprobanteEntregaMail;
 use App\Models\Colaborador;
-use App\Models\DocumentoExpediente;
-use App\Models\User;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioInventario;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
-use Tests\TestCase;
 
 /**
- * Sube un documento de identidad (categoría `Identificacion`) al expediente
- * del colaborador, como administrador. Devuelve el `DocumentoExpediente`.
- */
-function subirIdentificacion(TestCase $test, User $admin, int $colaboradorId, string $archivo = 'ine.jpg'): DocumentoExpediente
-{
-    $upload = str_ends_with($archivo, '.pdf')
-        ? UploadedFile::fake()->create($archivo, 120, 'application/pdf')
-        : UploadedFile::fake()->image($archivo);
-
-    $test->actingAs($admin)->post("/colaboradores/{$colaboradorId}/expediente", [
-        'categoria' => CategoriaDocumentoExpediente::Identificacion->value,
-        'nombre' => 'INE',
-        'archivo' => $upload,
-    ])->assertRedirect();
-
-    return DocumentoExpediente::query()->where('colaborador_id', $colaboradorId)->latest('id')->firstOrFail();
-}
-
-/**
+ * `subirIdentificacion()` vive en `tests/Pest.php` (compartida con las
+ * pruebas de identidad de Devoluciones).
+ *
  * Consulta del documento de identidad (categoría `Identificacion` del
  * expediente) durante el flujo de firma de una entrega. Finalidad única:
  * que el encargado tenga el documento a la mano para una verificación
@@ -145,6 +125,37 @@ it('abrir el preview del INE no modifica el expediente', function () {
         ->and($documento->versiones()->count())->toBe($conteoVersiones)
         ->and($documento->versionActual->id)->toBe($versionAntes->id)
         ->and($documento->versionActual->updated_at->equalTo($versionAntes->updated_at))->toBeTrue();
+});
+
+it('REGRESIÓN E2E: la identificación capturada durante una entrega aparece en la ruta REAL del Expediente (no sólo en la consulta interna del servicio)', function () {
+    // Reproduce el reporte de QA paso a paso: capturar durante la entrega,
+    // luego abrir la pantalla del expediente (y la pestaña del perfil) por
+    // sus rutas HTTP reales, exactamente como lo haría un usuario en el
+    // navegador — no basta con invocar `ServicioExpediente::payload()`
+    // directamente en el test.
+    $this->actingAs($this->admin);
+
+    $subida = $this->post(
+        "/entregas/documento-identidad/{$this->colaborador->id}",
+        ['archivo' => UploadedFile::fake()->image('ine.jpg', 1000, 640)],
+        ['Accept' => 'application/json'],
+    );
+    $subida->assertOk()->assertJson(['ok' => true]);
+
+    $expediente = $this->get("/colaboradores/{$this->colaborador->id}/expediente");
+    $expediente->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Colaboradores/Expediente')
+        ->has('documentos', 1)
+        ->where('documentos.0.categoria', 'identificacion')
+        ->where('documentos.0.activo', true)
+        ->where('documentos.0.version_actual.mime', 'image/jpeg'));
+
+    $perfil = $this->get("/colaboradores/{$this->colaborador->id}");
+    $perfil->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Colaboradores/Detalle')
+        ->where('kpis.documentos', 1)
+        ->has('expediente.documentos', 1)
+        ->where('expediente.documentos.0.categoria', 'identificacion'));
 });
 
 it('el documento de identidad NO se incorpora al acuse, al snapshot ni al correo de la entrega', function () {

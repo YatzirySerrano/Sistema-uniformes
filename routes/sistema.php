@@ -217,9 +217,24 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('devoluciones/crear', [DevolucionController::class, 'create'])->name('devoluciones.create');
     Route::get('devoluciones/exportar', [DevolucionController::class, 'exportar'])->name('devoluciones.exportar');
     Route::get('devoluciones/evidencias/{evidencia}', [DevolucionController::class, 'verEvidencia'])->name('devoluciones.evidencias.ver');
+    // Identidad del COLABORADOR QUE DEVUELVE durante el wizard de una
+    // devolución nueva (todavía no existe el registro `Devolucion`, igual que
+    // en Entregas: `App\Servicios\ServicioIdentidadColaborador`). Resuelta
+    // SIEMPRE desde la ENTREGA REAL que origina la devolución — nunca desde un
+    // colaborador_id suelto — para evitar acceso lateral a la identificación
+    // de cualquier colaborador de una empresa autorizada.
+    Route::get('devoluciones/documento-identidad/{entrega}', [DevolucionController::class, 'documentoIdentidad'])->name('devoluciones.documento-identidad');
+    Route::get('devoluciones/documento-identidad/{entrega}/ver', [DevolucionController::class, 'verDocumentoIdentidad'])->name('devoluciones.documento-identidad.ver');
+    Route::post('devoluciones/documento-identidad/{entrega}', [DevolucionController::class, 'guardarDocumentoIdentidad'])->name('devoluciones.documento-identidad.guardar');
     Route::post('devoluciones', [DevolucionController::class, 'store'])->name('devoluciones.store');
     Route::get('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'firmar'])->name('devoluciones.firmar');
     Route::post('devoluciones/{devolucion}/firmar', [AcuseDevolucionController::class, 'confirmar'])->name('devoluciones.confirmar');
+    // Identidad del COLABORADOR QUE DEVUELVE durante la firma de una
+    // devolución YA REGISTRADA (flujo legado); resuelta SIEMPRE desde
+    // `Devolucion->colaborador`, nunca desde un id de la URL.
+    Route::get('devoluciones/{devolucion}/documento-identidad', [AcuseDevolucionController::class, 'documentoIdentidad'])->name('devoluciones.acuse.documento-identidad');
+    Route::get('devoluciones/{devolucion}/documento-identidad/ver', [AcuseDevolucionController::class, 'verDocumentoIdentidad'])->name('devoluciones.acuse.documento-identidad.ver');
+    Route::post('devoluciones/{devolucion}/documento-identidad', [AcuseDevolucionController::class, 'guardarDocumentoIdentidad'])->name('devoluciones.acuse.documento-identidad.guardar');
     Route::get('devoluciones/{devolucion}', [DevolucionController::class, 'show'])->name('devoluciones.show');
     Route::get('acuses-devolucion/{acuse}/pdf', [AcuseDevolucionController::class, 'pdf'])->name('acuses-devolucion.pdf');
     Route::get('acuses-devolucion/{acuse}/firma', [AcuseDevolucionController::class, 'firma'])->name('acuses-devolucion.firma');

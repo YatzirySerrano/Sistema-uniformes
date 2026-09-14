@@ -1,6 +1,7 @@
 import { tourDashboard } from './dashboard';
 import { tourFirmaDevolucion, tourFirmaEntrega } from './firma';
 import { tourGenerico } from './generico';
+import { tourInventarioFisicoDetalle } from './inventarioFisico';
 import type { Tour } from './tipos';
 
 type EntradaRegistro = { patron: RegExp; tours: Tour[] };
@@ -111,6 +112,46 @@ const REGISTRO: EntradaRegistro[] = [
                 'Movimientos',
                 '/inventario/movimientos',
                 'El historial completo, append-only, de cada entrada, salida, entrega y devolución de inventario.',
+            ),
+        ],
+    },
+    {
+        patron: /^\/inventarios-fisicos\/?$/,
+        tours: [
+            tourGenerico(
+                'inventarios-fisicos',
+                'Inventario físico',
+                '/inventarios-fisicos',
+                'Rondas de conteo por escaneo de QR: eliges empresa/almacén al crear la ronda y comparas lo encontrado contra lo esperado. No mueve stock ni cambia asignaciones.',
+                true,
+            ),
+        ],
+    },
+    {
+        patron: /^\/inventarios-fisicos\/\d+\/?$/,
+        tours: [tourInventarioFisicoDetalle],
+    },
+    {
+        patron: /^\/contratos\/?$/,
+        tours: [
+            tourGenerico(
+                'contratos',
+                'Contratos',
+                '/contratos',
+                'Un contrato pertenece a una empresa y puede tener varios Servicios operativos derivados de él, cada uno con su propia vigencia y estado.',
+                true,
+            ),
+        ],
+    },
+    {
+        patron: /^\/servicios\/?$/,
+        tours: [
+            tourGenerico(
+                'servicios',
+                'Servicios',
+                '/servicios',
+                'Un Servicio pertenece siempre a un Contrato (la empresa se hereda de ahí) y tiene una sucursal asociada; los colaboradores se asignan operativamente a él, así que cambiar sus asignaciones afecta el trabajo diario, no sólo un dato administrativo.',
+                true,
             ),
         ],
     },
