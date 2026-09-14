@@ -41,6 +41,7 @@ const props = defineProps<{
         empresa_id?: number | null;
         buscar?: string;
         sucursal_id?: number | null;
+        almacen_id?: number | null;
         estado?: string;
         desde?: string;
         hasta?: string;
@@ -63,6 +64,21 @@ const sucursalSeleccionada = ref<OpcionSucursal | null>(null);
 const estado = ref(props.filtros.estado ?? '');
 const desde = ref(props.filtros.desde ?? '');
 const hasta = ref(props.filtros.hasta ?? '');
+
+// `sucursalSeleccionada` no se preselecciona (no llega el nombre de la
+// sucursal, sólo su id) — este valor conserva el filtro real hasta que el
+// usuario interactúe explícitamente con el combobox, para no perderlo en
+// cuanto cambie cualquier otro filtro (p. ej. al llegar desde una card del
+// Dashboard con `?sucursal_id=`).
+const sucursalIdActivo = ref<number | undefined>(
+    props.filtros.sucursal_id ?? undefined,
+);
+watch(sucursalSeleccionada, (s) => {
+    sucursalIdActivo.value = s?.id ?? undefined;
+});
+// `almacen_id` no tiene selector propio en este listado — sólo llega como
+// contexto del Dashboard — pero debe conservarse en cada refiltrado.
+const almacenIdDashboard = props.filtros.almacen_id ?? undefined;
 
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
@@ -111,7 +127,7 @@ const hayFiltros = computed(
     () =>
         buscar.value !== '' ||
         !!empresaSeleccionada.value ||
-        !!sucursalSeleccionada.value ||
+        !!sucursalIdActivo.value ||
         estado.value !== '' ||
         desde.value !== '' ||
         hasta.value !== '',
@@ -119,7 +135,7 @@ const hayFiltros = computed(
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
 watch(
-    [buscar, empresaSeleccionada, sucursalSeleccionada, estado, desde, hasta],
+    [buscar, empresaSeleccionada, sucursalIdActivo, estado, desde, hasta],
     () => {
         clearTimeout(temporizador);
         temporizador = setTimeout(() => {
@@ -128,7 +144,8 @@ watch(
                 {
                     buscar: buscar.value || undefined,
                     empresa_id: empresaSeleccionada.value?.id || undefined,
-                    sucursal_id: sucursalSeleccionada.value?.id || undefined,
+                    sucursal_id: sucursalIdActivo.value || undefined,
+                    almacen_id: almacenIdDashboard,
                     estado: estado.value || undefined,
                     desde: desde.value || undefined,
                     hasta: hasta.value || undefined,
@@ -143,6 +160,7 @@ function limpiarFiltros(): void {
     buscar.value = '';
     empresaSeleccionada.value = null;
     sucursalSeleccionada.value = null;
+    sucursalIdActivo.value = undefined;
     estado.value = '';
     desde.value = '';
     hasta.value = '';
@@ -285,11 +303,7 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                 <p class="text-muted-foreground text-xs">
                     Registró: {{ d.registrada_por }}
                 </p>
-                <BotonVer
-                    :href="`/devoluciones/${d.id}`"
-                    etiqueta="Ver detalle"
-                    class="mt-1 w-fit"
-                />
+                <BotonVer :href="`/devoluciones/${d.id}`" class="mt-1 w-fit" />
             </div>
         </div>
 

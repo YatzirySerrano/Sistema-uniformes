@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -70,6 +71,14 @@ class TraspasoInventario extends Model
     public function renglones(): HasMany
     {
         return $this->hasMany(TraspasoRenglon::class);
+    }
+
+    /**
+     * @return HasOne<AcuseTraspaso, $this>
+     */
+    public function acuse(): HasOne
+    {
+        return $this->hasOne(AcuseTraspaso::class);
     }
 
     /**

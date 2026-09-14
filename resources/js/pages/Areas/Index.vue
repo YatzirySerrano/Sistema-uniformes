@@ -4,10 +4,8 @@ import {
     ArrowUpRight,
     Building2,
     Network,
-    Pencil,
     Plus,
     Search,
-    SquareArrowOutUpRight,
     Users,
     X,
 } from '@lucide/vue';
@@ -15,7 +13,10 @@ import { computed, ref, watch } from 'vue';
 import type { AreaEditable } from '@/components/areas/FormularioArea.vue';
 import FormularioArea from '@/components/areas/FormularioArea.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -430,29 +431,22 @@ const vista = useVistaPreferida('areas');
                     </div>
 
                     <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            @click.stop="verDetalle(a)"
-                        >
-                            <SquareArrowOutUpRight class="size-3.5" />
-                            Ver detalles
-                        </Button>
-                        <Button
+                        <BotonVer @click.stop="verDetalle(a)" />
+                        <BotonEditar
                             v-if="permisos.editar"
-                            variant="ghost"
-                            size="sm"
                             @click.stop="editar(a)"
-                        >
-                            <Pencil class="size-3.5" /> Editar
-                        </Button>
+                        />
+                        <BotonEliminar
+                            v-if="permisos.desactivar && a.activa"
+                            @click.stop="alternarEstado(a)"
+                        />
                         <Button
-                            v-if="permisos.desactivar"
-                            variant="ghost"
+                            v-else-if="permisos.desactivar"
+                            variant="outline"
                             size="sm"
                             @click.stop="alternarEstado(a)"
                         >
-                            {{ a.activa ? 'Eliminar' : 'Restaurar' }}
+                            Restaurar
                         </Button>
                     </div>
                 </div>
@@ -505,27 +499,23 @@ const vista = useVistaPreferida('areas');
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex justify-end gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    @click="verDetalle(a)"
-                                    >Ver</Button
-                                >
-                                <Button
+                            <div class="flex flex-wrap justify-end gap-2">
+                                <BotonVer @click="verDetalle(a)" />
+                                <BotonEditar
                                     v-if="permisos.editar"
-                                    variant="ghost"
-                                    size="sm"
                                     @click="editar(a)"
-                                    >Editar</Button
-                                >
+                                />
+                                <BotonEliminar
+                                    v-if="permisos.desactivar && a.activa"
+                                    @click="alternarEstado(a)"
+                                />
                                 <Button
-                                    v-if="permisos.desactivar"
-                                    variant="ghost"
+                                    v-else-if="permisos.desactivar"
+                                    variant="outline"
                                     size="sm"
                                     @click="alternarEstado(a)"
                                 >
-                                    {{ a.activa ? 'Eliminar' : 'Restaurar' }}
+                                    Restaurar
                                 </Button>
                             </div>
                         </td>

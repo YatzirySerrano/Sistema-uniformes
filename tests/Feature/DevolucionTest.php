@@ -9,6 +9,7 @@ use App\Enums\RolSistema;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
+use App\Models\Almacen;
 use App\Models\Colaborador;
 use App\Models\Devolucion;
 use App\Models\MovimientoInventario;
@@ -258,4 +259,24 @@ it('el ciclo completo Almacén → colaborador A → devolución confirmada → 
 
     expect($segundaEntrega->detalles->first()->cantidad)->toBe(5)
         ->and(SaldoInventario::first()->cantidad)->toBe(15); // 20 - 10 (entrega) + 10 (devolución confirmada) - 5
+});
+
+it('el listado de Devoluciones filtra por almacen_id (filtro silencioso usado por el enlace del Dashboard)', function () {
+    $devolucion = app(RegistrarDevolucion::class)->ejecutar(
+        $this->entrega->id, $this->datos['almacenA']->id, now()->toDateString(),
+        [['detalle_entrega_id' => $this->detalle->id, 'cantidad' => 2, 'condicion' => 'reutilizable']],
+        [], $this->admin->id,
+    );
+
+    $almacenB = Almacen::factory()->paraEmpresa($this->datos['empresaA'])->create();
+
+    $this->actingAs($this->admin)
+        ->get("/devoluciones?empresa_id={$this->datos['empresaA']->id}&almacen_id={$this->datos['almacenA']->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('devoluciones.data', 1)->where('devoluciones.data.0.id', $devolucion->id));
+
+    $this->actingAs($this->admin)
+        ->get("/devoluciones?empresa_id={$this->datos['empresaA']->id}&almacen_id={$almacenB->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('devoluciones.data', 0));
 });

@@ -3,6 +3,7 @@
 use App\Http\Controllers\ActivoController;
 use App\Http\Controllers\AcuseController;
 use App\Http\Controllers\AcuseDevolucionController;
+use App\Http\Controllers\AcuseTraspasoController;
 use App\Http\Controllers\AlmacenController;
 use App\Http\Controllers\AreaController;
 use App\Http\Controllers\BitacoraController;
@@ -158,6 +159,11 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventario/traspasos/previsualizar', [MovimientoInventarioController::class, 'previsualizarTraspaso'])->name('inventario.traspasos.previsualizar');
     Route::post('inventario/traspasos', [MovimientoInventarioController::class, 'almacenarTraspaso'])->name('inventario.traspasos.store');
     Route::get('inventario/traspasos/{traspaso}', [MovimientoInventarioController::class, 'traspasoShow'])->name('inventario.traspasos.show');
+
+    // Comprobante/firma del acuse de traspaso (documento privado).
+    Route::get('acuses-traspaso/{acuse}/pdf', [AcuseTraspasoController::class, 'pdf'])->name('acuses-traspaso.pdf');
+    Route::get('acuses-traspaso/{acuse}/firma', [AcuseTraspasoController::class, 'firma'])->name('acuses-traspaso.firma');
+    Route::post('acuses-traspaso/{acuse}/regenerar-pdf', [AcuseTraspasoController::class, 'regenerarPdf'])->name('acuses-traspaso.regenerar-pdf');
 
     // Conjuntos
     Route::get('conjuntos', [ConjuntoController::class, 'index'])->name('conjuntos.index');

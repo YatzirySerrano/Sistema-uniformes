@@ -6,12 +6,12 @@ import {
     Layers,
     Package,
     PackagePlus,
-    Pencil,
     ScrollText,
 } from '@lucide/vue';
 import { ref } from 'vue';
 import AgregarExistenciasDialog from '@/components/sistema/AgregarExistenciasDialog.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
 import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -125,16 +125,10 @@ const dialogoExistencias = ref(false);
                             : 'Agregar existencias'
                     }}
                 </Button>
-                <Button
+                <BotonEditar
                     v-if="permisos.editar"
-                    variant="outline"
-                    size="sm"
-                    as-child
-                >
-                    <Link :href="`/activos/${activo.id}/editar`">
-                        <Pencil class="size-3.5" /> Editar
-                    </Link>
-                </Button>
+                    :href="`/activos/${activo.id}/editar`"
+                />
             </div>
         </div>
 

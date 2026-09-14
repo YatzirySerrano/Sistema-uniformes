@@ -18,6 +18,9 @@ import { computed, ref } from 'vue';
 import type { AlmacenEditable } from '@/components/almacenes/FormularioAlmacen.vue';
 import FormularioAlmacen from '@/components/almacenes/FormularioAlmacen.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -195,22 +198,18 @@ function confirmarDesactivar(): void {
                         <Package class="size-3.5" /> Ver activos aquí
                     </Link>
                 </Button>
+                <BotonEditar v-if="permisos.editar" @click="abrirEditar" />
+                <BotonEliminar
+                    v-if="permisos.administrar && almacen.activo"
+                    @click="alternarEstado"
+                />
                 <Button
-                    v-if="permisos.editar"
-                    variant="outline"
-                    size="sm"
-                    @click="abrirEditar"
-                >
-                    <Pencil class="size-3.5" /> Editar
-                </Button>
-                <Button
-                    v-if="permisos.administrar"
-                    :variant="almacen.activo ? 'ghost' : 'default'"
+                    v-else-if="permisos.administrar"
+                    variant="default"
                     size="sm"
                     @click="alternarEstado"
                 >
-                    <Power class="size-3.5" />
-                    {{ almacen.activo ? 'Eliminar' : 'Restaurar' }}
+                    <Power class="size-3.5" /> Restaurar
                 </Button>
             </div>
         </div>
@@ -360,9 +359,7 @@ function confirmarDesactivar(): void {
                             {{ e.codigo }}
                         </p>
                     </div>
-                    <Button variant="ghost" size="sm" as-child>
-                        <Link :href="`/empresas/${e.id}`">Ver</Link>
-                    </Button>
+                    <BotonVer :href="`/empresas/${e.id}`" />
                 </div>
             </div>
         </section>

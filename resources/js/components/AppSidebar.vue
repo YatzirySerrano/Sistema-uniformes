@@ -9,6 +9,7 @@ import {
     Compass,
     FileBarChart2,
     FileSignature,
+    Gauge,
     LayoutGrid,
     MapPin,
     Network,
@@ -136,6 +137,12 @@ const grupos = computed<Grupo[]>(() =>
                     href: '/conjuntos',
                     icono: Boxes,
                     visible: puede('conjuntos.ver'),
+                },
+                {
+                    titulo: 'Inventario',
+                    href: '/inventario',
+                    icono: Gauge,
+                    visible: puede('inventario.ver'),
                 },
                 {
                     titulo: 'Movimientos',

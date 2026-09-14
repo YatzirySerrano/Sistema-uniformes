@@ -25,6 +25,7 @@ const props = withDefaults(
                 type="button"
                 :aria-label="props.etiqueta ?? 'Más información'"
                 class="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-4 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                @click.stop.prevent
             >
                 <HelpCircle class="size-3.5" aria-hidden="true" />
             </TooltipTrigger>

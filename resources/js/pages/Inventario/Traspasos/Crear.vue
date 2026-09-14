@@ -10,10 +10,11 @@ import {
     TriangleAlert,
     X,
 } from '@lucide/vue';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
+import PadFirma from '@/components/sistema/PadFirma.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -289,6 +290,8 @@ const form = useForm<{
     motivo: string;
     notas: string;
     renglones: RenglonPayload[];
+    firma: string;
+    idempotency_key: string;
 }>({
     empresa_origen_id: null,
     almacen_origen_id: null,
@@ -297,7 +300,17 @@ const form = useForm<{
     motivo: '',
     notas: '',
     renglones: [],
+    firma: '',
+    // Una clave por intento de alta: evita que un doble submit registre dos
+    // traspasos (el backend la rechaza si ya la vio).
+    idempotency_key:
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
 });
+
+const padFirma = ref<InstanceType<typeof PadFirma> | null>(null);
+const firmaVacia = ref(true);
 const errln = computed(() => form.errors as unknown as Record<string, string>);
 
 // El activo por cantidad usa variantes REALES si trae al menos una elegible.
@@ -392,10 +405,24 @@ function irA(n: 1 | 2 | 3): void {
     if (n >= 2 && !puedeAvanzar1.value) return;
     if (n === 3 && !puedeAvanzar2.value) return;
     paso.value = n;
+
+    // El PadFirma vive dentro del contenedor del paso 3 (`v-show`), así que
+    // se monta oculto: al entrar al paso hay que recalibrar el canvas ya con
+    // el ancho real. No borra la firma existente.
+    if (n === 3) {
+        void nextTick(() => padFirma.value?.recalibrar());
+    }
 }
 
+const puedeConfirmar = computed(
+    () => puedeAvanzar2.value && !firmaVacia.value && !form.processing,
+);
+
 function enviar(): void {
-    if (!puedeAvanzar2.value) return;
+    if (!puedeConfirmar.value) return;
+    const firma = padFirma.value?.obtenerDataUrl();
+    if (!firma) return;
+
     form.empresa_origen_id = empresaOrigen.value?.id ?? null;
     form.almacen_origen_id = almacenOrigen.value?.id ?? null;
     form.empresa_destino_id = empresaDestino.value?.id ?? null;
@@ -409,12 +436,14 @@ function enviar(): void {
         unidad_ids:
             f.control === 'individual' ? f.unidades.map((u) => u.id) : null,
     }));
+    form.firma = firma;
     form.post('/inventario/traspasos', {
         preserveScroll: true,
         onError: () => {
             const claves = Object.keys(form.errors);
             if (claves.some((k) => k.startsWith('renglones'))) paso.value = 2;
-            else if (claves.includes('negocio')) paso.value = 3;
+            else if (claves.includes('negocio') || claves.includes('firma'))
+                paso.value = 3;
             else paso.value = 1;
         },
     });
@@ -973,6 +1002,19 @@ function enviar(): void {
                         class="border-input bg-background rounded-md border px-3 py-2 text-sm"
                     />
                 </div>
+
+                <div class="grid gap-1.5">
+                    <Label>Firma del responsable</Label>
+                    <p class="text-muted-foreground text-xs">
+                        El traspaso no se considera completado sin esta firma:
+                        se confirma y se mueve el inventario en el mismo paso.
+                    </p>
+                    <PadFirma
+                        ref="padFirma"
+                        @cambio="(v: boolean) => (firmaVacia = v)"
+                    />
+                    <InputError :message="form.errors.firma" />
+                </div>
             </div>
 
             <!-- ============ Navegación ============ -->
@@ -1001,12 +1043,12 @@ function enviar(): void {
                 >
                     Revisar <ChevronRight class="size-4" />
                 </Button>
-                <Button
-                    v-else
-                    type="submit"
-                    :disabled="!puedeAvanzar2 || form.processing"
-                >
-                    Confirmar traspaso
+                <Button v-else type="submit" :disabled="!puedeConfirmar">
+                    {{
+                        form.processing
+                            ? 'Confirmando…'
+                            : 'Confirmar y firmar traspaso'
+                    }}
                 </Button>
                 <Button variant="ghost" as-child>
                     <Link href="/inventario/movimientos">Cancelar</Link>

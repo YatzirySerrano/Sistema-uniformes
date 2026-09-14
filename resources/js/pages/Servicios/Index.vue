@@ -1,17 +1,11 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import {
-    Building2,
-    FileSignature,
-    MapPin,
-    Pencil,
-    Plus,
-    Search,
-    X,
-} from '@lucide/vue';
+import { Building2, FileSignature, MapPin, Plus, Search, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import type { ServicioEditable } from '@/components/servicios/FormularioServicio.vue';
 import FormularioServicio from '@/components/servicios/FormularioServicio.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -414,21 +408,21 @@ function alternarEstado(s: ServicioFila): void {
 
                 <div class="mt-auto flex flex-wrap gap-2 pt-1">
                     <BotonVer @click.stop="verDetalle(s)" />
-                    <Button
+                    <BotonEditar
                         v-if="permisos.editar"
-                        variant="ghost"
-                        size="sm"
                         @click.stop="editar(s)"
-                    >
-                        <Pencil class="size-3.5" /> Editar
-                    </Button>
+                    />
+                    <BotonEliminar
+                        v-if="permisos.administrar && s.activo"
+                        @click.stop="alternarEstado(s)"
+                    />
                     <Button
-                        v-if="permisos.administrar"
-                        variant="ghost"
+                        v-else-if="permisos.administrar"
+                        variant="outline"
                         size="sm"
                         @click.stop="alternarEstado(s)"
                     >
-                        {{ s.activo ? 'Eliminar' : 'Restaurar' }}
+                        Restaurar
                     </Button>
                 </div>
             </div>
@@ -480,23 +474,23 @@ function alternarEstado(s: ServicioFila): void {
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex justify-end gap-2">
+                            <div class="flex flex-wrap justify-end gap-2">
                                 <BotonVer @click="verDetalle(s)" />
-                                <Button
+                                <BotonEditar
                                     v-if="permisos.editar"
-                                    variant="ghost"
-                                    size="sm"
                                     @click="editar(s)"
-                                >
-                                    <Pencil class="size-3.5" /> Editar
-                                </Button>
+                                />
+                                <BotonEliminar
+                                    v-if="permisos.administrar && s.activo"
+                                    @click="alternarEstado(s)"
+                                />
                                 <Button
-                                    v-if="permisos.administrar"
-                                    variant="ghost"
+                                    v-else-if="permisos.administrar"
+                                    variant="outline"
                                     size="sm"
                                     @click="alternarEstado(s)"
                                 >
-                                    {{ s.activo ? 'Eliminar' : 'Restaurar' }}
+                                    Restaurar
                                 </Button>
                             </div>
                         </td>

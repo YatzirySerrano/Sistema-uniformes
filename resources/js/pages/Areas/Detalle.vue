@@ -5,7 +5,6 @@ import {
     Building2,
     Hash,
     Network,
-    Pencil,
     Power,
     ScrollText,
     Users,
@@ -14,6 +13,8 @@ import { computed, ref } from 'vue';
 import type { AreaEditable } from '@/components/areas/FormularioArea.vue';
 import FormularioArea from '@/components/areas/FormularioArea.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -134,22 +135,18 @@ function confirmarDesactivar(): void {
             </div>
 
             <div class="flex flex-wrap gap-2">
+                <BotonEditar v-if="permisos.editar" @click="abrirEditar" />
+                <BotonEliminar
+                    v-if="permisos.desactivar && area.activa"
+                    @click="alternarEstado"
+                />
                 <Button
-                    v-if="permisos.editar"
-                    variant="outline"
-                    size="sm"
-                    @click="abrirEditar"
-                >
-                    <Pencil class="size-3.5" /> Editar
-                </Button>
-                <Button
-                    v-if="permisos.desactivar"
-                    :variant="area.activa ? 'ghost' : 'default'"
+                    v-else-if="permisos.desactivar"
+                    variant="default"
                     size="sm"
                     @click="alternarEstado"
                 >
-                    <Power class="size-3.5" />
-                    {{ area.activa ? 'Eliminar' : 'Restaurar' }}
+                    <Power class="size-3.5" /> Restaurar
                 </Button>
             </div>
         </div>

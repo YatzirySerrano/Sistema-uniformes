@@ -6,7 +6,6 @@ import {
     Hash,
     Mail,
     MapPin,
-    Pencil,
     Phone,
     Power,
     ScrollText,
@@ -17,6 +16,8 @@ import { computed, ref } from 'vue';
 import type { EmpresaEditable } from '@/components/empresas/FormularioEmpresa.vue';
 import FormularioEmpresa from '@/components/empresas/FormularioEmpresa.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -162,22 +163,18 @@ function irA(ruta: string): void {
             </div>
 
             <div class="flex flex-wrap gap-2">
+                <BotonEditar v-if="puedeEditar" @click="abrirEditar" />
+                <BotonEliminar
+                    v-if="puedeCambiarEstado && empresa.activa"
+                    @click="modalEstado = true"
+                />
                 <Button
-                    v-if="puedeEditar"
-                    variant="outline"
-                    size="sm"
-                    @click="abrirEditar"
-                >
-                    <Pencil class="size-3.5" /> Editar
-                </Button>
-                <Button
-                    v-if="puedeCambiarEstado"
-                    :variant="empresa.activa ? 'ghost' : 'default'"
+                    v-else-if="puedeCambiarEstado"
+                    variant="default"
                     size="sm"
                     @click="modalEstado = true"
                 >
-                    <Power class="size-3.5" />
-                    {{ empresa.activa ? 'Eliminar' : 'Restaurar' }}
+                    <Power class="size-3.5" /> Restaurar
                 </Button>
             </div>
         </div>

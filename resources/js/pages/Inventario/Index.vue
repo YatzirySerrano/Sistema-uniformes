@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { PackagePlus, Search } from '@lucide/vue';
+import { PackagePlus, Search, Settings2, SlidersHorizontal } from '@lucide/vue';
 import { computed, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
+    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
@@ -404,21 +406,27 @@ function guardarMinimo() {
                         <td class="text-muted-foreground px-3 py-2 text-right">
                             {{ s.minimo }}
                         </td>
-                        <td class="px-3 py-2 text-right whitespace-nowrap">
-                            <button
-                                v-if="permisos.ajustar"
-                                class="text-primary text-xs hover:underline"
-                                @click="abrir('ajuste', s)"
-                            >
-                                Ajustar
-                            </button>
-                            <button
-                                v-if="permisos.minimos"
-                                class="text-primary ml-3 text-xs hover:underline"
-                                @click="abrir('minimo', s)"
-                            >
-                                Mínimo
-                            </button>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex flex-wrap justify-end gap-1.5">
+                                <Button
+                                    v-if="permisos.ajustar"
+                                    variant="outline"
+                                    size="sm"
+                                    @click="abrir('ajuste', s)"
+                                >
+                                    <SlidersHorizontal class="size-3.5" />
+                                    Ajustar
+                                </Button>
+                                <Button
+                                    v-if="permisos.minimos"
+                                    variant="outline"
+                                    size="sm"
+                                    @click="abrir('minimo', s)"
+                                >
+                                    <Settings2 class="size-3.5" />
+                                    Configurar mínimo
+                                </Button>
+                            </div>
                         </td>
                     </tr>
                 </tbody>
@@ -434,24 +442,51 @@ function guardarMinimo() {
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>Ajustar existencia</DialogTitle>
+                    <DialogDescription>
+                        Corrige la existencia real de esta fila de inventario.
+                        Queda registrado en el historial de movimientos.
+                    </DialogDescription>
                 </DialogHeader>
-                <p v-if="actual" class="text-muted-foreground text-sm">
-                    {{ actual.activo }} · {{ actual.talla }} ·
-                    {{ actual.almacen }} — existencia actual
-                    {{ actual.cantidad }}
-                </p>
+                <dl
+                    v-if="actual"
+                    class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm"
+                >
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Empresa</dt>
+                        <dd>{{ actual.empresa }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Almacén</dt>
+                        <dd>{{ actual.almacen }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Activo</dt>
+                        <dd>{{ actual.activo }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Variante</dt>
+                        <dd>{{ actual.talla || 'Sin variante' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Existencia actual
+                        </dt>
+                        <dd class="font-medium">{{ actual.cantidad }}</dd>
+                    </div>
+                </dl>
                 <div class="grid gap-3">
                     <div class="grid gap-1.5">
-                        <Label>Existencia objetivo</Label>
+                        <Label for="ajuste-objetivo">Existencia objetivo</Label>
                         <Input
+                            id="ajuste-objetivo"
                             v-model.number="ajuste.existencia_objetivo"
                             type="number"
                             min="0"
                         />
                     </div>
                     <div class="grid gap-1.5">
-                        <Label>Motivo (obligatorio)</Label>
-                        <Input v-model="ajuste.motivo" />
+                        <Label for="ajuste-motivo">Motivo (obligatorio)</Label>
+                        <Input id="ajuste-motivo" v-model="ajuste.motivo" />
                         <p
                             v-if="ajuste.errors.motivo"
                             class="text-destructive text-xs"
@@ -459,13 +494,27 @@ function guardarMinimo() {
                             {{ ajuste.errors.motivo }}
                         </p>
                     </div>
+                </div>
+                <DialogFooter>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        :disabled="ajuste.processing"
+                        @click="dialogo = null"
+                    >
+                        Cancelar
+                    </Button>
                     <Button
                         :disabled="ajuste.processing"
                         @click="guardarAjuste"
                     >
-                        Registrar ajuste
+                        {{
+                            ajuste.processing
+                                ? 'Guardando…'
+                                : 'Registrar ajuste'
+                        }}
                     </Button>
-                </div>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
 
@@ -476,24 +525,78 @@ function guardarMinimo() {
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>Configurar mínimo</DialogTitle>
+                    <DialogDescription>
+                        Debajo de este mínimo, la fila se marca "bajo mínimo" en
+                        el inventario y en los reportes. Un mínimo de 0
+                        desactiva la alerta para esta fila.
+                    </DialogDescription>
                 </DialogHeader>
-                <p v-if="actual" class="text-muted-foreground text-sm">
-                    {{ actual.activo }} · {{ actual.talla }} ·
-                    {{ actual.almacen }}
-                </p>
+                <dl
+                    v-if="actual"
+                    class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm"
+                >
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Empresa</dt>
+                        <dd>{{ actual.empresa }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Almacén</dt>
+                        <dd>{{ actual.almacen }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Activo</dt>
+                        <dd>{{ actual.activo }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Variante</dt>
+                        <dd>{{ actual.talla || 'Sin variante' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Existencia actual
+                        </dt>
+                        <dd class="font-medium">{{ actual.cantidad }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Mínimo actual
+                        </dt>
+                        <dd class="font-medium">{{ actual.minimo }}</dd>
+                    </div>
+                </dl>
                 <div class="grid gap-3">
                     <div class="grid gap-1.5">
-                        <Label>Existencia mínima</Label>
+                        <Label for="minimo-nuevo">Nuevo mínimo</Label>
                         <Input
+                            id="minimo-nuevo"
                             v-model.number="minimo.minimo"
                             type="number"
                             min="0"
                         />
+                        <p
+                            v-if="minimo.errors.minimo"
+                            class="text-destructive text-xs"
+                        >
+                            {{ minimo.errors.minimo }}
+                        </p>
                     </div>
-                    <Button :disabled="minimo.processing" @click="guardarMinimo"
-                        >Guardar mínimo</Button
-                    >
                 </div>
+                <DialogFooter>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        :disabled="minimo.processing"
+                        @click="dialogo = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        :disabled="minimo.processing"
+                        @click="guardarMinimo"
+                    >
+                        {{ minimo.processing ? 'Guardando…' : 'Guardar' }}
+                    </Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     </div>

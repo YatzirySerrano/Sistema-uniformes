@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
-import { Boxes, Package, Pencil, Warehouse } from '@lucide/vue';
+import { Head, router } from '@inertiajs/vue3';
+import { Boxes, Package, Warehouse } from '@lucide/vue';
 import { ref } from 'vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import { Badge } from '@/components/ui/badge';
@@ -101,17 +103,20 @@ function variantePara(c: Componente): string {
             :descripcion="conjunto.descripcion ?? undefined"
         >
             <template #acciones>
-                <Button v-if="permisos.editar" variant="outline" as-child>
-                    <Link :href="`/conjuntos/${conjunto.id}/editar`">
-                        <Pencil class="size-4" /> Editar
-                    </Link>
-                </Button>
+                <BotonEditar
+                    v-if="permisos.editar"
+                    :href="`/conjuntos/${conjunto.id}/editar`"
+                />
+                <BotonEliminar
+                    v-if="permisos.administrar && conjunto.activo"
+                    @click="alternarEstado"
+                />
                 <Button
-                    v-if="permisos.administrar"
+                    v-else-if="permisos.administrar"
                     variant="outline"
                     @click="alternarEstado"
                 >
-                    {{ conjunto.activo ? 'Eliminar' : 'Restaurar' }}
+                    Restaurar
                 </Button>
             </template>
         </EncabezadoPagina>

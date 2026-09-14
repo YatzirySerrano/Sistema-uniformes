@@ -10,7 +10,6 @@ import {
     MapPin,
     Mail,
     Package,
-    Pencil,
     Power,
     RefreshCcw,
     ScrollText,
@@ -27,6 +26,8 @@ import type {
     Categoria,
     Documento,
 } from '@/components/colaboradores/ExpedienteExplorer.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -221,14 +222,7 @@ const modalEmpresa = ref(false);
             </div>
 
             <div class="flex flex-wrap justify-center gap-2 sm:justify-end">
-                <Button
-                    v-if="puedeEditar"
-                    variant="outline"
-                    size="sm"
-                    @click="abrirEditar"
-                >
-                    <Pencil class="size-3.5" /> Editar
-                </Button>
+                <BotonEditar v-if="puedeEditar" @click="abrirEditar" />
                 <Button
                     v-if="puedeEditar"
                     variant="outline"
@@ -246,14 +240,17 @@ const modalEmpresa = ref(false);
                     <ArrowLeftRight class="size-3.5" /> Transferir a otra
                     empresa
                 </Button>
+                <BotonEliminar
+                    v-if="puedeEliminar && colaborador.activo"
+                    @click="alternarEstado"
+                />
                 <Button
-                    v-if="puedeEliminar"
-                    :variant="colaborador.activo ? 'ghost' : 'default'"
+                    v-else-if="puedeEliminar"
+                    variant="default"
                     size="sm"
                     @click="alternarEstado"
                 >
-                    <Power class="size-3.5" />
-                    {{ colaborador.activo ? 'Eliminar' : 'Restaurar' }}
+                    <Power class="size-3.5" /> Restaurar
                 </Button>
             </div>
         </div>

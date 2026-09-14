@@ -3,10 +3,8 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowUpRight,
     Building2,
-    Pencil,
     Plus,
     Search,
-    SquareArrowOutUpRight,
     Store,
     Users,
     X,
@@ -15,7 +13,9 @@ import { computed, ref, watch } from 'vue';
 import type { EmpresaEditable } from '@/components/empresas/FormularioEmpresa.vue';
 import FormularioEmpresa from '@/components/empresas/FormularioEmpresa.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -474,23 +474,11 @@ function hrefColaboradoresDe(empresa: EmpresaTarjeta): string {
                     </div>
 
                     <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            @click.stop="verDetalle(e)"
-                        >
-                            <SquareArrowOutUpRight class="size-3.5" />
-                            Ver detalles
-                        </Button>
-                        <Button
+                        <BotonVer @click.stop="verDetalle(e)" />
+                        <BotonEditar
                             v-if="puedeEditar"
-                            variant="ghost"
-                            size="sm"
                             @click.stop="editarEmpresa(e)"
-                        >
-                            <Pencil class="size-3.5" />
-                            Editar
-                        </Button>
+                        />
                     </div>
                 </div>
             </div>
@@ -561,20 +549,12 @@ function hrefColaboradoresDe(empresa: EmpresaTarjeta): string {
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex justify-end gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    @click="verDetalle(e)"
-                                    >Ver</Button
-                                >
-                                <Button
+                            <div class="flex flex-wrap justify-end gap-2">
+                                <BotonVer @click="verDetalle(e)" />
+                                <BotonEditar
                                     v-if="puedeEditar"
-                                    variant="ghost"
-                                    size="sm"
                                     @click="editarEmpresa(e)"
-                                    >Editar</Button
-                                >
+                                />
                             </div>
                         </td>
                     </tr>

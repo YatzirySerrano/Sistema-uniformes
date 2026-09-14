@@ -3,6 +3,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import FormularioColaborador from '@/components/colaboradores/FormularioColaborador.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -353,13 +354,11 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex justify-end gap-2">
+                            <div class="flex flex-wrap justify-end gap-2">
                                 <BotonVer :href="`/colaboradores/${c.id}`" />
-                                <Link
+                                <BotonEditar
                                     :href="`/colaboradores/${c.id}/editar`"
-                                    class="text-primary text-sm hover:underline"
-                                    >Editar</Link
-                                >
+                                />
                             </div>
                         </td>
                     </tr>

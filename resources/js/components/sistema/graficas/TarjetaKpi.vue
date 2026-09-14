@@ -39,10 +39,12 @@ const etiquetaComponente = computed(() => (props.href ? Link : 'div'));
     <component
         :is="etiquetaComponente"
         :href="href"
+        :aria-label="href ? `Ver detalle de ${titulo}` : undefined"
         class="group hover:border-primary/30 hover:bg-muted/20 bg-card relative flex rounded-xl border transition-[color,box-shadow,border-color] duration-150 hover:shadow-sm"
         :class="[
             compacto ? 'items-center gap-3 p-3' : 'flex-col gap-3 p-4',
-            href && 'cursor-pointer',
+            href &&
+                'focus-visible:ring-ring cursor-pointer focus-visible:ring-2 focus-visible:outline-none',
         ]"
     >
         <span

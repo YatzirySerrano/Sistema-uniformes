@@ -7,13 +7,14 @@ import {
     FileSignature,
     Hash,
     MapPin,
-    Pencil,
     Power,
     ScrollText,
 } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import type { ContratoEditable } from '@/components/contratos/FormularioContrato.vue';
 import FormularioContrato from '@/components/contratos/FormularioContrato.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -138,22 +139,18 @@ function confirmarDesactivar(): void {
             </div>
 
             <div class="flex flex-wrap gap-2">
+                <BotonEditar v-if="permisos.editar" @click="abrirEditar" />
+                <BotonEliminar
+                    v-if="permisos.administrar && contrato.activo"
+                    @click="alternarEstado"
+                />
                 <Button
-                    v-if="permisos.editar"
-                    variant="outline"
-                    size="sm"
-                    @click="abrirEditar"
-                >
-                    <Pencil class="size-3.5" /> Editar
-                </Button>
-                <Button
-                    v-if="permisos.administrar"
-                    :variant="contrato.activo ? 'ghost' : 'default'"
+                    v-else-if="permisos.administrar"
+                    variant="default"
                     size="sm"
                     @click="alternarEstado"
                 >
-                    <Power class="size-3.5" />
-                    {{ contrato.activo ? 'Eliminar' : 'Restaurar' }}
+                    <Power class="size-3.5" /> Restaurar
                 </Button>
             </div>
         </div>

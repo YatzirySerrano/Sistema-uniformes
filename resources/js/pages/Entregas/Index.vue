@@ -4,6 +4,7 @@ import { Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
@@ -39,9 +40,13 @@ const props = defineProps<{
     filtros: {
         buscar?: string;
         empresa_id?: number | null;
+        sucursal_id?: number | null;
+        almacen_id?: number | null;
         estado?: string;
         contrato_id?: number | null;
         servicio_id?: number | null;
+        desde?: string;
+        hasta?: string;
     };
     empresasAutorizadas: EmpresaAutorizada[];
     estados: { valor: string; etiqueta: string }[];
@@ -58,6 +63,14 @@ const empresaSeleccionada = ref<EmpresaAutorizada | null>(
         null,
 );
 const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
+const desde = ref(props.filtros.desde ?? '');
+const hasta = ref(props.filtros.hasta ?? '');
+// `sucursal_id`/`almacen_id` no tienen selector propio en este listado — sólo
+// llegan como contexto al navegar desde una card del Dashboard — pero deben
+// conservarse en cada refiltrado para que el conteo siga coincidiendo con el
+// KPI del que se originó el enlace.
+const sucursalIdDashboard = props.filtros.sucursal_id ?? undefined;
+const almacenIdDashboard = props.filtros.almacen_id ?? undefined;
 const estado = ref(props.filtros.estado ?? '');
 // Resincroniza el filtro si el backend resuelve una empresa distinta a la
 // que ya tenía este ref local — nunca se queda con un valor obsoleto ni
@@ -128,7 +141,7 @@ async function buscarServiciosFiltro(
 }
 
 let t: ReturnType<typeof setTimeout>;
-watch([buscar, empresaId, estado, contratoId, servicioId], () => {
+watch([buscar, empresaId, estado, contratoId, servicioId, desde, hasta], () => {
     clearTimeout(t);
     t = setTimeout(() => {
         router.get(
@@ -139,6 +152,10 @@ watch([buscar, empresaId, estado, contratoId, servicioId], () => {
                 estado: estado.value || undefined,
                 contrato_id: contratoId.value || undefined,
                 servicio_id: servicioId.value || undefined,
+                desde: desde.value || undefined,
+                hasta: hasta.value || undefined,
+                sucursal_id: sucursalIdDashboard,
+                almacen_id: almacenIdDashboard,
             },
             { preserveState: true, replace: true, preserveScroll: true },
         );
@@ -165,8 +182,8 @@ const vista = useVistaPreferida('entregas', 'tabla');
             </template>
         </EncabezadoPagina>
 
-        <div class="flex flex-col gap-2 sm:flex-row">
-            <div class="relative flex-1">
+        <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <div class="relative flex-1 sm:min-w-[200px]">
                 <Search
                     class="text-muted-foreground absolute top-2.5 left-2.5 size-4"
                 />
@@ -216,6 +233,12 @@ const vista = useVistaPreferida('entregas', 'tabla');
                         })),
                     ]"
                 />
+            </div>
+            <div class="w-40">
+                <DatePicker v-model="desde" placeholder="Desde" />
+            </div>
+            <div class="w-40">
+                <DatePicker v-model="hasta" placeholder="Hasta" />
             </div>
 
             <SelectorVista v-model="vista" class="ml-auto" />

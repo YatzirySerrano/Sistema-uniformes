@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Pencil, Plus, X } from '@lucide/vue';
+import { Plus, X } from '@lucide/vue';
 import { computed, ref } from 'vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
@@ -389,31 +391,37 @@ function confirmarEstado() {
                                 </div>
                                 <div
                                     v-if="permisos.administrar_tipos"
-                                    class="flex shrink-0 items-center gap-1"
+                                    class="flex shrink-0 flex-wrap items-center gap-1.5"
                                 >
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        :aria-label="`Editar ${t.nombre}`"
+                                    <BotonEditar
+                                        etiqueta="Editar"
                                         @click="abrirEdicionTipo(t)"
-                                    >
-                                        <Pencil class="size-4" />
-                                    </Button>
+                                    />
+                                    <BotonEliminar
+                                        v-if="t.activo"
+                                        @click="
+                                            confirmacion = {
+                                                recurso: 'tipo',
+                                                id: t.id,
+                                                nombre: t.nombre,
+                                                activar: false,
+                                            }
+                                        "
+                                    />
                                     <Button
-                                        variant="ghost"
+                                        v-else
+                                        variant="outline"
                                         size="sm"
                                         @click="
                                             confirmacion = {
                                                 recurso: 'tipo',
                                                 id: t.id,
                                                 nombre: t.nombre,
-                                                activar: !t.activo,
+                                                activar: true,
                                             }
                                         "
                                     >
-                                        {{
-                                            t.activo ? 'Eliminar' : 'Restaurar'
-                                        }}
+                                        Restaurar
                                     </Button>
                                 </div>
                             </div>
@@ -673,31 +681,37 @@ function confirmarEstado() {
                                 </div>
                                 <div
                                     v-if="permisos.administrar_categorias"
-                                    class="flex shrink-0 items-center gap-1"
+                                    class="flex shrink-0 flex-wrap items-center gap-1.5"
                                 >
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        :aria-label="`Editar ${c.nombre}`"
+                                    <BotonEditar
+                                        etiqueta="Editar"
                                         @click="abrirEdicionCategoria(c)"
-                                    >
-                                        <Pencil class="size-4" />
-                                    </Button>
+                                    />
+                                    <BotonEliminar
+                                        v-if="c.activa"
+                                        @click="
+                                            confirmacion = {
+                                                recurso: 'categoria',
+                                                id: c.id,
+                                                nombre: c.nombre,
+                                                activar: false,
+                                            }
+                                        "
+                                    />
                                     <Button
-                                        variant="ghost"
+                                        v-else
+                                        variant="outline"
                                         size="sm"
                                         @click="
                                             confirmacion = {
                                                 recurso: 'categoria',
                                                 id: c.id,
                                                 nombre: c.nombre,
-                                                activar: !c.activa,
+                                                activar: true,
                                             }
                                         "
                                     >
-                                        {{
-                                            c.activa ? 'Eliminar' : 'Restaurar'
-                                        }}
+                                        Restaurar
                                     </Button>
                                 </div>
                             </div>

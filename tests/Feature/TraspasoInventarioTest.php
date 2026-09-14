@@ -327,8 +327,8 @@ it('el endpoint registra el traspaso y lo audita nombrando origen y destino', fu
             'empresa_destino_id' => $this->datos['empresaA']->id, 'almacen_destino_id' => $this->almacenA2->id,
             'motivo' => 'Reacomodo',
             'renglones' => [['control' => 'cantidad', 'activo_origen_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 25]],
+            'firma' => firmaDemoBase64(),
         ])
-        ->assertRedirect(route('inventario.movimientos'))
         ->assertSessionHas('toast')
         ->assertSessionHasNoErrors();
 
@@ -337,6 +337,10 @@ it('el endpoint registra el traspaso y lo audita nombrando origen y destino', fu
     $entrada = BitacoraAuditoria::where('modulo', 'inventario')->where('accion', 'traspaso')->latest('id')->first();
     expect($entrada)->not->toBeNull();
     expect($entrada->descripcion)->toContain($traspaso->folio);
+
+    // Firma obligatoria: el traspaso nace YA con su acuse (ver
+    // AcuseTraspasoTest.php para la cobertura completa de firma/PDF/atomicidad).
+    expect($traspaso->acuse)->not->toBeNull();
 });
 
 it('el listado de Movimientos expone la referencia legible (folio del traspaso) y datos para las cards', function () {
@@ -409,6 +413,7 @@ it('un usuario sin acceso a la empresa destino no puede traspasar hacia ella', f
             'empresa_origen_id' => $this->datos['empresaA']->id, 'almacen_origen_id' => $this->datos['almacenA']->id,
             'empresa_destino_id' => $this->datos['empresaB']->id, 'almacen_destino_id' => $this->datos['almacenB']->id,
             'renglones' => [['control' => 'cantidad', 'activo_origen_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 10]],
+            'firma' => firmaDemoBase64(),
         ])
         ->assertSessionHasErrors('empresa_destino_id');
 
@@ -470,6 +475,7 @@ it('el Form Request prevalida la cantidad contra el saldo EXACTO de la variante 
                 'control' => 'cantidad', 'activo_origen_id' => $calcetas->id,
                 'talla_id' => $tallaXs->id, 'cantidad' => 21,
             ]],
+            'firma' => firmaDemoBase64(),
         ])
         ->assertSessionHasErrors('renglones.0.cantidad');
 

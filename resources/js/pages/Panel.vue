@@ -174,6 +174,79 @@ const subtitulo = computed(() => {
     return `Resumen operativo de ${partes.join(' · ')}.`;
 });
 
+// ------------------------------------------------------------------
+// Navegación desde las cards de KPI: cada una arma la URL del listado
+// destino con EXACTAMENTE los filtros que ese módulo soporta y que
+// reproducen el mismo criterio con el que se calculó el KPI — nunca un
+// `router.visit('/modulo')` genérico ni un parámetro que el destino ignore.
+// Los filtros usados son siempre `props.filtros` (lo que el backend YA
+// aplicó para el `resumen` mostrado), no los refs locales todavía sin
+// confirmar.
+// ------------------------------------------------------------------
+function qs(params: Record<string, string | number | null | undefined>) {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+        if (v !== null && v !== undefined && v !== '') p.set(k, String(v));
+    }
+    const s = p.toString();
+    return s ? `?${s}` : '';
+}
+
+const hrefColaboradoresActivos = computed(
+    () =>
+        `/colaboradores${qs({
+            empresa_id: props.filtros.empresa_id,
+            sucursal_id: props.filtros.sucursal_id,
+            estado: 'activos',
+        })}`,
+);
+const hrefExistenciasDisponibles = computed(
+    () =>
+        `/inventario${qs({
+            empresa_id: props.filtros.empresa_id,
+            almacen_id: props.filtros.almacen_id,
+        })}`,
+);
+const hrefEntregasPeriodo = computed(
+    () =>
+        `/entregas${qs({
+            empresa_id: props.filtros.empresa_id,
+            sucursal_id: props.filtros.sucursal_id,
+            almacen_id: props.filtros.almacen_id,
+            desde: props.filtros.desde,
+            hasta: props.filtros.hasta,
+        })}`,
+);
+const hrefStockBajo = computed(
+    () =>
+        `/inventario${qs({
+            empresa_id: props.filtros.empresa_id,
+            almacen_id: props.filtros.almacen_id,
+            estado_stock: 'bajo_minimo',
+        })}`,
+);
+const hrefDevolucionesPeriodo = computed(
+    () =>
+        `/devoluciones${qs({
+            empresa_id: props.filtros.empresa_id,
+            sucursal_id: props.filtros.sucursal_id,
+            almacen_id: props.filtros.almacen_id,
+            desde: props.filtros.desde,
+            hasta: props.filtros.hasta,
+        })}`,
+);
+const hrefAlmacenesActivos = computed(
+    () =>
+        `/almacenes${qs({ empresa_id: props.filtros.empresa_id, estado: 'activos' })}`,
+);
+function hrefUnidades(estadoVisible: string): string {
+    return `/activos/unidades${qs({
+        empresa_id: props.filtros.empresa_id,
+        almacen_id: props.filtros.almacen_id,
+        estado_visible: estadoVisible,
+    })}`;
+}
+
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
     return props.empresasAutorizadas.filter((e) =>
@@ -592,6 +665,7 @@ const seriesCategoria = computed(() =>
                 titulo="Colaboradores activos"
                 :valor="resumen.kpis.colaboradores_activos"
                 :icono="Users"
+                :href="hrefColaboradoresActivos"
                 tono-clase="bg-blue-500/10 text-blue-600 dark:text-blue-400"
                 descripcion="Activos actualmente"
             />
@@ -599,6 +673,7 @@ const seriesCategoria = computed(() =>
                 titulo="Existencias disponibles"
                 :valor="resumen.kpis.existencias_disponibles"
                 :icono="Boxes"
+                :href="hrefExistenciasDisponibles"
                 tono-clase="bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
                 descripcion="Activos por cantidad, todos los almacenes"
                 ayuda="Suma de cantidades en existencia de activos por cantidad (no incluye unidades identificadas)."
@@ -607,6 +682,7 @@ const seriesCategoria = computed(() =>
                 titulo="Entregas del periodo"
                 :valor="resumen.kpis.entregas_periodo"
                 :icono="ClipboardList"
+                :href="hrefEntregasPeriodo"
                 tono-clase="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
                 descripcion="Dentro del rango de fechas"
             />
@@ -614,6 +690,7 @@ const seriesCategoria = computed(() =>
                 titulo="Activos con stock bajo"
                 :valor="resumen.kpis.activos_stock_bajo"
                 :icono="AlertTriangle"
+                :href="hrefStockBajo"
                 :tono-clase="
                     resumen.kpis.activos_stock_bajo
                         ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
@@ -629,6 +706,7 @@ const seriesCategoria = computed(() =>
                 titulo="Devoluciones"
                 :valor="resumen.kpis.devoluciones_periodo"
                 :icono="RotateCcw"
+                :href="hrefDevolucionesPeriodo"
                 tono-clase="bg-orange-500/10 text-orange-600 dark:text-orange-400"
             />
             <TarjetaKpi
@@ -636,6 +714,7 @@ const seriesCategoria = computed(() =>
                 titulo="Almacenes activos"
                 :valor="resumen.kpis.almacenes_activos"
                 :icono="Warehouse"
+                :href="hrefAlmacenesActivos"
                 tono-clase="bg-slate-500/10 text-slate-600 dark:text-slate-400"
             />
             <TarjetaKpi
@@ -643,6 +722,7 @@ const seriesCategoria = computed(() =>
                 titulo="Unidades disponibles"
                 :valor="resumen.kpis.unidades_disponibles"
                 :icono="CheckCircle2"
+                :href="hrefUnidades('disponible')"
                 tono-clase="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
             />
             <TarjetaKpi
@@ -650,6 +730,7 @@ const seriesCategoria = computed(() =>
                 titulo="Unidades asignadas"
                 :valor="resumen.kpis.unidades_asignadas"
                 :icono="Users"
+                :href="hrefUnidades('asignado')"
                 tono-clase="bg-blue-500/10 text-blue-600 dark:text-blue-400"
             />
             <TarjetaKpi
@@ -657,6 +738,7 @@ const seriesCategoria = computed(() =>
                 titulo="En reparación"
                 :valor="resumen.kpis.unidades_en_reparacion"
                 :icono="Wrench"
+                :href="hrefUnidades('reparacion')"
                 tono-clase="bg-amber-500/10 text-amber-600 dark:text-amber-400"
             />
         </div>
@@ -887,13 +969,18 @@ const seriesCategoria = computed(() =>
                             >Activos que requieren reposición</CardDescription
                         >
                     </div>
-                    <Badge
+                    <Link
                         v-if="stockBajoConSeveridad.length"
-                        variant="secondary"
-                        class="shrink-0 font-normal"
-                        >{{ stockBajoConSeveridad.length }} con stock
-                        bajo</Badge
+                        :href="hrefStockBajo"
+                        class="focus-visible:ring-ring shrink-0 rounded"
                     >
+                        <Badge
+                            variant="secondary"
+                            class="hover:bg-secondary/70 cursor-pointer font-normal transition-colors"
+                            >{{ stockBajoConSeveridad.length }} con stock
+                            bajo</Badge
+                        >
+                    </Link>
                 </CardHeader>
                 <CardContent class="space-y-1">
                     <EstadoVacio

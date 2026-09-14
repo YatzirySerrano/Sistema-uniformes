@@ -16,6 +16,7 @@ import {
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -303,13 +304,7 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                     <p v-if="r.ip">IP: {{ r.ip }}</p>
                 </div>
 
-                <Button
-                    variant="outline"
-                    size="sm"
-                    class="mt-1 w-full"
-                    @click="verDetalle(r)"
-                    >Ver detalle</Button
-                >
+                <BotonVer class="mt-1 w-full" @click="verDetalle(r)" />
             </div>
         </div>
 
@@ -355,12 +350,7 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                             {{ r.ip ?? '—' }}
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                @click="verDetalle(r)"
-                                >Ver detalle</Button
-                            >
+                            <BotonVer @click="verDetalle(r)" />
                         </td>
                     </tr>
                 </tbody>

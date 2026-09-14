@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Acciones\RegistrarTraspasoInventario;
+use App\Acciones\RegistrarTraspasoFirmado;
 use App\Enums\TipoMovimiento;
+use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Inventario\RegistrarTraspasoRequest;
@@ -23,10 +24,12 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
+use Throwable;
 
 /**
  * Historial de movimientos de inventario por empresa. Filtros por empresa y
@@ -252,24 +255,44 @@ class MovimientoInventarioController extends Controller
         return response()->json(['renglones' => $renglones]);
     }
 
-    public function almacenarTraspaso(RegistrarTraspasoRequest $request, RegistrarTraspasoInventario $accion): RedirectResponse
+    public function almacenarTraspaso(RegistrarTraspasoRequest $request, RegistrarTraspasoFirmado $accion): RedirectResponse
     {
         $datos = $request->validated();
 
-        $traspaso = $accion->ejecutar(
-            (int) $datos['empresa_origen_id'],
-            (int) $datos['almacen_origen_id'],
-            (int) $datos['empresa_destino_id'],
-            (int) $datos['almacen_destino_id'],
-            $datos['renglones'],
-            $request->user()->id,
-            $datos['motivo'] ?? null,
-            $datos['notas'] ?? null,
-        );
+        // Idempotencia: un doble submit o un reintento de red no debe
+        // registrar dos traspasos. La clave la genera el formulario (una por
+        // intento) — mismo patrón que Entregas.
+        $clave = $datos['idempotency_key'] ?? null;
+        if ($clave !== null && ! Cache::add("traspasos:idempotencia:{$clave}", true, now()->addMinutes(10))) {
+            throw new ExcepcionDeNegocioSimple('Este traspaso ya se registró o se está procesando. Revisa el historial de movimientos.');
+        }
 
-        return to_route('inventario.movimientos')->with('toast', [
+        try {
+            $acuse = $accion->ejecutar(
+                (int) $datos['empresa_origen_id'],
+                (int) $datos['almacen_origen_id'],
+                (int) $datos['empresa_destino_id'],
+                (int) $datos['almacen_destino_id'],
+                $datos['renglones'],
+                $request->user(),
+                $datos['firma'],
+                $datos['motivo'] ?? null,
+                $datos['notas'] ?? null,
+                $request->ip(),
+                $request->userAgent(),
+            );
+        } catch (Throwable $e) {
+            // Falló: se libera la clave para permitir un reintento legítimo.
+            if ($clave !== null) {
+                Cache::forget("traspasos:idempotencia:{$clave}");
+            }
+
+            throw $e;
+        }
+
+        return to_route('inventario.traspasos.show', $acuse->traspaso_inventario_id)->with('toast', [
             'type' => 'success',
-            'message' => "Traspaso {$traspaso->folio} registrado correctamente.",
+            'message' => "Traspaso {$acuse->traspaso->folio} registrado y firmado correctamente.",
         ]);
     }
 
@@ -292,6 +315,7 @@ class MovimientoInventarioController extends Controller
             'renglones.talla:id,valor',
             'renglones.unidadActivo:id,codigo',
             'renglones.unidadActivo.especificacion',
+            'acuse',
         ]);
 
         return Inertia::render('Inventario/Traspasos/Detalle', [
@@ -323,6 +347,14 @@ class MovimientoInventarioController extends Controller
                     'movimiento_salida_id' => $r->movimiento_salida_id,
                     'movimiento_entrada_id' => $r->movimiento_entrada_id,
                 ]),
+            ],
+            'acuse' => $traspaso->acuse === null ? null : [
+                'id' => $traspaso->acuse->id,
+                'firmante' => $traspaso->acuse->nombre_firmante_snapshot,
+                'firmado_en' => $traspaso->acuse->firmado_en->toIso8601String(),
+                'tiene_pdf' => $traspaso->acuse->tienePdf(),
+                'ver_pdf' => $request->user()->can('verPdf', $traspaso->acuse),
+                'ver_firma' => $request->user()->can('verFirma', $traspaso->acuse),
             ],
         ]);
     }

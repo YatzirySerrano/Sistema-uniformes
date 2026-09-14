@@ -49,9 +49,13 @@ class EntregaController extends Controller
         $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
             'empresa_id' => ['nullable', 'integer'],
+            'sucursal_id' => ['nullable', 'integer'],
+            'almacen_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'string'],
             'contrato_id' => ['nullable', 'integer'],
             'servicio_id' => ['nullable', 'integer'],
+            'desde' => ['nullable', 'date'],
+            'hasta' => ['nullable', 'date'],
         ]);
 
         $empresaFiltro = $this->empresaDelFiltro($request);
@@ -62,6 +66,8 @@ class EntregaController extends Controller
             ->when($filtros['buscar'] ?? null, fn ($q, $b) => $q->where(fn ($s) => $s
                 ->where('folio', 'like', "%{$b}%")
                 ->orWhereHas('colaborador', fn ($c) => $c->where('nombre_completo', 'like', "%{$b}%")->orWhere('numero_empleado', 'like', "%{$b}%"))))
+            ->when($filtros['sucursal_id'] ?? null, fn ($q, $s) => $q->where('sucursal_id', $s))
+            ->when($filtros['almacen_id'] ?? null, fn ($q, $a) => $q->where('almacen_id', $a))
             ->when($filtros['estado'] ?? null, fn ($q, $e) => $q->where('estado', $e))
             // Servicio es el snapshot histórico de la propia entrega
             // (`entregas_uniformes.servicio_id`); Contrato filtra por el
@@ -69,6 +75,8 @@ class EntregaController extends Controller
             // servicio VIGENTE del colaborador, que puede ya haber cambiado.
             ->when($filtros['servicio_id'] ?? null, fn ($q, $s) => $q->where('servicio_id', $s))
             ->when($filtros['contrato_id'] ?? null, fn ($q, $c) => $q->whereHas('servicio', fn ($sq) => $sq->where('contrato_id', $c)))
+            ->when($filtros['desde'] ?? null, fn ($q, $d) => $q->whereDate('fecha_entrega', '>=', $d))
+            ->when($filtros['hasta'] ?? null, fn ($q, $h) => $q->whereDate('fecha_entrega', '<=', $h))
             ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'encargado:id,name', 'servicio:id,nombre,contrato_id', 'servicio.contrato:id,nombre'])
             ->withCount('detalles')
             ->latest()

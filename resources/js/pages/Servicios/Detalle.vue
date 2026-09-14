@@ -5,11 +5,9 @@ import {
     Building2,
     ChevronLeft,
     ChevronRight,
-    Eye,
     FileSignature,
     Hash,
     MapPin,
-    Pencil,
     Power,
     ScrollText,
     Search,
@@ -21,6 +19,9 @@ import { computed, ref, watch } from 'vue';
 import AsignarColaboradoresDialog from '@/components/servicios/AsignarColaboradoresDialog.vue';
 import type { ServicioEditable } from '@/components/servicios/FormularioServicio.vue';
 import FormularioServicio from '@/components/servicios/FormularioServicio.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -240,22 +241,18 @@ function confirmarQuitar(): void {
             </div>
 
             <div class="flex flex-wrap gap-2">
+                <BotonEditar v-if="permisos.editar" @click="abrirEditar" />
+                <BotonEliminar
+                    v-if="permisos.administrar && servicio.activo"
+                    @click="alternarEstado"
+                />
                 <Button
-                    v-if="permisos.editar"
-                    variant="outline"
-                    size="sm"
-                    @click="abrirEditar"
-                >
-                    <Pencil class="size-3.5" /> Editar
-                </Button>
-                <Button
-                    v-if="permisos.administrar"
-                    :variant="servicio.activo ? 'ghost' : 'default'"
+                    v-else-if="permisos.administrar"
+                    variant="default"
                     size="sm"
                     @click="alternarEstado"
                 >
-                    <Power class="size-3.5" />
-                    {{ servicio.activo ? 'Eliminar' : 'Restaurar' }}
+                    <Power class="size-3.5" /> Restaurar
                 </Button>
             </div>
         </div>
@@ -437,11 +434,7 @@ function confirmarQuitar(): void {
                             </p>
                         </div>
                         <div class="flex flex-wrap gap-2">
-                            <Button variant="outline" size="sm" as-child>
-                                <Link :href="`/colaboradores/${c.id}`">
-                                    <Eye class="size-3.5" /> Ver
-                                </Link>
-                            </Button>
+                            <BotonVer :href="`/colaboradores/${c.id}`" />
                             <Button
                                 v-if="permisos.asignarColaboradores"
                                 variant="ghost"
@@ -504,19 +497,11 @@ function confirmarQuitar(): void {
                                 </td>
                                 <td class="py-2 pr-3">
                                     <div
-                                        class="flex justify-end gap-1.5 whitespace-nowrap"
+                                        class="flex flex-wrap justify-end gap-1.5"
                                     >
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            as-child
-                                        >
-                                            <Link
-                                                :href="`/colaboradores/${c.id}`"
-                                            >
-                                                <Eye class="size-3.5" /> Ver
-                                            </Link>
-                                        </Button>
+                                        <BotonVer
+                                            :href="`/colaboradores/${c.id}`"
+                                        />
                                         <Button
                                             v-if="permisos.asignarColaboradores"
                                             variant="ghost"

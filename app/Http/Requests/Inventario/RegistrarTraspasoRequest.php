@@ -40,6 +40,10 @@ class RegistrarTraspasoRequest extends FormRequest
             'almacen_destino_id' => ['required', 'integer'],
             'motivo' => ['nullable', 'string', 'max:255'],
             'notas' => ['nullable', 'string', 'max:1000'],
+            'firma' => ['required', 'string', 'max:3000000'],
+            // Una clave por intento de alta: evita que un doble submit
+            // registre dos traspasos (el backend la rechaza si ya la vio).
+            'idempotency_key' => ['nullable', 'uuid'],
 
             'renglones' => ['required', 'array', 'min:1', 'max:100'],
             'renglones.*.control' => ['required', Rule::in([TipoControlActivo::Cantidad->value, TipoControlActivo::SeguimientoIndividual->value])],
@@ -201,6 +205,7 @@ class RegistrarTraspasoRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'firma.required' => 'La firma del responsable es obligatoria para confirmar el traspaso.',
             'renglones.required' => 'Agrega al menos un renglón al traspaso.',
             'renglones.*.control.in' => 'Tipo de control no válido.',
             'renglones.*.activo_origen_id.required' => 'Selecciona el activo a traspasar.',

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
-import { Plus, Search, ShieldAlert, Trash2, X } from '@lucide/vue';
+import { Plus, Search, ShieldAlert, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -337,33 +339,21 @@ function confirmarEliminar() {
                         </Tooltip>
                     </div>
 
-                    <div class="mt-auto flex items-center gap-1 pt-1">
-                        <Button
+                    <div
+                        class="mt-auto flex flex-wrap items-center gap-1.5 pt-1"
+                    >
+                        <BotonEditar
                             v-if="permisos.editar"
-                            variant="outline"
-                            size="sm"
+                            etiqueta="Editar permisos"
                             @click="editar(r)"
-                        >
-                            Editar permisos
-                        </Button>
-                        <Tooltip
+                        />
+                        <BotonEliminar
                             v-if="
                                 permisos.editar && !r.base && r.usuarios === 0
                             "
-                        >
-                            <TooltipTrigger as-child>
-                                <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    aria-label="Eliminar rol"
-                                    class="text-destructive hover:bg-destructive/10 hover:text-destructive ml-auto"
-                                    @click="pedirEliminar(r)"
-                                >
-                                    <Trash2 class="size-4" />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Eliminar rol</TooltipContent>
-                        </Tooltip>
+                            class="ml-auto"
+                            @click="pedirEliminar(r)"
+                        />
                         <Tooltip v-else-if="permisos.editar && r.usuarios > 0">
                             <TooltipTrigger as-child>
                                 <span
@@ -412,38 +402,21 @@ function confirmarEliminar() {
                             <td class="px-3 py-2">{{ r.permisos.length }}</td>
                             <td class="px-3 py-2 text-right">
                                 <div
-                                    class="flex items-center justify-end gap-1"
+                                    class="flex flex-wrap items-center justify-end gap-1.5"
                                 >
-                                    <Button
+                                    <BotonEditar
                                         v-if="permisos.editar"
-                                        variant="outline"
-                                        size="sm"
+                                        etiqueta="Editar permisos"
                                         @click="editar(r)"
-                                    >
-                                        Editar permisos
-                                    </Button>
-                                    <Tooltip
+                                    />
+                                    <BotonEliminar
                                         v-if="
                                             permisos.editar &&
                                             !r.base &&
                                             r.usuarios === 0
                                         "
-                                    >
-                                        <TooltipTrigger as-child>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                aria-label="Eliminar rol"
-                                                class="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                                @click="pedirEliminar(r)"
-                                            >
-                                                <Trash2 class="size-4" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent
-                                            >Eliminar rol</TooltipContent
-                                        >
-                                    </Tooltip>
+                                        @click="pedirEliminar(r)"
+                                    />
                                     <Tooltip
                                         v-else-if="
                                             permisos.editar && r.usuarios > 0

@@ -128,6 +128,7 @@ class DevolucionController extends Controller
         return $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
             'sucursal_id' => ['nullable', 'integer'],
+            'almacen_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'string'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
@@ -153,6 +154,7 @@ class DevolucionController extends Controller
             // `empresa_id` arriba: una sucursal de otra empresa nunca filtra
             // nada ajeno, simplemente no coincide con ninguna fila visible.
             ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
+            ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $a) => $q->where('almacen_id', $a))
             ->when($filtros['estado'] ?? null, fn (Builder $q, $e) => $q->where('estado', $e))
             ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('fecha', '>=', $d))
             ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('fecha', '<=', $h))

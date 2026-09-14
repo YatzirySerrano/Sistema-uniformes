@@ -74,6 +74,38 @@ class RegistrarTraspasoInventario
         ?string $motivo = null,
         ?string $notas = null,
     ): TraspasoInventario {
+        return DB::transaction(fn (): TraspasoInventario => $this->crearYRegistrar(
+            $empresaOrigenId, $almacenOrigenId, $empresaDestinoId, $almacenDestinoId,
+            $renglones, $realizadoPor, $motivo, $notas,
+        ));
+    }
+
+    /**
+     * Núcleo transaccional reutilizable: NO abre `DB::transaction` — asume
+     * que ya hay una activa (la abre el llamador: `ejecutar()` para uso
+     * directo/histórico, `RegistrarTraspasoFirmado` para el flujo con firma
+     * obligatoria). Crea el `TraspasoInventario`, sus renglones y mueve el
+     * inventario real. NO crea el acuse (eso es `ConfirmarAcuseTraspaso`).
+     *
+     * @param  array<int, array{
+     *     control: string,
+     *     activo_origen_id: int|string,
+     *     talla_id?: int|string|null,
+     *     cantidad?: int|string|null,
+     *     unidad_ids?: array<int, int|string>|null,
+     *     activo_destino_id?: int|string|null,
+     * }>  $renglones
+     */
+    public function crearYRegistrar(
+        int $empresaOrigenId,
+        int $almacenOrigenId,
+        int $empresaDestinoId,
+        int $almacenDestinoId,
+        array $renglones,
+        ?int $realizadoPor,
+        ?string $motivo = null,
+        ?string $notas = null,
+    ): TraspasoInventario {
         $empresaOrigen = Empresa::query()->findOr($empresaOrigenId, fn () => throw new ExcepcionDeNegocioSimple('La empresa origen no existe.'));
         $empresaDestino = Empresa::query()->findOr($empresaDestinoId, fn () => throw new ExcepcionDeNegocioSimple('La empresa destino no existe.'));
         $almacenOrigen = Almacen::query()->findOr($almacenOrigenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén origen no existe.'));
@@ -92,71 +124,69 @@ class RegistrarTraspasoInventario
             throw new ExcepcionDeNegocioSimple('Agrega al menos un renglón al traspaso.');
         }
 
-        return DB::transaction(function () use ($empresaOrigen, $empresaDestino, $almacenOrigen, $almacenDestino, $renglones, $realizadoPor, $motivo, $notas): TraspasoInventario {
-            $traspaso = TraspasoInventario::query()->create([
-                'folio' => $this->folios->siguiente(ServicioFolios::TRASPASO),
-                'tipo' => $empresaOrigen->id === $empresaDestino->id
-                    ? TraspasoInventario::TIPO_MISMA_EMPRESA
-                    : TraspasoInventario::TIPO_INTEREMPRESA,
-                'empresa_origen_id' => $empresaOrigen->id,
-                'almacen_origen_id' => $almacenOrigen->id,
-                'empresa_destino_id' => $empresaDestino->id,
-                'almacen_destino_id' => $almacenDestino->id,
-                'estado' => 'completado',
-                'motivo' => $motivo,
-                'notas' => $notas,
-                'realizado_por' => $realizadoPor,
-                'ocurrido_en' => now(),
-            ]);
+        $traspaso = TraspasoInventario::query()->create([
+            'folio' => $this->folios->siguiente(ServicioFolios::TRASPASO),
+            'tipo' => $empresaOrigen->id === $empresaDestino->id
+                ? TraspasoInventario::TIPO_MISMA_EMPRESA
+                : TraspasoInventario::TIPO_INTEREMPRESA,
+            'empresa_origen_id' => $empresaOrigen->id,
+            'almacen_origen_id' => $almacenOrigen->id,
+            'empresa_destino_id' => $empresaDestino->id,
+            'almacen_destino_id' => $almacenDestino->id,
+            'estado' => 'completado',
+            'motivo' => $motivo,
+            'notas' => $notas,
+            'realizado_por' => $realizadoPor,
+            'ocurrido_en' => now(),
+        ]);
 
-            foreach ($renglones as $renglon) {
-                $control = TipoControlActivo::from((string) $renglon['control']);
-                $activoOrigen = Activo::query()
-                    ->where('empresa_id', $empresaOrigen->id)
-                    ->findOr((int) $renglon['activo_origen_id'], fn () => throw new ExcepcionDeNegocioSimple('Un activo origen no pertenece a la empresa origen.'));
+        foreach ($renglones as $renglon) {
+            $control = TipoControlActivo::from((string) $renglon['control']);
+            $activoOrigen = Activo::query()
+                ->where('empresa_id', $empresaOrigen->id)
+                ->findOr((int) $renglon['activo_origen_id'], fn () => throw new ExcepcionDeNegocioSimple('Un activo origen no pertenece a la empresa origen.'));
 
-                if ($activoOrigen->tipo_control !== $control) {
-                    throw new ExcepcionDeNegocioSimple('El tipo de control indicado no coincide con el del activo «'.$activoOrigen->nombre.'».');
-                }
-
-                $manualDestinoId = ($renglon['activo_destino_id'] ?? null) !== null ? (int) $renglon['activo_destino_id'] : null;
-
-                if ($control === TipoControlActivo::Cantidad) {
-                    $this->traspasarCantidad($traspaso, $empresaOrigen, $almacenOrigen, $empresaDestino, $almacenDestino, $activoOrigen, $renglon, $manualDestinoId, $realizadoPor);
-
-                    continue;
-                }
-
-                $this->traspasarUnidades($traspaso, $empresaOrigen, $almacenOrigen, $empresaDestino, $almacenDestino, $activoOrigen, $renglon, $manualDestinoId, $realizadoPor);
+            if ($activoOrigen->tipo_control !== $control) {
+                throw new ExcepcionDeNegocioSimple('El tipo de control indicado no coincide con el del activo «'.$activoOrigen->nombre.'».');
             }
 
-            $this->auditoria->registrar('inventario', 'traspaso', [
-                'tipo_entidad' => TraspasoInventario::class,
-                'entidad_id' => $traspaso->getKey(),
-                'empresa_id' => $empresaOrigen->id,
-                'motivo' => $motivo,
-                'descripcion' => sprintf(
-                    'Traspaso %s: %s / %s → %s / %s (%d renglón(es)).',
-                    $traspaso->folio,
-                    $empresaOrigen->nombre_comercial,
-                    $almacenOrigen->nombre,
-                    $empresaDestino->nombre_comercial,
-                    $almacenDestino->nombre,
-                    $traspaso->renglones()->count(),
-                ),
-                'valores_nuevos' => [
-                    'folio' => $traspaso->folio,
-                    'tipo' => $traspaso->tipo,
-                    'empresa_origen' => $empresaOrigen->nombre_comercial,
-                    'almacen_origen' => $almacenOrigen->nombre,
-                    'empresa_destino' => $empresaDestino->nombre_comercial,
-                    'almacen_destino' => $almacenDestino->nombre,
-                    'renglones' => $traspaso->renglones()->count(),
-                ],
-            ]);
+            $manualDestinoId = ($renglon['activo_destino_id'] ?? null) !== null ? (int) $renglon['activo_destino_id'] : null;
 
-            return $traspaso->load('renglones');
-        });
+            if ($control === TipoControlActivo::Cantidad) {
+                $this->traspasarCantidad($traspaso, $empresaOrigen, $almacenOrigen, $empresaDestino, $almacenDestino, $activoOrigen, $renglon, $manualDestinoId, $realizadoPor);
+
+                continue;
+            }
+
+            $this->traspasarUnidades($traspaso, $empresaOrigen, $almacenOrigen, $empresaDestino, $almacenDestino, $activoOrigen, $renglon, $manualDestinoId, $realizadoPor);
+        }
+
+        $this->auditoria->registrar('inventario', 'traspaso', [
+            'tipo_entidad' => TraspasoInventario::class,
+            'entidad_id' => $traspaso->getKey(),
+            'empresa_id' => $empresaOrigen->id,
+            'motivo' => $motivo,
+            'descripcion' => sprintf(
+                'Traspaso %s: %s / %s → %s / %s (%d renglón(es)).',
+                $traspaso->folio,
+                $empresaOrigen->nombre_comercial,
+                $almacenOrigen->nombre,
+                $empresaDestino->nombre_comercial,
+                $almacenDestino->nombre,
+                $traspaso->renglones()->count(),
+            ),
+            'valores_nuevos' => [
+                'folio' => $traspaso->folio,
+                'tipo' => $traspaso->tipo,
+                'empresa_origen' => $empresaOrigen->nombre_comercial,
+                'almacen_origen' => $almacenOrigen->nombre,
+                'empresa_destino' => $empresaDestino->nombre_comercial,
+                'almacen_destino' => $almacenDestino->nombre,
+                'renglones' => $traspaso->renglones()->count(),
+            ],
+        ]);
+
+        return $traspaso->load('renglones');
     }
 
     /**

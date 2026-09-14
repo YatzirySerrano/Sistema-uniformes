@@ -5,7 +5,6 @@ import {
     Building2,
     FileSignature,
     MapPin,
-    Pencil,
     Plus,
     Search,
     X,
@@ -14,6 +13,8 @@ import { computed, ref, watch } from 'vue';
 import type { ContratoEditable } from '@/components/contratos/FormularioContrato.vue';
 import FormularioContrato from '@/components/contratos/FormularioContrato.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -424,21 +425,21 @@ function alternarEstado(c: ContratoFila): void {
 
                     <div class="mt-auto flex flex-wrap gap-2 pt-1">
                         <BotonVer @click.stop="verDetalle(c)" />
-                        <Button
+                        <BotonEditar
                             v-if="permisos.editar"
-                            variant="ghost"
-                            size="sm"
                             @click.stop="editar(c)"
-                        >
-                            <Pencil class="size-3.5" /> Editar
-                        </Button>
+                        />
+                        <BotonEliminar
+                            v-if="permisos.administrar && c.activo"
+                            @click.stop="alternarEstado(c)"
+                        />
                         <Button
-                            v-if="permisos.administrar"
-                            variant="ghost"
+                            v-else-if="permisos.administrar"
+                            variant="outline"
                             size="sm"
                             @click.stop="alternarEstado(c)"
                         >
-                            {{ c.activo ? 'Eliminar' : 'Restaurar' }}
+                            Restaurar
                         </Button>
                     </div>
                 </div>
@@ -489,23 +490,23 @@ function alternarEstado(c: ContratoFila): void {
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex justify-end gap-2">
+                            <div class="flex flex-wrap justify-end gap-2">
                                 <BotonVer @click="verDetalle(c)" />
-                                <Button
+                                <BotonEditar
                                     v-if="permisos.editar"
-                                    variant="ghost"
-                                    size="sm"
                                     @click="editar(c)"
-                                >
-                                    <Pencil class="size-3.5" /> Editar
-                                </Button>
+                                />
+                                <BotonEliminar
+                                    v-if="permisos.administrar && c.activo"
+                                    @click="alternarEstado(c)"
+                                />
                                 <Button
-                                    v-if="permisos.administrar"
-                                    variant="ghost"
+                                    v-else-if="permisos.administrar"
+                                    variant="outline"
                                     size="sm"
                                     @click="alternarEstado(c)"
                                 >
-                                    {{ c.activo ? 'Eliminar' : 'Restaurar' }}
+                                    Restaurar
                                 </Button>
                             </div>
                         </td>

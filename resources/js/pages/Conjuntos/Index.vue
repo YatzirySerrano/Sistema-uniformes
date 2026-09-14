@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Boxes, Package, Pencil, Plus, Search, X } from '@lucide/vue';
+import { Boxes, Package, Plus, Search, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -292,24 +295,22 @@ const vista = useVistaPreferida('conjuntos');
                 </p>
 
                 <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                    <Button
+                    <BotonEditar
                         v-if="permisos.editar"
-                        variant="ghost"
-                        size="sm"
-                        as-child
+                        :href="`/conjuntos/${c.id}/editar`"
                         @click.stop
-                    >
-                        <Link :href="`/conjuntos/${c.id}/editar`">
-                            <Pencil class="size-3.5" /> Editar
-                        </Link>
-                    </Button>
+                    />
+                    <BotonEliminar
+                        v-if="permisos.administrar && c.activo"
+                        @click.stop="alternarEstado(c)"
+                    />
                     <Button
-                        v-if="permisos.administrar"
-                        variant="ghost"
+                        v-else-if="permisos.administrar"
+                        variant="outline"
                         size="sm"
                         @click.stop="alternarEstado(c)"
                     >
-                        {{ c.activo ? 'Eliminar' : 'Restaurar' }}
+                        Restaurar
                     </Button>
                 </div>
             </div>
@@ -350,29 +351,23 @@ const vista = useVistaPreferida('conjuntos');
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex justify-end gap-2">
-                                <Button variant="outline" size="sm" as-child>
-                                    <Link :href="`/conjuntos/${c.id}`"
-                                        >Ver</Link
-                                    >
-                                </Button>
-                                <Button
+                            <div class="flex flex-wrap justify-end gap-2">
+                                <BotonVer :href="`/conjuntos/${c.id}`" />
+                                <BotonEditar
                                     v-if="permisos.editar"
-                                    variant="ghost"
-                                    size="sm"
-                                    as-child
-                                >
-                                    <Link :href="`/conjuntos/${c.id}/editar`"
-                                        >Editar</Link
-                                    >
-                                </Button>
+                                    :href="`/conjuntos/${c.id}/editar`"
+                                />
+                                <BotonEliminar
+                                    v-if="permisos.administrar && c.activo"
+                                    @click="alternarEstado(c)"
+                                />
                                 <Button
-                                    v-if="permisos.administrar"
-                                    variant="ghost"
+                                    v-else-if="permisos.administrar"
+                                    variant="outline"
                                     size="sm"
                                     @click="alternarEstado(c)"
                                 >
-                                    {{ c.activo ? 'Eliminar' : 'Restaurar' }}
+                                    Restaurar
                                 </Button>
                             </div>
                         </td>

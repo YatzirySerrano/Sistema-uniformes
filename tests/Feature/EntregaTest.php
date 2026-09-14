@@ -232,3 +232,44 @@ it('la petición HTTP de creación busca la entrega y expone empresa, almacén y
             ->where('entrega.items.0.cantidad', 2),
         );
 });
+
+it('el listado de Entregas filtra por rango de fechas, sucursal y almacén (coherencia con el KPI del Dashboard)', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+
+    $dentro = $this->accion->ejecutar(
+        $this->datos['colaboradorA']->id,
+        $this->datos['almacenA']->id,
+        $this->encargado->id,
+        now()->toDateString(),
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        [],
+        [],
+    );
+    EntregaUniforme::query()->whereKey($dentro->id)->update(['fecha_entrega' => now()->subDays(3)]);
+
+    $fuera = $this->accion->ejecutar(
+        $this->datos['colaboradorA']->id,
+        $this->datos['almacenA']->id,
+        $this->encargado->id,
+        now()->toDateString(),
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        [],
+        [],
+    );
+    EntregaUniforme::query()->whereKey($fuera->id)->update(['fecha_entrega' => now()->subDays(60)]);
+
+    $desde = now()->subDays(10)->toDateString();
+    $hasta = now()->toDateString();
+
+    $this->actingAs($admin)
+        ->get("/entregas?empresa_id={$this->datos['empresaA']->id}&desde={$desde}&hasta={$hasta}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('entregas.data', 1)->where('entregas.data.0.id', $dentro->id));
+
+    // sucursal_id/almacen_id: filtros silenciosos usados por el enlace del
+    // Dashboard, sin control propio en esta pantalla, pero deben acotar igual.
+    $this->actingAs($admin)
+        ->get("/entregas?empresa_id={$this->datos['empresaA']->id}&sucursal_id={$this->datos['sucursalB']->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('entregas.data', 0));
+});

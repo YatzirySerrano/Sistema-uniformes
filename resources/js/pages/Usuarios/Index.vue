@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Pencil, Plus, Search, X } from '@lucide/vue';
+import { Plus, Search, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -304,18 +306,18 @@ function confirmarEstado(): void {
                     {{ u.empresas.join(', ') || 'Sin empresas asignadas' }}
                 </p>
                 <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                    <Button variant="ghost" size="sm" as-child>
-                        <Link :href="`/usuarios/${u.id}/editar`">
-                            <Pencil class="size-3.5" /> Editar
-                        </Link>
-                    </Button>
+                    <BotonEditar :href="`/usuarios/${u.id}/editar`" />
+                    <BotonEliminar
+                        v-if="u.puedeCambiarEstado && u.activo"
+                        @click="toggle(u)"
+                    />
                     <Button
-                        v-if="u.puedeCambiarEstado"
-                        variant="ghost"
+                        v-else-if="u.puedeCambiarEstado"
+                        variant="outline"
                         size="sm"
                         @click="toggle(u)"
                     >
-                        {{ u.activo ? 'Eliminar' : 'Restaurar' }}
+                        Restaurar
                     </Button>
                 </div>
             </div>
@@ -366,20 +368,24 @@ function confirmarEstado(): void {
                                 >{{ u.activo ? 'Activo' : 'Eliminado' }}</Badge
                             >
                         </td>
-                        <td class="px-3 py-2 text-right whitespace-nowrap">
-                            <Link
-                                :href="`/usuarios/${u.id}/editar`"
-                                class="text-primary text-xs hover:underline"
-                                >Editar</Link
-                            >
-                            <button
-                                v-if="u.puedeCambiarEstado"
-                                type="button"
-                                class="text-primary ml-3 text-xs hover:underline"
-                                @click="toggle(u)"
-                            >
-                                {{ u.activo ? 'Eliminar' : 'Restaurar' }}
-                            </button>
+                        <td class="px-3 py-2 text-right">
+                            <div class="flex flex-wrap justify-end gap-2">
+                                <BotonEditar
+                                    :href="`/usuarios/${u.id}/editar`"
+                                />
+                                <BotonEliminar
+                                    v-if="u.puedeCambiarEstado && u.activo"
+                                    @click="toggle(u)"
+                                />
+                                <Button
+                                    v-else-if="u.puedeCambiarEstado"
+                                    variant="outline"
+                                    size="sm"
+                                    @click="toggle(u)"
+                                >
+                                    Restaurar
+                                </Button>
+                            </div>
                         </td>
                     </tr>
                 </tbody>

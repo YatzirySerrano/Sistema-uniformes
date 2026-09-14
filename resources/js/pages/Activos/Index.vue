@@ -5,14 +5,15 @@ import {
     Building2,
     Layers,
     Package,
-    Pencil,
     Plus,
     Ruler,
     Search,
-    SquareArrowOutUpRight,
     X,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -609,31 +610,23 @@ const vista = useVistaPreferida('activos');
                 </div>
 
                 <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        @click.stop="router.visit(`/activos/${a.id}`)"
-                    >
-                        <SquareArrowOutUpRight class="size-3.5" /> Ver detalle
-                    </Button>
-                    <Button
+                    <BotonVer :href="`/activos/${a.id}`" @click.stop />
+                    <BotonEditar
                         v-if="permisos.editar"
-                        variant="ghost"
-                        size="sm"
-                        as-child
+                        :href="`/activos/${a.id}/editar`"
                         @click.stop
-                    >
-                        <Link :href="`/activos/${a.id}/editar`">
-                            <Pencil class="size-3.5" /> Editar
-                        </Link>
-                    </Button>
+                    />
+                    <BotonEliminar
+                        v-if="permisos.administrar && a.activo"
+                        @click.stop="alternarEstado(a)"
+                    />
                     <Button
-                        v-if="permisos.administrar"
-                        variant="ghost"
+                        v-else-if="permisos.administrar"
+                        variant="outline"
                         size="sm"
                         @click.stop="alternarEstado(a)"
                     >
-                        {{ a.activo ? 'Eliminar' : 'Restaurar' }}
+                        Restaurar
                     </Button>
                 </div>
             </div>
@@ -697,27 +690,23 @@ const vista = useVistaPreferida('activos');
                             </Badge>
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex justify-end gap-2">
-                                <Button variant="outline" size="sm" as-child>
-                                    <Link :href="`/activos/${a.id}`">Ver</Link>
-                                </Button>
-                                <Button
+                            <div class="flex flex-wrap justify-end gap-2">
+                                <BotonVer :href="`/activos/${a.id}`" />
+                                <BotonEditar
                                     v-if="permisos.editar"
-                                    variant="ghost"
-                                    size="sm"
-                                    as-child
-                                >
-                                    <Link :href="`/activos/${a.id}/editar`"
-                                        >Editar</Link
-                                    >
-                                </Button>
+                                    :href="`/activos/${a.id}/editar`"
+                                />
+                                <BotonEliminar
+                                    v-if="permisos.administrar && a.activo"
+                                    @click="alternarEstado(a)"
+                                />
                                 <Button
-                                    v-if="permisos.administrar"
-                                    variant="ghost"
+                                    v-else-if="permisos.administrar"
+                                    variant="outline"
                                     size="sm"
                                     @click="alternarEstado(a)"
                                 >
-                                    {{ a.activo ? 'Eliminar' : 'Restaurar' }}
+                                    Restaurar
                                 </Button>
                             </div>
                         </td>

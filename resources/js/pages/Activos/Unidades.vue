@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import {
-    ImageOff,
-    QrCode,
-    Search,
-    SquareArrowOutUpRight,
-    X,
-} from '@lucide/vue';
+import { ImageOff, QrCode, Search, X } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -521,12 +516,7 @@ const vista = useVistaPreferida('unidades-activo');
                 </p>
 
                 <div class="mt-auto flex flex-wrap gap-2">
-                    <Button variant="outline" size="sm" as-child>
-                        <Link :href="`/activos/unidades/${u.public_token}`">
-                            <SquareArrowOutUpRight class="size-3.5" /> Ver
-                            detalle
-                        </Link>
-                    </Button>
+                    <BotonVer :href="`/activos/unidades/${u.public_token}`" />
                     <Button
                         variant="ghost"
                         size="sm"
@@ -647,12 +637,9 @@ const vista = useVistaPreferida('unidades-activo');
                                 >
                                     <QrCode class="size-3.5" /> QR
                                 </Button>
-                                <Button variant="outline" size="sm" as-child>
-                                    <Link
-                                        :href="`/activos/unidades/${u.public_token}`"
-                                        >Ver</Link
-                                    >
-                                </Button>
+                                <BotonVer
+                                    :href="`/activos/unidades/${u.public_token}`"
+                                />
                             </div>
                         </td>
                     </tr>

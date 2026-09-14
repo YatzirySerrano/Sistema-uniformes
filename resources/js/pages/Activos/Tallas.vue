@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
-import {
-    ArrowDown,
-    ArrowUp,
-    GripVertical,
-    Pencil,
-    Plus,
-    Trash2,
-} from '@lucide/vue';
+import { ArrowDown, ArrowUp, GripVertical, Plus } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import InputError from '@/components/InputError.vue';
@@ -281,25 +276,16 @@ watch(
 
                         <div
                             v-if="puedeAdministrar"
-                            class="flex shrink-0 items-center gap-1"
+                            class="flex shrink-0 flex-wrap items-center gap-1.5"
                         >
-                            <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                :aria-label="`Editar ${t.valor}`"
+                            <BotonEditar
+                                etiqueta="Editar"
                                 @click="abrirEdicion(t)"
-                            >
-                                <Pencil class="size-4" />
-                            </Button>
-                            <Button
+                            />
+                            <BotonEliminar
                                 v-if="t.activos_count === 0"
-                                variant="ghost"
-                                size="icon-sm"
-                                :aria-label="`Eliminar ${t.valor}`"
                                 @click="eliminar(t.id)"
-                            >
-                                <Trash2 class="size-4" />
-                            </Button>
+                            />
                         </div>
                     </div>
                 </template>

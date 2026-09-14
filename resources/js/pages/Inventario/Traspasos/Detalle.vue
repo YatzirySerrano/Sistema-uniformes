@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ArrowLeft, ArrowRight } from '@lucide/vue';
+import { ArrowLeft, ArrowRight, Download, FileSignature } from '@lucide/vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fechaHora } from '@/lib/fecha';
@@ -35,6 +35,14 @@ defineProps<{
         almacen_destino: string | null;
         renglones: Renglon[];
     };
+    acuse: {
+        id: number;
+        firmante: string;
+        firmado_en: string;
+        tiene_pdf: boolean;
+        ver_pdf: boolean;
+        ver_firma: boolean;
+    } | null;
 }>();
 
 defineOptions({
@@ -56,11 +64,43 @@ function fecha(iso: string): string {
     <Head :title="`Traspaso ${traspaso.folio}`" />
 
     <div class="flex w-full flex-col gap-4 p-4">
-        <Button variant="ghost" size="sm" as-child class="w-fit">
-            <Link href="/inventario/movimientos">
-                <ArrowLeft class="size-4" /> Volver a movimientos
-            </Link>
-        </Button>
+        <div class="flex flex-wrap items-center gap-2">
+            <Button variant="ghost" size="sm" as-child class="w-fit">
+                <Link href="/inventario/movimientos">
+                    <ArrowLeft class="size-4" /> Volver a movimientos
+                </Link>
+            </Button>
+            <div class="ml-auto flex flex-wrap gap-2">
+                <Button
+                    v-if="acuse?.tiene_pdf && acuse.ver_pdf"
+                    variant="outline"
+                    size="sm"
+                    as-child
+                >
+                    <a
+                        :href="`/acuses-traspaso/${acuse.id}/pdf`"
+                        target="_blank"
+                        rel="noopener"
+                    >
+                        <Download class="size-4" /> Descargar PDF
+                    </a>
+                </Button>
+                <Button
+                    v-if="acuse?.ver_firma"
+                    variant="outline"
+                    size="sm"
+                    as-child
+                >
+                    <a
+                        :href="`/acuses-traspaso/${acuse.id}/firma`"
+                        target="_blank"
+                        rel="noopener"
+                    >
+                        <FileSignature class="size-4" /> Ver firma
+                    </a>
+                </Button>
+            </div>
+        </div>
 
         <div class="rounded-xl border p-4">
             <div class="flex flex-wrap items-center gap-2">
@@ -114,6 +154,20 @@ function fecha(iso: string): string {
                     <dd class="text-pretty">{{ traspaso.notas }}</dd>
                 </div>
             </dl>
+        </div>
+
+        <div
+            v-if="acuse"
+            class="rounded-xl border border-emerald-500/40 bg-emerald-50/50 p-4 text-sm dark:bg-emerald-950/20"
+        >
+            <div class="flex items-center gap-2 font-medium">
+                <FileSignature class="size-4" />
+                Traspaso confirmado y firmado
+            </div>
+            <p class="text-muted-foreground mt-1">
+                Firmado por <strong>{{ acuse.firmante }}</strong> el
+                {{ fecha(acuse.firmado_en) }}.
+            </p>
         </div>
 
         <section class="rounded-xl border p-4">
