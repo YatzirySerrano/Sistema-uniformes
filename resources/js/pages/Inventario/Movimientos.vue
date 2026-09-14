@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { ArrowLeftRight } from '@lucide/vue';
+import {
+    AlertTriangle,
+    ArrowLeftRight,
+    Calendar,
+    PackageMinus,
+    PackagePlus,
+    Trash2,
+    Undo2,
+    User,
+    Warehouse,
+    type LucideIcon,
+} from '@lucide/vue';
 import { ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -17,6 +28,7 @@ import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Movimiento = {
     id: number;
+    tipo: string;
     tipo_etiqueta: string;
     direccion: string;
     cantidad: number;
@@ -33,6 +45,27 @@ type Movimiento = {
     realizado_por: string | null;
     ocurrido_en: string;
 };
+
+/** Icono por tipo de movimiento — con significado, no sólo decorativo. */
+const ICONOS_TIPO: Record<string, LucideIcon> = {
+    inicial: PackagePlus,
+    entrada: PackagePlus,
+    ajuste_entrada: PackagePlus,
+    correccion: PackagePlus,
+    migracion_legacy: PackagePlus,
+    devolucion: Undo2,
+    recuperacion: Undo2,
+    entrega: PackageMinus,
+    ajuste_salida: PackageMinus,
+    baja: Trash2,
+    incidencia: AlertTriangle,
+    traspaso_entrada: ArrowLeftRight,
+    traspaso_salida: ArrowLeftRight,
+};
+
+function iconoTipo(tipo: string): LucideIcon {
+    return ICONOS_TIPO[tipo] ?? PackagePlus;
+}
 
 const props = defineProps<{
     movimientos: Paginado<Movimiento>;
@@ -186,13 +219,20 @@ const vista = useVistaPreferida('movimientos', 'tabla');
             v-else-if="vista === 'cards'"
             class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
         >
-            <article
+            <Link
                 v-for="m in movimientos.data"
                 :key="m.id"
-                class="flex flex-col gap-2 rounded-xl border p-4 text-sm"
+                :href="`/inventario/movimientos/${m.id}`"
+                class="hover:bg-muted/40 focus-visible:ring-ring flex flex-col gap-2 rounded-xl border p-4 text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
             >
                 <div class="flex items-start justify-between gap-2">
-                    <span class="font-medium">{{ m.tipo_etiqueta }}</span>
+                    <span class="flex items-center gap-1.5 font-medium">
+                        <component
+                            :is="iconoTipo(m.tipo)"
+                            class="text-muted-foreground size-4 shrink-0"
+                        />
+                        {{ m.tipo_etiqueta }}
+                    </span>
                     <span
                         class="font-semibold whitespace-nowrap"
                         :class="
@@ -207,7 +247,9 @@ const vista = useVistaPreferida('movimientos', 'tabla');
                 </div>
                 <p>
                     {{ m.activo }}
-                    <span class="text-muted-foreground">· {{ m.talla }}</span>
+                    <span v-if="m.talla" class="text-muted-foreground"
+                        >· {{ m.talla }}</span
+                    >
                     <span
                         v-if="m.unidad_codigo"
                         class="text-muted-foreground font-mono text-xs"
@@ -215,27 +257,28 @@ const vista = useVistaPreferida('movimientos', 'tabla');
                         · {{ m.unidad_codigo }}</span
                     >
                 </p>
-                <p class="text-muted-foreground text-xs">
-                    Existencia: {{ m.existencia_anterior }} →
-                    {{ m.existencia_resultante }}
-                </p>
-                <p class="text-muted-foreground text-xs">
-                    {{ m.empresa ?? '—' }} · {{ m.almacen ?? '—'
-                    }}<span v-if="m.sucursal"> · {{ m.sucursal }}</span>
-                </p>
                 <p v-if="m.referencia" class="text-muted-foreground text-xs">
                     {{ m.referencia }}
                 </p>
-                <p v-if="m.motivo" class="text-muted-foreground text-xs italic">
-                    {{ m.motivo }}
-                </p>
                 <div
-                    class="text-muted-foreground mt-auto flex items-center justify-between pt-1 text-xs"
+                    class="text-muted-foreground mt-auto flex items-center justify-between gap-2 pt-1 text-xs"
                 >
-                    <span>{{ fecha(m.ocurrido_en) }}</span>
-                    <span>{{ m.realizado_por ?? '—' }}</span>
+                    <span class="flex min-w-0 items-center gap-1 truncate">
+                        <Warehouse class="size-3.5 shrink-0" />
+                        {{ m.almacen ?? '—' }}
+                    </span>
+                    <span class="flex shrink-0 items-center gap-1">
+                        <Calendar class="size-3.5" />
+                        {{ fecha(m.ocurrido_en) }}
+                    </span>
                 </div>
-            </article>
+                <p
+                    v-if="m.realizado_por"
+                    class="text-muted-foreground flex items-center gap-1 text-xs"
+                >
+                    <User class="size-3.5 shrink-0" /> {{ m.realizado_por }}
+                </p>
+            </Link>
         </div>
 
         <div v-else class="overflow-x-auto rounded-xl border">

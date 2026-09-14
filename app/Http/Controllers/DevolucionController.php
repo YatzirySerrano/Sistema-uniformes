@@ -22,6 +22,7 @@ use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -48,6 +49,7 @@ class DevolucionController extends Controller
         $this->authorize('viewAny', Devolucion::class);
 
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
 
         $devoluciones = $this->consultaDevoluciones($request)
             ->paginate($this->porPagina())
@@ -57,6 +59,7 @@ class DevolucionController extends Controller
                 'folio' => $d->folio,
                 'empresa' => $d->empresa?->nombre_comercial,
                 'colaborador' => $d->colaborador?->nombre_completo,
+                'numero_empleado' => $d->colaborador?->numero_empleado,
                 'entrega_folio' => $d->entrega?->folio,
                 'sucursal' => $d->sucursal?->nombre,
                 'registrada_por' => $d->registradaPor?->name,
@@ -69,8 +72,9 @@ class DevolucionController extends Controller
 
         return Inertia::render('Devoluciones/Index', [
             'devoluciones' => $devoluciones,
-            'filtros' => ['empresa_id' => $empresaFiltro?->id],
+            'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'estados' => collect(EstadoDevolucion::cases())->map(fn ($e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
             'puedeCrear' => $request->user()->can('create', Devolucion::class),
         ]);
     }
@@ -83,6 +87,7 @@ class DevolucionController extends Controller
         $this->authorize('viewAny', Devolucion::class);
 
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
         $devoluciones = $this->consultaDevoluciones($request)->get();
 
         $filas = $devoluciones->map(fn (Devolucion $d): array => [
@@ -91,16 +96,38 @@ class DevolucionController extends Controller
             $d->colaborador?->nombre_completo,
             $d->entrega?->folio,
             $d->sucursal?->nombre,
+            $d->estado->etiqueta(),
             $d->registradaPor?->name,
             $d->fecha->format('d/m/Y'),
             (int) $d->detalles_count,
         ])->all();
 
-        $contexto = new ContextoExportacion('Devoluciones', $empresaFiltro, [], $devoluciones->count());
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Estado' => ($filtros['estado'] ?? null) ? (EstadoDevolucion::tryFrom($filtros['estado'])?->etiqueta() ?? $filtros['estado']) : null,
+            'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
+            'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
+        ]);
+
+        $contexto = new ContextoExportacion('Devoluciones', $empresaFiltro, $filtrosHumanos, $devoluciones->count());
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'Folio', 'Empresa', 'Colaborador', 'Entrega', 'Sucursal', 'Registró', 'Fecha', 'Renglones',
+            'Folio', 'Empresa', 'Colaborador', 'Entrega', 'Sucursal', 'Estado', 'Registró', 'Fecha', 'Renglones',
         ], $contexto);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'sucursal_id' => ['nullable', 'integer'],
+            'estado' => ['nullable', 'string'],
+            'desde' => ['nullable', 'date'],
+            'hasta' => ['nullable', 'date'],
+        ]);
     }
 
     /**
@@ -110,10 +137,21 @@ class DevolucionController extends Controller
     {
         $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
 
         return Devolucion::query()
             ->whereIn('empresa_id', $idsAutorizadas)
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
+            ->when($filtros['buscar'] ?? null, fn (Builder $q, $b) => $q->where(fn (Builder $s) => $s
+                ->where('folio', 'like', "%{$b}%")
+                ->orWhereHas('colaborador', fn (Builder $c) => $c->where('nombre_completo', 'like', "%{$b}%")->orWhere('numero_empleado', 'like', "%{$b}%"))))
+            // `sucursal_id` sólo puede devolver filas ya acotadas por
+            // `empresa_id` arriba: una sucursal de otra empresa nunca filtra
+            // nada ajeno, simplemente no coincide con ninguna fila visible.
+            ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
+            ->when($filtros['estado'] ?? null, fn (Builder $q, $e) => $q->where('estado', $e))
+            ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('fecha', '>=', $d))
+            ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('fecha', '<=', $h))
             ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'entrega:id,folio', 'registradaPor:id,name'])
             ->withCount('detalles')
             ->withExists('acuse')

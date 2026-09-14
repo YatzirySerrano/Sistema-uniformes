@@ -70,7 +70,9 @@ class UnidadActivoController extends Controller
                 'codigo' => $u->codigo,
                 'activo' => $u->activo?->nombre,
                 'almacen' => $u->almacen?->nombre,
+                'empresa' => $u->empresa?->nombre_comercial,
                 'colaborador' => $u->colaborador?->nombre_completo,
+                'numero_empleado' => $u->colaborador?->numero_empleado,
                 'ubicacion_operativa' => $u->ubicacionOperativa(),
                 'estado' => $u->estado->value,
                 'estado_etiqueta' => $u->estado->etiqueta(),
@@ -81,6 +83,16 @@ class UnidadActivoController extends Controller
                 'entregable' => $u->esEntregable(),
                 'marca_modelo' => $u->especificacion?->marcaModelo(),
                 'imei_mascara' => $u->especificacion?->imeiMascara(),
+                'imagen_url' => $u->imagen === null ? null : route('unidades-activo.imagen', $u),
+                // Sólo tiene sentido mientras está Asignada.
+                'folio_origen' => $u->estado === EstadoUnidadActivo::Asignada ? $u->detalleEntrega?->entrega?->folio : null,
+                'fecha_asignacion' => $u->estado === EstadoUnidadActivo::Asignada ? $u->detalleEntrega?->entrega?->fecha_entrega?->toDateString() : null,
+                // Sólo aporta información mientras NO puede asignarse.
+                'observaciones' => $u->estado !== EstadoUnidadActivo::Baja && $u->condicion !== CondicionUnidadActivo::Funcionando
+                    ? Str::limit((string) $u->observaciones, 120) ?: null
+                    : null,
+                'motivo_baja' => $u->estado === EstadoUnidadActivo::Baja ? $u->motivo_baja : null,
+                'dado_de_baja_en' => $u->estado === EstadoUnidadActivo::Baja ? $u->dado_de_baja_en?->toDateString() : null,
             ]);
 
         return Inertia::render('Activos/Unidades', [
@@ -191,11 +203,12 @@ class UnidadActivoController extends Controller
         return UnidadActivo::query()
             ->whereIn('empresa_id', $idsScope)
             ->with([
-                'activo:id,nombre,codigo', 'almacen:id,nombre',
-                'colaborador:id,nombre_completo,servicio_actual_id',
+                'activo:id,nombre,codigo', 'almacen:id,nombre', 'empresa:id,nombre_comercial',
+                'colaborador:id,nombre_completo,numero_empleado,servicio_actual_id',
                 'colaborador.servicioActual:id,nombre,contrato_id',
                 'colaborador.servicioActual.contrato:id,nombre',
-                'especificacion',
+                'especificacion', 'imagen',
+                'detalleEntrega.entrega:id,folio,fecha_entrega',
             ])
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
                 $q->where(function (Builder $sub) use ($buscar): void {

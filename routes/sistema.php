@@ -71,6 +71,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/{colaborador}/expediente/{documento}/versiones', [DocumentoExpedienteController::class, 'versiones'])->name('colaboradores.expediente.versiones');
     Route::get('colaboradores/{colaborador}/expediente/{documento}/versiones/{version}/descargar', [DocumentoExpedienteController::class, 'descargarVersion'])->name('colaboradores.expediente.version-descargar');
 
+    Route::get('colaboradores/{colaborador}/historico', [ColaboradorController::class, 'historico'])->name('colaboradores.historico');
+
     // Perfil del colaborador (una sola ruta de un segmento: va después de las
     // rutas literales de arriba para no capturarlas).
     Route::get('colaboradores/{colaborador}', [ColaboradorController::class, 'show'])->name('colaboradores.show');
@@ -147,6 +149,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('inventario/minimos', [InventarioController::class, 'minimos'])->name('inventario.minimos');
     Route::get('inventario/movimientos', [MovimientoInventarioController::class, 'index'])->name('inventario.movimientos');
     Route::get('inventario/movimientos/exportar', [MovimientoInventarioController::class, 'exportar'])->name('inventario.movimientos.exportar');
+    Route::get('inventario/movimientos/{movimiento}', [MovimientoInventarioController::class, 'show'])->name('inventario.movimientos.show');
 
     // Traspasos de inventario (entre almacenes de una empresa o entre empresas).
     // Rutas literales ANTES de `traspasos/{traspaso}` para que "crear" /

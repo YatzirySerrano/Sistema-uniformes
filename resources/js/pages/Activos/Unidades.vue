@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { QrCode, Search, SquareArrowOutUpRight, X } from '@lucide/vue';
+import {
+    ImageOff,
+    QrCode,
+    Search,
+    SquareArrowOutUpRight,
+    X,
+} from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -28,7 +34,9 @@ type Unidad = {
     codigo: string;
     activo: string | null;
     almacen: string | null;
+    empresa: string | null;
     colaborador: string | null;
+    numero_empleado: string | null;
     ubicacion_operativa: UbicacionOperativa;
     estado: string;
     estado_etiqueta: string;
@@ -39,6 +47,12 @@ type Unidad = {
     entregable: boolean;
     marca_modelo: string | null;
     imei_mascara: string | null;
+    imagen_url: string | null;
+    folio_origen: string | null;
+    fecha_asignacion: string | null;
+    observaciones: string | null;
+    motivo_baja: string | null;
+    dado_de_baja_en: string | null;
 };
 
 const props = defineProps<{
@@ -426,6 +440,18 @@ const vista = useVistaPreferida('unidades-activo');
                             :checked="idsSeleccionados.includes(u.id)"
                             @change="alternarSeleccion(u.id)"
                         />
+                        <img
+                            v-if="u.imagen_url"
+                            :src="u.imagen_url"
+                            alt=""
+                            class="size-10 shrink-0 rounded-md border object-cover"
+                        />
+                        <div
+                            v-else
+                            class="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-md border"
+                        >
+                            <ImageOff class="size-4" />
+                        </div>
                         <div class="min-w-0">
                             <p class="truncate font-mono text-sm font-medium">
                                 {{ u.codigo }}
@@ -466,11 +492,32 @@ const vista = useVistaPreferida('unidades-activo');
                 </div>
 
                 <p class="text-muted-foreground text-xs">
-                    {{ u.almacen ?? 'Sin almacén' }}
+                    <span v-if="empresasAutorizadas.length > 1 && u.empresa"
+                        >{{ u.empresa }} · </span
+                    >{{ u.almacen ?? 'Sin almacén' }}
                 </p>
                 <p v-if="u.colaborador" class="text-muted-foreground text-xs">
-                    Con: {{ u.colaborador }} ·
-                    {{ ubicacionServicioTexto(u.ubicacion_operativa) }}
+                    Con: {{ u.colaborador
+                    }}<span v-if="u.numero_empleado">
+                        (N.º {{ u.numero_empleado }})</span
+                    >
+                    · {{ ubicacionServicioTexto(u.ubicacion_operativa) }}
+                </p>
+                <p v-if="u.folio_origen" class="text-muted-foreground text-xs">
+                    Entrega origen: {{ u.folio_origen }}
+                    <span v-if="u.fecha_asignacion"
+                        >· {{ u.fecha_asignacion }}</span
+                    >
+                </p>
+                <p v-if="u.observaciones" class="text-muted-foreground text-xs">
+                    {{ u.observaciones }}
+                </p>
+                <p
+                    v-if="u.estado === 'baja'"
+                    class="text-muted-foreground text-xs"
+                >
+                    Baja: {{ u.dado_de_baja_en ?? '—'
+                    }}<span v-if="u.motivo_baja"> · {{ u.motivo_baja }}</span>
                 </p>
 
                 <div class="mt-auto flex flex-wrap gap-2">
@@ -497,6 +544,9 @@ const vista = useVistaPreferida('unidades-activo');
                 <thead class="bg-muted/50 text-muted-foreground text-left">
                     <tr>
                         <th class="w-8 px-3 py-2"></th>
+                        <th class="w-12 px-3 py-2">
+                            <span class="sr-only">Foto</span>
+                        </th>
                         <th class="px-3 py-2 font-medium">Código / Activo</th>
                         <th class="px-3 py-2 font-medium">Estado</th>
                         <th class="px-3 py-2 font-medium">
@@ -519,6 +569,20 @@ const vista = useVistaPreferida('unidades-activo');
                                 :checked="idsSeleccionados.includes(u.id)"
                                 @change="alternarSeleccion(u.id)"
                             />
+                        </td>
+                        <td class="px-3 py-2">
+                            <img
+                                v-if="u.imagen_url"
+                                :src="u.imagen_url"
+                                alt=""
+                                class="size-9 rounded-md border object-cover"
+                            />
+                            <div
+                                v-else
+                                class="bg-muted text-muted-foreground flex size-9 items-center justify-center rounded-md border"
+                            >
+                                <ImageOff class="size-4" />
+                            </div>
                         </td>
                         <td class="px-3 py-2">
                             <p class="font-mono font-medium">{{ u.codigo }}</p>
@@ -546,12 +610,31 @@ const vista = useVistaPreferida('unidades-activo');
                         <td class="text-muted-foreground px-3 py-2">
                             {{ u.almacen ?? 'Sin almacén' }}
                             <span v-if="u.colaborador" class="block text-xs">
-                                Con: {{ u.colaborador }} ·
+                                Con: {{ u.colaborador
+                                }}<span v-if="u.numero_empleado">
+                                    (N.º {{ u.numero_empleado }})</span
+                                >
+                                ·
                                 {{
                                     ubicacionServicioTexto(
                                         u.ubicacion_operativa,
                                     )
                                 }}
+                            </span>
+                            <span v-if="u.folio_origen" class="block text-xs">
+                                Entrega origen: {{ u.folio_origen
+                                }}<span v-if="u.fecha_asignacion">
+                                    · {{ u.fecha_asignacion }}</span
+                                >
+                            </span>
+                            <span
+                                v-if="u.estado === 'baja'"
+                                class="block text-xs"
+                            >
+                                Baja: {{ u.dado_de_baja_en ?? '—'
+                                }}<span v-if="u.motivo_baja">
+                                    · {{ u.motivo_baja }}</span
+                                >
                             </span>
                         </td>
                         <td class="px-3 py-2 text-right">

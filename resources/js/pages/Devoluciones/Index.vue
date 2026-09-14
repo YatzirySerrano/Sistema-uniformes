@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Plus } from '@lucide/vue';
-import { ref, watch } from 'vue';
+import { Plus, Search, X } from '@lucide/vue';
+import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import { varianteBadgeEstadoDevolucion } from '@/lib/estadoDevolucion';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
@@ -20,6 +23,7 @@ type Devolucion = {
     folio: string;
     empresa: string | null;
     colaborador: string;
+    numero_empleado: string | null;
     sucursal: string;
     registrada_por: string;
     fecha: string;
@@ -29,10 +33,20 @@ type Devolucion = {
     tiene_acuse: boolean;
 };
 
+type OpcionSucursal = { id: number; nombre: string };
+
 const props = defineProps<{
     devoluciones: Paginado<Devolucion>;
-    filtros: { empresa_id?: number | null };
+    filtros: {
+        empresa_id?: number | null;
+        buscar?: string;
+        sucursal_id?: number | null;
+        estado?: string;
+        desde?: string;
+        hasta?: string;
+    };
     empresasAutorizadas: EmpresaAutorizada[];
+    estados: { valor: string; etiqueta: string }[];
     puedeCrear: boolean;
 }>();
 
@@ -44,6 +58,11 @@ const empresaSeleccionada = ref<EmpresaAutorizada | null>(
     props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
         null,
 );
+const buscar = ref(props.filtros.buscar ?? '');
+const sucursalSeleccionada = ref<OpcionSucursal | null>(null);
+const estado = ref(props.filtros.estado ?? '');
+const desde = ref(props.filtros.desde ?? '');
+const hasta = ref(props.filtros.hasta ?? '');
 
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
@@ -51,6 +70,23 @@ async function buscarEmpresas(termino: string) {
     return props.empresasAutorizadas.filter((e) =>
         e.nombre_comercial.toLowerCase().includes(t),
     );
+}
+
+async function buscarSucursales(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionSucursal[]> {
+    const params = new URLSearchParams({ q });
+    if (empresaSeleccionada.value)
+        params.set('empresa_id', String(empresaSeleccionada.value.id));
+
+    const res = await fetch(`/sucursales/buscar?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal,
+    });
+    if (!res.ok) return [];
+    return (await res.json()).sucursales ?? [];
 }
 
 // Resincroniza el filtro si el backend resuelve una empresa distinta a la
@@ -66,13 +102,51 @@ watch(
     },
 );
 
-watch(empresaSeleccionada, (e) => {
-    router.get('/devoluciones', e ? { empresa_id: e.id } : {}, {
-        preserveState: true,
-        replace: true,
-        preserveScroll: true,
-    });
+// Cambiar de empresa invalida la sucursal elegida (podría no pertenecerle).
+watch(empresaSeleccionada, () => {
+    sucursalSeleccionada.value = null;
 });
+
+const hayFiltros = computed(
+    () =>
+        buscar.value !== '' ||
+        !!empresaSeleccionada.value ||
+        !!sucursalSeleccionada.value ||
+        estado.value !== '' ||
+        desde.value !== '' ||
+        hasta.value !== '',
+);
+
+let temporizador: ReturnType<typeof setTimeout> | undefined;
+watch(
+    [buscar, empresaSeleccionada, sucursalSeleccionada, estado, desde, hasta],
+    () => {
+        clearTimeout(temporizador);
+        temporizador = setTimeout(() => {
+            router.get(
+                '/devoluciones',
+                {
+                    buscar: buscar.value || undefined,
+                    empresa_id: empresaSeleccionada.value?.id || undefined,
+                    sucursal_id: sucursalSeleccionada.value?.id || undefined,
+                    estado: estado.value || undefined,
+                    desde: desde.value || undefined,
+                    hasta: hasta.value || undefined,
+                },
+                { preserveState: true, replace: true, preserveScroll: true },
+            );
+        }, 300);
+    },
+);
+
+function limpiarFiltros(): void {
+    buscar.value = '';
+    empresaSeleccionada.value = null;
+    sucursalSeleccionada.value = null;
+    estado.value = '';
+    desde.value = '';
+    hasta.value = '';
+}
 
 const vista = useVistaPreferida('devoluciones', 'tabla');
 </script>
@@ -98,22 +172,80 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
             </template>
         </EncabezadoPagina>
 
-        <div class="flex flex-wrap items-center gap-2">
-            <label
-                v-if="empresasAutorizadas.length > 1"
-                class="flex w-fit items-center gap-1.5 text-sm"
-            >
-                <span class="text-muted-foreground">Empresa</span>
-                <BuscadorAsync
-                    v-model="empresaSeleccionada"
-                    :buscar="buscarEmpresas"
-                    :etiqueta="(e) => String(e.nombre_comercial)"
-                    placeholder="Todas las empresas"
-                    placeholder-busqueda="Buscar empresa…"
-                    class="w-56"
+        <div class="flex flex-col gap-3">
+            <div class="relative w-full sm:w-[340px]">
+                <Search
+                    class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2"
                 />
-            </label>
-            <SelectorVista v-model="vista" class="ml-auto" />
+                <Input
+                    v-model="buscar"
+                    class="pl-8"
+                    placeholder="Buscar por folio, colaborador o N.º de empleado"
+                    aria-label="Buscar devoluciones"
+                />
+            </div>
+
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <label
+                    v-if="empresasAutorizadas.length > 1"
+                    class="flex items-center gap-1.5 text-sm"
+                >
+                    <span class="text-muted-foreground">Empresa</span>
+                    <BuscadorAsync
+                        v-model="empresaSeleccionada"
+                        :buscar="buscarEmpresas"
+                        :etiqueta="(e) => String(e.nombre_comercial)"
+                        placeholder="Todas las empresas"
+                        placeholder-busqueda="Buscar empresa…"
+                        class="w-52"
+                    />
+                </label>
+
+                <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Sucursal</span>
+                    <BuscadorAsync
+                        v-model="sucursalSeleccionada"
+                        :buscar="buscarSucursales"
+                        :dependencia="empresaSeleccionada?.id"
+                        :etiqueta="(s) => String((s as OpcionSucursal).nombre)"
+                        placeholder="Todas"
+                        placeholder-busqueda="Buscar sucursal…"
+                        class="w-48"
+                    />
+                </label>
+
+                <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Estado</span>
+                    <div class="w-44">
+                        <SelectSimple
+                            v-model="estado"
+                            :opciones="[
+                                { valor: '', etiqueta: 'Todos' },
+                                ...estados,
+                            ]"
+                        />
+                    </div>
+                </label>
+
+                <div class="w-36">
+                    <DatePicker v-model="desde" placeholder="Desde" />
+                </div>
+                <div class="w-36">
+                    <DatePicker v-model="hasta" placeholder="Hasta" />
+                </div>
+
+                <Button
+                    v-if="hayFiltros"
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    @click="limpiarFiltros"
+                >
+                    <X class="size-3.5" /> Limpiar filtros
+                </Button>
+
+                <SelectorVista v-model="vista" class="ml-auto" />
+            </div>
         </div>
 
         <EstadoVacio
@@ -137,7 +269,12 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                         d.estado_etiqueta
                     }}</Badge>
                 </div>
-                <p class="text-muted-foreground text-sm">{{ d.colaborador }}</p>
+                <p class="text-muted-foreground text-sm">
+                    {{ d.colaborador
+                    }}<span v-if="d.numero_empleado">
+                        (N.º {{ d.numero_empleado }})</span
+                    >
+                </p>
                 <p class="text-muted-foreground text-sm">{{ d.sucursal }}</p>
                 <div
                     class="text-muted-foreground mt-auto flex items-center justify-between text-xs"
@@ -181,7 +318,15 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                     >
                         <td class="px-3 py-2 font-medium">{{ d.folio }}</td>
                         <td class="px-3 py-2">{{ d.empresa }}</td>
-                        <td class="px-3 py-2">{{ d.colaborador }}</td>
+                        <td class="px-3 py-2">
+                            {{ d.colaborador
+                            }}<span
+                                v-if="d.numero_empleado"
+                                class="text-muted-foreground text-xs"
+                            >
+                                (N.º {{ d.numero_empleado }})</span
+                            >
+                        </td>
                         <td class="px-3 py-2">{{ d.sucursal }}</td>
                         <td class="px-3 py-2">
                             <Badge

@@ -19,6 +19,7 @@ use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioExpediente;
+use App\Servicios\ServicioHistoricoColaborador;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\GeneradorNumeroEmpleado;
 use Illuminate\Database\Eloquent\Builder;
@@ -321,6 +322,7 @@ class ColaboradorController extends Controller
             'puedeEditar' => $usuario->can('update', $colaborador),
             'puedeEliminar' => $usuario->can('desactivar', $colaborador),
             'puedeCambiarEmpresa' => $usuario->can('cambiarEmpresa', $colaborador),
+            'puedeVerHistorico' => $usuario->can('verHistorico', $colaborador),
             'puedeVerExpediente' => $puedeVerExpediente,
             'expediente' => $puedeVerExpediente ? [
                 'id' => $colaborador->id,
@@ -329,6 +331,29 @@ class ColaboradorController extends Controller
                 'foto_url' => $fotoUrl,
                 ...$servicioExpediente->payload($colaborador, $usuario, (string) $request->query('estado', 'activos')),
             ] : null,
+        ]);
+    }
+
+    /**
+     * Histórico laboral completo del colaborador: periodos por empresa, con
+     * fechas reales (nunca inventadas), sucursal/área/número de empleado de
+     * cada tramo, servicios asociados, y entregas/devoluciones de esa
+     * empresa. Sólo alcance global — ver `ColaboradorPolicy::verHistorico`.
+     */
+    public function historico(Colaborador $colaborador, ServicioHistoricoColaborador $servicio): Response
+    {
+        $this->authorize('verHistorico', $colaborador);
+
+        $colaborador->loadMissing('empresa:id,nombre_comercial');
+
+        return Inertia::render('Colaboradores/Historico', [
+            'colaborador' => [
+                'id' => $colaborador->id,
+                'nombre_completo' => $colaborador->nombre_completo,
+                'numero_empleado' => $colaborador->numero_empleado,
+                'empresa_actual' => $colaborador->empresa?->nombre_comercial,
+            ],
+            'periodos' => $servicio->construir($colaborador),
         ]);
     }
 

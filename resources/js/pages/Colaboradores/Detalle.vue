@@ -82,6 +82,7 @@ const props = defineProps<{
     puedeEditar: boolean;
     puedeEliminar: boolean;
     puedeCambiarEmpresa: boolean;
+    puedeVerHistorico: boolean;
     puedeVerExpediente: boolean;
     expediente: ExpedientePayload | null;
 }>();
@@ -295,15 +296,30 @@ const modalEmpresa = ref(false);
         </div>
 
         <div
-            v-if="historicoPorEmpresa && historicoPorEmpresa.length > 0"
+            v-if="
+                (historicoPorEmpresa && historicoPorEmpresa.length > 0) ||
+                puedeVerHistorico
+            "
             class="rounded-xl border p-3 text-sm"
         >
-            <p
-                class="text-muted-foreground mb-2 flex items-center gap-1 text-xs"
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p
+                    class="text-muted-foreground flex items-center gap-1 text-xs"
+                >
+                    <Building2 class="size-3" /> Histórico por empresa de origen
+                </p>
+                <Link
+                    v-if="puedeVerHistorico"
+                    :href="`/colaboradores/${colaborador.id}/historico`"
+                    class="text-primary text-xs font-medium underline"
+                >
+                    Ver histórico laboral completo
+                </Link>
+            </div>
+            <ul
+                v-if="historicoPorEmpresa && historicoPorEmpresa.length > 0"
+                class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3"
             >
-                <Building2 class="size-3" /> Histórico por empresa de origen
-            </p>
-            <ul class="grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
                 <li
                     v-for="fila in historicoPorEmpresa"
                     :key="fila.empresa_id"

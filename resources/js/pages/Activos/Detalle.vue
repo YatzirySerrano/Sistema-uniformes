@@ -248,32 +248,44 @@ const dialogoExistencias = ref(false);
                     v-if="resumenUnidades"
                     class="grid grid-cols-2 gap-3 text-center sm:grid-cols-4"
                 >
-                    <div class="bg-muted/40 rounded-lg p-3">
+                    <Link
+                        :href="`/activos/unidades?activo_id=${activo.id}&estado=en_almacen`"
+                        class="bg-muted/40 hover:bg-muted focus-visible:ring-ring rounded-lg p-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    >
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.en_almacen }}
                         </p>
                         <p class="text-muted-foreground text-xs">En almacén</p>
-                    </div>
-                    <div class="bg-muted/40 rounded-lg p-3">
+                    </Link>
+                    <Link
+                        :href="`/activos/unidades?activo_id=${activo.id}&estado=en_almacen&estado_visible=reparacion`"
+                        class="bg-muted/40 hover:bg-muted focus-visible:ring-ring rounded-lg p-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    >
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.no_disponibles }}
                         </p>
                         <p class="text-muted-foreground text-xs">
                             No disponibles
                         </p>
-                    </div>
-                    <div class="bg-muted/40 rounded-lg p-3">
+                    </Link>
+                    <Link
+                        :href="`/activos/unidades?activo_id=${activo.id}&estado=asignada`"
+                        class="bg-muted/40 hover:bg-muted focus-visible:ring-ring rounded-lg p-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    >
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.asignada }}
                         </p>
                         <p class="text-muted-foreground text-xs">Asignadas</p>
-                    </div>
-                    <div class="bg-muted/40 rounded-lg p-3">
+                    </Link>
+                    <Link
+                        :href="`/activos/unidades?activo_id=${activo.id}&estado=baja`"
+                        class="bg-muted/40 hover:bg-muted focus-visible:ring-ring rounded-lg p-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    >
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.baja }}
                         </p>
                         <p class="text-muted-foreground text-xs">Baja</p>
-                    </div>
+                    </Link>
                 </div>
             </section>
 

@@ -4,6 +4,7 @@ import {
     AlertTriangle,
     ArrowLeft,
     ImagePlus,
+    Maximize2,
     Package,
     QrCode,
     RotateCcw,
@@ -210,6 +211,8 @@ function quitarImagenUnidad(): void {
         preserveScroll: true,
     });
 }
+
+const dialogoImagenAmpliada = ref(false);
 
 defineOptions({
     layout: {
@@ -442,40 +445,55 @@ function guardarEquipo(): void {
                     <ImagePlus class="text-muted-foreground size-4" />
                     Foto
                 </h2>
-                <img
+                <button
                     v-if="unidad.imagen_url"
-                    :src="unidad.imagen_url"
-                    :alt="`Foto de la unidad ${unidad.codigo}`"
-                    class="mb-3 max-h-56 w-full rounded-md border object-contain"
-                />
+                    type="button"
+                    class="focus-visible:ring-ring mb-3 block w-full rounded-md focus-visible:ring-2 focus-visible:outline-none"
+                    aria-label="Ampliar foto de la unidad"
+                    @click="dialogoImagenAmpliada = true"
+                >
+                    <img
+                        :src="unidad.imagen_url"
+                        :alt="`Foto de la unidad ${unidad.codigo}`"
+                        class="max-h-56 w-full rounded-md border object-contain transition-opacity hover:opacity-90"
+                    />
+                </button>
                 <p v-else class="text-muted-foreground mb-3 text-sm">
                     Esta unidad no tiene foto.
                 </p>
-                <div
-                    v-if="permisos.administrar"
-                    class="flex flex-wrap items-center gap-2"
-                >
-                    <CapturaEvidencia
-                        v-model="formImagen.imagen"
-                        v-model:origen="origenImagen"
-                        :etiqueta="
-                            unidad.imagen_url
-                                ? 'Reemplazar foto'
-                                : 'Agregar foto'
-                        "
-                        :disabled="formImagen.processing"
-                    />
+                <div class="flex flex-wrap items-center gap-2">
                     <Button
                         v-if="unidad.imagen_url"
                         type="button"
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        class="text-destructive"
-                        :disabled="formImagen.processing"
-                        @click="quitarImagenUnidad"
+                        @click="dialogoImagenAmpliada = true"
                     >
-                        <Trash2 class="size-3.5" /> Quitar imagen
+                        <Maximize2 class="size-3.5" /> Ampliar
                     </Button>
+                    <template v-if="permisos.administrar">
+                        <CapturaEvidencia
+                            v-model="formImagen.imagen"
+                            v-model:origen="origenImagen"
+                            :etiqueta="
+                                unidad.imagen_url
+                                    ? 'Reemplazar foto'
+                                    : 'Agregar foto'
+                            "
+                            :disabled="formImagen.processing"
+                        />
+                        <Button
+                            v-if="unidad.imagen_url"
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            class="text-destructive"
+                            :disabled="formImagen.processing"
+                            @click="quitarImagenUnidad"
+                        >
+                            <Trash2 class="size-3.5" /> Quitar imagen
+                        </Button>
+                    </template>
                 </div>
                 <InputError :message="formImagen.errors.imagen" />
             </section>
@@ -589,6 +607,21 @@ function guardarEquipo(): void {
                 </ul>
             </section>
         </div>
+
+        <Dialog v-if="unidad.imagen_url" v-model:open="dialogoImagenAmpliada">
+            <DialogContent class="sm:max-w-2xl">
+                <DialogHeader>
+                    <DialogTitle
+                        >Foto de la unidad {{ unidad.codigo }}</DialogTitle
+                    >
+                </DialogHeader>
+                <img
+                    :src="unidad.imagen_url"
+                    :alt="`Foto de la unidad ${unidad.codigo}`"
+                    class="max-h-[70vh] w-full rounded-md object-contain"
+                />
+            </DialogContent>
+        </Dialog>
 
         <Dialog v-model:open="dialogoBaja">
             <DialogContent class="sm:max-w-sm">

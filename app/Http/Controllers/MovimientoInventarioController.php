@@ -9,8 +9,11 @@ use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Inventario\RegistrarTraspasoRequest;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\Devolucion;
+use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
 use App\Models\TraspasoInventario;
+use App\Models\User;
 use App\Servicios\HomologadorActivo;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\FechaHora;
@@ -79,6 +82,113 @@ class MovimientoInventarioController extends Controller
             'tipos' => collect(TipoMovimiento::cases())->map(fn ($t): array => ['valor' => $t->value, 'etiqueta' => $t->etiqueta()]),
             'puedeTransferir' => $request->user()->can('inventario.transferir'),
         ]);
+    }
+
+    /**
+     * Detalle de un movimiento concreto. Reutiliza EXACTAMENTE la misma
+     * consulta con scope que `index()` (`consultaMovimientos()`): si el
+     * movimiento no aparece ahí (fuera de las empresas/almacenes autorizados
+     * del usuario), responde 404 — nunca 403, para no confirmar por el código
+     * de estado que el registro existe.
+     */
+    public function show(Request $request, MovimientoInventario $movimiento): Response
+    {
+        abort_unless($request->user()->can('inventario.ver'), 403);
+
+        $filtros = $this->filtrosListado($request);
+        $encontrado = $this->consultaMovimientos($request, $filtros)->whereKey($movimiento->getKey())->first();
+
+        abort_if($encontrado === null, 404);
+
+        return Inertia::render('Inventario/MovimientoDetalle', [
+            'movimiento' => [
+                'id' => $encontrado->id,
+                'tipo' => $encontrado->tipo->value,
+                'tipo_etiqueta' => $encontrado->tipo->etiqueta(),
+                'direccion' => $encontrado->direccion->value,
+                'cantidad' => $encontrado->cantidad,
+                'existencia_anterior' => $encontrado->existencia_anterior,
+                'existencia_resultante' => $encontrado->existencia_resultante,
+                'empresa' => $encontrado->empresa?->nombre_comercial,
+                'almacen' => $encontrado->almacen?->nombre,
+                'sucursal' => $encontrado->sucursal?->nombre,
+                'activo' => $encontrado->activo?->nombre,
+                'talla' => $encontrado->talla?->valor,
+                'unidad_codigo' => $encontrado->unidadActivo?->codigo,
+                'motivo' => $encontrado->motivo,
+                'notas' => $encontrado->notas,
+                'realizado_por' => $encontrado->realizadoPor?->name,
+                'ocurrido_en' => $encontrado->ocurrido_en->toIso8601String(),
+                'referencia' => $this->referenciaDetalle($encontrado, $request->user()),
+                'colaborador' => $this->colaboradorDelMovimiento($encontrado),
+            ],
+        ]);
+    }
+
+    /**
+     * Etiqueta + link (sólo si el usuario puede ver ese recurso concreto) del
+     * documento que originó el movimiento. Nunca expone un enlace a algo que
+     * el usuario no está autorizado a abrir — en ese caso se muestra sólo la
+     * etiqueta, sin `url`.
+     *
+     * @return array{etiqueta: string|null, url: string|null}
+     */
+    private function referenciaDetalle(MovimientoInventario $m, User $usuario): array
+    {
+        if ($m->referencia_tipo === TraspasoInventario::class) {
+            $traspaso = TraspasoInventario::query()->find($m->referencia_id);
+
+            return $traspaso === null ? ['etiqueta' => null, 'url' => null] : [
+                'etiqueta' => "Traspaso {$traspaso->folio}",
+                'url' => $usuario->can('view', $traspaso) ? route('inventario.traspasos.show', $traspaso) : null,
+            ];
+        }
+
+        if ($m->referencia_tipo === EntregaUniforme::class) {
+            $entrega = EntregaUniforme::query()->find($m->referencia_id);
+
+            return $entrega === null ? ['etiqueta' => null, 'url' => null] : [
+                'etiqueta' => "Entrega {$entrega->folio}",
+                'url' => $usuario->can('view', $entrega) ? route('entregas.show', $entrega) : null,
+            ];
+        }
+
+        if ($m->referencia_tipo === Devolucion::class) {
+            $devolucion = Devolucion::query()->find($m->referencia_id);
+
+            return $devolucion === null ? ['etiqueta' => null, 'url' => null] : [
+                'etiqueta' => "Devolución {$devolucion->folio}",
+                'url' => $usuario->can('view', $devolucion) ? route('devoluciones.show', $devolucion) : null,
+            ];
+        }
+
+        return [
+            'etiqueta' => match ($m->referencia_tipo) {
+                'alta_unidad' => 'Alta de unidad',
+                'entrada_manual' => 'Entrada manual',
+                'baja_unidad' => 'Baja de unidad',
+                default => null,
+            },
+            'url' => null,
+        ];
+    }
+
+    /**
+     * Colaborador relacionado con el movimiento, derivado SIEMPRE de la
+     * entrega/devolución de origen (nunca de una columna propia del
+     * movimiento, que no existe).
+     */
+    private function colaboradorDelMovimiento(MovimientoInventario $m): ?string
+    {
+        if ($m->referencia_tipo === EntregaUniforme::class) {
+            return EntregaUniforme::query()->find($m->referencia_id)?->colaborador?->nombre_completo;
+        }
+
+        if ($m->referencia_tipo === Devolucion::class) {
+            return Devolucion::query()->find($m->referencia_id)?->colaborador?->nombre_completo;
+        }
+
+        return null;
     }
 
     /**

@@ -96,14 +96,16 @@ class EntregasDemoSeeder extends Seeder
             $encargado->id, 'Cambio de talla',
         );
 
-        // 5) Entrega firmada + corrección administrativa
+        // 5) Entrega corregida mientras aún estaba pendiente de firma, y
+        // firmada después (una entrega firmada es inmutable: CorregirEntrega
+        // sólo puede aplicarse ANTES de firmar).
         if ($colaboradores->count() >= 5 && $firma !== null) {
             $aCorregir = $crear->ejecutar($colaboradores[4]->id, $almacen->id, $encargado->id, now()->subDays(15)->toDateString(), $itemsDisponibles(), [], []);
-            $confirmar->ejecutar($aCorregir, $firma, $firma, true, $encargado->id, '127.0.0.1', 'SeederDemo/1.0');
             $nuevos = $aCorregir->detalles->map(fn ($d): array => [
                 'activo_id' => $d->activo_id, 'talla_id' => $d->talla_id, 'cantidad' => max(1, $d->cantidad - 1),
             ])->all();
             $corregir->ejecutar($aCorregir->fresh('detalles'), $nuevos, 'Se registró un activo de más por error de captura.', $encargado->id);
+            $confirmar->ejecutar($aCorregir->fresh(), $firma, $firma, true, $encargado->id, '127.0.0.1', 'SeederDemo/1.0');
         }
 
         Auth::logout();

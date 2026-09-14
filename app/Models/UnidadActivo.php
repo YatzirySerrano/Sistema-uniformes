@@ -154,6 +154,19 @@ class UnidadActivo extends Model
     }
 
     /**
+     * Renglón de entrega vigente de esta unidad (la más reciente si hubo más
+     * de una a lo largo de su vida — devuelta y vuelta a asignar). Sólo tiene
+     * sentido mientras `estado = Asignada`; da acceso al folio y fecha de la
+     * entrega de origen sin duplicar esos datos en la propia unidad.
+     *
+     * @return HasOne<DetalleEntrega, $this>
+     */
+    public function detalleEntrega(): HasOne
+    {
+        return $this->hasOne(DetalleEntrega::class, 'unidad_activo_id')->latestOfMany();
+    }
+
+    /**
      * Perfil técnico del activo de esta unidad (Celular / Computadora / Tablet
      * / null). Fuente única: `ResolverPerfilTecnicoUnidad` (por `codigo` de
      * categoría/tipo, nunca por nombre).

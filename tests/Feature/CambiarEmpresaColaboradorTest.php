@@ -17,6 +17,7 @@ use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\Servicio;
 use App\Models\Sucursal;
+use App\Models\TransferenciaColaborador;
 use App\Models\UnidadActivo;
 
 /**
@@ -247,6 +248,30 @@ it('registra la transferencia en la bitácora de auditoría', function () {
         ->and($bitacora->valores_anteriores['empresa'])->toBe('DASTI')
         ->and($bitacora->valores_nuevos['empresa'])->toBe('SIESA')
         ->and($bitacora->valores_nuevos['servicio'])->toBe('Sin servicio');
+});
+
+it('registra una fila estructurada en transferencias_colaborador con los IDs reales', function () {
+    $contratoDasti = Contrato::factory()->for($this->dasti)->create();
+    $servicioDasti = Servicio::factory()->for($contratoDasti)->for($this->sucDasti)->create();
+    $c = ($this->colaborador)(['servicio_actual_id' => $servicioDasti->id]);
+    $numeroAnterior = $c->numero_empleado;
+
+    ($this->transferir)($c, ['motivo' => 'Reasignación de contrato'])->assertSessionHasNoErrors();
+
+    $c->refresh();
+    $fila = TransferenciaColaborador::query()->where('colaborador_id', $c->id)->latest('id')->first();
+
+    expect($fila)->not->toBeNull()
+        ->and($fila->empresa_origen_id)->toBe($this->dasti->id)
+        ->and($fila->empresa_destino_id)->toBe($this->siesa->id)
+        ->and($fila->sucursal_origen_id)->toBe($this->sucDasti->id)
+        ->and($fila->sucursal_destino_id)->toBe($this->sucSiesa->id)
+        ->and($fila->servicio_origen_id)->toBe($servicioDasti->id)
+        ->and($fila->servicio_destino_id)->toBeNull()
+        ->and($fila->numero_empleado_anterior)->toBe($numeroAnterior)
+        ->and($fila->numero_empleado_nuevo)->toBe($c->numero_empleado)
+        ->and($fila->motivo)->toBe('Reasignación de contrato')
+        ->and($fila->usuario_id)->toBe($this->admin->id);
 });
 
 it('el re-chequeo bajo lock aborta si aparece custodia entre la previsualización y la confirmación', function () {

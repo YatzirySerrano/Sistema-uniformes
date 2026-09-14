@@ -192,9 +192,9 @@ async function capturarFoto(): Promise<void> {
 </script>
 
 <template>
-    <div class="grid gap-1.5">
+    <div class="grid min-w-0 gap-1.5">
         <div
-            class="border-input relative flex flex-col items-center gap-2 rounded-md border border-dashed text-center transition-colors"
+            class="border-input relative flex min-w-0 flex-col items-center gap-2 rounded-md border border-dashed text-center transition-colors"
             :class="[
                 tamanoClase,
                 arrastrando ? 'border-primary bg-primary/5' : '',
@@ -237,12 +237,12 @@ async function capturarFoto(): Promise<void> {
                     class="rounded-md object-cover"
                     :class="miniaturaClase"
                 />
-                <p class="flex items-center gap-1.5 text-sm">
+                <p class="flex w-full min-w-0 items-center gap-1.5 text-sm">
                     <FileText
                         v-if="tipo === 'documento'"
                         class="size-4 shrink-0"
                     />
-                    <span class="truncate">{{
+                    <span class="min-w-0 flex-1 truncate">{{
                         modelValue?.name ??
                         archivoActualNombre ??
                         'Archivo actual'

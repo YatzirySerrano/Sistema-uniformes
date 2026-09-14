@@ -7,9 +7,11 @@ use App\Models\Area;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
+use App\Models\TransferenciaColaborador;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Soporte\GeneradorNumeroEmpleado;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -51,11 +53,14 @@ class CambiarEmpresaColaborador
             $colaborador->loadMissing(['servicioActual', 'sucursal', 'departamento']);
 
             $empresaOrigen = Empresa::query()->findOrFail($colaborador->empresa_id);
+            $servicioAnteriorId = $colaborador->servicio_actual_id;
             $servicioAnteriorNombre = 'Sin servicio';
             if ($colaborador->servicio_actual_id !== null) {
                 $servicioAnteriorNombre = $colaborador->servicioActual->nombre;
             }
+            $sucursalAnteriorId = $colaborador->sucursal_id;
             $sucursalAnteriorNombre = $colaborador->sucursal->nombre;
+            $areaAnteriorId = $colaborador->area_id;
             $areaAnteriorNombre = $colaborador->departamento?->nombre;
             $numeroAnterior = $colaborador->numero_empleado;
 
@@ -126,6 +131,26 @@ class CambiarEmpresaColaborador
                     'servicio' => 'Sin servicio',
                     'numero_empleado' => $numeroNuevo,
                 ],
+            ]);
+
+            // Fila estructurada (IDs reales, no sólo nombres) para poder
+            // reconstruir periodos con fechas exactas en el histórico laboral
+            // del colaborador — ver App\Servicios\ServicioHistoricoColaborador.
+            TransferenciaColaborador::query()->create([
+                'colaborador_id' => $colaborador->getKey(),
+                'empresa_origen_id' => $empresaOrigen->id,
+                'empresa_destino_id' => $empresaDestino->id,
+                'sucursal_origen_id' => $sucursalAnteriorId,
+                'sucursal_destino_id' => $sucursalDestino->id,
+                'area_origen_id' => $areaAnteriorId,
+                'area_destino_id' => $areaDestino?->id,
+                'servicio_origen_id' => $servicioAnteriorId,
+                'servicio_destino_id' => null,
+                'numero_empleado_anterior' => $numeroAnterior,
+                'numero_empleado_nuevo' => $numeroNuevo,
+                'motivo' => $motivo,
+                'usuario_id' => Auth::id(),
+                'ocurrido_en' => now(),
             ]);
 
             return $colaborador;

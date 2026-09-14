@@ -42,6 +42,18 @@ class ColaboradorPolicy
         return $user->can('colaboradores.desactivar') && $user->puedeAccederEmpresa($colaborador->empresa_id);
     }
 
+    /**
+     * Histórico laboral completo (todas las empresas por las que pasó el
+     * colaborador). Mismo criterio que el desglose agregado que ya existe en
+     * `show()`: sólo alcance global — un Supervisor/Encargado restringido
+     * nunca debe reconstruir la historia de una empresa que no puede
+     * consultar, ni siquiera de la empresa actual del colaborador.
+     */
+    public function verHistorico(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('colaboradores.ver') && $user->tieneAlcanceGlobal();
+    }
+
     public function importar(User $user): bool
     {
         return $user->can('colaboradores.importar');
