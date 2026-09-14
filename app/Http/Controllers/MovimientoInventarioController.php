@@ -88,6 +88,74 @@ class MovimientoInventarioController extends Controller
     }
 
     /**
+     * "Traspasos de inventario": a diferencia de `index()` (el historial
+     * técnico completo, que mezcla entradas/entregas/devoluciones/traspasos y
+     * confunde al usuario final), esta vista SÓLO lista traspasos, consultando
+     * `TraspasoInventario` como entidad raíz — NUNCA reconstruida agrupando
+     * `movimientos_inventario` — así que cada traspaso aparece EXACTAMENTE
+     * una vez (nunca como dos tarjetas "salida"/"entrada"). El alcance de
+     * empresa es el mismo que autoriza verlo (`TraspasoInventarioPolicy`):
+     * acceso a origen O destino.
+     */
+    public function indexTraspasos(Request $request): Response
+    {
+        abort_unless($request->user()->can('inventario.ver'), 403);
+
+        $idsScope = $this->idsScope($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        $filtros = $request->validate([
+            'almacen_id' => ['nullable', 'integer'],
+            'desde' => ['nullable', 'date'],
+            'hasta' => ['nullable', 'date'],
+        ]);
+
+        $traspasos = TraspasoInventario::query()
+            ->where(function (Builder $q) use ($idsScope): void {
+                $q->whereIn('empresa_origen_id', $idsScope)->orWhereIn('empresa_destino_id', $idsScope);
+            })
+            ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $v) => $q->where(
+                fn (Builder $sub) => $sub->where('almacen_origen_id', $v)->orWhere('almacen_destino_id', $v)
+            ))
+            ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
+            ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
+            ->with([
+                'empresaOrigen:id,nombre_comercial', 'empresaDestino:id,nombre_comercial',
+                'almacenOrigen:id,nombre', 'almacenDestino:id,nombre',
+                'realizadoPor:id,name',
+            ])
+            ->withCount('renglones')
+            ->withSum('renglones', 'cantidad')
+            ->latest('ocurrido_en')
+            ->paginate($this->porPagina())
+            ->withQueryString()
+            ->through(fn (TraspasoInventario $t): array => [
+                'id' => $t->id,
+                'folio' => $t->folio,
+                'estado' => $t->estado,
+                'interempresa' => $t->esInterempresa(),
+                'empresa_origen' => $t->empresaOrigen?->nombre_comercial,
+                'almacen_origen' => $t->almacenOrigen?->nombre,
+                'empresa_destino' => $t->empresaDestino?->nombre_comercial,
+                'almacen_destino' => $t->almacenDestino?->nombre,
+                'renglones' => (int) $t->renglones_count,
+                'unidades' => (int) ($t->renglones_sum_cantidad ?? 0),
+                'realizado_por' => $t->realizadoPor?->name,
+                'ocurrido_en' => $t->ocurrido_en->toIso8601String(),
+            ]);
+
+        return Inertia::render('Inventario/Traspasos/Index', [
+            'traspasos' => $traspasos,
+            'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'almacenes' => $idsScope
+                ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($request->user(), $id)->all())
+                ->unique('id')->map->only(['id', 'nombre'])->values(),
+            'puedeTransferir' => $request->user()->can('inventario.transferir'),
+        ]);
+    }
+
+    /**
      * Detalle de un movimiento concreto. Reutiliza EXACTAMENTE la misma
      * consulta con scope que `index()` (`consultaMovimientos()`): si el
      * movimiento no aparece ahí (fuera de las empresas/almacenes autorizados

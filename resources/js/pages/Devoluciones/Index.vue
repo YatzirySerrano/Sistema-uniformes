@@ -279,8 +279,21 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
             <div
                 v-for="d in devoluciones.data"
                 :key="d.id"
-                class="flex flex-col gap-2 rounded-xl border p-4"
+                class="hover:bg-muted/40 relative flex flex-col gap-2 rounded-xl border p-4 transition-colors"
             >
+                <!--
+                    Tarjeta completa clicable sin anidar <a> dentro de <a>:
+                    este Link cubre toda la tarjeta (stretched-link) y queda
+                    POR DEBAJO (z-0) del resto del contenido; el BotonVer de
+                    abajo se eleva explícitamente (z-10) para seguir siendo
+                    clicable por sí mismo. El resto del texto no tiene
+                    posición propia, así que un clic ahí cae sobre este Link.
+                -->
+                <Link
+                    :href="`/devoluciones/${d.id}`"
+                    :aria-label="`Ver devolución ${d.folio}`"
+                    class="focus-visible:ring-ring absolute inset-0 z-0 rounded-xl focus-visible:ring-2 focus-visible:outline-none"
+                />
                 <div class="flex items-start justify-between gap-2">
                     <p class="font-medium">{{ d.folio }}</p>
                     <Badge :variant="varianteBadgeEstadoDevolucion(d.estado)">{{
@@ -303,7 +316,10 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                 <p class="text-muted-foreground text-xs">
                     Registró: {{ d.registrada_por }}
                 </p>
-                <BotonVer :href="`/devoluciones/${d.id}`" class="mt-1 w-fit" />
+                <BotonVer
+                    :href="`/devoluciones/${d.id}`"
+                    class="relative z-10 mt-1 w-fit"
+                />
             </div>
         </div>
 

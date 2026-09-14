@@ -64,7 +64,10 @@ defineOptions({
     layout: {
         breadcrumbs: [
             { title: 'Inventario', href: '/inventario' },
-            { title: 'Movimientos', href: '/inventario/movimientos' },
+            {
+                title: 'Traspasos de inventario',
+                href: '/inventario/traspasos',
+            },
             { title: 'Nuevo traspaso', href: '/inventario/traspasos/crear' },
         ],
     },
@@ -1051,7 +1054,7 @@ function enviar(): void {
                     }}
                 </Button>
                 <Button variant="ghost" as-child>
-                    <Link href="/inventario/movimientos">Cancelar</Link>
+                    <Link href="/inventario/traspasos">Cancelar</Link>
                 </Button>
             </div>
         </form>

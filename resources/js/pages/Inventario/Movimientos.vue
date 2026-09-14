@@ -153,13 +153,14 @@ const vista = useVistaPreferida('movimientos', 'tabla');
     <div class="flex flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Movimientos de inventario"
-            descripcion="Historial completo de entradas y salidas. Cada cambio de existencia queda registrado."
+            descripcion="Historial técnico completo: entradas, ajustes, entregas, devoluciones y traspasos. Para ver sólo traspasos, usa Traspasos de inventario."
         >
             <template #acciones>
                 <div class="flex flex-wrap items-center gap-2">
-                    <Button v-if="puedeTransferir" as-child size="sm">
-                        <Link href="/inventario/traspasos/crear">
-                            <ArrowLeftRight class="size-4" /> Nuevo traspaso
+                    <Button variant="outline" as-child size="sm">
+                        <Link href="/inventario/traspasos">
+                            <ArrowLeftRight class="size-4" /> Traspasos de
+                            inventario
                         </Link>
                     </Button>
                     <BotonesExportar

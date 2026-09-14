@@ -12,6 +12,7 @@ use App\Models\SaldoInventario;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioInventario;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -184,6 +185,83 @@ class InventarioController extends Controller
         );
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Mínimo actualizado.']);
+    }
+
+    /**
+     * Vista previa de "aplicar mínimo masivo": cuántas combinaciones de saldo
+     * YA EXISTENTES caen dentro del alcance recibido, antes de que el usuario
+     * confirme. `activo_id` acota a un solo activo (todas sus variantes en un
+     * almacén, desde el Detalle del activo); sin él, el alcance es TODA la
+     * empresa + almacén (desde el listado general de Inventario).
+     */
+    public function previsualizarMinimoMasivo(Request $request, ServicioInventario $inventario): JsonResponse
+    {
+        abort_unless($request->user()->can('inventario.minimos'), 403);
+        $empresa = $this->resolverEmpresa($request);
+        $datos = $this->validarAlcanceMinimoMasivo($request, $empresa->id);
+
+        return response()->json([
+            'combinaciones' => $inventario->contarCombinacionesConSaldo(
+                $empresa->id,
+                (int) $datos['almacen_id'],
+                isset($datos['activo_id']) ? (int) $datos['activo_id'] : null,
+            ),
+        ]);
+    }
+
+    /**
+     * Aplica el mismo mínimo a todas las combinaciones de saldo del alcance
+     * (empresa + almacén, y opcionalmente un solo activo) — NUNCA cruza a
+     * otra empresa o almacén distintos de los recibidos y validados.
+     */
+    public function aplicarMinimoMasivo(Request $request, ServicioInventario $inventario): RedirectResponse
+    {
+        abort_unless($request->user()->can('inventario.minimos'), 403);
+        $empresa = $this->resolverEmpresa($request);
+        $datos = $this->validarAlcanceMinimoMasivo($request, $empresa->id, [
+            'minimo' => ['required', 'integer', 'min:0', 'max:1000000'],
+        ]);
+
+        $afectadas = $inventario->aplicarMinimoMasivo(
+            $empresa->id,
+            (int) $datos['almacen_id'],
+            (int) $datos['minimo'],
+            isset($datos['activo_id']) ? (int) $datos['activo_id'] : null,
+        );
+
+        return back()->with('toast', [
+            'type' => 'success',
+            'message' => "Mínimo aplicado a {$afectadas} combinación(es).",
+        ]);
+    }
+
+    /**
+     * Reglas del alcance de una aplicación masiva de mínimo: el almacén debe
+     * abastecer a la empresa y estar activo; si viene `activo_id` (acotar a
+     * un solo activo, ej. "todas sus variantes"), debe pertenecer a la
+     * empresa. No exige `activo_id` — sin él el alcance es toda la empresa +
+     * almacén.
+     *
+     * @param  array<string, mixed>  $extra
+     * @return array<string, mixed>
+     */
+    private function validarAlcanceMinimoMasivo(Request $request, int $empresaId, array $extra = []): array
+    {
+        return $request->validate([
+            'almacen_id' => [
+                'required', 'integer',
+                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('almacenes', 'id')->where(fn ($q) => $q->where('activo', true)),
+            ],
+            'activo_id' => [
+                'nullable', 'integer',
+                Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+            ],
+            ...$extra,
+        ], [
+            'almacen_id.exists' => 'El almacén no abastece a esta empresa o está desactivado.',
+            'activo_id.exists' => 'El activo no pertenece a esta empresa.',
+        ]);
     }
 
     /**

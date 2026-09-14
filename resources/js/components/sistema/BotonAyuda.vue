@@ -67,7 +67,10 @@ watch(
                 <Compass class="relative size-5" />
             </button>
         </PopoverTrigger>
-        <PopoverContent align="end" class="w-72 space-y-3">
+        <PopoverContent
+            align="end"
+            class="w-[min(20rem,calc(100vw-2rem))] space-y-3"
+        >
             <div class="space-y-1">
                 <p class="text-sm font-semibold">¿Necesitas ayuda aquí?</p>
                 <p class="text-muted-foreground text-xs">
@@ -82,14 +85,16 @@ watch(
                     :key="tour.id"
                     variant="outline"
                     size="sm"
-                    class="w-full justify-start"
+                    class="h-auto w-full justify-start gap-2 py-2 text-left whitespace-normal"
                     @click="lanzar(tour.id)"
                 >
-                    <Compass class="size-3.5" />
-                    {{ tour.titulo }}
+                    <Compass class="size-3.5 shrink-0" />
+                    <span class="min-w-0 flex-1 break-words">{{
+                        tour.titulo
+                    }}</span>
                     <span
                         v-if="!haVisto(tour.id)"
-                        class="bg-primary ml-auto size-1.5 shrink-0 rounded-full"
+                        class="bg-primary size-1.5 shrink-0 rounded-full"
                     />
                 </Button>
             </div>

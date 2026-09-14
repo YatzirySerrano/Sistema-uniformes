@@ -312,7 +312,7 @@ it('el PDF del acuse está disponible y contiene el folio correcto del traspaso'
     expect($respuesta->headers->get('content-disposition'))->toContain($traspaso->folio);
 });
 
-it('un usuario con acceso a AMBAS empresas puede ver el PDF y la firma', function () {
+it('un usuario con acceso a AMBAS empresas y el permiso puede ver el detalle, el PDF y la firma', function () {
     ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $this->datos['activoA']->id, $this->datos['tallaA']->id, 100);
 
     $this->actingAs($this->admin)
@@ -321,14 +321,16 @@ it('un usuario con acceso a AMBAS empresas puede ver el PDF y la firma', functio
             ['firma' => firmaDemoBase64()],
         ));
 
+    $traspaso = TraspasoInventario::firstOrFail();
     $acuse = AcuseTraspaso::firstOrFail();
 
+    $this->actingAs($this->admin)->get("/inventario/traspasos/{$traspaso->id}")->assertOk();
     $this->actingAs($this->admin)->get("/acuses-traspaso/{$acuse->id}/pdf")->assertOk();
     $this->actingAs($this->admin)->get("/acuses-traspaso/{$acuse->id}/firma")->assertOk()
         ->assertHeader('content-type', 'image/png');
 });
 
-it('IDOR/cross-company: un usuario con acceso a UNA sola de las dos empresas no puede ver el PDF ni la firma', function () {
+it('autorización de consulta (detalle/PDF/firma): permiso inventario.ver + acceso a origen O destino — nunca hace falta acceso a ambas', function () {
     ($this->cargarStock)($this->datos['empresaA']->id, $this->datos['almacenA']->id, $this->datos['activoA']->id, $this->datos['tallaA']->id, 100);
 
     $this->actingAs($this->admin)
@@ -337,15 +339,51 @@ it('IDOR/cross-company: un usuario con acceso a UNA sola de las dos empresas no 
             ['firma' => firmaDemoBase64()],
         ));
 
+    $traspaso = TraspasoInventario::firstOrFail();
     $acuse = AcuseTraspaso::firstOrFail();
-    $soloOrigen = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaA']]);
-    $soloDestino = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaB']]);
-    $ajenoTotal = usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]);
 
-    foreach ([$soloOrigen, $soloDestino, $ajenoTotal] as $usuario) {
+    $verTodo = function ($usuario) use ($traspaso, $acuse) {
+        $this->actingAs($usuario)->get("/inventario/traspasos/{$traspaso->id}")->assertOk();
+        $this->actingAs($usuario)->get("/acuses-traspaso/{$acuse->id}/pdf")->assertOk();
+        $this->actingAs($usuario)->get("/acuses-traspaso/{$acuse->id}/firma")->assertOk();
+    };
+    $rechazaTodo = function ($usuario) use ($traspaso, $acuse) {
+        $this->actingAs($usuario)->get("/inventario/traspasos/{$traspaso->id}")->assertForbidden();
         $this->actingAs($usuario)->get("/acuses-traspaso/{$acuse->id}/pdf")->assertForbidden();
         $this->actingAs($usuario)->get("/acuses-traspaso/{$acuse->id}/firma")->assertForbidden();
-    }
+    };
+
+    // 1. Sólo empresa ORIGEN + permiso funcional (inventario.ver, ya incluido
+    //    en Supervisor) → puede ver.
+    $verTodo(usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaA']]));
+
+    // 2. Sólo empresa DESTINO + permiso funcional → puede ver.
+    $verTodo(usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaB']]));
+
+    // 4. Ninguna de las dos empresas → 403, aunque tenga el permiso.
+    $rechazaTodo(usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]));
+
+    // 5. Empresa ORIGEN pero SIN el permiso funcional (rol Colaborador no lo
+    //    tiene) → 403: el acceso a la empresa nunca basta por sí solo.
+    $rechazaTodo(usuarioCon(RolSistema::Colaborador->value, [$this->datos['empresaA']]));
+
+    // 6. Empresa DESTINO pero SIN el permiso funcional → 403.
+    $rechazaTodo(usuarioCon(RolSistema::Colaborador->value, [$this->datos['empresaB']]));
+
+    // 7. Manipulación directa del id (IDOR): un usuario con el permiso pero
+    //    sin alcance a ninguna de las dos empresas recibe 403 puro — el
+    //    cuerpo de la respuesta nunca revela el folio ni datos del traspaso
+    //    ajeno, sólo el mensaje genérico de "no autorizado".
+    $ajeno = usuarioCon(RolSistema::Supervisor->value, [Empresa::factory()->create()]);
+    $respuestaPdf = $this->actingAs($ajeno)->get("/acuses-traspaso/{$acuse->id}/pdf");
+    $respuestaFirma = $this->actingAs($ajeno)->get("/acuses-traspaso/{$acuse->id}/firma");
+    $respuestaDetalle = $this->actingAs($ajeno)->get("/inventario/traspasos/{$traspaso->id}");
+
+    $respuestaPdf->assertForbidden();
+    $respuestaFirma->assertForbidden();
+    $respuestaDetalle->assertForbidden();
+    expect($respuestaPdf->getContent())->not->toContain($traspaso->folio);
+    expect($respuestaDetalle->getContent())->not->toContain($traspaso->folio);
 });
 
 it('el acuse es 1:1 con el traspaso: no se puede crear un segundo acuse para el mismo traspaso', function () {

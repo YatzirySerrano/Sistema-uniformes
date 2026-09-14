@@ -145,8 +145,8 @@ const grupos = computed<Grupo[]>(() =>
                     visible: puede('inventario.ver'),
                 },
                 {
-                    titulo: 'Movimientos',
-                    href: '/inventario/movimientos',
+                    titulo: 'Traspasos de inventario',
+                    href: '/inventario/traspasos',
                     icono: ArrowLeftRight,
                     visible: puede('inventario.ver'),
                 },

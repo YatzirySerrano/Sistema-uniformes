@@ -191,6 +191,42 @@ class ServicioInventario
     }
 
     /**
+     * Cuenta cuántas combinaciones de saldo YA EXISTENTES caen dentro del
+     * alcance empresa + almacén (opcionalmente acotado a un solo activo, para
+     * "aplicar a todas las variantes de este activo"). Es el número que se
+     * muestra ANTES de confirmar una aplicación masiva de mínimo.
+     */
+    public function contarCombinacionesConSaldo(int $empresaId, int $almacenId, ?int $activoId = null): int
+    {
+        return $this->consultaSaldosDelAlcance($empresaId, $almacenId, $activoId)->count();
+    }
+
+    /**
+     * Aplica el MISMO mínimo a todas las combinaciones de saldo que ya
+     * existen dentro del alcance explícito empresa + almacén (y, si se
+     * indica, un solo activo). Nunca crea combinaciones nuevas ni sale del
+     * alcance recibido — es la misma regla de "bajo mínimo" de siempre
+     * (`SaldoInventario::estaBajoMinimo()`), sólo que se escribe en lote.
+     * Devuelve cuántas filas se modificaron.
+     */
+    public function aplicarMinimoMasivo(int $empresaId, int $almacenId, int $minimo, ?int $activoId = null): int
+    {
+        return DB::transaction(fn (): int => $this->consultaSaldosDelAlcance($empresaId, $almacenId, $activoId)
+            ->update(['minimo' => max(0, $minimo)]));
+    }
+
+    /**
+     * @return Builder<SaldoInventario>
+     */
+    private function consultaSaldosDelAlcance(int $empresaId, int $almacenId, ?int $activoId): Builder
+    {
+        return SaldoInventario::query()
+            ->where('empresa_id', $empresaId)
+            ->where('almacen_id', $almacenId)
+            ->when($activoId !== null, fn (Builder $q) => $q->where('activo_id', $activoId));
+    }
+
+    /**
      * Ajuste absoluto: fija la existencia a un valor objetivo generando el
      * movimiento de ajuste correspondiente. Exige motivo.
      */

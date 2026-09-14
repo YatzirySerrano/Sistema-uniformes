@@ -148,13 +148,18 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('inventario/entrada', [InventarioController::class, 'entrada'])->name('inventario.entrada');
     Route::post('inventario/ajuste', [InventarioController::class, 'ajuste'])->name('inventario.ajuste');
     Route::post('inventario/minimos', [InventarioController::class, 'minimos'])->name('inventario.minimos');
+    Route::get('inventario/minimos/masivo', [InventarioController::class, 'previsualizarMinimoMasivo'])->name('inventario.minimos.masivo-preview');
+    Route::post('inventario/minimos/masivo', [InventarioController::class, 'aplicarMinimoMasivo'])->name('inventario.minimos.masivo');
     Route::get('inventario/movimientos', [MovimientoInventarioController::class, 'index'])->name('inventario.movimientos');
     Route::get('inventario/movimientos/exportar', [MovimientoInventarioController::class, 'exportar'])->name('inventario.movimientos.exportar');
     Route::get('inventario/movimientos/{movimiento}', [MovimientoInventarioController::class, 'show'])->name('inventario.movimientos.show');
 
     // Traspasos de inventario (entre almacenes de una empresa o entre empresas).
+    // Pantalla canónica de cara al usuario: consulta SÓLO traspasos (nunca
+    // entregas/devoluciones/movimientos técnicos), una tarjeta por traspaso.
     // Rutas literales ANTES de `traspasos/{traspaso}` para que "crear" /
     // "previsualizar" no se capturen como el binding del modelo.
+    Route::get('inventario/traspasos', [MovimientoInventarioController::class, 'indexTraspasos'])->name('inventario.traspasos.index');
     Route::get('inventario/traspasos/crear', [MovimientoInventarioController::class, 'nuevoTraspaso'])->name('inventario.traspasos.create');
     Route::get('inventario/traspasos/previsualizar', [MovimientoInventarioController::class, 'previsualizarTraspaso'])->name('inventario.traspasos.previsualizar');
     Route::post('inventario/traspasos', [MovimientoInventarioController::class, 'almacenarTraspaso'])->name('inventario.traspasos.store');

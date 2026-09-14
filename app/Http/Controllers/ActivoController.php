@@ -489,6 +489,10 @@ class ActivoController extends Controller
             ->with(['almacen:id,nombre', 'talla:id,valor'])
             ->get()
             ->map(fn (SaldoInventario $s): array => [
+                'empresa_id' => $s->empresa_id,
+                'almacen_id' => $s->almacen_id,
+                'activo_id' => $s->activo_id,
+                'talla_id' => $s->talla_id,
                 'almacen' => $s->almacen?->nombre,
                 'talla' => $s->talla?->valor,
                 'cantidad' => $s->cantidad,
@@ -538,6 +542,7 @@ class ActivoController extends Controller
                 'administrar' => $request->user()->can('administrar', $activo),
                 'agregar_existencias' => $request->user()->can('inventario.entrada')
                     && $request->user()->can('update', $activo),
+                'minimos' => $request->user()->can('inventario.minimos'),
             ],
             'suspendidos' => $this->cascada->paraVista($this->cascada->checklistDe($activo)),
         ]);

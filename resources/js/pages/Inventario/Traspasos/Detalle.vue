@@ -49,11 +49,18 @@ defineOptions({
     layout: {
         breadcrumbs: [
             { title: 'Inventario', href: '/inventario' },
-            { title: 'Movimientos', href: '/inventario/movimientos' },
+            {
+                title: 'Traspasos de inventario',
+                href: '/inventario/traspasos',
+            },
             { title: 'Traspaso', href: '#' },
         ],
     },
 });
+
+const ETIQUETA_ESTADO: Record<string, string> = {
+    completado: 'Completado',
+};
 
 function fecha(iso: string): string {
     return fechaHora(iso);
@@ -66,8 +73,8 @@ function fecha(iso: string): string {
     <div class="flex w-full flex-col gap-4 p-4">
         <div class="flex flex-wrap items-center gap-2">
             <Button variant="ghost" size="sm" as-child class="w-fit">
-                <Link href="/inventario/movimientos">
-                    <ArrowLeft class="size-4" /> Volver a movimientos
+                <Link href="/inventario/traspasos">
+                    <ArrowLeft class="size-4" /> Volver a traspasos
                 </Link>
             </Button>
             <div class="ml-auto flex flex-wrap gap-2">
@@ -119,6 +126,9 @@ function fecha(iso: string): string {
                             ? 'Entre empresas'
                             : 'Misma empresa'
                     }}
+                </Badge>
+                <Badge variant="outline">
+                    {{ ETIQUETA_ESTADO[traspaso.estado] ?? traspaso.estado }}
                 </Badge>
             </div>
             <div

@@ -253,6 +253,57 @@ function guardarMinimo() {
         onSuccess: () => (dialogo.value = null),
     });
 }
+
+// --- "Aplicar mínimo general": mismo mínimo a TODA una empresa + almacén ---
+// Sólo tiene sentido (y sólo se ofrece) cuando el listado ya está acotado a
+// una empresa y un almacén concretos — nunca "todas las empresas" ni "todos
+// los almacenes": el alcance visible en los filtros ES el alcance real de la
+// operación, así el usuario nunca aplica algo más amplio de lo que ve.
+const dialogoMasivo = ref(false);
+const previsualizacionMasiva = ref<number | null>(null);
+const previsualizandoMasiva = ref(false);
+const formMasivo = useForm({
+    empresa_id: 0,
+    almacen_id: 0,
+    minimo: 0,
+});
+
+function abrirMinimoMasivo(): void {
+    formMasivo.reset();
+    formMasivo.empresa_id = Number(filtros.empresa_id);
+    formMasivo.almacen_id = Number(filtros.almacen_id);
+    previsualizacionMasiva.value = null;
+    dialogoMasivo.value = true;
+}
+
+async function previsualizarMasivo(): Promise<void> {
+    previsualizandoMasiva.value = true;
+    previsualizacionMasiva.value = null;
+    try {
+        const params = new URLSearchParams({
+            empresa_id: String(formMasivo.empresa_id),
+            almacen_id: String(formMasivo.almacen_id),
+        });
+        const res = await fetch(
+            `/inventario/minimos/masivo?${params.toString()}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            },
+        );
+        if (res.ok)
+            previsualizacionMasiva.value = (await res.json()).combinaciones;
+    } finally {
+        previsualizandoMasiva.value = false;
+    }
+}
+
+function confirmarMinimoMasivo(): void {
+    formMasivo.post('/inventario/minimos/masivo', {
+        preserveScroll: true,
+        onSuccess: () => (dialogoMasivo.value = false),
+    });
+}
 </script>
 
 <template>
@@ -364,6 +415,25 @@ function guardarMinimo() {
                 @click="limpiarFiltros"
             >
                 Limpiar filtros
+            </Button>
+        </div>
+
+        <div
+            v-if="permisos.minimos && filtros.empresa_id && filtros.almacen_id"
+            class="bg-muted/40 flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm"
+        >
+            <span class="text-muted-foreground">
+                Con Empresa y Almacén filtrados puedes fijar un mínimo general
+                para todo ese alcance.
+            </span>
+            <Button
+                variant="outline"
+                size="sm"
+                class="ml-auto"
+                @click="abrirMinimoMasivo"
+            >
+                <Settings2 class="size-3.5" />
+                Aplicar mínimo general
             </Button>
         </div>
 
@@ -595,6 +665,108 @@ function guardarMinimo() {
                         @click="guardarMinimo"
                     >
                         {{ minimo.processing ? 'Guardando…' : 'Guardar' }}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog v-model:open="dialogoMasivo">
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Aplicar mínimo general</DialogTitle>
+                    <DialogDescription>
+                        Aplica un solo mínimo a TODAS las combinaciones de
+                        activo + variante que ya tienen existencia en esta
+                        empresa y este almacén. Nunca toca otra empresa ni otro
+                        almacén.
+                    </DialogDescription>
+                </DialogHeader>
+                <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Empresa</dt>
+                        <dd class="font-medium">
+                            {{ empresaSel?.nombre_comercial ?? '—' }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Almacén</dt>
+                        <dd class="font-medium">
+                            {{ almacenSel?.nombre ?? '—' }}
+                        </dd>
+                    </div>
+                </dl>
+                <div class="grid gap-3">
+                    <div class="grid gap-1.5">
+                        <Label for="masivo-minimo-general">Nuevo mínimo</Label>
+                        <Input
+                            id="masivo-minimo-general"
+                            v-model.number="formMasivo.minimo"
+                            type="number"
+                            min="0"
+                        />
+                        <p
+                            v-if="formMasivo.errors.minimo"
+                            class="text-destructive text-xs"
+                        >
+                            {{ formMasivo.errors.minimo }}
+                        </p>
+                    </div>
+
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        class="w-fit"
+                        :disabled="previsualizandoMasiva"
+                        @click="previsualizarMasivo"
+                    >
+                        {{
+                            previsualizandoMasiva
+                                ? 'Calculando…'
+                                : 'Ver a cuántas combinaciones afecta'
+                        }}
+                    </Button>
+
+                    <p
+                        v-if="previsualizacionMasiva !== null"
+                        class="text-sm"
+                        :class="
+                            previsualizacionMasiva > 0
+                                ? 'text-foreground'
+                                : 'text-muted-foreground'
+                        "
+                    >
+                        <template v-if="previsualizacionMasiva > 0">
+                            Se aplicará el mínimo a
+                            <strong>{{ previsualizacionMasiva }}</strong>
+                            combinación(es) de esta empresa y almacén.
+                        </template>
+                        <template v-else>
+                            No hay combinaciones con existencia en esa empresa y
+                            almacén todavía.
+                        </template>
+                    </p>
+                </div>
+                <DialogFooter>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        :disabled="formMasivo.processing"
+                        @click="dialogoMasivo = false"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        :disabled="
+                            !previsualizacionMasiva || formMasivo.processing
+                        "
+                        @click="confirmarMinimoMasivo"
+                    >
+                        {{
+                            formMasivo.processing
+                                ? 'Aplicando…'
+                                : 'Confirmar y aplicar'
+                        }}
                     </Button>
                 </DialogFooter>
             </DialogContent>

@@ -3,10 +3,13 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeftRight,
     Boxes,
+    Briefcase,
     Building,
+    ClipboardCheck,
     ClipboardList,
     Compass,
     FileBarChart2,
+    FileText,
     LayoutGrid,
     Network,
     Package,
@@ -106,6 +109,29 @@ const secciones: Seccion[] = [
         ],
     },
     {
+        titulo: 'Contratos y servicios',
+        modulos: [
+            {
+                tourId: 'contratos',
+                titulo: 'Contratos',
+                href: '/contratos',
+                icono: FileText,
+                descripcion:
+                    'Administra los contratos comerciales de cada empresa y los servicios operativos derivados de ellos.',
+                tono: TONO_ORGANIZACION,
+            },
+            {
+                tourId: 'servicios',
+                titulo: 'Servicios',
+                href: '/servicios',
+                icono: Briefcase,
+                descripcion:
+                    'Administra los servicios operativos derivados de un contrato, vinculados a una sucursal y utilizados para asignar colaboradores.',
+                tono: TONO_ORGANIZACION,
+            },
+        ],
+    },
+    {
         titulo: 'Inventario y activos',
         modulos: [
             {
@@ -145,12 +171,21 @@ const secciones: Seccion[] = [
                 tono: TONO_INVENTARIO,
             },
             {
-                tourId: 'movimientos',
-                titulo: 'Movimientos',
-                href: '/inventario/movimientos',
+                tourId: 'traspasos',
+                titulo: 'Traspasos de inventario',
+                href: '/inventario/traspasos',
                 icono: ArrowLeftRight,
                 descripcion:
-                    'El historial completo de cada entrada, salida, entrega y devolución.',
+                    'Consulta y registra transferencias de inventario entre almacenes.',
+                tono: TONO_INVENTARIO,
+            },
+            {
+                tourId: 'inventarios-fisicos',
+                titulo: 'Inventario físico',
+                href: '/inventarios-fisicos',
+                icono: ClipboardCheck,
+                descripcion:
+                    'Realiza rondas de conteo físico por almacén, mediante QR o captura manual, y compara existencias encontradas contra las esperadas.',
                 tono: TONO_INVENTARIO,
             },
             {

@@ -105,13 +105,14 @@ const REGISTRO: EntradaRegistro[] = [
         ],
     },
     {
-        patron: /^\/inventario\/movimientos\/?$/,
+        patron: /^\/inventario\/traspasos\/?$/,
         tours: [
             tourGenerico(
-                'movimientos',
-                'Movimientos',
-                '/inventario/movimientos',
-                'El historial completo, append-only, de cada entrada, salida, entrega y devolución de inventario.',
+                'traspasos',
+                'Traspasos de inventario',
+                '/inventario/traspasos',
+                'Consulta y registra transferencias de inventario entre almacenes. El historial técnico completo (entradas, ajustes…) sigue disponible en Movimientos.',
+                true,
             ),
         ],
     },
