@@ -303,13 +303,13 @@ onBeforeUnmount(() => {
                         <span class="block truncate">{{ etiqueta(item) }}</span>
                         <span
                             v-if="motivoDeshabilitado(item)"
-                            class="text-destructive block truncate text-xs"
+                            class="text-destructive block text-xs break-words"
                         >
                             {{ motivoDeshabilitado(item) }}
                         </span>
                         <span
-                            v-else-if="descripcion"
-                            class="text-muted-foreground block truncate text-xs"
+                            v-else-if="descripcion && descripcion(item)"
+                            class="text-muted-foreground block text-xs break-words"
                         >
                             {{ descripcion(item) }}
                         </span>

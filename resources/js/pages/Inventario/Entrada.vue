@@ -50,8 +50,11 @@ function sinVariantesHabilitadas(a: ActivoBuscado | null): boolean {
 defineOptions({
     layout: {
         breadcrumbs: [
-            { title: 'Inventario', href: '/inventario' },
-            { title: 'Registrar entrada', href: '/inventario/entrada' },
+            { title: 'Activos', href: '/activos' },
+            {
+                title: 'Registrar ingreso de stock',
+                href: '/inventario/entrada',
+            },
         ],
     },
 });
@@ -283,12 +286,12 @@ function enviar() {
 </script>
 
 <template>
-    <Head title="Registrar entrada de inventario" />
+    <Head title="Registrar ingreso de stock" />
 
     <div class="flex w-full flex-col gap-6 p-4">
         <EncabezadoPagina
-            titulo="Registrar entrada de inventario"
-            descripcion="Suma existencias a un almacén: recepción de compra, traspaso o carga inicial. Cada movimiento queda registrado."
+            titulo="Registrar ingreso de stock"
+            descripcion="Suma existencias de activos que ya existen en el catálogo a un almacén, por ejemplo por una compra, recepción de mercancía o carga inicial. Cada movimiento queda registrado."
         />
 
         <div
@@ -378,13 +381,13 @@ function enviar() {
                     <Input
                         id="motivo"
                         v-model="form.motivo"
-                        placeholder="Compra OC-1042 · Inventario inicial · Traspaso"
+                        placeholder="Compra OC-1042 · Recepción de mercancía · Inventario inicial"
                         :aria-invalid="!!form.errors.motivo || undefined"
                     />
                     <p class="text-muted-foreground text-xs">
-                        Indica el origen o motivo de esta entrada, por ejemplo:
-                        compra OC-1042, inventario inicial o devolución
-                        extraordinaria.
+                        Indica el origen o motivo del ingreso, por ejemplo:
+                        compra OC-1042, recepción de mercancía o inventario
+                        inicial.
                     </p>
                     <InputError :message="form.errors.motivo" />
                 </div>
@@ -560,10 +563,10 @@ function enviar() {
 
             <div class="flex flex-wrap items-center gap-3">
                 <Button type="submit" :disabled="form.processing || incompleto">
-                    Registrar entrada
+                    Registrar ingreso de stock
                 </Button>
                 <Button variant="ghost" as-child>
-                    <Link href="/inventario">Cancelar</Link>
+                    <Link href="/activos">Cancelar</Link>
                 </Button>
                 <p
                     v-if="incompleto && !form.processing"

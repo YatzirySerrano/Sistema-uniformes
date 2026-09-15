@@ -116,8 +116,8 @@ final class Permisos
         'inventario' => [
             'etiqueta' => 'Inventario por almacén',
             'permisos' => [
-                'inventario.ver' => 'Ver inventario y movimientos',
-                'inventario.entrada' => 'Registrar entradas de almacén',
+                'inventario.ver' => 'Ver existencias globales y movimientos',
+                'inventario.entrada' => 'Registrar ingreso de stock',
                 'inventario.ajustar' => 'Ajustar existencias de almacén',
                 'inventario.minimos' => 'Configurar mínimos por almacén',
                 'inventario.transferir' => 'Transferir entre almacenes',

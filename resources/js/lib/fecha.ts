@@ -34,3 +34,18 @@ export function fechaHora(
 export function soloFecha(iso: string | null | undefined): string {
     return fechaHora(iso, { dateStyle: 'short', timeStyle: undefined });
 }
+
+/**
+ * Formatea una fecha de NEGOCIO ("Y-m-d", día sin hora — p. ej.
+ * `fecha_entrega`, `fecha` de devolución) como "dd/mm/aaaa" mediante
+ * manipulación de texto. NUNCA usar `new Date(fecha)` aquí: interpretaría el
+ * string en UTC y luego lo reformatearía en la zona del navegador, pudiendo
+ * desplazar el día mostrado — exactamente el bug que este formateo evita.
+ */
+export function fechaNegocio(fecha: string | null | undefined): string {
+    if (!fecha) return '—';
+    const [anio, mes, dia] = fecha.split('-');
+    if (!anio || !mes || !dia) return fecha;
+
+    return `${dia}/${mes}/${anio}`;
+}

@@ -22,7 +22,10 @@
                                 <tr>
                                     <td width="48" style="vertical-align:middle; padding-right:12px;">
                                         @if ($logo)
-                                            <img src="{{ $logo }}" alt="{{ $empresaNombre }}" width="44" style="display:block; width:44px; height:44px; border-radius:6px; background:#ffffff; object-fit:contain;">
+                                            {{-- Adjunto inline vía Content-ID (`$message` lo inyecta
+                                                 Laravel automáticamente al renderizar la vista de un
+                                                 Mailable) — nunca data URI ni URL remota. --}}
+                                            <img src="{{ $message->embedData($logo['binario'], $logo['nombre'], $logo['mime']) }}" alt="{{ $empresaNombre }}" width="44" style="display:block; width:44px; height:44px; border-radius:6px; background:#ffffff; object-fit:contain;">
                                         @else
                                             {{-- Sin logo utilizable (no configurado, o formato no
                                                  embebible en correo como SVG): placeholder con la

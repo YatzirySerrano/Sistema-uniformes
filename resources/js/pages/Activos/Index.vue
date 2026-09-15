@@ -5,8 +5,8 @@ import {
     Building2,
     Layers,
     Package,
+    PackagePlus,
     Plus,
-    Ruler,
     Search,
     X,
 } from '@lucide/vue';
@@ -82,6 +82,8 @@ const props = defineProps<{
         administrar: boolean;
         administrar_catalogos: boolean;
         verEliminados: boolean;
+        verExistenciasGlobales: boolean;
+        registrarIngreso: boolean;
     };
 }>();
 
@@ -315,18 +317,23 @@ const vista = useVistaPreferida('activos');
             descripcion="Administra los bienes y prendas que la empresa entrega o mantiene en inventario: uniformes, equipo de cómputo, dispositivos y accesorios."
         >
             <template #acciones>
-                <Button variant="outline" as-child>
-                    <Link href="/tallas"
-                        ><Ruler class="size-4" /> Variantes / tallas</Link
-                    >
-                </Button>
                 <Button
-                    v-if="permisos.administrar_catalogos"
+                    v-if="permisos.verExistenciasGlobales"
                     variant="outline"
                     as-child
                 >
-                    <Link href="/activos-catalogos"
-                        ><Layers class="size-4" /> Tipos y categorías</Link
+                    <Link href="/inventario"
+                        ><Boxes class="size-4" /> Existencias globales</Link
+                    >
+                </Button>
+                <Button
+                    v-if="permisos.registrarIngreso"
+                    variant="outline"
+                    as-child
+                >
+                    <Link href="/inventario/entrada"
+                        ><PackagePlus class="size-4" /> Registrar ingreso de
+                        stock</Link
                     >
                 </Button>
                 <Button v-if="permisos.crear" as-child>

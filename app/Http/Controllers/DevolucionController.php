@@ -22,6 +22,7 @@ use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
 use App\Soporte\ContextoExportacion;
+use App\Soporte\FechaHora;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -208,6 +209,10 @@ class DevolucionController extends Controller
             'condicionesUnidad' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'textoConsentimiento' => ConfirmarAcuseDevolucion::TEXTO_CONSENTIMIENTO,
+            // Fecha de negocio "de hoy" en la zona de presentación — sólo para
+            // MOSTRARLA de forma no editable; el valor guardado lo decide
+            // siempre el servidor al confirmar, no este prop.
+            'fechaActual' => FechaHora::hoyNegocio(),
         ]);
     }
 
@@ -284,7 +289,10 @@ class DevolucionController extends Controller
             $acuse = $accion->ejecutar(
                 (int) $datos['entrega_uniforme_id'],
                 (int) $datos['almacen_id'],
-                $datos['fecha'],
+                // Fecha AUTORITATIVA: siempre "hoy" del servidor, nunca lo que
+                // mande el cliente — una devolución nueva no puede fecharse en
+                // el pasado ni en el futuro manipulando el payload.
+                FechaHora::hoyNegocio(),
                 $datos['activos'] ?? [],
                 $datos['unidades'] ?? [],
                 $request->user()->id,

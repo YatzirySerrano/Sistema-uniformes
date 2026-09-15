@@ -62,7 +62,12 @@ const props = defineProps<{
 }>();
 
 defineOptions({
-    layout: { breadcrumbs: [{ title: 'Inventario', href: '/inventario' }] },
+    layout: {
+        breadcrumbs: [
+            { title: 'Activos', href: '/activos' },
+            { title: 'Existencias globales', href: '/inventario' },
+        ],
+    },
 });
 
 const filtros = reactive({
@@ -289,17 +294,18 @@ function confirmarMinimoMasivo(): void {
 </script>
 
 <template>
-    <Head title="Inventario" />
+    <Head title="Existencias globales" />
 
     <div class="flex w-full flex-col gap-4 p-4">
         <EncabezadoPagina
-            titulo="Inventario"
-            descripcion="Vista global de existencias por EMPRESA + ALMACÉN + ACTIVO + VARIANTE, para registrar entradas, ajustar existencias y aplicar un mínimo a todo un almacén. El mínimo de un activo puntual se configura desde su propio detalle."
+            titulo="Existencias globales"
+            descripcion="Consulta las existencias de todos los activos por empresa, almacén y variante, e identifica faltantes o niveles bajos. El mínimo de un activo puntual se configura desde su propio detalle."
         >
             <template #acciones>
                 <Button v-if="permisos.entrada" as-child>
                     <Link href="/inventario/entrada">
-                        <PackagePlus class="size-4" /> Registrar entrada
+                        <PackagePlus class="size-4" /> Registrar ingreso de
+                        stock
                     </Link>
                 </Button>
             </template>

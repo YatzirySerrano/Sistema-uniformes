@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { ChevronLeft, ChevronRight, Plus, Trash2 } from '@lucide/vue';
+import { Calendar, ChevronLeft, ChevronRight, Plus, Trash2 } from '@lucide/vue';
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
-import DatePicker from '@/components/sistema/DatePicker.vue';
 import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
@@ -13,6 +12,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { fechaNegocio } from '@/lib/fecha';
 
 type OpcionEmpresa = {
     id: number;
@@ -55,7 +55,28 @@ type OpcionUnidad = {
     codigo: string;
     entregable: boolean;
     motivo_no_entregable: string | null;
+    /** "Marca Modelo" en una línea, o null si la unidad no tiene ninguno. */
+    marca_modelo: string | null;
+    /** IMEI enmascarado (`••••1234`) — nunca el IMEI completo. */
+    imei_mascara: string | null;
+    numero_telefonico: string | null;
 };
+
+/**
+ * Descripción secundaria de una unidad para el selector: sólo con los campos
+ * que existan (nunca "Marca: — · Modelo: —"). El código sigue siendo el
+ * identificador principal (`etiqueta`); esto es apoyo para reconocerla sin
+ * memorizar códigos ni volver al catálogo de unidades.
+ */
+function descripcionUnidad(u: OpcionUnidad): string {
+    return [
+        u.marca_modelo,
+        u.imei_mascara ? `IMEI ${u.imei_mascara}` : null,
+        u.numero_telefonico ? `Tel. ${u.numero_telefonico}` : null,
+    ]
+        .filter(Boolean)
+        .join(' · ');
+}
 
 type ComponenteVarianteLibre = {
     componente_id: number;
@@ -75,6 +96,15 @@ type OpcionConjunto = {
 const props = defineProps<{
     encargado: { name: string; email: string };
     textoConsentimiento: string;
+    /**
+     * Fecha de negocio "de hoy" ("Y-m-d"), calculada en el servidor con la
+     * zona de presentación de la aplicación — nunca `new Date().toISOString()`
+     * del navegador, que cerca de medianoche puede desfasarse un día por UTC.
+     * Sólo para MOSTRARLA de forma no editable: la fecha realmente guardada
+     * siempre la decide el servidor al confirmar, ignorando cualquier valor
+     * que llegue en el payload.
+     */
+    fechaActual: string;
 }>();
 
 defineOptions({
@@ -86,7 +116,10 @@ defineOptions({
     },
 });
 
-const hoy = new Date().toISOString().slice(0, 10);
+// Fecha de negocio "de hoy": SIEMPRE la que da el servidor (`fechaActual`),
+// nunca `new Date().toISOString()` — evita el desfase de día por UTC cerca de
+// medianoche. Ya no es editable por el usuario (ver `fecha_entrega` abajo).
+const hoy = props.fechaActual;
 
 // ------------------------------------------------------------------
 // Pasos del flujo: la entrega NO termina hasta firmar.
@@ -846,13 +879,18 @@ function enviar(): void {
                 </div>
 
                 <div class="grid gap-1.5">
-                    <Label for="fecha_entrega">Fecha de entrega</Label>
-                    <DatePicker
-                        id="fecha_entrega"
-                        v-model="form.fecha_entrega"
-                        :max="hoy"
-                        :invalido="!!form.errors.fecha_entrega"
-                    />
+                    <Label>Fecha de entrega</Label>
+                    <div
+                        class="bg-muted/40 text-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                    >
+                        <Calendar
+                            class="text-muted-foreground size-4 shrink-0"
+                        />
+                        <span class="font-medium">{{ fechaNegocio(hoy) }}</span>
+                        <span class="text-muted-foreground text-xs"
+                            >· Fecha asignada automáticamente</span
+                        >
+                    </div>
                     <InputError :message="form.errors.fecha_entrega" />
                 </div>
 
@@ -1192,8 +1230,11 @@ function enviar(): void {
                                     (u) => unidadNoEntregable(u as OpcionUnidad)
                                 "
                                 :etiqueta="(u) => (u as OpcionUnidad).codigo"
+                                :descripcion="
+                                    (u) => descripcionUnidad(u as OpcionUnidad)
+                                "
                                 placeholder="Unidad (código)…"
-                                placeholder-busqueda="Buscar por código"
+                                placeholder-busqueda="Buscar por código, marca, modelo, IMEI o teléfono"
                                 sin-resultados="Sin unidades de este activo en el almacén."
                                 :invalido="
                                     !!erroresLaxos[
@@ -1478,7 +1519,7 @@ function enviar(): void {
                         </div>
                         <div>
                             <dt class="text-muted-foreground text-xs">Fecha</dt>
-                            <dd>{{ form.fecha_entrega }}</dd>
+                            <dd>{{ fechaNegocio(form.fecha_entrega) }}</dd>
                         </div>
                         <div>
                             <dt class="text-muted-foreground text-xs">

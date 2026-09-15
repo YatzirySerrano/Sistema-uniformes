@@ -178,9 +178,9 @@ function enviar(): void {
                         código nuevo por cada una.
                     </template>
                     <template v-else>
-                        Registra una entrada de inventario para este activo sin
-                        salir de su detalle. Queda igual que "Registrar
-                        entrada": genera movimiento y auditoría.
+                        Suma existencias de este activo sin salir de su detalle.
+                        Usa exactamente las mismas reglas que "Registrar ingreso
+                        de stock": genera movimiento y auditoría.
                     </template>
                 </DialogDescription>
             </DialogHeader>

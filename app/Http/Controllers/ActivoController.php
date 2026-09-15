@@ -154,6 +154,11 @@ class ActivoController extends Controller
                 'administrar' => $request->user()->can('activos.administrar'),
                 'administrar_catalogos' => $request->user()->can('administrar', TipoActivo::class),
                 'verEliminados' => $puedeVerEliminados,
+                // Encabezado de Activos: "Existencias globales" reutiliza
+                // /inventario (mismo permiso que ya exigía su propio index);
+                // "Registrar ingreso de stock" reutiliza /inventario/entrada.
+                'verExistenciasGlobales' => $request->user()->can('inventario.ver'),
+                'registrarIngreso' => $request->user()->can('inventario.entrada'),
             ],
         ]);
     }

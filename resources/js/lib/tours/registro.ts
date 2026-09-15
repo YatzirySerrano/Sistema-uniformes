@@ -63,7 +63,7 @@ const REGISTRO: EntradaRegistro[] = [
                 'activos',
                 'Activos',
                 '/activos',
-                'El catálogo de todo lo que la empresa puede entregar: uniformes, equipo de cómputo, herramientas… Aquí también agregas existencias.',
+                'El catálogo de todo lo que la empresa puede entregar: uniformes, equipo de cómputo, herramientas… "Existencias globales" y "Registrar ingreso de stock" viven aquí arriba; los mínimos y las existencias puntuales se configuran en el detalle de cada activo.',
                 true,
             ),
         ],

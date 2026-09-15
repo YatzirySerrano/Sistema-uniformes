@@ -140,7 +140,7 @@ const secciones: Seccion[] = [
                 href: '/activos',
                 icono: Package,
                 descripcion:
-                    'El catálogo de todo lo que la empresa puede entregar. Aquí también agregas existencias.',
+                    'El catálogo de todo lo que la empresa puede entregar. Desde aquí consultas existencias globales, registras ingresos de stock y, en el detalle de cada activo, configuras mínimos y agregas existencias puntuales.',
                 tono: TONO_INVENTARIO,
             },
             {

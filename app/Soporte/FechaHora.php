@@ -36,4 +36,18 @@ final class FechaHora
 
         return CarbonImmutable::instance($momento)->setTimezone(self::zona())->format($formato);
     }
+
+    /**
+     * Fecha de negocio "de hoy" (`Y-m-d`, sin hora), calculada en la zona de
+     * presentación (`America/Mexico_City` por defecto) — NUNCA en UTC
+     * (`config('app.timezone')`), que cerca de medianoche puede ya ser "mañana"
+     * o todavía "ayer" en la zona real del negocio. Única fuente autoritativa
+     * para `fecha_entrega` (Entregas) y `fecha` (Devoluciones) al CREAR un
+     * registro nuevo: el valor que mande el cliente en el payload nunca se usa
+     * para decidir qué día se guarda.
+     */
+    public static function hoyNegocio(): string
+    {
+        return CarbonImmutable::now(self::zona())->toDateString();
+    }
 }

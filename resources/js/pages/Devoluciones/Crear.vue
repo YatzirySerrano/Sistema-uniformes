@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { ChevronLeft, ChevronRight } from '@lucide/vue';
+import { Calendar, ChevronLeft, ChevronRight } from '@lucide/vue';
 import { computed, nextTick, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
-import DatePicker from '@/components/sistema/DatePicker.vue';
 import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
@@ -13,6 +12,7 @@ import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { fechaNegocio } from '@/lib/fecha';
 
 type OpcionEntrega = {
     id: number;
@@ -74,6 +74,14 @@ const props = defineProps<{
     condiciones: { valor: string; etiqueta: string }[];
     condicionesUnidad: { valor: string; etiqueta: string }[];
     textoConsentimiento: string;
+    /**
+     * Fecha de negocio "de hoy" ("Y-m-d"), calculada en el servidor con la
+     * zona de presentación de la aplicación — nunca `new Date().toISOString()`
+     * del navegador, que cerca de medianoche puede desfasarse un día por UTC.
+     * Sólo para MOSTRARLA de forma no editable: la fecha realmente guardada
+     * siempre la decide el servidor al confirmar.
+     */
+    fechaActual: string;
 }>();
 
 // ------------------------------------------------------------------
@@ -133,7 +141,10 @@ defineOptions({
     },
 });
 
-const hoy = new Date().toISOString().slice(0, 10);
+// Fecha de negocio "de hoy": SIEMPRE la que da el servidor (`fechaActual`),
+// nunca `new Date().toISOString()` — evita el desfase de día por UTC cerca de
+// medianoche. Ya no es editable por el usuario (ver "Fecha" abajo).
+const hoy = props.fechaActual;
 
 // ------------------------------------------------------------------
 // Pasos: la devolución NO queda concluida hasta firmar (una sola
@@ -649,13 +660,20 @@ function enviar(): void {
                             <InputError :message="form.errors.almacen_id" />
                         </div>
                         <div class="grid gap-1.5">
-                            <Label for="fecha">Fecha</Label>
-                            <DatePicker
-                                id="fecha"
-                                v-model="form.fecha"
-                                :max="hoy"
-                                :invalido="!!form.errors.fecha"
-                            />
+                            <Label>Fecha de devolución</Label>
+                            <div
+                                class="bg-muted/40 text-foreground flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                            >
+                                <Calendar
+                                    class="text-muted-foreground size-4 shrink-0"
+                                />
+                                <span class="font-medium">{{
+                                    fechaNegocio(hoy)
+                                }}</span>
+                                <span class="text-muted-foreground text-xs"
+                                    >· Asignada automáticamente</span
+                                >
+                            </div>
                             <InputError :message="form.errors.fecha" />
                         </div>
                         <div class="grid gap-1.5">
@@ -884,7 +902,7 @@ function enviar(): void {
                                 <dt class="text-muted-foreground text-xs">
                                     Fecha
                                 </dt>
-                                <dd>{{ form.fecha }}</dd>
+                                <dd>{{ fechaNegocio(form.fecha) }}</dd>
                             </div>
                             <div>
                                 <dt class="text-muted-foreground text-xs">

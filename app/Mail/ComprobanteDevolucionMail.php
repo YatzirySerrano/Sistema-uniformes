@@ -71,7 +71,7 @@ class ComprobanteDevolucionMail extends Mailable implements ShouldQueue
                 ? 'Se adjunta el comprobante de devolución en formato PDF.'
                 : 'El comprobante en PDF se está generando y podrá descargarse desde el sistema en unos minutos.',
             'color' => $s['empresa']['color_principal'] ?? '#171717',
-            'logo' => LogoEmpresaCorreo::dataUri($s['empresa']['logo_ruta'] ?? null),
+            'logo' => LogoEmpresaCorreo::resolver($s['empresa']['logo_ruta'] ?? null),
         ]);
     }
 

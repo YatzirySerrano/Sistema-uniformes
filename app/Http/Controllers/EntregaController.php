@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
+use App\Soporte\FechaHora;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -118,6 +119,11 @@ class EntregaController extends Controller
                 'email' => $request->user()->email,
             ],
             'textoConsentimiento' => ConfirmarAcuseRecepcion::TEXTO_CONSENTIMIENTO,
+            // Fecha de negocio "de hoy" en la zona de presentación — sólo para
+            // MOSTRARLA de forma no editable (evita el salto de día de
+            // `toISOString()` en UTC cerca de medianoche). El valor guardado lo
+            // decide siempre el servidor al confirmar, no este prop.
+            'fechaActual' => FechaHora::hoyNegocio(),
         ]);
     }
 
@@ -244,7 +250,10 @@ class EntregaController extends Controller
                 $colaborador->id,
                 (int) $datos['almacen_id'],
                 $request->user()->id,
-                $datos['fecha_entrega'],
+                // Fecha AUTORITATIVA: siempre "hoy" del servidor, nunca lo que
+                // mande el cliente — una entrega nueva no puede fecharse en el
+                // pasado ni en el futuro manipulando el payload.
+                FechaHora::hoyNegocio(),
                 $datos['activos'] ?? [],
                 $datos['unidades'] ?? [],
                 $datos['conjuntos'] ?? [],
