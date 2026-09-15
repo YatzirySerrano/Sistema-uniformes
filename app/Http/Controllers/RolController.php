@@ -7,9 +7,11 @@ use App\Http\Controllers\Concerns\ExportaListado;
 use App\Servicios\ServicioAuditoria;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\Permisos;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -58,6 +60,12 @@ class RolController extends Controller
      * Excel/PDF del listado de roles, respetando los mismos filtros que
      * `index()`. Representación legible: nombre, tipo, nº de usuarios,
      * nº de permisos y permisos agrupados por módulo (nunca ids técnicos).
+     *
+     * El PDF usa una plantilla propia (`reportes.roles-permisos`, NO la
+     * genérica de una tabla): un rol con muchos permisos como una sola celda
+     * de texto corrido es ilegible, así que aquí cada rol es un bloque con
+     * sus permisos en listas por categoría. El Excel sí puede ser una fila
+     * por rol (una celda ancha se lee bien en una hoja de cálculo).
      */
     public function exportar(Request $request): BinaryFileResponse|HttpResponse
     {
@@ -65,6 +73,29 @@ class RolController extends Controller
 
         $filtros = $this->filtrosListado($request);
         $roles = $this->consultaRoles($filtros)->get();
+
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Tipo' => match ($filtros['tipo'] ?? null) {
+                'base' => 'Roles base del sistema',
+                'personalizados' => 'Roles personalizados',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Roles y permisos', null, $filtrosHumanos, $roles->count());
+
+        if ($request->input('formato', 'xlsx') === 'pdf') {
+            $pdf = Pdf::loadView('reportes.roles-permisos', [
+                'contexto' => $contexto,
+                'roles' => $roles->map(fn (Role $r): array => $this->rolParaPdf($r))->all(),
+            ])->setPaper('letter', 'portrait');
+
+            return response($pdf->output(), 200, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'attachment; filename="'.$contexto->nombreArchivo().'.pdf"',
+            ]);
+        }
 
         $etiquetasPermiso = Permisos::etiquetas();
 
@@ -81,20 +112,56 @@ class RolController extends Controller
             ];
         })->all();
 
-        $filtrosHumanos = array_filter([
-            'Búsqueda' => $filtros['buscar'] ?? null,
-            'Tipo' => match ($filtros['tipo'] ?? null) {
-                'base' => 'Roles base del sistema',
-                'personalizados' => 'Roles personalizados',
-                default => null,
-            },
-        ]);
-
-        $contexto = new ContextoExportacion('Roles y permisos', null, $filtrosHumanos, $roles->count());
-
-        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+        return $this->respuestaExportacion('xlsx', $filas, [
             'Rol', 'Tipo', 'Usuarios', 'N.º de permisos', 'Permisos',
         ], $contexto);
+    }
+
+    /**
+     * @return array{etiqueta: string, base: bool, usuarios: int, total_permisos: int, grupos: Collection<string, array<int, string>>}
+     */
+    private function rolParaPdf(Role $r): array
+    {
+        $permisos = $r->permissions->pluck('name')->all();
+
+        return [
+            'etiqueta' => Str::of($r->name)->replace('_', ' ')->title()->value(),
+            'base' => in_array($r->name, RolSistema::valores(), true),
+            'usuarios' => (int) $r->users_count,
+            'total_permisos' => count($permisos),
+            'grupos' => $this->agruparPermisos($permisos),
+        ];
+    }
+
+    /**
+     * Agrupa los permisos de un rol por categoría (mismo agrupado que ya usa
+     * la pantalla de Roles en pantalla, `Permisos::GRUPOS`) para poder
+     * imprimirlos como listas cortas por categoría en vez de un bloque
+     * corrido. El orden de categorías es siempre el mismo (el de
+     * `Permisos::GRUPOS`), nunca el de inserción de Spatie.
+     *
+     * @param  array<int, string>  $permisos
+     * @return Collection<string, array<int, string>>
+     */
+    private function agruparPermisos(array $permisos): Collection
+    {
+        $permisosDelRol = array_flip($permisos);
+        $agrupado = collect();
+
+        foreach (Permisos::GRUPOS as $grupo) {
+            $items = [];
+            foreach ($grupo['permisos'] as $clave => $etiqueta) {
+                if (isset($permisosDelRol[$clave])) {
+                    $items[] = $etiqueta;
+                }
+            }
+
+            if ($items !== []) {
+                $agrupado->put($grupo['etiqueta'], $items);
+            }
+        }
+
+        return $agrupado;
     }
 
     /**

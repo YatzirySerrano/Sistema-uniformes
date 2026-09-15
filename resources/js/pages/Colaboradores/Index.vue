@@ -4,6 +4,7 @@ import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import FormularioColaborador from '@/components/colaboradores/FormularioColaborador.vue';
 import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -19,6 +20,7 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
+    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
@@ -54,6 +56,7 @@ const props = defineProps<{
     puedeCrear: boolean;
     puedeImportar: boolean;
     puedeVerEliminados: boolean;
+    puedeEliminar: boolean;
 }>();
 
 defineOptions({
@@ -171,6 +174,38 @@ function alGuardarNuevo(): void {
 }
 
 const vista = useVistaPreferida('colaboradores', 'tabla');
+
+// --- Eliminar (desactivar) / Restaurar — mismo patrón que Colaboradores/Detalle.vue ---
+const confirmandoEliminar = ref<Colaborador | null>(null);
+const procesandoEstado = ref(false);
+
+function confirmarEliminar(): void {
+    if (!confirmandoEliminar.value) return;
+    procesandoEstado.value = true;
+    router.post(
+        `/colaboradores/${confirmandoEliminar.value.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                confirmandoEliminar.value = null;
+            },
+        },
+    );
+}
+
+function alternarEstado(c: Colaborador): void {
+    if (c.activo) {
+        confirmandoEliminar.value = c;
+    } else {
+        router.post(
+            `/colaboradores/${c.id}/estado`,
+            {},
+            { preserveScroll: true },
+        );
+    }
+}
 </script>
 
 <template>
@@ -259,12 +294,22 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
             v-else-if="vista === 'cards'"
             class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
         >
-            <Link
+            <div
                 v-for="c in colaboradores.data"
                 :key="c.id"
-                :href="`/colaboradores/${c.id}`"
-                class="hover:border-primary/20 flex flex-col gap-2 rounded-xl border p-4 transition-colors"
+                class="hover:border-primary/20 relative flex flex-col gap-2 rounded-xl border p-4 transition-colors"
             >
+                <!--
+                    Tarjeta completa clicable sin anidar <a> dentro de <a>
+                    (stretched-link): este Link cubre toda la tarjeta y queda
+                    por debajo (z-0); los botones de acción se elevan (z-10)
+                    para seguir siendo clicables por sí mismos.
+                -->
+                <Link
+                    :href="`/colaboradores/${c.id}`"
+                    :aria-label="`Ver colaborador ${c.nombre_completo}`"
+                    class="focus-visible:ring-ring absolute inset-0 z-0 rounded-xl focus-visible:ring-2 focus-visible:outline-none"
+                />
                 <div class="flex items-start justify-between gap-2">
                     <div class="flex min-w-0 items-center gap-2">
                         <Avatar class="size-8 shrink-0">
@@ -294,7 +339,24 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                 <p class="text-muted-foreground text-sm">
                     {{ [c.puesto, c.area].filter(Boolean).join(' · ') || '—' }}
                 </p>
-            </Link>
+
+                <div class="relative z-10 mt-1 flex flex-wrap gap-2 pt-1">
+                    <BotonVer :href="`/colaboradores/${c.id}`" />
+                    <BotonEditar :href="`/colaboradores/${c.id}/editar`" />
+                    <BotonEliminar
+                        v-if="puedeEliminar && c.activo"
+                        @click.stop.prevent="alternarEstado(c)"
+                    />
+                    <Button
+                        v-else-if="puedeEliminar"
+                        variant="outline"
+                        size="sm"
+                        @click.stop.prevent="alternarEstado(c)"
+                    >
+                        Restaurar
+                    </Button>
+                </div>
+            </div>
         </div>
 
         <div v-else class="overflow-x-auto rounded-xl border">
@@ -359,6 +421,18 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                                 <BotonEditar
                                     :href="`/colaboradores/${c.id}/editar`"
                                 />
+                                <BotonEliminar
+                                    v-if="puedeEliminar && c.activo"
+                                    @click="alternarEstado(c)"
+                                />
+                                <Button
+                                    v-else-if="puedeEliminar"
+                                    variant="outline"
+                                    size="sm"
+                                    @click="alternarEstado(c)"
+                                >
+                                    Restaurar
+                                </Button>
                             </div>
                         </td>
                     </tr>
@@ -386,6 +460,43 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
                     @guardado="alGuardarNuevo"
                     @cancelar="modalNuevo = false"
                 />
+            </DialogContent>
+        </Dialog>
+
+        <Dialog
+            :open="confirmandoEliminar !== null"
+            @update:open="
+                (v) => {
+                    if (!v) confirmandoEliminar = null;
+                }
+            "
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>¿Eliminar este colaborador?</DialogTitle>
+                    <DialogDescription>
+                        Esta acción lo retirará de los listados y nuevas
+                        operaciones. Su historial de entregas, acuses y
+                        expediente digital no se modifican, y podrás restaurarlo
+                        cuando quieras.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="confirmandoEliminar = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEliminar"
+                    >
+                        Eliminar
+                    </Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     </div>

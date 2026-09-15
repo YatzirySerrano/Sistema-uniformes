@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Plus, Search } from '@lucide/vue';
+import {
+    Boxes,
+    Briefcase,
+    Calendar,
+    MapPin,
+    Plus,
+    Search,
+    User,
+    UserCog,
+} from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -272,20 +281,44 @@ const vista = useVistaPreferida('entregas', 'tabla');
                         e.estado_etiqueta
                     }}</Badge>
                 </div>
-                <p class="text-muted-foreground text-sm">
+                <p
+                    class="text-muted-foreground flex items-center gap-1.5 text-sm"
+                >
+                    <User class="size-3.5 shrink-0" />
                     {{ e.colaborador }}
                     <span class="text-xs">· {{ e.numero_empleado }}</span>
                 </p>
-                <p class="text-muted-foreground text-sm">{{ e.sucursal }}</p>
-                <p v-if="e.servicio" class="text-muted-foreground text-xs">
+                <p
+                    class="text-muted-foreground flex items-center gap-1.5 text-sm"
+                >
+                    <MapPin class="size-3.5 shrink-0" />
+                    {{ e.sucursal }}
+                </p>
+                <p
+                    v-if="e.servicio"
+                    class="text-muted-foreground flex items-center gap-1.5 text-xs"
+                >
+                    <Briefcase class="size-3 shrink-0" />
                     {{ e.servicio }}
                 </p>
                 <div
-                    class="text-muted-foreground mt-auto flex items-center justify-between text-xs"
+                    class="text-muted-foreground mt-auto flex items-center justify-between gap-2 pt-1 text-xs"
                 >
-                    <span>{{ e.fecha_entrega }}</span>
-                    <span>{{ e.renglones }} renglón(es)</span>
+                    <span class="flex items-center gap-1">
+                        <Calendar class="size-3.5 shrink-0" />
+                        {{ e.fecha_entrega }}
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <Boxes class="size-3.5 shrink-0" />
+                        {{ e.renglones }} renglón(es)
+                    </span>
                 </div>
+                <p
+                    v-if="e.encargado"
+                    class="text-muted-foreground flex items-center gap-1.5 text-xs"
+                >
+                    <UserCog class="size-3.5 shrink-0" /> {{ e.encargado }}
+                </p>
             </Link>
         </div>
 

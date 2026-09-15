@@ -2,13 +2,17 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { ArrowLeftRight, Boxes, Calendar, User, Warehouse } from '@lucide/vue';
 import { ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import { fechaHora } from '@/lib/fecha';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
@@ -94,6 +98,8 @@ watch(
 function fecha(iso: string) {
     return fechaHora(iso);
 }
+
+const vista = useVistaPreferida('traspasos', 'cards');
 </script>
 
 <template>
@@ -105,6 +111,10 @@ function fecha(iso: string) {
             descripcion="Consulta y registra transferencias de inventario entre almacenes."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/inventario/traspasos/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="puedeTransferir" as-child size="sm">
                     <Link href="/inventario/traspasos/crear">
                         <ArrowLeftRight class="size-4" /> Nuevo traspaso
@@ -137,6 +147,7 @@ function fecha(iso: string) {
             <div class="w-40">
                 <DatePicker v-model="f.hasta" placeholder="Hasta" />
             </div>
+            <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
         <EstadoVacio
@@ -145,7 +156,10 @@ function fecha(iso: string) {
             descripcion="No hay traspasos de inventario que coincidan con los filtros."
         />
 
-        <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
             <Link
                 v-for="t in traspasos.data"
                 :key="t.id"
@@ -201,6 +215,67 @@ function fecha(iso: string) {
                     <User class="size-3.5 shrink-0" /> {{ t.realizado_por }}
                 </p>
             </Link>
+        </div>
+
+        <div v-else class="overflow-x-auto rounded-xl border">
+            <table class="w-full min-w-[820px] text-sm">
+                <thead class="bg-muted/50 text-muted-foreground text-left">
+                    <tr>
+                        <th class="px-3 py-2 font-medium">Folio</th>
+                        <th class="px-3 py-2 font-medium">Origen</th>
+                        <th class="px-3 py-2 font-medium">Destino</th>
+                        <th class="px-3 py-2 text-right font-medium">
+                            Renglones
+                        </th>
+                        <th class="px-3 py-2 text-right font-medium">
+                            Unidades
+                        </th>
+                        <th class="px-3 py-2 font-medium">Fecha</th>
+                        <th class="px-3 py-2 font-medium">Responsable</th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr
+                        v-for="t in traspasos.data"
+                        :key="t.id"
+                        class="hover:bg-muted/40 border-t transition-colors"
+                    >
+                        <td class="px-3 py-2 font-medium">
+                            {{ t.folio }}
+                            <Badge
+                                v-if="t.interempresa"
+                                variant="outline"
+                                class="ml-1"
+                                >Interempresa</Badge
+                            >
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ t.empresa_origen }} · {{ t.almacen_origen }}
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ t.empresa_destino }} · {{ t.almacen_destino }}
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            {{ t.renglones }}
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            {{ t.unidades }}
+                        </td>
+                        <td
+                            class="text-muted-foreground px-3 py-2 whitespace-nowrap"
+                        >
+                            {{ fecha(t.ocurrido_en) }}
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2">
+                            {{ t.realizado_por ?? '—' }}
+                        </td>
+                        <td class="px-3 py-2 text-right">
+                            <BotonVer :href="`/inventario/traspasos/${t.id}`" />
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
 
         <Paginacion :links="traspasos.links" :total="traspasos.total" />

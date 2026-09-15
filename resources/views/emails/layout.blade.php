@@ -20,11 +20,23 @@
                         <td style="background-color:{{ $color }}; padding:20px 28px;">
                             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                                 <tr>
-                                    @if ($logo)
-                                        <td width="48" style="vertical-align:middle; padding-right:12px;">
-                                            <img src="{{ $logo }}" alt="{{ $empresaNombre }}" width="44" style="display:block; width:44px; height:auto; border-radius:6px; background:#ffffff;">
-                                        </td>
-                                    @endif
+                                    <td width="48" style="vertical-align:middle; padding-right:12px;">
+                                        @if ($logo)
+                                            <img src="{{ $logo }}" alt="{{ $empresaNombre }}" width="44" style="display:block; width:44px; height:44px; border-radius:6px; background:#ffffff; object-fit:contain;">
+                                        @else
+                                            {{-- Sin logo utilizable (no configurado, o formato no
+                                                 embebible en correo como SVG): placeholder con la
+                                                 inicial de la empresa en vez de dejar un hueco o un
+                                                 ícono roto. --}}
+                                            <table role="presentation" width="44" height="44" cellpadding="0" cellspacing="0" border="0" style="width:44px; height:44px; background-color:rgba(255,255,255,0.18); border-radius:6px;">
+                                                <tr>
+                                                    <td align="center" valign="middle" style="width:44px; height:44px; font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:18px; font-weight:700; color:#ffffff;">
+                                                        {{ mb_strtoupper(mb_substr($empresaNombre, 0, 1)) }}
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        @endif
+                                    </td>
                                     <td style="vertical-align:middle;">
                                         <div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:16px; font-weight:700; color:#ffffff; line-height:1.3;">
                                             {{ $empresaNombre }}

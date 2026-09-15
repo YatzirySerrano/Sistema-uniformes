@@ -4,6 +4,7 @@ namespace App\Mail;
 
 use App\Models\AcuseRecepcion;
 use App\Servicios\ServicioAcusePdf;
+use App\Soporte\LogoEmpresaCorreo;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -11,8 +12,6 @@ use Illuminate\Mail\Mailables\Attachment;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 
 /**
  * Comprobante que se envía a AMBAS partes cuando una entrega queda
@@ -77,7 +76,7 @@ class ComprobanteEntregaMail extends Mailable implements ShouldQueue
                 ? 'Se adjunta el comprobante de entrega en formato PDF.'
                 : 'El comprobante en PDF se está generando y podrá descargarse desde el sistema en unos minutos.',
             'color' => $s['empresa']['color_principal'] ?? '#171717',
-            'logo' => $this->logoDataUri($s['empresa']['logo_ruta'] ?? null),
+            'logo' => LogoEmpresaCorreo::dataUri($s['empresa']['logo_ruta'] ?? null),
         ]);
     }
 
@@ -96,40 +95,5 @@ class ComprobanteEntregaMail extends Mailable implements ShouldQueue
             Attachment::fromData(fn (): string => $contenido, $this->acuse->nombreArchivoDescarga())
                 ->withMime('application/pdf'),
         ];
-    }
-
-    /**
-     * El logo de la empresa como data URI (sólo PNG/JPG/GIF existentes en el
-     * disco público). `null` ante cualquier problema — el correo se envía
-     * igual, sólo con el nombre de la empresa.
-     */
-    private function logoDataUri(?string $ruta): ?string
-    {
-        if ($ruta === null) {
-            return null;
-        }
-
-        $mime = match (Str::lower(pathinfo($ruta, PATHINFO_EXTENSION))) {
-            'png' => 'image/png',
-            'jpg', 'jpeg' => 'image/jpeg',
-            'gif' => 'image/gif',
-            default => null,
-        };
-
-        if ($mime === null) {
-            return null;
-        }
-
-        try {
-            if (! Storage::disk('public')->exists($ruta)) {
-                return null;
-            }
-
-            $contenido = Storage::disk('public')->get($ruta);
-        } catch (\Throwable) {
-            return null;
-        }
-
-        return $contenido === null ? null : 'data:'.$mime.';base64,'.base64_encode($contenido);
     }
 }

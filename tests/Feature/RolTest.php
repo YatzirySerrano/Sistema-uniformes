@@ -2,6 +2,7 @@
 
 use App\Enums\RolSistema;
 use App\Exports\ListadoExport;
+use App\Soporte\ContextoExportacion;
 use App\Soporte\Permisos;
 use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Permission\Models\Role;
@@ -174,6 +175,35 @@ it('exporta roles a PDF', function () {
     $respuesta = $this->actingAs($admin)->get('/roles/exportar?formato=pdf')->assertOk();
 
     expect($respuesta->getContent())->toStartWith('%PDF-');
+});
+
+it('la plantilla PDF de roles agrupa los permisos por categoría en listas, no como un bloque de texto corrido', function () {
+    // Prueba la PLANTILLA en aislamiento con datos ya agrupados (misma forma
+    // que produce `RolController::rolParaPdf()`): así se cubre exactamente
+    // el bug reportado — "los permisos aparecen en una sola línea muy
+    // larga" — sin depender de poder inspeccionar el binario del PDF.
+    $html = view('reportes.roles-permisos', [
+        'contexto' => new ContextoExportacion('Roles y permisos', null, [], 1),
+        'roles' => [[
+            'etiqueta' => 'Multi Permiso',
+            'base' => false,
+            'usuarios' => 3,
+            'total_permisos' => 4,
+            'grupos' => collect([
+                'Reportes' => ['Ver reportes', 'Exportar reportes'],
+                'Empresas' => ['Ver empresas', 'Editar empresas'],
+            ]),
+        ]],
+    ])->render();
+
+    // Cada categoría es su propio título + <ul>, no un único ítem
+    // "Reportes: Ver, Exportar · Empresas: Ver, Editar" en una sola celda.
+    expect(substr_count($html, '<ul class="categoria-lista">'))->toBe(2)
+        ->and($html)->toContain('Reportes')
+        ->and($html)->toContain('Empresas')
+        ->and($html)->toContain('Ver reportes')
+        ->and($html)->toContain('Editar empresas')
+        ->and($html)->not->toContain('Reportes: Ver reportes, Exportar reportes · Empresas');
 });
 
 it('el endpoint de exportación de roles exige el permiso roles.ver', function () {

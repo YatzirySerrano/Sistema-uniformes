@@ -197,7 +197,13 @@ function limpiarFiltros() {
     categoriaSel.value = null;
 }
 
-const dialogo = ref<'ajuste' | 'minimo' | null>(null);
+// La configuración de mínimo POR RENGLÓN vive en el Detalle del activo
+// (`Activos/Detalle.vue`) — aquí sólo queda el ajuste de existencia (que no
+// existe en ningún otro lugar) y, más abajo, "Aplicar mínimo general" (un
+// alcance más amplio, empresa+almacén completos, que tampoco existe en
+// Activo Detalle). Evita duplicar el mismo diálogo de mínimo individual en
+// dos pantallas.
+const dialogo = ref<'ajuste' | null>(null);
 const actual = ref<Saldo | null>(null);
 
 const ajuste = useForm({
@@ -208,47 +214,23 @@ const ajuste = useForm({
     existencia_objetivo: 0,
     motivo: '',
 });
-const minimo = useForm({
-    empresa_id: 0,
-    almacen_id: 0,
-    activo_id: 0,
-    talla_id: 0,
-    minimo: 0,
-});
 
-function abrir(tipo: 'ajuste' | 'minimo', s: Saldo) {
+function abrir(tipo: 'ajuste', s: Saldo) {
     actual.value = s;
     dialogo.value = tipo;
-    if (tipo === 'ajuste') {
-        ajuste.defaults({
-            empresa_id: s.empresa_id,
-            almacen_id: s.almacen_id,
-            activo_id: s.activo_id,
-            talla_id: s.talla_id,
-            existencia_objetivo: s.cantidad,
-            motivo: '',
-        });
-        ajuste.reset();
-    } else {
-        minimo.defaults({
-            empresa_id: s.empresa_id,
-            almacen_id: s.almacen_id,
-            activo_id: s.activo_id,
-            talla_id: s.talla_id,
-            minimo: s.minimo,
-        });
-        minimo.reset();
-    }
+    ajuste.defaults({
+        empresa_id: s.empresa_id,
+        almacen_id: s.almacen_id,
+        activo_id: s.activo_id,
+        talla_id: s.talla_id,
+        existencia_objetivo: s.cantidad,
+        motivo: '',
+    });
+    ajuste.reset();
 }
 
 function guardarAjuste() {
     ajuste.post('/inventario/ajuste', {
-        preserveScroll: true,
-        onSuccess: () => (dialogo.value = null),
-    });
-}
-function guardarMinimo() {
-    minimo.post('/inventario/minimos', {
         preserveScroll: true,
         onSuccess: () => (dialogo.value = null),
     });
@@ -312,7 +294,7 @@ function confirmarMinimoMasivo(): void {
     <div class="flex w-full flex-col gap-4 p-4">
         <EncabezadoPagina
             titulo="Inventario"
-            descripcion="Existencias por EMPRESA + ALMACÉN + ACTIVO + VARIANTE. Un mismo almacén puede abastecer a varias empresas; su stock se mantiene separado por empresa."
+            descripcion="Vista global de existencias por EMPRESA + ALMACÉN + ACTIVO + VARIANTE, para registrar entradas, ajustar existencias y aplicar un mínimo a todo un almacén. El mínimo de un activo puntual se configura desde su propio detalle."
         >
             <template #acciones>
                 <Button v-if="permisos.entrada" as-child>
@@ -489,12 +471,14 @@ function confirmarMinimoMasivo(): void {
                                 </Button>
                                 <Button
                                     v-if="permisos.minimos"
-                                    variant="outline"
+                                    variant="ghost"
                                     size="sm"
-                                    @click="abrir('minimo', s)"
+                                    as-child
                                 >
-                                    <Settings2 class="size-3.5" />
-                                    Configurar mínimo
+                                    <Link :href="`/activos/${s.activo_id}`">
+                                        <Settings2 class="size-3.5" />
+                                        Configurar mínimo
+                                    </Link>
                                 </Button>
                             </div>
                         </td>
@@ -583,88 +567,6 @@ function confirmarMinimoMasivo(): void {
                                 ? 'Guardando…'
                                 : 'Registrar ajuste'
                         }}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-
-        <Dialog
-            :open="dialogo === 'minimo'"
-            @update:open="(v: boolean) => !v && (dialogo = null)"
-        >
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Configurar mínimo</DialogTitle>
-                    <DialogDescription>
-                        Debajo de este mínimo, la fila se marca "bajo mínimo" en
-                        el inventario y en los reportes. Un mínimo de 0
-                        desactiva la alerta para esta fila.
-                    </DialogDescription>
-                </DialogHeader>
-                <dl
-                    v-if="actual"
-                    class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm"
-                >
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Empresa</dt>
-                        <dd>{{ actual.empresa }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Almacén</dt>
-                        <dd>{{ actual.almacen }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Activo</dt>
-                        <dd>{{ actual.activo }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Variante</dt>
-                        <dd>{{ actual.talla || 'Sin variante' }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">
-                            Existencia actual
-                        </dt>
-                        <dd class="font-medium">{{ actual.cantidad }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">
-                            Mínimo actual
-                        </dt>
-                        <dd class="font-medium">{{ actual.minimo }}</dd>
-                    </div>
-                </dl>
-                <div class="grid gap-3">
-                    <div class="grid gap-1.5">
-                        <Label for="minimo-nuevo">Nuevo mínimo</Label>
-                        <Input
-                            id="minimo-nuevo"
-                            v-model.number="minimo.minimo"
-                            type="number"
-                            min="0"
-                        />
-                        <p
-                            v-if="minimo.errors.minimo"
-                            class="text-destructive text-xs"
-                        >
-                            {{ minimo.errors.minimo }}
-                        </p>
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        :disabled="minimo.processing"
-                        @click="dialogo = null"
-                    >
-                        Cancelar
-                    </Button>
-                    <Button
-                        :disabled="minimo.processing"
-                        @click="guardarMinimo"
-                    >
-                        {{ minimo.processing ? 'Guardando…' : 'Guardar' }}
                     </Button>
                 </DialogFooter>
             </DialogContent>

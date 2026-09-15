@@ -14,6 +14,7 @@ import type { EmpresaEditable } from '@/components/empresas/FormularioEmpresa.vu
 import FormularioEmpresa from '@/components/empresas/FormularioEmpresa.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -27,6 +28,7 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
+    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
@@ -61,6 +63,7 @@ const props = defineProps<{
     puedeCrear: boolean;
     puedeEditar: boolean;
     puedeVerEliminadas: boolean;
+    puedeCambiarEstado: boolean;
 }>();
 
 defineOptions({
@@ -178,6 +181,34 @@ function hrefSucursalesDe(empresa: EmpresaTarjeta): string {
 
 function hrefColaboradoresDe(empresa: EmpresaTarjeta): string {
     return `/colaboradores?empresa_id=${empresa.id}`;
+}
+
+// --- Eliminar (desactivar) / Restaurar — mismo patrón que Servicios/Index.vue ---
+const confirmandoEliminar = ref<EmpresaTarjeta | null>(null);
+const procesandoEstado = ref(false);
+
+function confirmarEliminar(): void {
+    if (!confirmandoEliminar.value) return;
+    procesandoEstado.value = true;
+    router.post(
+        `/empresas/${confirmandoEliminar.value.id}/estado`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                procesandoEstado.value = false;
+                confirmandoEliminar.value = null;
+            },
+        },
+    );
+}
+
+function alternarEstado(e: EmpresaTarjeta): void {
+    if (e.activa) {
+        confirmandoEliminar.value = e;
+    } else {
+        router.post(`/empresas/${e.id}/estado`, {}, { preserveScroll: true });
+    }
 }
 </script>
 
@@ -479,6 +510,18 @@ function hrefColaboradoresDe(empresa: EmpresaTarjeta): string {
                             v-if="puedeEditar"
                             @click.stop="editarEmpresa(e)"
                         />
+                        <BotonEliminar
+                            v-if="puedeCambiarEstado && e.activa"
+                            @click.stop="alternarEstado(e)"
+                        />
+                        <Button
+                            v-else-if="puedeCambiarEstado"
+                            variant="outline"
+                            size="sm"
+                            @click.stop="alternarEstado(e)"
+                        >
+                            Restaurar
+                        </Button>
                     </div>
                 </div>
             </div>
@@ -555,6 +598,18 @@ function hrefColaboradoresDe(empresa: EmpresaTarjeta): string {
                                     v-if="puedeEditar"
                                     @click="editarEmpresa(e)"
                                 />
+                                <BotonEliminar
+                                    v-if="puedeCambiarEstado && e.activa"
+                                    @click="alternarEstado(e)"
+                                />
+                                <Button
+                                    v-else-if="puedeCambiarEstado"
+                                    variant="outline"
+                                    size="sm"
+                                    @click="alternarEstado(e)"
+                                >
+                                    Restaurar
+                                </Button>
                             </div>
                         </td>
                     </tr>
@@ -589,6 +644,50 @@ function hrefColaboradoresDe(empresa: EmpresaTarjeta): string {
                     @guardado="alGuardar"
                     @cancelar="modalAbierto = false"
                 />
+            </DialogContent>
+        </Dialog>
+
+        <Dialog
+            :open="confirmandoEliminar !== null"
+            @update:open="
+                (v) => {
+                    if (!v) confirmandoEliminar = null;
+                }
+            "
+        >
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle
+                        >¿Eliminar la empresa
+                        <span v-if="confirmandoEliminar">{{
+                            confirmandoEliminar.nombre_comercial
+                        }}</span
+                        >?</DialogTitle
+                    >
+                    <DialogDescription>
+                        Esta acción la retirará de los listados y restringirá
+                        sus operaciones. Sucursales, colaboradores, áreas,
+                        activos y conjuntos que dependan de ella quedarán
+                        suspendidos por cascada (no se borran). Podrás
+                        restaurarla cuando quieras.
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="procesandoEstado"
+                        @click="confirmandoEliminar = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        variant="destructive"
+                        :disabled="procesandoEstado"
+                        @click="confirmarEliminar"
+                    >
+                        Eliminar
+                    </Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     </div>

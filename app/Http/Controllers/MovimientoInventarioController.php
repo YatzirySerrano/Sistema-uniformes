@@ -103,30 +103,11 @@ class MovimientoInventarioController extends Controller
 
         $idsScope = $this->idsScope($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosTraspasos($request);
 
-        $filtros = $request->validate([
-            'almacen_id' => ['nullable', 'integer'],
-            'desde' => ['nullable', 'date'],
-            'hasta' => ['nullable', 'date'],
-        ]);
-
-        $traspasos = TraspasoInventario::query()
-            ->where(function (Builder $q) use ($idsScope): void {
-                $q->whereIn('empresa_origen_id', $idsScope)->orWhereIn('empresa_destino_id', $idsScope);
-            })
-            ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $v) => $q->where(
-                fn (Builder $sub) => $sub->where('almacen_origen_id', $v)->orWhere('almacen_destino_id', $v)
-            ))
-            ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
-            ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
-            ->with([
-                'empresaOrigen:id,nombre_comercial', 'empresaDestino:id,nombre_comercial',
-                'almacenOrigen:id,nombre', 'almacenDestino:id,nombre',
-                'realizadoPor:id,name',
-            ])
+        $traspasos = $this->consultaTraspasos($request, $filtros)
             ->withCount('renglones')
             ->withSum('renglones', 'cantidad')
-            ->latest('ocurrido_en')
             ->paginate($this->porPagina())
             ->withQueryString()
             ->through(fn (TraspasoInventario $t): array => [
@@ -153,6 +134,89 @@ class MovimientoInventarioController extends Controller
                 ->unique('id')->map->only(['id', 'nombre'])->values(),
             'puedeTransferir' => $request->user()->can('inventario.transferir'),
         ]);
+    }
+
+    /**
+     * Excel/PDF de "Traspasos de inventario", respetando los mismos filtros
+     * que `indexTraspasos()` — misma consulta filtrada, sólo cambia la salida.
+     */
+    public function exportarTraspasos(Request $request): BinaryFileResponse|HttpResponse
+    {
+        abort_unless($request->user()->can('inventario.ver'), 403);
+
+        $filtros = $this->filtrosTraspasos($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $traspasos = $this->consultaTraspasos($request, $filtros)
+            ->withCount('renglones')
+            ->withSum('renglones', 'cantidad')
+            ->get();
+
+        $filas = $traspasos->map(fn (TraspasoInventario $t): array => [
+            $t->folio,
+            $t->empresaOrigen?->nombre_comercial,
+            $t->almacenOrigen?->nombre,
+            $t->empresaDestino?->nombre_comercial,
+            $t->almacenDestino?->nombre,
+            (int) $t->renglones_count,
+            (int) ($t->renglones_sum_cantidad ?? 0),
+            $t->realizadoPor?->name,
+            FechaHora::local($t->ocurrido_en),
+        ])->all();
+
+        $filtrosHumanos = array_filter([
+            'Almacén' => ($filtros['almacen_id'] ?? null) ? Almacen::query()->find((int) $filtros['almacen_id'])?->nombre : null,
+            'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
+            'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
+        ]);
+
+        $contexto = new ContextoExportacion('Traspasos de inventario', $empresaFiltro, $filtrosHumanos, $traspasos->count());
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Folio', 'Empresa origen', 'Almacén origen', 'Empresa destino', 'Almacén destino',
+            'Renglones', 'Unidades', 'Realizó', 'Fecha',
+        ], $contexto);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosTraspasos(Request $request): array
+    {
+        return $request->validate([
+            'almacen_id' => ['nullable', 'integer'],
+            'desde' => ['nullable', 'date'],
+            'hasta' => ['nullable', 'date'],
+        ]);
+    }
+
+    /**
+     * Consulta de `TraspasoInventario` como entidad raíz — NUNCA reconstruida
+     * agrupando `movimientos_inventario` — compartida por `indexTraspasos()`
+     * y `exportarTraspasos()`. El alcance de empresa es el mismo que autoriza
+     * verlos (`TraspasoInventarioPolicy::view`): acceso a origen O destino.
+     *
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<TraspasoInventario>
+     */
+    private function consultaTraspasos(Request $request, array $filtros): Builder
+    {
+        $idsScope = $this->idsScope($request);
+
+        return TraspasoInventario::query()
+            ->where(function (Builder $q) use ($idsScope): void {
+                $q->whereIn('empresa_origen_id', $idsScope)->orWhereIn('empresa_destino_id', $idsScope);
+            })
+            ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $v) => $q->where(
+                fn (Builder $sub) => $sub->where('almacen_origen_id', $v)->orWhere('almacen_destino_id', $v)
+            ))
+            ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
+            ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
+            ->with([
+                'empresaOrigen:id,nombre_comercial', 'empresaDestino:id,nombre_comercial',
+                'almacenOrigen:id,nombre', 'almacenDestino:id,nombre',
+                'realizadoPor:id,name',
+            ])
+            ->latest('ocurrido_en');
     }
 
     /**

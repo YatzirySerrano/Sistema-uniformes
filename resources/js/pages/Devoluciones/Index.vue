@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
-import { Plus, Search, X } from '@lucide/vue';
+import {
+    Boxes,
+    Calendar,
+    MapPin,
+    Plus,
+    Search,
+    User,
+    UserCog,
+    X,
+} from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
@@ -300,20 +309,37 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                         d.estado_etiqueta
                     }}</Badge>
                 </div>
-                <p class="text-muted-foreground text-sm">
+                <p
+                    class="text-muted-foreground flex items-center gap-1.5 text-sm"
+                >
+                    <User class="size-3.5 shrink-0" />
                     {{ d.colaborador
                     }}<span v-if="d.numero_empleado">
                         (N.º {{ d.numero_empleado }})</span
                     >
                 </p>
-                <p class="text-muted-foreground text-sm">{{ d.sucursal }}</p>
-                <div
-                    class="text-muted-foreground mt-auto flex items-center justify-between text-xs"
+                <p
+                    class="text-muted-foreground flex items-center gap-1.5 text-sm"
                 >
-                    <span>{{ d.fecha }}</span>
-                    <span>{{ d.renglones }} renglón(es)</span>
+                    <MapPin class="size-3.5 shrink-0" />
+                    {{ d.sucursal }}
+                </p>
+                <div
+                    class="text-muted-foreground mt-auto flex items-center justify-between gap-2 pt-1 text-xs"
+                >
+                    <span class="flex items-center gap-1">
+                        <Calendar class="size-3.5 shrink-0" />
+                        {{ d.fecha }}
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <Boxes class="size-3.5 shrink-0" />
+                        {{ d.renglones }} renglón(es)
+                    </span>
                 </div>
-                <p class="text-muted-foreground text-xs">
+                <p
+                    class="text-muted-foreground flex items-center gap-1.5 text-xs"
+                >
+                    <UserCog class="size-3.5 shrink-0" />
                     Registró: {{ d.registrada_por }}
                 </p>
                 <BotonVer

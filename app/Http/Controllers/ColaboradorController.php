@@ -86,6 +86,12 @@ class ColaboradorController extends Controller
             'puedeCrear' => $usuario->can('create', Colaborador::class),
             'puedeImportar' => $usuario->can('importar', Colaborador::class),
             'puedeVerEliminados' => $usuario->can('colaboradores.desactivar'),
+            // Mismo permiso que ya exige `desactivar` en el detalle
+            // (`ColaboradorPolicy::desactivar`, prop `puedeEliminar` allá
+            // también); el listado ya sólo trae colaboradores dentro del
+            // alcance del usuario (`consultaColaboradores()`), así que este
+            // booleano de página equivale exactamente al Gate por fila.
+            'puedeEliminar' => $usuario->can('colaboradores.desactivar'),
         ]);
     }
 

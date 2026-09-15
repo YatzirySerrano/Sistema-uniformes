@@ -160,6 +160,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Rutas literales ANTES de `traspasos/{traspaso}` para que "crear" /
     // "previsualizar" no se capturen como el binding del modelo.
     Route::get('inventario/traspasos', [MovimientoInventarioController::class, 'indexTraspasos'])->name('inventario.traspasos.index');
+    Route::get('inventario/traspasos/exportar', [MovimientoInventarioController::class, 'exportarTraspasos'])->name('inventario.traspasos.exportar');
     Route::get('inventario/traspasos/crear', [MovimientoInventarioController::class, 'nuevoTraspaso'])->name('inventario.traspasos.create');
     Route::get('inventario/traspasos/previsualizar', [MovimientoInventarioController::class, 'previsualizarTraspaso'])->name('inventario.traspasos.previsualizar');
     Route::post('inventario/traspasos', [MovimientoInventarioController::class, 'almacenarTraspaso'])->name('inventario.traspasos.store');

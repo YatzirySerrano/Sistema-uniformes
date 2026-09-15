@@ -81,6 +81,12 @@ class EmpresaController extends Controller
             'puedeCrear' => $usuario->can('create', Empresa::class),
             'puedeEditar' => $usuario->can('empresas.editar') || $usuario->can('configuracion-empresa.editar'),
             'puedeVerEliminadas' => $usuario->can('empresas.editar'),
+            // Mismo permiso que ya exige `cambiarEstado` en el detalle
+            // (`EmpresaPolicy::cambiarEstado`); el listado ya sólo trae
+            // empresas dentro del alcance del usuario (`consultaEmpresas()`),
+            // así que este booleano de página equivale exactamente al Gate
+            // por fila sin pagar una consulta extra por renglón.
+            'puedeCambiarEstado' => $usuario->can('empresas.editar'),
         ]);
     }
 
