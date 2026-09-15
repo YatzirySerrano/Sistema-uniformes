@@ -709,7 +709,7 @@ function guardarEquipo(): void {
                             id="incidencia-observacion"
                             v-model="formIncidencia.observacion"
                             rows="2"
-                            class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                            class="border-input bg-background rounded-md border px-3 py-2 text-base md:text-sm"
                         />
                         <InputError
                             :message="formIncidencia.errors.observacion"

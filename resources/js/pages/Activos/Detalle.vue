@@ -263,8 +263,8 @@ function confirmarMinimoMasivo(): void {
             </div>
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-[320px_1fr]">
-            <div class="flex flex-col gap-4">
+        <div class="grid min-w-0 gap-4 lg:grid-cols-[320px_1fr]">
+            <div class="flex min-w-0 flex-col gap-4">
                 <section class="rounded-xl border p-4">
                     <h2
                         class="mb-3 flex items-center gap-2 text-sm font-semibold"
@@ -349,7 +349,7 @@ function confirmarMinimoMasivo(): void {
 
             <section
                 v-if="activo.tipo_control === 'individual'"
-                class="rounded-xl border p-4"
+                class="min-w-0 rounded-xl border p-4"
             >
                 <div
                     class="mb-3 flex flex-wrap items-center justify-between gap-2"
@@ -414,7 +414,7 @@ function confirmarMinimoMasivo(): void {
                 </div>
             </section>
 
-            <section v-else class="rounded-xl border p-4">
+            <section v-else class="min-w-0 rounded-xl border p-4">
                 <div
                     class="mb-3 flex flex-wrap items-center justify-between gap-2"
                 >
@@ -456,82 +456,157 @@ function confirmarMinimoMasivo(): void {
                     </div>
                 </div>
 
-                <div class="overflow-x-auto rounded-lg border">
-                    <table class="w-full min-w-[560px] text-sm">
-                        <thead
-                            class="bg-muted/50 text-muted-foreground text-left"
-                        >
-                            <tr>
-                                <th class="px-3 py-2 font-medium">Almacén</th>
-                                <th class="px-3 py-2 font-medium">Variante</th>
-                                <th class="px-3 py-2 text-right font-medium">
-                                    Existencia
-                                </th>
-                                <th class="px-3 py-2 text-right font-medium">
-                                    Mínimo
-                                </th>
-                                <th class="px-3 py-2 font-medium">Estado</th>
-                                <th class="px-3 py-2"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="(s, i) in saldos"
-                                :key="i"
-                                class="border-t"
-                            >
-                                <td class="px-3 py-2">
-                                    {{ s.almacen ?? '—' }}
-                                </td>
-                                <td class="px-3 py-2">
-                                    {{ s.talla ?? 'Sin variante' }}
-                                </td>
-                                <td class="px-3 py-2 text-right font-medium">
-                                    {{ s.cantidad }}
-                                </td>
-                                <td
-                                    class="text-muted-foreground px-3 py-2 text-right"
-                                >
-                                    {{ s.minimo }}
-                                </td>
-                                <td class="px-3 py-2">
-                                    <Badge
-                                        v-if="s.bajo_minimo"
-                                        variant="secondary"
-                                        class="text-amber-600"
-                                        >Bajo mínimo</Badge
-                                    >
-                                    <span v-else class="text-muted-foreground"
-                                        >OK</span
-                                    >
-                                </td>
-                                <td class="px-3 py-2 text-right">
-                                    <Button
-                                        v-if="permisos.minimos"
-                                        variant="ghost"
-                                        size="sm"
-                                        @click="abrirMinimoIndividual(s)"
-                                    >
-                                        <Settings2 class="size-3.5" />
-                                        Configurar mínimo
-                                    </Button>
-                                </td>
-                            </tr>
-                            <tr v-if="!saldos.length">
-                                <td
-                                    colspan="6"
-                                    class="text-muted-foreground px-3 py-6 text-center"
-                                >
-                                    Este activo todavía no tiene existencias.
-                                    <span v-if="permisos.agregar_existencias">
-                                        Usa "Agregar existencias" para registrar
-                                        la primera entrada.</span
-                                    >
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div
+                    v-if="!saldos.length"
+                    class="text-muted-foreground rounded-lg border px-3 py-6 text-center text-sm"
+                >
+                    Este activo todavía no tiene existencias.
+                    <span v-if="permisos.agregar_existencias">
+                        Usa "Agregar existencias" para registrar la primera
+                        entrada.</span
+                    >
                 </div>
+
+                <template v-else>
+                    <!-- Escritorio / tablet ancha: tabla -->
+                    <div
+                        class="hidden overflow-x-auto rounded-lg border md:block"
+                    >
+                        <table class="w-full min-w-[560px] text-sm">
+                            <thead
+                                class="bg-muted/50 text-muted-foreground text-left"
+                            >
+                                <tr>
+                                    <th class="px-3 py-2 font-medium">
+                                        Almacén
+                                    </th>
+                                    <th class="px-3 py-2 font-medium">
+                                        Variante
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-right font-medium"
+                                    >
+                                        Existencia
+                                    </th>
+                                    <th
+                                        class="px-3 py-2 text-right font-medium"
+                                    >
+                                        Mínimo
+                                    </th>
+                                    <th class="px-3 py-2 font-medium">
+                                        Estado
+                                    </th>
+                                    <th class="px-3 py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr
+                                    v-for="(s, i) in saldos"
+                                    :key="i"
+                                    class="border-t"
+                                >
+                                    <td class="px-3 py-2">
+                                        {{ s.almacen ?? '—' }}
+                                    </td>
+                                    <td class="px-3 py-2">
+                                        {{ s.talla ?? 'Sin variante' }}
+                                    </td>
+                                    <td
+                                        class="px-3 py-2 text-right font-medium"
+                                    >
+                                        {{ s.cantidad }}
+                                    </td>
+                                    <td
+                                        class="text-muted-foreground px-3 py-2 text-right"
+                                    >
+                                        {{ s.minimo }}
+                                    </td>
+                                    <td class="px-3 py-2">
+                                        <Badge
+                                            v-if="s.bajo_minimo"
+                                            variant="secondary"
+                                            class="text-amber-600"
+                                            >Bajo mínimo</Badge
+                                        >
+                                        <span
+                                            v-else
+                                            class="text-muted-foreground"
+                                            >OK</span
+                                        >
+                                    </td>
+                                    <td class="px-3 py-2 text-right">
+                                        <Button
+                                            v-if="permisos.minimos"
+                                            variant="ghost"
+                                            size="sm"
+                                            @click="abrirMinimoIndividual(s)"
+                                        >
+                                            <Settings2 class="size-3.5" />
+                                            Configurar mínimo
+                                        </Button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Móvil: una card por combinación almacén + variante -->
+                    <div class="grid gap-3 md:hidden">
+                        <div
+                            v-for="(s, i) in saldos"
+                            :key="i"
+                            class="flex flex-col gap-2 rounded-lg border p-3 text-sm"
+                        >
+                            <div class="flex items-start justify-between gap-2">
+                                <div class="min-w-0">
+                                    <p class="truncate font-medium">
+                                        {{ s.almacen ?? '—' }}
+                                    </p>
+                                    <p class="text-muted-foreground text-xs">
+                                        {{ s.talla ?? 'Sin variante' }}
+                                    </p>
+                                </div>
+                                <Badge
+                                    v-if="s.bajo_minimo"
+                                    variant="secondary"
+                                    class="shrink-0 text-amber-600"
+                                    >Bajo mínimo</Badge
+                                >
+                                <span
+                                    v-else
+                                    class="text-muted-foreground shrink-0 text-xs"
+                                    >OK</span
+                                >
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <p class="text-muted-foreground text-xs">
+                                        Existencia
+                                    </p>
+                                    <p class="font-medium">{{ s.cantidad }}</p>
+                                </div>
+                                <div>
+                                    <p class="text-muted-foreground text-xs">
+                                        Mínimo
+                                    </p>
+                                    <p class="text-muted-foreground">
+                                        {{ s.minimo }}
+                                    </p>
+                                </div>
+                            </div>
+                            <Button
+                                v-if="permisos.minimos"
+                                variant="outline"
+                                size="sm"
+                                class="w-fit"
+                                @click="abrirMinimoIndividual(s)"
+                            >
+                                <Settings2 class="size-3.5" />
+                                Configurar mínimo
+                            </Button>
+                        </div>
+                    </div>
+                </template>
             </section>
         </div>
 

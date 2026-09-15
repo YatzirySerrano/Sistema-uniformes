@@ -83,7 +83,7 @@ function enviar() {
                     v-model="form.motivo"
                     rows="3"
                     required
-                    class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                    class="border-input bg-background rounded-md border px-3 py-2 text-base md:text-sm"
                     placeholder="Explica el motivo. Quedará registrado en la auditoría."
                 />
                 <InputError :message="form.errors.motivo" />

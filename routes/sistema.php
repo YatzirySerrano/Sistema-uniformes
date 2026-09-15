@@ -92,6 +92,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::redirect('prendas', 'activos');
     Route::get('activos', [ActivoController::class, 'index'])->name('activos.index');
     Route::get('activos/buscar', [ActivoController::class, 'buscar'])->name('activos.buscar');
+    Route::get('activos/exportar', [ActivoController::class, 'exportar'])->name('activos.exportar');
     Route::get('activos/siguiente-codigo', [ActivoController::class, 'siguienteCodigo'])->name('activos.siguiente-codigo');
     Route::get('activos/crear', [ActivoController::class, 'create'])->name('activos.create');
     Route::post('activos', [ActivoController::class, 'store'])->name('activos.store');

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Check, ChevronsUpDown, Loader2, Plus, Search, X } from '@lucide/vue';
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 /**
  * Combobox de selección única con búsqueda remota (debounced). Pensado para
@@ -195,7 +195,9 @@ function alClicFuera(evento: MouseEvent): void {
     }
 }
 
-document.addEventListener('click', alClicFuera);
+onMounted(() => {
+    document.addEventListener('click', alClicFuera);
+});
 onBeforeUnmount(() => {
     document.removeEventListener('click', alClicFuera);
     cancelarEnVuelo();
@@ -203,7 +205,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div ref="contenedor" class="relative">
+    <div ref="contenedor" class="relative min-w-0">
         <button
             :id="id"
             type="button"
@@ -217,10 +219,13 @@ onBeforeUnmount(() => {
             aria-haspopup="listbox"
             @click="disabled ? null : abierto ? cerrar() : abrir()"
         >
-            <span v-if="modelValue" class="truncate text-left">
+            <span v-if="modelValue" class="min-w-0 flex-1 truncate text-left">
                 {{ etiqueta(modelValue) }}
             </span>
-            <span v-else class="text-muted-foreground truncate text-left">
+            <span
+                v-else
+                class="text-muted-foreground min-w-0 flex-1 truncate text-left"
+            >
                 {{ placeholder ?? 'Selecciona…' }}
             </span>
             <span class="flex shrink-0 items-center gap-1">
@@ -246,7 +251,7 @@ onBeforeUnmount(() => {
                 <input
                     v-model="termino"
                     type="text"
-                    class="border-input bg-background focus-visible:ring-ring h-8 w-full rounded border pr-2 pl-7 text-sm focus-visible:ring-2 focus-visible:outline-none"
+                    class="border-input bg-background focus-visible:ring-ring h-8 w-full rounded border pr-2 pl-7 text-base focus-visible:ring-2 focus-visible:outline-none md:text-sm"
                     :placeholder="placeholderBusqueda ?? 'Buscar…'"
                     aria-label="Buscar"
                     @keydown.esc="cerrar"

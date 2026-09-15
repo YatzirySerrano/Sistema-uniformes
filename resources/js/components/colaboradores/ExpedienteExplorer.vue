@@ -749,7 +749,7 @@ function abrirHistorial(documento: Documento): void {
                             id="ee-descripcion"
                             v-model="formSubir.descripcion"
                             rows="2"
-                            class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                            class="border-input bg-background rounded-md border px-3 py-2 text-base md:text-sm"
                         />
                         <InputError :message="formSubir.errors.descripcion" />
                     </div>
@@ -842,7 +842,7 @@ function abrirHistorial(documento: Documento): void {
                             id="ee-comentario"
                             v-model="formVersion.comentario"
                             rows="2"
-                            class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                            class="border-input bg-background rounded-md border px-3 py-2 text-base md:text-sm"
                         />
                         <InputError :message="formVersion.errors.comentario" />
                     </div>
@@ -922,7 +922,7 @@ function abrirHistorial(documento: Documento): void {
                             id="ee-descripcion-editar"
                             v-model="formEditar.descripcion"
                             rows="2"
-                            class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                            class="border-input bg-background rounded-md border px-3 py-2 text-base md:text-sm"
                         />
                         <InputError :message="formEditar.errors.descripcion" />
                     </div>

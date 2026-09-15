@@ -338,7 +338,7 @@ function cambiarSeccion(s: Seccion): void {
 
 // Tabla ↔ Tarjetas del detalle: misma query/paginación/filtros, sólo cambia
 // la presentación.
-const vista = useVistaPreferida('inventario-fisico-detalle', 'tabla');
+const vista = useVistaPreferida('inventario-fisico-detalle', 'cards');
 
 /* ---------- Artículos por cantidad (comprobación manual) ---------- */
 const existencias = ref<FilaExistencia[]>(
@@ -597,7 +597,7 @@ onBeforeUnmount(() => {
             Ronda cerrada y firmada por
             <strong>{{ ronda.firma.nombre_firmante }}</strong>
             el {{ fecha(ronda.firma.aceptado_en) }} ·
-            <span class="text-muted-foreground font-mono text-xs">
+            <span class="text-muted-foreground font-mono text-xs break-all">
                 Huella SHA-256 {{ ronda.firma.hash_firma }}
             </span>
         </div>

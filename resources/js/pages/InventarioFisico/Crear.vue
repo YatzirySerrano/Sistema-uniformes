@@ -211,7 +211,7 @@ function enviar(): void {
                     id="observaciones"
                     v-model="form.observaciones"
                     rows="3"
-                    class="border-input bg-background focus-visible:ring-ring rounded-md border px-3 py-2 text-sm focus-visible:ring-1 focus-visible:outline-none"
+                    class="border-input bg-background focus-visible:ring-ring rounded-md border px-3 py-2 text-base focus-visible:ring-1 focus-visible:outline-none md:text-sm"
                 ></textarea>
                 <InputError :message="form.errors.observaciones" />
             </div>

@@ -344,7 +344,7 @@ function enviar(): void {
                         id="descripcion"
                         v-model="form.descripcion"
                         rows="3"
-                        class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                        class="border-input bg-background rounded-md border px-3 py-2 text-base md:text-sm"
                     />
                     <InputError :message="form.errors.descripcion" />
                 </div>

@@ -13,7 +13,7 @@ import {
     Wrench,
     X,
 } from '@lucide/vue';
-import { computed, defineAsyncComponent, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -112,6 +112,20 @@ defineOptions({
 // los KPIs y filtros (lo primero que el usuario necesita ver) se rendericen
 // sin esperar a que se descargue y evalúe el bundle completo de gráficas.
 const VueApexCharts = defineAsyncComponent(() => import('vue3-apexcharts'));
+
+// Las 5 gráficas montan simultáneamente en cuanto el chunk resuelve; retrasar
+// su montaje un frame (tras el primer paint de KPIs/filtros, que es lo que el
+// usuario necesita ver primero) evita competir por el mismo frame de render.
+// Nunca bloquea: si `requestIdleCallback` no existe (Safari), cae a rAF doble.
+const graficasListas = ref(false);
+onMounted(() => {
+    const activar = () => (graficasListas.value = true);
+    if ('requestIdleCallback' in window) {
+        window.requestIdleCallback(activar, { timeout: 500 });
+    } else {
+        requestAnimationFrame(() => requestAnimationFrame(activar));
+    }
+});
 
 const {
     colores,
@@ -771,11 +785,15 @@ const seriesCategoria = computed(() =>
                         class="py-6"
                     />
                     <VueApexCharts
-                        v-else
+                        v-else-if="graficasListas"
                         type="area"
                         height="260"
                         :options="opcionesEntregasDevoluciones"
                         :series="seriesEntregasDevoluciones"
+                    />
+                    <div
+                        v-else
+                        class="bg-muted/50 h-[260px] rounded-lg motion-safe:animate-pulse"
                     />
                 </CardContent>
             </Card>
@@ -800,11 +818,15 @@ const seriesCategoria = computed(() =>
                         class="py-6"
                     />
                     <VueApexCharts
-                        v-else
+                        v-else-if="graficasListas"
                         type="area"
                         height="260"
                         :options="opcionesMovimientos"
                         :series="seriesMovimientos"
+                    />
+                    <div
+                        v-else
+                        class="bg-muted/50 h-[260px] rounded-lg motion-safe:animate-pulse"
                     />
                 </CardContent>
             </Card>
@@ -823,11 +845,15 @@ const seriesCategoria = computed(() =>
                         class="py-6"
                     />
                     <VueApexCharts
-                        v-else
+                        v-else-if="graficasListas"
                         type="donut"
                         height="260"
                         :options="opcionesUnidades"
                         :series="seriesUnidades"
+                    />
+                    <div
+                        v-else
+                        class="bg-muted/50 h-[260px] rounded-lg motion-safe:animate-pulse"
                     />
                 </CardContent>
             </Card>
@@ -848,11 +874,15 @@ const seriesCategoria = computed(() =>
                         class="py-6"
                     />
                     <VueApexCharts
-                        v-else
+                        v-else-if="graficasListas"
                         type="bar"
                         height="260"
                         :options="opcionesAlmacen"
                         :series="seriesAlmacen"
+                    />
+                    <div
+                        v-else
+                        class="bg-muted/50 h-[260px] rounded-lg motion-safe:animate-pulse"
                     />
                 </CardContent>
             </Card>
@@ -871,22 +901,26 @@ const seriesCategoria = computed(() =>
                         class="py-6"
                     />
                     <VueApexCharts
-                        v-else
+                        v-else-if="graficasListas"
                         :type="categoriaEsDonut ? 'donut' : 'bar'"
                         height="260"
                         :options="opcionesCategoria"
                         :series="seriesCategoria"
                     />
+                    <div
+                        v-else
+                        class="bg-muted/50 h-[260px] rounded-lg motion-safe:animate-pulse"
+                    />
                 </CardContent>
             </Card>
         </div>
 
-        <div class="grid gap-4 lg:grid-cols-2">
-            <Card data-tour="entregas-recientes-dashboard">
+        <div class="grid min-w-0 gap-4 lg:grid-cols-2">
+            <Card data-tour="entregas-recientes-dashboard" class="min-w-0">
                 <CardHeader
                     class="flex flex-row items-start justify-between gap-2"
                 >
-                    <div>
+                    <div class="min-w-0">
                         <CardTitle class="text-base"
                             >Entregas recientes</CardTitle
                         >
@@ -928,9 +962,10 @@ const seriesCategoria = computed(() =>
                             <span
                                 class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
                             >
-                                <span class="truncate text-sm font-medium">{{
-                                    e.folio
-                                }}</span>
+                                <span
+                                    class="min-w-0 truncate text-sm font-medium"
+                                    >{{ e.folio }}</span
+                                >
                                 <Badge
                                     :variant="varianteEstadoEntrega(e.estado)"
                                     class="shrink-0 font-normal"
@@ -957,11 +992,11 @@ const seriesCategoria = computed(() =>
                 </CardContent>
             </Card>
 
-            <Card data-tour="existencias-bajas-dashboard">
+            <Card data-tour="existencias-bajas-dashboard" class="min-w-0">
                 <CardHeader
                     class="flex flex-row items-start justify-between gap-2"
                 >
-                    <div>
+                    <div class="min-w-0">
                         <CardTitle class="text-base"
                             >Existencias bajas</CardTitle
                         >
@@ -1014,7 +1049,7 @@ const seriesCategoria = computed(() =>
                                     class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1"
                                 >
                                     <span
-                                        class="truncate text-sm font-medium"
+                                        class="min-w-0 truncate text-sm font-medium"
                                         >{{ s.activo }}</span
                                     >
                                     <span

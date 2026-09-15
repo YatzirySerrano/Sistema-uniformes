@@ -321,7 +321,7 @@ function enviar(): void {
                     v-model="form.descripcion"
                     rows="2"
                     maxlength="1000"
-                    class="border-input bg-background focus-visible:ring-ring min-h-[60px] rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none"
+                    class="border-input bg-background focus-visible:ring-ring min-h-[60px] rounded-md border px-3 py-2 text-base shadow-xs focus-visible:ring-2 focus-visible:outline-none md:text-sm"
                 ></textarea>
                 <InputError :message="error('descripcion')" />
             </div>

@@ -118,7 +118,7 @@ function fecha(valor: string | null): string {
 
 // Tabla ↔ Tarjetas: sólo cambia la presentación; el dataset (misma query,
 // paginación y filtros) es el mismo. Preferencia recordada por dispositivo.
-const vista = useVistaPreferida('inventario-fisico', 'tabla');
+const vista = useVistaPreferida('inventario-fisico', 'cards');
 </script>
 
 <template>
@@ -311,12 +311,12 @@ const vista = useVistaPreferida('inventario-fisico', 'tabla');
 
         <div
             v-else
-            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            class="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
         >
             <div
                 v-for="r in rondas.data"
                 :key="r.id"
-                class="flex flex-col gap-3 rounded-xl border p-4"
+                class="flex min-w-0 flex-col gap-3 rounded-xl border p-4"
             >
                 <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
@@ -341,7 +341,7 @@ const vista = useVistaPreferida('inventario-fisico', 'tabla');
                     <p v-if="r.almacen">Almacén: {{ r.almacen }}</p>
                 </div>
 
-                <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                <dl class="grid min-w-0 grid-cols-2 gap-x-4 gap-y-1 text-sm">
                     <dt class="text-muted-foreground">Esperados</dt>
                     <dd class="text-right font-medium tabular-nums">
                         {{ r.esperados }}

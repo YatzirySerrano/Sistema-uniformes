@@ -1002,7 +1002,7 @@ function enviar(): void {
                         id="notas"
                         v-model="form.notas"
                         rows="2"
-                        class="border-input bg-background rounded-md border px-3 py-2 text-sm"
+                        class="border-input bg-background rounded-md border px-3 py-2 text-base md:text-sm"
                     />
                 </div>
 

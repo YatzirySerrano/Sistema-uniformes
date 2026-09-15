@@ -10,6 +10,7 @@ use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\CreaConCodigoUnico;
+use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Controllers\Concerns\ReactivaSuspendidos;
 use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Activos\AgregarExistenciasRequest;
@@ -26,16 +27,20 @@ use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
 use App\Servicios\ServicioEvidencias;
+use App\Soporte\ContextoExportacion;
 use App\Soporte\ResolverPerfilTecnicoUnidad;
 use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Throwable;
 
 /**
@@ -46,6 +51,7 @@ class ActivoController extends Controller
 {
     use ConEmpresa;
     use CreaConCodigoUnico;
+    use ExportaListado;
     use ReactivaSuspendidos;
     use ReconciliaSecuenciaCodigo;
 
@@ -59,54 +65,13 @@ class ActivoController extends Controller
     {
         $this->authorize('viewAny', Activo::class);
 
-        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $idsScope = $this->idsScopeActivos($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
-        $idsScope = $empresaFiltro !== null ? collect([$empresaFiltro->id]) : $idsAutorizadas;
-
-        $filtros = $request->validate([
-            'buscar' => ['nullable', 'string', 'max:100'],
-            'tipo_activo_id' => ['nullable', 'integer'],
-            'categoria_id' => ['nullable', 'integer'],
-            'almacen_id' => ['nullable', 'integer'],
-            'control' => ['nullable', Rule::in(['cantidad', 'individual'])],
-            'estado' => ['nullable', Rule::in(['activos', 'inactivos'])],
-            'orden' => ['nullable', Rule::in(['az', 'za'])],
-        ]);
-
-        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
-
-        // Sólo quien puede administrar activos puede verlos eliminados en el
-        // listado. Para el resto, "activo" se fuerza sin importar qué
-        // `estado` pida la URL.
+        $filtros = $this->filtrosListado($request);
         $puedeVerEliminados = $request->user()->can('activos.administrar');
+        $existencias = $this->existenciasPorActivo($idsScope);
 
-        $existencias = SaldoInventario::query()
-            ->whereIn('empresa_id', $idsScope)
-            ->selectRaw('activo_id, SUM(cantidad) as total, SUM(CASE WHEN minimo > 0 AND cantidad <= minimo THEN 1 ELSE 0 END) as tallas_bajo_minimo')
-            ->groupBy('activo_id')
-            ->get()
-            ->keyBy('activo_id');
-
-        $activos = Activo::query()
-            ->whereIn('empresa_id', $idsScope)
-            ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'empresa:id,nombre_comercial'])
-            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
-                $q->where(function (Builder $sub) use ($buscar): void {
-                    $sub->where('nombre', 'like', "%{$buscar}%")
-                        ->orWhere('codigo', 'like', "%{$buscar}%")
-                        ->orWhere('categoria', 'like', "%{$buscar}%");
-                });
-            })
-            ->when($filtros['tipo_activo_id'] ?? null, fn (Builder $q, $v) => $q->where('tipo_activo_id', $v))
-            ->when($filtros['categoria_id'] ?? null, fn (Builder $q, $v) => $q->where('categoria_id', $v))
-            ->when($filtros['almacen_id'] ?? null, function (Builder $q, $almacenId): void {
-                $q->whereHas('saldos', fn (Builder $s) => $s->where('almacen_id', $almacenId)->where('cantidad', '>', 0));
-            })
-            ->when($filtros['control'] ?? null, fn (Builder $q, $v) => $q->where('tipo_control', $v))
-            ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
-            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
-            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
-            ->orderBy('nombre', $orden)
+        $activos = $this->consultaActivos($request, $filtros, $idsScope, $puedeVerEliminados)
             ->get()
             ->map(fn (Activo $a): array => [
                 'id' => $a->id,
@@ -164,6 +129,135 @@ class ActivoController extends Controller
     }
 
     /**
+     * Excel/PDF del listado, respetando los mismos filtros que `index()`.
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', Activo::class);
+
+        $idsScope = $this->idsScopeActivos($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
+        $puedeVerEliminados = $request->user()->can('activos.administrar');
+        $existencias = $this->existenciasPorActivo($idsScope);
+
+        $activos = $this->consultaActivos($request, $filtros, $idsScope, $puedeVerEliminados)->get();
+
+        $filas = $activos->map(fn (Activo $a): array => [
+            $a->nombre,
+            $a->codigo,
+            $a->tipoActivo?->nombre,
+            $a->categoria,
+            $a->empresa?->nombre_comercial,
+            $a->tipo_control->etiqueta(),
+            (int) ($existencias[$a->id]->total ?? 0),
+            (int) ($existencias[$a->id]->tallas_bajo_minimo ?? 0),
+            $a->activo ? 'Activo' : 'Inactivo',
+        ])->all();
+
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Tipo' => ($filtros['tipo_activo_id'] ?? null)
+                ? TipoActivo::query()->whereKey($filtros['tipo_activo_id'])->value('nombre')
+                : null,
+            'Categoría' => ($filtros['categoria_id'] ?? null)
+                ? CategoriaActivo::query()->whereKey($filtros['categoria_id'])->value('nombre')
+                : null,
+            'Almacén' => ($filtros['almacen_id'] ?? null)
+                ? Almacen::query()->whereKey($filtros['almacen_id'])->value('nombre')
+                : null,
+            'Control' => match ($filtros['control'] ?? null) {
+                'cantidad' => 'Por cantidad',
+                'individual' => 'Seguimiento individual',
+                default => null,
+            },
+            'Estado' => $puedeVerEliminados ? match ($filtros['estado'] ?? null) {
+                'activos' => 'Activos',
+                'inactivos' => 'Eliminados',
+                default => null,
+            } : null,
+        ]);
+
+        $contexto = new ContextoExportacion('Activos', $empresaFiltro, $filtrosHumanos, $activos->count());
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Nombre', 'Código', 'Tipo', 'Categoría', 'Empresa', 'Control', 'Existencias', 'Bajo mínimo', 'Estado',
+        ], $contexto);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'tipo_activo_id' => ['nullable', 'integer'],
+            'categoria_id' => ['nullable', 'integer'],
+            'almacen_id' => ['nullable', 'integer'],
+            'control' => ['nullable', Rule::in(['cantidad', 'individual'])],
+            'estado' => ['nullable', Rule::in(['activos', 'inactivos'])],
+            'orden' => ['nullable', Rule::in(['az', 'za'])],
+        ]);
+    }
+
+    /**
+     * @return Collection<int, int>
+     */
+    private function idsScopeActivos(Request $request): Collection
+    {
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        return $empresaFiltro !== null ? collect([$empresaFiltro->id]) : $idsAutorizadas;
+    }
+
+    /**
+     * @param  array<string, mixed>  $filtros
+     * @param  Collection<int, int>  $idsScope
+     * @return Builder<Activo>
+     */
+    private function consultaActivos(Request $request, array $filtros, Collection $idsScope, bool $puedeVerEliminados): Builder
+    {
+        $orden = ($filtros['orden'] ?? 'az') === 'za' ? 'desc' : 'asc';
+
+        return Activo::query()
+            ->whereIn('empresa_id', $idsScope)
+            ->with(['tallas:id,valor', 'tipoActivo:id,nombre', 'empresa:id,nombre_comercial'])
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {
+                $q->where(function (Builder $sub) use ($buscar): void {
+                    $sub->where('nombre', 'like', "%{$buscar}%")
+                        ->orWhere('codigo', 'like', "%{$buscar}%")
+                        ->orWhere('categoria', 'like', "%{$buscar}%");
+                });
+            })
+            ->when($filtros['tipo_activo_id'] ?? null, fn (Builder $q, $v) => $q->where('tipo_activo_id', $v))
+            ->when($filtros['categoria_id'] ?? null, fn (Builder $q, $v) => $q->where('categoria_id', $v))
+            ->when($filtros['almacen_id'] ?? null, function (Builder $q, $almacenId): void {
+                $q->whereHas('saldos', fn (Builder $s) => $s->where('almacen_id', $almacenId)->where('cantidad', '>', 0));
+            })
+            ->when($filtros['control'] ?? null, fn (Builder $q, $v) => $q->where('tipo_control', $v))
+            ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
+            ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
+            ->orderBy('nombre', $orden);
+    }
+
+    /**
+     * @param  Collection<int, int>  $idsScope
+     * @return \Illuminate\Database\Eloquent\Collection<int, SaldoInventario>
+     */
+    private function existenciasPorActivo(Collection $idsScope): \Illuminate\Database\Eloquent\Collection
+    {
+        return SaldoInventario::query()
+            ->whereIn('empresa_id', $idsScope)
+            ->selectRaw('activo_id, SUM(cantidad) as total, SUM(CASE WHEN minimo > 0 AND cantidad <= minimo THEN 1 ELSE 0 END) as tallas_bajo_minimo')
+            ->groupBy('activo_id')
+            ->get()
+            ->keyBy('activo_id');
+    }
+
+    /**
      * Búsqueda con autocompletado para los combobox de activos. Requiere
      * `empresa_id`: el activo pertenece a una empresa concreta.
      */
@@ -194,7 +288,14 @@ class ActivoController extends Controller
             ->where('activo', true)
             ->when(in_array($control, ['cantidad', 'individual'], true), fn (Builder $q) => $q->where('tipo_control', $control))
             ->withCount('tallas')
-            ->with(['tipoActivo:id,nombre', 'categoriaActivo:id,nombre'])
+            ->with([
+                'tipoActivo:id,nombre',
+                'categoriaActivo:id,nombre',
+                // Mismo filtro/orden que `tallasElegibles()`, pero como eager
+                // load: evita repetir la consulta por cada fila del `map()`
+                // de abajo (hasta 20 resultados por búsqueda).
+                'tallas' => fn ($q) => $q->activas()->ordenadas(),
+            ])
             ->when($termino !== '', function (Builder $q) use ($termino): void {
                 $q->where(function (Builder $sub) use ($termino): void {
                     $sub->where('nombre', 'like', "%{$termino}%")
@@ -206,61 +307,74 @@ class ActivoController extends Controller
             })
             ->orderBy('nombre')
             ->limit(20)
-            ->get()
-            ->map(function (Activo $a) use ($almacenId): array {
-                $tallas = $a->tallasElegibles()
-                    ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])
-                    ->values();
+            ->get();
 
-                $fila = [
-                    'id' => $a->id,
-                    'nombre' => $a->nombre,
-                    'codigo' => $a->codigo,
-                    'tipo' => $a->tipoActivo?->nombre,
-                    'categoria' => $a->categoriaActivo?->nombre,
-                    'control' => $a->tipo_control->value,
-                    // `usa_variantes`: el activo tiene variantes asociadas (crudo).
-                    // `tallas`: sólo las elegibles (asociadas y activas). Si
-                    // `usa_variantes` y `tallas` está vacío → todas sus variantes
-                    // están desactivadas.
-                    'usa_variantes' => (int) $a->tallas_count > 0,
-                    'tallas' => $tallas,
-                ];
+        $idsActivos = $activos->pluck('id');
 
-                if ($almacenId === null) {
-                    return $fila;
-                }
+        // Disponibilidad por almacén: se resuelve en UNA consulta agrupada
+        // por camino (unidades o saldos) para las hasta 20 filas de la
+        // página, en vez de una consulta por activo.
+        $unidadesDisponiblesPorActivo = $almacenId === null ? collect() : UnidadActivo::query()
+            ->whereIn('activo_id', $idsActivos)
+            ->where('almacen_id', $almacenId)
+            ->where('estado', EstadoUnidadActivo::EnAlmacen)
+            ->where('condicion', CondicionUnidadActivo::Funcionando)
+            ->selectRaw('activo_id, count(*) as total')
+            ->groupBy('activo_id')
+            ->pluck('total', 'activo_id');
 
-                if ($a->tipo_control === TipoControlActivo::SeguimientoIndividual) {
-                    $fila['disponible'] = UnidadActivo::query()
-                        ->where('activo_id', $a->id)
-                        ->where('almacen_id', $almacenId)
-                        ->where('estado', EstadoUnidadActivo::EnAlmacen)
-                        ->where('condicion', CondicionUnidadActivo::Funcionando)
-                        ->count();
+        $saldosPorActivo = $almacenId === null ? collect() : SaldoInventario::query()
+            ->where('empresa_id', $empresa->id)
+            ->where('almacen_id', $almacenId)
+            ->whereIn('activo_id', $idsActivos)
+            ->get(['activo_id', 'talla_id', 'cantidad'])
+            ->groupBy('activo_id');
 
-                    return $fila;
-                }
+        $resultado = $activos->map(function (Activo $a) use ($almacenId, $unidadesDisponiblesPorActivo, $saldosPorActivo): array {
+            $tallas = $a->tallas
+                ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])
+                ->values();
 
-                $saldosPorTalla = SaldoInventario::query()
-                    ->where('empresa_id', $a->empresa_id)
-                    ->where('almacen_id', $almacenId)
-                    ->where('activo_id', $a->id)
-                    ->get(['talla_id', 'cantidad'])
-                    ->keyBy(fn (SaldoInventario $s) => $s->talla_id ?? 0);
+            $fila = [
+                'id' => $a->id,
+                'nombre' => $a->nombre,
+                'codigo' => $a->codigo,
+                'tipo' => $a->tipoActivo?->nombre,
+                'categoria' => $a->categoriaActivo?->nombre,
+                'control' => $a->tipo_control->value,
+                // `usa_variantes`: el activo tiene variantes asociadas (crudo).
+                // `tallas`: sólo las elegibles (asociadas y activas). Si
+                // `usa_variantes` y `tallas` está vacío → todas sus variantes
+                // están desactivadas.
+                'usa_variantes' => (int) $a->tallas_count > 0,
+                'tallas' => $tallas,
+            ];
 
-                $fila['disponible'] = (int) $saldosPorTalla->sum('cantidad');
-                $fila['tallas'] = $tallas->map(function (array $t) use ($saldosPorTalla): array {
-                    $saldo = $saldosPorTalla->get($t['id']);
-                    $t['disponible'] = $saldo !== null ? (int) $saldo->cantidad : 0;
+            if ($almacenId === null) {
+                return $fila;
+            }
 
-                    return $t;
-                })->values();
+            if ($a->tipo_control === TipoControlActivo::SeguimientoIndividual) {
+                $fila['disponible'] = (int) ($unidadesDisponiblesPorActivo[$a->id] ?? 0);
 
                 return $fila;
-            });
+            }
 
-        return response()->json(['activos' => $activos]);
+            $saldosPorTalla = ($saldosPorActivo->get($a->id) ?? collect())
+                ->keyBy(fn (SaldoInventario $s) => $s->talla_id ?? 0);
+
+            $fila['disponible'] = (int) $saldosPorTalla->sum('cantidad');
+            $fila['tallas'] = $tallas->map(function (array $t) use ($saldosPorTalla): array {
+                $saldo = $saldosPorTalla->get($t['id']);
+                $t['disponible'] = $saldo !== null ? (int) $saldo->cantidad : 0;
+
+                return $t;
+            })->values();
+
+            return $fila;
+        });
+
+        return response()->json(['activos' => $resultado]);
     }
 
     public function create(Request $request): Response

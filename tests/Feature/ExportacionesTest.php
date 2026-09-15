@@ -112,6 +112,16 @@ it('exporta Conjuntos a Excel respetando el alcance del usuario', function () {
     });
 });
 
+it('exporta Activos a Excel respetando el alcance del usuario', function () {
+    Activo::factory()->for($this->datos['empresaB'])->create(['nombre' => 'Laptop Oculta B']);
+
+    assertFilasExportadas($this, '/activos/exportar', $this->supervisorA, 'Activos', function (array $filas): void {
+        $nombres = array_column($filas, 0);
+        expect($nombres)->toContain($this->datos['activoA']->nombre)
+            ->not->toContain('Laptop Oculta B');
+    });
+});
+
 it('exporta Movimientos de inventario a Excel y PDF, respetando el alcance del usuario', function () {
     $this->supervisorA->givePermissionTo('inventario.ver');
     MovimientoInventario::factory()->create([

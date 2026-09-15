@@ -381,7 +381,7 @@ function enviar(): void {
                         rows="2"
                         maxlength="500"
                         placeholder="Opcional — queda en la auditoría de cada colaborador"
-                        class="border-input bg-background focus-visible:ring-ring min-h-[60px] rounded-md border px-3 py-2 text-sm shadow-xs focus-visible:ring-2 focus-visible:outline-none"
+                        class="border-input bg-background focus-visible:ring-ring min-h-[60px] rounded-md border px-3 py-2 text-base shadow-xs focus-visible:ring-2 focus-visible:outline-none md:text-sm"
                     ></textarea>
                     <InputError :message="form.errors.motivo" />
                 </div>

@@ -13,6 +13,7 @@ import {
 import { computed, ref, watch } from 'vue';
 import BotonEditar from '@/components/sistema/BotonEditar.vue';
 import BotonEliminar from '@/components/sistema/BotonEliminar.vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
@@ -317,6 +318,10 @@ const vista = useVistaPreferida('activos');
             descripcion="Administra los bienes y prendas que la empresa entrega o mantiene en inventario: uniformes, equipo de cómputo, dispositivos y accesorios."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/activos/exportar"
+                    :filtros="filtros"
+                />
                 <Button
                     v-if="permisos.verExistenciasGlobales"
                     variant="outline"
@@ -357,10 +362,12 @@ const vista = useVistaPreferida('activos');
                 />
             </div>
 
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div
+                class="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-2"
+            >
                 <label
                     v-if="empresasAutorizadas.length > 1"
-                    class="flex items-center gap-1.5 text-sm"
+                    class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-1.5"
                 >
                     <span class="text-muted-foreground">Empresa</span>
                     <BuscadorAsync
@@ -369,12 +376,14 @@ const vista = useVistaPreferida('activos');
                         :etiqueta="(e) => String(e.nombre_comercial)"
                         placeholder="Todas"
                         placeholder-busqueda="Buscar empresa…"
-                        class="w-56"
+                        class="w-full sm:w-56"
                     />
                 </label>
-                <label class="flex items-center gap-1.5 text-sm">
+                <label
+                    class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-1.5"
+                >
                     <span class="text-muted-foreground">Tipo</span>
-                    <div class="w-44">
+                    <div class="w-full sm:w-44">
                         <BuscadorAsync
                             :model-value="tipoSel"
                             :buscar="buscarTipos"
@@ -389,9 +398,11 @@ const vista = useVistaPreferida('activos');
                     </div>
                 </label>
 
-                <label class="flex items-center gap-1.5 text-sm">
+                <label
+                    class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-1.5"
+                >
                     <span class="text-muted-foreground">Categoría</span>
-                    <div class="w-44">
+                    <div class="w-full sm:w-44">
                         <BuscadorAsync
                             :model-value="categoriaSel"
                             :buscar="buscarCategorias"
@@ -413,9 +424,11 @@ const vista = useVistaPreferida('activos');
                     </div>
                 </label>
 
-                <label class="flex items-center gap-1.5 text-sm">
+                <label
+                    class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-1.5"
+                >
                     <span class="text-muted-foreground">Almacén</span>
-                    <div class="w-44">
+                    <div class="w-full sm:w-44">
                         <BuscadorAsync
                             :model-value="almacenSel"
                             :buscar="buscarAlmacenes"
@@ -435,9 +448,11 @@ const vista = useVistaPreferida('activos');
                     </div>
                 </label>
 
-                <label class="flex items-center gap-1.5 text-sm">
+                <label
+                    class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-1.5"
+                >
                     <span class="text-muted-foreground">Control</span>
-                    <div class="w-48">
+                    <div class="w-full sm:w-48">
                         <SelectSimple
                             v-model="control"
                             :opciones="[
@@ -452,9 +467,11 @@ const vista = useVistaPreferida('activos');
                     </div>
                 </label>
 
-                <label class="flex items-center gap-1.5 text-sm">
+                <label
+                    class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-1.5"
+                >
                     <span class="text-muted-foreground">Estado</span>
-                    <div class="w-36">
+                    <div class="w-full sm:w-36">
                         <SelectSimple
                             v-model="estado"
                             :opciones="opcionesEstado"
@@ -462,9 +479,11 @@ const vista = useVistaPreferida('activos');
                     </div>
                 </label>
 
-                <label class="flex items-center gap-1.5 text-sm">
+                <label
+                    class="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-1.5"
+                >
                     <span class="text-muted-foreground">Orden</span>
-                    <div class="w-36">
+                    <div class="w-full sm:w-36">
                         <SelectSimple
                             v-model="orden"
                             :opciones="[
@@ -480,6 +499,7 @@ const vista = useVistaPreferida('activos');
                     type="button"
                     variant="ghost"
                     size="sm"
+                    class="w-fit"
                     @click="limpiarFiltros"
                 >
                     <X class="size-3.5" /> Limpiar filtros
