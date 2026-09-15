@@ -365,66 +365,92 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                     <DialogTitle>Detalle del evento</DialogTitle>
                 </DialogHeader>
 
-                <div v-if="registroSeleccionado" class="space-y-4 text-sm">
-                    <dl class="grid grid-cols-2 gap-x-4 gap-y-2">
-                        <div>
+                <div
+                    v-if="registroSeleccionado"
+                    class="min-w-0 space-y-4 text-sm"
+                >
+                    <dl
+                        class="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2"
+                    >
+                        <div class="min-w-0">
                             <dt class="text-muted-foreground text-xs">
                                 Módulo
                             </dt>
-                            <dd>{{ registroSeleccionado.modulo }}</dd>
+                            <dd class="break-words">
+                                {{ registroSeleccionado.modulo }}
+                            </dd>
                         </div>
-                        <div>
+                        <div class="min-w-0">
                             <dt class="text-muted-foreground text-xs">
                                 Acción
                             </dt>
-                            <dd>
+                            <dd class="break-words">
                                 {{
                                     etiquetaAccion(registroSeleccionado.accion)
                                 }}
                             </dd>
                         </div>
-                        <div>
+                        <div class="min-w-0">
                             <dt class="text-muted-foreground text-xs">
                                 Usuario
                             </dt>
-                            <dd>
+                            <dd class="break-words">
                                 {{ registroSeleccionado.usuario ?? 'Sistema' }}
                             </dd>
                         </div>
-                        <div>
+                        <div class="min-w-0">
                             <dt class="text-muted-foreground text-xs">Fecha</dt>
-                            <dd>{{ fecha(registroSeleccionado.fecha) }}</dd>
+                            <dd class="break-words">
+                                {{ fecha(registroSeleccionado.fecha) }}
+                            </dd>
                         </div>
-                        <div v-if="registroSeleccionado.empresa">
+                        <div
+                            v-if="registroSeleccionado.empresa"
+                            class="min-w-0"
+                        >
                             <dt class="text-muted-foreground text-xs">
                                 Empresa
                             </dt>
-                            <dd>{{ registroSeleccionado.empresa }}</dd>
+                            <dd class="break-words">
+                                {{ registroSeleccionado.empresa }}
+                            </dd>
                         </div>
-                        <div v-if="registroSeleccionado.sucursal">
+                        <div
+                            v-if="registroSeleccionado.sucursal"
+                            class="min-w-0"
+                        >
                             <dt class="text-muted-foreground text-xs">
                                 Sucursal
                             </dt>
-                            <dd>{{ registroSeleccionado.sucursal }}</dd>
+                            <dd class="break-words">
+                                {{ registroSeleccionado.sucursal }}
+                            </dd>
                         </div>
-                        <div v-if="registroSeleccionado.entidad">
+                        <div
+                            v-if="registroSeleccionado.entidad"
+                            class="min-w-0"
+                        >
                             <dt class="text-muted-foreground text-xs">
                                 Entidad
                             </dt>
-                            <dd>{{ registroSeleccionado.entidad }}</dd>
+                            <dd class="break-words">
+                                {{ registroSeleccionado.entidad }}
+                            </dd>
                         </div>
-                        <div v-if="registroSeleccionado.ip">
+                        <div v-if="registroSeleccionado.ip" class="min-w-0">
                             <dt class="text-muted-foreground text-xs">IP</dt>
-                            <dd>{{ registroSeleccionado.ip }}</dd>
+                            <dd class="break-words">
+                                {{ registroSeleccionado.ip }}
+                            </dd>
                         </div>
                     </dl>
 
-                    <p class="text-sm">
+                    <p class="min-w-0 text-sm break-words">
                         {{ registroSeleccionado.descripcion }}
                     </p>
                     <p
                         v-if="registroSeleccionado.motivo"
-                        class="text-muted-foreground text-xs italic"
+                        class="text-muted-foreground min-w-0 text-xs break-words italic"
                     >
                         Motivo: {{ registroSeleccionado.motivo }}
                     </p>
@@ -435,18 +461,24 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                             v-if="registroSeleccionado.cambios.length"
                             class="overflow-x-auto rounded-md border"
                         >
-                            <table class="w-full min-w-[420px] text-sm">
+                            <table class="w-full table-fixed text-sm">
                                 <thead
                                     class="bg-muted/50 text-muted-foreground text-left text-xs"
                                 >
                                     <tr>
-                                        <th class="px-2.5 py-1.5 font-medium">
+                                        <th
+                                            class="w-[34%] px-2.5 py-1.5 font-medium"
+                                        >
                                             Campo
                                         </th>
-                                        <th class="px-2.5 py-1.5 font-medium">
+                                        <th
+                                            class="w-[33%] px-2.5 py-1.5 font-medium"
+                                        >
                                             Antes
                                         </th>
-                                        <th class="px-2.5 py-1.5 font-medium">
+                                        <th
+                                            class="w-[33%] px-2.5 py-1.5 font-medium"
+                                        >
                                             Ahora
                                         </th>
                                     </tr>
@@ -459,15 +491,19 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                                         :key="i"
                                         class="border-t"
                                     >
-                                        <td class="px-2.5 py-1.5 font-medium">
+                                        <td
+                                            class="px-2.5 py-1.5 align-top font-medium break-words"
+                                        >
                                             {{ c.campo }}
                                         </td>
                                         <td
-                                            class="text-muted-foreground px-2.5 py-1.5"
+                                            class="text-muted-foreground px-2.5 py-1.5 align-top break-words"
                                         >
                                             {{ c.antes }}
                                         </td>
-                                        <td class="px-2.5 py-1.5">
+                                        <td
+                                            class="px-2.5 py-1.5 align-top break-words"
+                                        >
                                             {{ c.ahora }}
                                         </td>
                                     </tr>
@@ -482,10 +518,10 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                     <div v-if="hayJsonTecnico">
                         <button
                             type="button"
-                            class="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs underline-offset-2 hover:underline"
+                            class="text-muted-foreground hover:text-foreground flex w-full items-start gap-1 text-left text-xs underline-offset-2 hover:underline"
                             @click="mostrarJson = !mostrarJson"
                         >
-                            <Code2 class="size-3.5" />
+                            <Code2 class="mt-0.5 size-3.5 shrink-0" />
                             {{
                                 mostrarJson
                                     ? 'Ocultar JSON técnico'
@@ -494,26 +530,26 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                         </button>
                         <div
                             v-if="mostrarJson"
-                            class="mt-2 grid gap-2 sm:grid-cols-2"
+                            class="mt-2 grid min-w-0 gap-2 sm:grid-cols-2"
                         >
-                            <div>
+                            <div class="min-w-0">
                                 <p class="text-muted-foreground mb-1 text-xs">
                                     Antes
                                 </p>
                                 <pre
-                                    class="bg-muted max-h-48 overflow-auto rounded-md p-2 text-xs"
+                                    class="bg-muted max-h-48 max-w-full overflow-auto rounded-md p-2 text-xs"
                                     >{{
                                         jsonLegible(
                                             registroSeleccionado.valores_anteriores,
                                         )
                                     }}</pre>
                             </div>
-                            <div>
+                            <div class="min-w-0">
                                 <p class="text-muted-foreground mb-1 text-xs">
                                     Ahora
                                 </p>
                                 <pre
-                                    class="bg-muted max-h-48 overflow-auto rounded-md p-2 text-xs"
+                                    class="bg-muted max-h-48 max-w-full overflow-auto rounded-md p-2 text-xs"
                                     >{{
                                         jsonLegible(
                                             registroSeleccionado.valores_nuevos,

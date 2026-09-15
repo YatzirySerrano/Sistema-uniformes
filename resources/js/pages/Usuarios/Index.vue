@@ -278,16 +278,19 @@ function confirmarEstado(): void {
             <div
                 v-for="u in usuarios.data"
                 :key="u.id"
-                class="flex flex-col gap-2 rounded-xl border p-4"
+                class="flex min-w-0 flex-col gap-2 rounded-xl border p-4"
             >
                 <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
-                        <p class="truncate font-medium">{{ u.name }}</p>
-                        <p class="text-muted-foreground truncate text-xs">
+                        <p class="font-medium break-words">{{ u.name }}</p>
+                        <p class="text-muted-foreground text-xs break-words">
                             {{ u.email }}
                         </p>
                     </div>
-                    <Badge :variant="u.activo ? 'success' : 'secondary'">
+                    <Badge
+                        :variant="u.activo ? 'success' : 'secondary'"
+                        class="shrink-0"
+                    >
                         {{ u.activo ? 'Activo' : 'Eliminado' }}
                     </Badge>
                 </div>
@@ -302,8 +305,19 @@ function confirmarEstado(): void {
                         >{{ r }}</span
                     >
                 </div>
-                <p class="text-muted-foreground text-xs">
-                    {{ u.empresas.join(', ') || 'Sin empresas asignadas' }}
+                <div v-if="u.empresas.length" class="min-w-0 text-xs">
+                    <p class="text-muted-foreground">Empresas:</p>
+                    <div class="flex flex-wrap gap-1 pt-0.5">
+                        <span
+                            v-for="emp in u.empresas"
+                            :key="emp"
+                            class="bg-muted max-w-full rounded px-1.5 py-0.5 break-words"
+                            >{{ emp }}</span
+                        >
+                    </div>
+                </div>
+                <p v-else class="text-muted-foreground text-xs">
+                    Sin empresas asignadas
                 </p>
                 <div class="mt-auto flex flex-wrap gap-2 pt-1">
                     <BotonEditar :href="`/usuarios/${u.id}/editar`" />

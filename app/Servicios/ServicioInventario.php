@@ -51,6 +51,21 @@ class ServicioInventario
     }
 
     /**
+     * Mínimo configurado actualmente para una fila de saldo (0 si la fila
+     * todavía no existe, igual que `ajustarMinimo()` la crea con `minimo => 0`).
+     */
+    public function minimoActual(int $empresaId, int $almacenId, int $activoId, ?int $tallaId): int
+    {
+        $query = SaldoInventario::query()
+            ->where('empresa_id', $empresaId)
+            ->where('almacen_id', $almacenId)
+            ->where('activo_id', $activoId);
+        $this->acotarTalla($query, $tallaId);
+
+        return (int) $query->value('minimo');
+    }
+
+    /**
      * Registra un movimiento y actualiza el saldo dentro de una transacción con
      * bloqueo pesimista sobre la fila de saldo.
      */

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from "vue"
-import { computed } from "vue"
+import { onMounted, ref } from "vue"
 import { cn } from "@/lib/utils"
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -9,8 +9,12 @@ const props = defineProps<{
   class?: HTMLAttributes["class"]
 }>()
 
-const width = computed(() => {
-  return `${Math.floor(Math.random() * 40) + 50}%`
+// Ancho fijo en SSR y en el primer render del cliente (evita mismatch de
+// hidratación); se aleatoriza recién montado, como una actualización normal.
+const width = ref('70%')
+
+onMounted(() => {
+  width.value = `${Math.floor(Math.random() * 40) + 50}%`
 })
 </script>
 

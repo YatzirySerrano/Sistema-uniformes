@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue';
+import { onMounted, ref, watch } from 'vue';
 
 export type VistaListado = 'cards' | 'tabla';
 
@@ -8,6 +8,15 @@ export type VistaListado = 'cards' | 'tabla';
  * navegador/dispositivo — nunca se envía al servidor ni se comparte entre
  * usuarios. Cards y tabla deben leer siempre el mismo dataset (misma query,
  * paginación y filtros); este composable sólo decide cuál se pinta.
+ *
+ * El valor inicial del ref es SIEMPRE `porDefecto`, tanto en SSR como en el
+ * primer render del cliente: `localStorage` no existe en Node y, si se leyera
+ * de forma síncrona en `setup()`, el HTML del servidor y el del cliente
+ * podrían pintar vistas distintas (mismatch de hidratación). La preferencia
+ * guardada se aplica recién en `onMounted` — después de que la hidratación ya
+ * coincidió con el HTML del servidor — así que el cambio, si lo hay, ocurre
+ * como una actualización reactiva normal, no como parte del diff de
+ * hidratación.
  */
 export function useVistaPreferida(
     modulo: string,
@@ -15,17 +24,18 @@ export function useVistaPreferida(
 ) {
     const clave = `vista:${modulo}`;
 
-    let inicial: VistaListado = porDefecto;
-    try {
-        const guardada = localStorage.getItem(clave);
-        if (guardada === 'cards' || guardada === 'tabla') {
-            inicial = guardada;
-        }
-    } catch {
-        // Almacenamiento no disponible (privado/bloqueado): se usa el valor por defecto.
-    }
+    const vista = ref<VistaListado>(porDefecto);
 
-    const vista = ref<VistaListado>(inicial);
+    onMounted(() => {
+        try {
+            const guardada = localStorage.getItem(clave);
+            if (guardada === 'cards' || guardada === 'tabla') {
+                vista.value = guardada;
+            }
+        } catch {
+            // Almacenamiento no disponible (privado/bloqueado): se usa el valor por defecto.
+        }
+    });
 
     watch(vista, (valor) => {
         try {

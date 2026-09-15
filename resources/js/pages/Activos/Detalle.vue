@@ -100,17 +100,26 @@ const formMinimo = useForm({
     empresa_id: 0,
     almacen_id: 0,
     activo_id: 0,
-    talla_id: 0,
+    talla_id: null as number | null,
     minimo: 0,
 });
+// "Sin variante" se representa como `talla_id: null` en toda la app (nunca un
+// comodín 0): forzarlo a 0 aquí rompía la validación del backend
+// (`Rule::exists('activo_talla', 'talla_id')` nunca encuentra una fila con
+// talla_id=0) y el error resultante quedaba invisible porque el diálogo sólo
+// mostraba `formMinimo.errors.minimo`, no `errors.talla_id`.
+const hayErroresMinimo = computed(
+    () => Object.keys(formMinimo.errors).length > 0,
+);
 
 function abrirMinimoIndividual(s: Saldo): void {
     filaMinimo.value = s;
+    formMinimo.clearErrors();
     formMinimo.defaults({
         empresa_id: s.empresa_id,
         almacen_id: s.almacen_id,
         activo_id: s.activo_id,
-        talla_id: s.talla_id ?? 0,
+        talla_id: s.talla_id,
         minimo: s.minimo,
     });
     formMinimo.reset();
@@ -685,6 +694,13 @@ function confirmarMinimoMasivo(): void {
                             {{ formMinimo.errors.minimo }}
                         </p>
                     </div>
+                    <p
+                        v-if="hayErroresMinimo && !formMinimo.errors.minimo"
+                        class="text-destructive text-xs"
+                    >
+                        No pudimos guardar el mínimo. Revisa los datos e intenta
+                        de nuevo.
+                    </p>
                 </div>
                 <DialogFooter>
                     <Button

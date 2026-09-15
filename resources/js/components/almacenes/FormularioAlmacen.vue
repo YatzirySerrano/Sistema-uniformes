@@ -90,9 +90,19 @@ function alternarEmpresa(id: number): void {
 // El responsable pertenece a una empresa concreta: se busca dentro de la
 // primera empresa abastecida seleccionada.
 const empresaResponsableId = computed(() => form.empresa_ids[0] ?? null);
-watch(empresaResponsableId, () => {
+
+// Empresa a la que sabemos que pertenece el `responsable` actualmente
+// seleccionado (la primera empresa abastecida en el momento en que se
+// eligió, o la de carga inicial en edición). Sólo se limpia el responsable
+// cuando la primera empresa abastecida REALMENTE cambia a una distinta de
+// ésta — nunca por un reordenamiento que, al final, deja la misma empresa en
+// primer lugar (p. ej. agregar una segunda empresa no mueve la primera).
+const responsableEmpresaId = ref<number | null>(empresaResponsableId.value);
+watch(empresaResponsableId, (valor) => {
+    if (valor === responsableEmpresaId.value) return;
     responsable.value = null;
     form.responsable_colaborador_id = null;
+    responsableEmpresaId.value = valor;
 });
 
 async function buscarColaboradores(termino: string): Promise<Colaborador[]> {
@@ -110,6 +120,7 @@ async function buscarColaboradores(termino: string): Promise<Colaborador[]> {
 function alElegirResponsable(c: { id: number } | null): void {
     responsable.value = (c as Colaborador) ?? null;
     form.responsable_colaborador_id = c?.id ?? null;
+    responsableEmpresaId.value = empresaResponsableId.value;
 }
 
 const erroresLocales = computed<Record<string, string>>(() => {
@@ -192,147 +203,12 @@ function enviar(): void {
 
 <template>
     <form class="space-y-4" @submit.prevent="enviar">
-        <div class="grid gap-4 sm:grid-cols-2">
-            <div class="grid gap-1.5 sm:col-span-2">
-                <Label for="alm-nombre" class="flex items-center gap-1.5">
-                    Nombre
-                    <span class="text-destructive">*</span>
-                    <AyudaTooltip
-                        texto="Nombre con el que se identifica el almacén (Almacén Morelos, Almacén Centro, etc.)."
-                        etiqueta="Ayuda sobre el nombre"
-                    />
-                </Label>
-                <Input
-                    id="alm-nombre"
-                    v-model="form.nombre"
-                    required
-                    maxlength="255"
-                    @blur="marcar('nombre')"
-                />
-                <InputError :message="error('nombre')" />
-            </div>
-
-            <div class="grid gap-1.5">
-                <Label for="alm-codigo" class="flex items-center gap-1.5">
-                    Código
-                    <AyudaTooltip
-                        texto="Lo genera el sistema automáticamente (único a nivel plataforma, ALM-0001). No se puede escribir ni editar."
-                        etiqueta="Ayuda sobre el código"
-                    />
-                </Label>
-                <div
-                    id="alm-codigo"
-                    class="bg-muted/50 text-muted-foreground flex h-9 items-center rounded-md border px-3 font-mono text-sm"
-                >
-                    <span v-if="codigoPreview" class="text-foreground">{{
-                        codigoPreview
-                    }}</span>
-                    <span v-else-if="cargandoPreview">Calculando…</span>
-                    <span v-else class="italic"
-                        >Se generará automáticamente</span
-                    >
-                </div>
-                <p class="text-muted-foreground text-xs">
-                    {{
-                        esEdicion
-                            ? 'Asignado al crear el almacén; no se puede modificar.'
-                            : 'Se asignará automáticamente al guardar.'
-                    }}
-                </p>
-            </div>
-
-            <div class="grid gap-1.5">
-                <Label for="alm-telefono" class="flex items-center gap-1.5">
-                    Teléfono
-                    <AyudaTooltip
-                        texto="Teléfono de contacto del almacén a 10 dígitos. Se guardan sólo los números."
-                        etiqueta="Ayuda sobre el teléfono"
-                    />
-                </Label>
-                <Input
-                    id="alm-telefono"
-                    v-model="form.telefono"
-                    inputmode="numeric"
-                    maxlength="10"
-                    placeholder="10 dígitos"
-                    @input="filtrarTelefono"
-                    @blur="marcar('telefono')"
-                />
-                <InputError :message="error('telefono')" />
-            </div>
-
-            <div class="grid gap-1.5">
-                <Label for="alm-correo">Correo</Label>
-                <Input
-                    id="alm-correo"
-                    v-model="form.correo"
-                    type="email"
-                    maxlength="255"
-                    @blur="marcar('correo')"
-                />
-                <InputError :message="error('correo')" />
-            </div>
-
-            <div class="grid gap-1.5">
-                <Label for="alm-responsable" class="flex items-center gap-1.5">
-                    Responsable del almacén
-                    <AyudaTooltip
-                        texto="Colaborador activo responsable del almacén. Se busca dentro de la primera empresa abastecida. Es opcional."
-                        etiqueta="Ayuda sobre el responsable"
-                    />
-                </Label>
-                <BuscadorAsync
-                    id="alm-responsable"
-                    :model-value="responsable"
-                    :buscar="buscarColaboradores"
-                    :dependencia="empresaResponsableId ?? ''"
-                    :etiqueta="(c) => (c as Colaborador).nombre_completo"
-                    :descripcion="
-                        (c) => `N.º ${(c as Colaborador).numero_empleado}`
-                    "
-                    :disabled="empresaResponsableId === null"
-                    placeholder="Sin responsable"
-                    @update:model-value="alElegirResponsable"
-                />
-                <p
-                    v-if="empresaResponsableId === null"
-                    class="text-muted-foreground text-xs"
-                >
-                    Selecciona primero una empresa abastecida.
-                </p>
-                <InputError :message="error('responsable_colaborador_id')" />
-            </div>
-
-            <div class="grid gap-1.5 sm:col-span-2">
-                <Label for="alm-direccion">Dirección</Label>
-                <Input
-                    id="alm-direccion"
-                    v-model="form.direccion"
-                    autocomplete="street-address"
-                    maxlength="255"
-                />
-                <InputError :message="error('direccion')" />
-            </div>
-
-            <div class="grid gap-1.5 sm:col-span-2">
-                <Label for="alm-descripcion">Descripción</Label>
-                <textarea
-                    id="alm-descripcion"
-                    v-model="form.descripcion"
-                    rows="2"
-                    maxlength="1000"
-                    class="border-input bg-background focus-visible:ring-ring min-h-[60px] rounded-md border px-3 py-2 text-base shadow-xs focus-visible:ring-2 focus-visible:outline-none md:text-sm"
-                ></textarea>
-                <InputError :message="error('descripcion')" />
-            </div>
-        </div>
-
         <div class="grid gap-2">
             <Label class="flex items-center gap-1.5">
                 Empresas abastecidas
                 <span class="text-destructive">*</span>
                 <AyudaTooltip
-                    texto="Un almacén puede surtir a varias razones sociales; su inventario se mantiene separado por empresa."
+                    texto="Un almacén puede surtir a varias razones sociales; su inventario se mantiene separado por empresa. La primera empresa que marques aquí es la que se usa para buscar el responsable."
                     etiqueta="Ayuda sobre empresas abastecidas"
                 />
                 <Badge v-if="form.empresa_ids.length" variant="secondary">
@@ -385,6 +261,141 @@ function enviar(): void {
                 No tienes empresas asignadas.
             </p>
             <InputError :message="error('empresa_ids')" />
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+            <div class="grid gap-1.5 sm:col-span-2">
+                <Label for="alm-nombre" class="flex items-center gap-1.5">
+                    Nombre
+                    <span class="text-destructive">*</span>
+                    <AyudaTooltip
+                        texto="Nombre con el que se identifica el almacén (Almacén Morelos, Almacén Centro, etc.)."
+                        etiqueta="Ayuda sobre el nombre"
+                    />
+                </Label>
+                <Input
+                    id="alm-nombre"
+                    v-model="form.nombre"
+                    required
+                    maxlength="255"
+                    @blur="marcar('nombre')"
+                />
+                <InputError :message="error('nombre')" />
+            </div>
+
+            <div class="grid gap-1.5">
+                <Label for="alm-codigo" class="flex items-center gap-1.5">
+                    Código
+                    <AyudaTooltip
+                        texto="Lo genera el sistema automáticamente (único a nivel plataforma, ALM-0001). No se puede escribir ni editar."
+                        etiqueta="Ayuda sobre el código"
+                    />
+                </Label>
+                <div
+                    id="alm-codigo"
+                    class="bg-muted/50 text-muted-foreground flex h-9 items-center rounded-md border px-3 font-mono text-sm"
+                >
+                    <span v-if="codigoPreview" class="text-foreground">{{
+                        codigoPreview
+                    }}</span>
+                    <span v-else-if="cargandoPreview">Calculando…</span>
+                    <span v-else class="italic"
+                        >Se generará automáticamente</span
+                    >
+                </div>
+                <p class="text-muted-foreground text-xs">
+                    {{
+                        esEdicion
+                            ? 'Asignado al crear el almacén; no se puede modificar.'
+                            : 'Se asignará automáticamente al guardar.'
+                    }}
+                </p>
+            </div>
+
+            <div class="grid gap-1.5">
+                <Label for="alm-responsable" class="flex items-center gap-1.5">
+                    Responsable del almacén
+                    <AyudaTooltip
+                        texto="Colaborador activo responsable del almacén. Se busca dentro de la primera empresa abastecida. Es opcional."
+                        etiqueta="Ayuda sobre el responsable"
+                    />
+                </Label>
+                <BuscadorAsync
+                    id="alm-responsable"
+                    :model-value="responsable"
+                    :buscar="buscarColaboradores"
+                    :dependencia="empresaResponsableId ?? ''"
+                    :etiqueta="(c) => (c as Colaborador).nombre_completo"
+                    :descripcion="
+                        (c) => `N.º ${(c as Colaborador).numero_empleado}`
+                    "
+                    :disabled="empresaResponsableId === null"
+                    placeholder="Sin responsable"
+                    @update:model-value="alElegirResponsable"
+                />
+                <p
+                    v-if="empresaResponsableId === null"
+                    class="text-muted-foreground text-xs"
+                >
+                    Selecciona primero una empresa abastecida.
+                </p>
+                <InputError :message="error('responsable_colaborador_id')" />
+            </div>
+
+            <div class="grid gap-1.5">
+                <Label for="alm-telefono" class="flex items-center gap-1.5">
+                    Teléfono
+                    <AyudaTooltip
+                        texto="Teléfono de contacto del almacén a 10 dígitos. Se guardan sólo los números."
+                        etiqueta="Ayuda sobre el teléfono"
+                    />
+                </Label>
+                <Input
+                    id="alm-telefono"
+                    v-model="form.telefono"
+                    inputmode="numeric"
+                    maxlength="10"
+                    placeholder="10 dígitos"
+                    @input="filtrarTelefono"
+                    @blur="marcar('telefono')"
+                />
+                <InputError :message="error('telefono')" />
+            </div>
+
+            <div class="grid gap-1.5">
+                <Label for="alm-correo">Correo</Label>
+                <Input
+                    id="alm-correo"
+                    v-model="form.correo"
+                    type="email"
+                    maxlength="255"
+                    @blur="marcar('correo')"
+                />
+                <InputError :message="error('correo')" />
+            </div>
+
+            <div class="grid gap-1.5 sm:col-span-2">
+                <Label for="alm-direccion">Dirección</Label>
+                <Input
+                    id="alm-direccion"
+                    v-model="form.direccion"
+                    autocomplete="street-address"
+                    maxlength="255"
+                />
+                <InputError :message="error('direccion')" />
+            </div>
+
+            <div class="grid gap-1.5 sm:col-span-2">
+                <Label for="alm-descripcion">Descripción</Label>
+                <textarea
+                    id="alm-descripcion"
+                    v-model="form.descripcion"
+                    rows="2"
+                    maxlength="1000"
+                    class="border-input bg-background focus-visible:ring-ring min-h-[60px] rounded-md border px-3 py-2 text-base shadow-xs focus-visible:ring-2 focus-visible:outline-none md:text-sm"
+                ></textarea>
+                <InputError :message="error('descripcion')" />
+            </div>
         </div>
 
         <div class="flex items-center justify-end gap-2 pt-1">

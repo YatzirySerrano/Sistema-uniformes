@@ -258,6 +258,22 @@ const vista = useVistaPreferida('movimientos', 'tabla');
                         · {{ m.unidad_codigo }}</span
                     >
                 </p>
+                <div
+                    class="bg-muted/40 grid grid-cols-2 divide-x rounded-lg text-center"
+                >
+                    <div class="px-2 py-1.5">
+                        <p class="text-muted-foreground text-[11px]">Antes</p>
+                        <p class="font-semibold tabular-nums">
+                            {{ m.existencia_anterior }}
+                        </p>
+                    </div>
+                    <div class="px-2 py-1.5">
+                        <p class="text-muted-foreground text-[11px]">Después</p>
+                        <p class="font-semibold tabular-nums">
+                            {{ m.existencia_resultante }}
+                        </p>
+                    </div>
+                </div>
                 <p v-if="m.referencia" class="text-muted-foreground text-xs">
                     {{ m.referencia }}
                 </p>

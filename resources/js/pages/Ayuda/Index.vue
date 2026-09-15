@@ -10,6 +10,7 @@ import {
     Compass,
     FileBarChart2,
     FileText,
+    History,
     LayoutGrid,
     Network,
     Package,
@@ -168,6 +169,15 @@ const secciones: Seccion[] = [
                 icono: Boxes,
                 descripcion:
                     'Agrupa varios activos como una sola plantilla de entrega, sin stock propio.',
+                tono: TONO_INVENTARIO,
+            },
+            {
+                tourId: 'movimientos',
+                titulo: 'Movimientos de inventario',
+                href: '/inventario/movimientos',
+                icono: History,
+                descripcion:
+                    'Consulta el historial técnico de ingresos, entregas, devoluciones, ajustes y traspasos, incluyendo la existencia anterior y resultante.',
                 tono: TONO_INVENTARIO,
             },
             {

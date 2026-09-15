@@ -316,7 +316,14 @@ const vista = useVistaPreferida('inventario-fisico', 'cards');
             <div
                 v-for="r in rondas.data"
                 :key="r.id"
-                class="flex min-w-0 flex-col gap-3 rounded-xl border p-4"
+                role="link"
+                tabindex="0"
+                class="hover:bg-muted/40 focus-visible:ring-ring flex min-w-0 cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                @click="router.visit(`/inventarios-fisicos/${r.id}`)"
+                @keydown.enter="router.visit(`/inventarios-fisicos/${r.id}`)"
+                @keydown.space.prevent="
+                    router.visit(`/inventarios-fisicos/${r.id}`)
+                "
             >
                 <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
@@ -384,6 +391,7 @@ const vista = useVistaPreferida('inventario-fisico', 'cards');
                     size="sm"
                     class="mt-auto self-end"
                     as-child
+                    @click.stop
                 >
                     <Link :href="`/inventarios-fisicos/${r.id}`">
                         <SquareArrowOutUpRight class="size-3.5" /> Ver

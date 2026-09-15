@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Acciones\AjustarInventario;
+use App\Acciones\AjustarMinimoInventario;
 use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
@@ -167,7 +168,7 @@ class InventarioController extends Controller
         return back()->with('toast', ['type' => 'success', 'message' => 'Ajuste de existencias registrado.']);
     }
 
-    public function minimos(Request $request, ServicioInventario $inventario): RedirectResponse
+    public function minimos(Request $request, AjustarMinimoInventario $ajustarMinimo): RedirectResponse
     {
         abort_unless($request->user()->can('inventario.minimos'), 403);
         $empresa = $this->resolverEmpresa($request);
@@ -176,7 +177,7 @@ class InventarioController extends Controller
             'minimo' => ['required', 'integer', 'min:0', 'max:1000000'],
         ]);
 
-        $inventario->ajustarMinimo(
+        $ajustarMinimo->ejecutar(
             $empresa->id,
             (int) $datos['almacen_id'],
             (int) $datos['activo_id'],

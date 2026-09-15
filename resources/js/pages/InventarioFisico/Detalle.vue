@@ -1132,7 +1132,124 @@ onBeforeUnmount(() => {
                 </p>
             </div>
 
-            <div class="overflow-x-auto">
+            <!-- Móvil: cards (evita el scroll horizontal de la tabla). Misma
+                 data/estado/función que la tabla de escritorio, sólo cambia
+                 la presentación. -->
+            <div class="grid gap-3 md:hidden">
+                <div
+                    v-for="e in existencias"
+                    :key="e.id"
+                    class="flex min-w-0 flex-col gap-2 rounded-xl border p-3 text-sm"
+                >
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <p class="truncate font-medium">
+                                {{ e.activo ?? '—' }}
+                            </p>
+                            <p
+                                v-if="e.talla"
+                                class="text-muted-foreground truncate text-xs"
+                            >
+                                Talla {{ e.talla }}
+                            </p>
+                        </div>
+                        <Badge
+                            variant="outline"
+                            class="shrink-0 text-xs"
+                            :class="ETIQUETA_EXISTENCIA[e.resultado].clase"
+                        >
+                            {{ ETIQUETA_EXISTENCIA[e.resultado].texto }}
+                        </Badge>
+                    </div>
+
+                    <div
+                        class="bg-muted/40 grid grid-cols-3 divide-x rounded-lg text-center"
+                    >
+                        <div class="px-2 py-1.5">
+                            <p class="text-muted-foreground text-[11px]">
+                                Esperado
+                            </p>
+                            <p class="font-semibold tabular-nums">
+                                {{ e.cantidad_esperada }}
+                            </p>
+                        </div>
+                        <div class="px-2 py-1.5">
+                            <p class="text-muted-foreground text-[11px]">
+                                Contado
+                            </p>
+                            <p class="font-semibold tabular-nums">
+                                {{ e.cantidad_contada ?? '—' }}
+                            </p>
+                        </div>
+                        <div class="px-2 py-1.5">
+                            <p class="text-muted-foreground text-[11px]">
+                                Diferencia
+                            </p>
+                            <p
+                                class="font-semibold tabular-nums"
+                                :class="
+                                    (e.diferencia ?? 0) < 0
+                                        ? 'text-red-600 dark:text-red-400'
+                                        : (e.diferencia ?? 0) > 0
+                                          ? 'text-amber-600 dark:text-amber-400'
+                                          : ''
+                                "
+                            >
+                                {{
+                                    e.diferencia === null
+                                        ? '—'
+                                        : e.diferencia > 0
+                                          ? `+${e.diferencia}`
+                                          : e.diferencia
+                                }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div v-if="puedeEscanear" class="flex flex-col gap-1.5">
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            class="h-10 w-full"
+                            :disabled="guardandoExistencia !== null"
+                            @click="verificarExistencia(e, e.cantidad_esperada)"
+                        >
+                            <CheckCircle2 class="size-4" /> Coincide
+                        </Button>
+                        <div class="flex items-center gap-1.5">
+                            <Input
+                                v-model.number="borrador[e.id]"
+                                type="number"
+                                min="0"
+                                class="h-10 flex-1"
+                                placeholder="Cantidad real"
+                            />
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                class="h-10"
+                                :disabled="
+                                    guardandoExistencia !== null ||
+                                    borrador[e.id] === '' ||
+                                    borrador[e.id] === undefined
+                                "
+                                @click="
+                                    verificarExistencia(
+                                        e,
+                                        Number(borrador[e.id]),
+                                    )
+                                "
+                            >
+                                Guardar
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Escritorio / tablet ancha: tabla (permite comparar varias
+                 filas a la vez sin perder contexto). -->
+            <div class="hidden overflow-x-auto md:block">
                 <table class="w-full min-w-[640px] text-sm">
                     <thead class="text-muted-foreground text-left">
                         <tr>

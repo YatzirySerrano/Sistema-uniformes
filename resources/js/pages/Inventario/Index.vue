@@ -1,11 +1,19 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { PackagePlus, Search, Settings2, SlidersHorizontal } from '@lucide/vue';
+import {
+    Building2,
+    PackagePlus,
+    Search,
+    Settings2,
+    SlidersHorizontal,
+    Warehouse as WarehouseIcon,
+} from '@lucide/vue';
 import { computed, reactive, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +27,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Saldo = {
@@ -291,6 +300,27 @@ function confirmarMinimoMasivo(): void {
         onSuccess: () => (dialogoMasivo.value = false),
     });
 }
+
+const vista = useVistaPreferida('existencias-globales', 'tabla');
+
+function estadoStock(s: Saldo): { texto: string; clase: string } {
+    if (s.cantidad <= 0) {
+        return {
+            texto: 'Sin existencias',
+            clase: 'text-rose-600 border-rose-200 dark:border-rose-900',
+        };
+    }
+    if (s.bajo_minimo) {
+        return {
+            texto: 'Bajo mínimo',
+            clase: 'text-amber-600 border-amber-200 dark:border-amber-900',
+        };
+    }
+    return {
+        texto: 'OK',
+        clase: 'text-emerald-600 border-emerald-200 dark:border-emerald-900',
+    };
+}
 </script>
 
 <template>
@@ -404,6 +434,7 @@ function confirmarMinimoMasivo(): void {
             >
                 Limpiar filtros
             </Button>
+            <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
         <div
@@ -430,6 +461,92 @@ function confirmarMinimoMasivo(): void {
             titulo="Sin existencias"
             descripcion="No hay inventario con los filtros seleccionados. Registra una entrada indicando la empresa y el almacén."
         />
+
+        <div
+            v-else-if="vista === 'cards'"
+            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+            <div
+                v-for="s in saldos.data"
+                :key="s.id"
+                class="flex min-w-0 flex-col gap-2 rounded-xl border p-4 text-sm"
+            >
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <p class="truncate font-medium">{{ s.activo }}</p>
+                        <p
+                            v-if="s.talla"
+                            class="text-muted-foreground truncate text-xs"
+                        >
+                            Variante {{ s.talla }}
+                        </p>
+                    </div>
+                    <Badge
+                        variant="outline"
+                        class="shrink-0 text-xs"
+                        :class="estadoStock(s).clase"
+                    >
+                        {{ estadoStock(s).texto }}
+                    </Badge>
+                </div>
+
+                <div class="text-muted-foreground grid gap-1 text-xs">
+                    <span class="flex min-w-0 items-center gap-1.5 truncate">
+                        <Building2 class="size-3.5 shrink-0" />
+                        {{ s.empresa ?? '—' }}
+                    </span>
+                    <span class="flex min-w-0 items-center gap-1.5 truncate">
+                        <WarehouseIcon class="size-3.5 shrink-0" />
+                        {{ s.almacen }}
+                    </span>
+                </div>
+
+                <div
+                    class="bg-muted/40 grid grid-cols-2 divide-x rounded-lg text-center"
+                >
+                    <div class="px-2 py-1.5">
+                        <p class="text-muted-foreground text-[11px]">
+                            Existencia
+                        </p>
+                        <p class="font-semibold tabular-nums">
+                            {{ s.cantidad }}
+                        </p>
+                    </div>
+                    <div class="px-2 py-1.5">
+                        <p class="text-muted-foreground text-[11px]">Mínimo</p>
+                        <p class="font-semibold tabular-nums">
+                            {{ s.minimo }}
+                        </p>
+                    </div>
+                </div>
+
+                <div
+                    v-if="permisos.ajustar || permisos.minimos"
+                    class="mt-auto flex flex-wrap gap-2 pt-1"
+                >
+                    <Button
+                        v-if="permisos.ajustar"
+                        variant="outline"
+                        size="sm"
+                        @click="abrir('ajuste', s)"
+                    >
+                        <SlidersHorizontal class="size-3.5" />
+                        Ajustar
+                    </Button>
+                    <Button
+                        v-if="permisos.minimos"
+                        variant="ghost"
+                        size="sm"
+                        as-child
+                    >
+                        <Link :href="`/activos/${s.activo_id}`">
+                            <Settings2 class="size-3.5" />
+                            Configurar mínimo
+                        </Link>
+                    </Button>
+                </div>
+            </div>
+        </div>
 
         <div v-else class="overflow-x-auto rounded-xl border">
             <table class="w-full min-w-[720px] text-sm">

@@ -33,7 +33,8 @@ implementar la exportación por módulo todavía.
 
 Fase 10 aplicó `SelectorVista` + `useVistaPreferida` (misma query/paginación/filtros, sólo cambia la representación) a: Empresas, Sucursales, Areas, Almacenes, Activos, Conjuntos, Colaboradores (ya existía), Unidades (Activos/Unidades.vue), Entregas, Devoluciones, Auditoria. Default 'cards' salvo donde ya existía tabla como vista principal (Colaboradores, Entregas, Devoluciones) → default 'tabla' con cards como alternativa nueva.
 
+Ronda 2026-09-15 (re-exposición de Movimientos en el sidebar) sumó el toggle a: `Inventario/Movimientos.vue` (cards con Antes/Después destacado en bloque de 2 columnas, no sólo en la tabla), `Inventario/Index.vue` ("Existencias globales") y `Reportes/Index.vue` (ambos tabs, Entregas e Inventario) — los tres con default `'tabla'` porque ya existía tabla como vista principal. La nota anterior de esta sección decía que Movimientos quedaba deliberadamente SIN el toggle por romper la comparación lateral de cantidades; se reconsideró: el bloque Antes/Después en la card resuelve esa comparación sin necesitar la tabla.
+
 Deliberadamente SIN el toggle (documentado, no lo fuerces sin pedir confirmación primero):
 
-- `Inventario/Movimientos.vue`: ledger numérico append-only de 7 columnas (fecha/tipo/almacén/activo-variante/±cantidad/antes→después/usuario); cards rompe la comparación lateral de cantidades entre filas y no hay acción por fila más allá de leer el dato.
 - `Activos/Catalogos.vue` y `Activos/Tallas.vue`: regla ya asentada en `.ai/rules/ux.md` ("Presentación en cards / filas apiladas, nunca tabla con scroll horizontal") para catálogos globales de plataforma — no re-litigar.

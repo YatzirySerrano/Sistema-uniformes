@@ -105,6 +105,18 @@ const REGISTRO: EntradaRegistro[] = [
         ],
     },
     {
+        patron: /^\/inventario\/movimientos\/?$/,
+        tours: [
+            tourGenerico(
+                'movimientos',
+                'Movimientos de inventario',
+                '/inventario/movimientos',
+                'Historial técnico de todo lo que cambió existencias: entradas, entregas, devoluciones, ajustes, bajas, incidencias, recuperaciones y traspasos, con la existencia anterior y la resultante de cada uno.',
+                true,
+            ),
+        ],
+    },
+    {
         patron: /^\/inventario\/traspasos\/?$/,
         tours: [
             tourGenerico(
