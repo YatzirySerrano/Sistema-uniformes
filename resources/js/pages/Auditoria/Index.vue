@@ -3,6 +3,7 @@ import { Head, router } from '@inertiajs/vue3';
 import {
     Boxes,
     Building2,
+    ChevronDown,
     Code2,
     FileClock,
     LayoutGrid,
@@ -37,6 +38,15 @@ import { fechaHora } from '@/lib/fecha';
 import type { EmpresaAutorizada, Paginado } from '@/types/sistema';
 
 type Cambio = { campo: string; antes: string; ahora: string };
+
+type RenglonTraspaso = {
+    control: 'cantidad' | 'individual';
+    activo_origen: string;
+    activo_destino: string;
+    talla: string | null;
+    cantidad: number;
+    unidad_codigo: string | null;
+};
 
 type Registro = {
     id: number;
@@ -180,10 +190,31 @@ function etiquetaAccion(accion: string): string {
 const detalleAbierto = ref(false);
 const registroSeleccionado = ref<Registro | null>(null);
 const mostrarJson = ref(false);
+const mostrarRenglones = ref(false);
+
+// Snapshot inmutable (columnas `*_snapshot` congeladas al momento del
+// traspaso): lo que se ve aquí no cambia aunque el activo se renombre
+// después. No es un dato en vivo ni forma parte del diff genérico de
+// "Cambios" — tiene su propia sección (ver `esClaveOculta` en
+// `DescripcionAuditoria`).
+function renglonesDe(
+    valoresNuevos: Record<string, unknown> | null,
+): RenglonTraspaso[] {
+    const r = valoresNuevos?.renglones;
+
+    return Array.isArray(r) ? (r as RenglonTraspaso[]) : [];
+}
+
+const renglonesTraspaso = computed(() =>
+    renglonesDe(registroSeleccionado.value?.valores_nuevos ?? null),
+);
 
 function verDetalle(registro: Registro) {
     registroSeleccionado.value = registro;
     mostrarJson.value = false;
+    // 1-2 renglones: se muestran abiertos por conveniencia. 3+: colapsados
+    // por defecto, sobre todo en móvil, para no alargar el diálogo.
+    mostrarRenglones.value = renglonesDe(registro.valores_nuevos).length <= 2;
     detalleAbierto.value = true;
 }
 
@@ -513,6 +544,57 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                         <p v-else class="text-muted-foreground text-xs">
                             Sin cambios detallados registrados para este evento.
                         </p>
+                    </div>
+
+                    <div v-if="renglonesTraspaso.length">
+                        <button
+                            type="button"
+                            class="mb-1.5 flex w-full items-center justify-between gap-2 text-left text-xs font-medium"
+                            :aria-expanded="mostrarRenglones"
+                            @click="mostrarRenglones = !mostrarRenglones"
+                        >
+                            <span
+                                >Activos traspasados ({{
+                                    renglonesTraspaso.length
+                                }})</span
+                            >
+                            <ChevronDown
+                                class="size-3.5 shrink-0 transition-transform"
+                                :class="mostrarRenglones ? 'rotate-180' : ''"
+                            />
+                        </button>
+                        <ul v-if="mostrarRenglones" class="grid gap-2">
+                            <li
+                                v-for="(r, i) in renglonesTraspaso"
+                                :key="i"
+                                class="min-w-0 rounded-md border p-2 text-sm"
+                            >
+                                <p class="min-w-0 font-medium break-words">
+                                    {{ r.activo_origen }}
+                                </p>
+                                <p
+                                    v-if="
+                                        r.activo_destino &&
+                                        r.activo_destino !== r.activo_origen
+                                    "
+                                    class="text-muted-foreground min-w-0 text-xs break-words"
+                                >
+                                    Registrado en destino como:
+                                    {{ r.activo_destino }}
+                                </p>
+                                <div
+                                    class="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs"
+                                >
+                                    <span v-if="r.talla"
+                                        >Talla: {{ r.talla }}</span
+                                    >
+                                    <span v-if="r.unidad_codigo"
+                                        >Unidad: {{ r.unidad_codigo }}</span
+                                    >
+                                    <span>Cantidad: {{ r.cantidad }}</span>
+                                </div>
+                            </li>
+                        </ul>
                     </div>
 
                     <div v-if="hayJsonTecnico">

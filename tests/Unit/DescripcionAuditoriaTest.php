@@ -105,6 +105,20 @@ it('resume una lista de registros anidados (p. ej. detalles de una entrega) en v
         ->and($fila['ahora'])->toBe('2 elementos');
 });
 
+it('oculta la clave "renglones" del diff genérico: tiene su propia sección en Auditoría de Traspasos', function () {
+    $servicio = new DescripcionAuditoria;
+
+    $cambios = $servicio->cambios(null, null, [
+        'folio' => 'TRA-000001',
+        'renglones' => [
+            ['control' => 'cantidad', 'activo_origen' => 'Camisa', 'talla' => 'M', 'cantidad' => 10, 'unidad_codigo' => null, 'activo_destino' => 'Camisa'],
+        ],
+    ]);
+
+    expect(cambio($cambios, 'Renglones'))->toBeNull()
+        ->and(cambio($cambios, 'Folio'))->not->toBeNull();
+});
+
 it('humaniza un array de un solo registro anidado en singular', function () {
     $servicio = new DescripcionAuditoria;
 

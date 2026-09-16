@@ -26,6 +26,7 @@ use App\Models\TipoActivo;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Servicios\ServicioEstadoInventario;
 use App\Servicios\ServicioEvidencias;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\ResolverPerfilTecnicoUnidad;
@@ -59,6 +60,7 @@ class ActivoController extends Controller
         private readonly ServicioAuditoria $auditoria,
         private readonly ServicioCascadaSuspension $cascada,
         private readonly ServicioGeneradorCodigos $codigos,
+        private readonly ServicioEstadoInventario $estadoInventario,
     ) {}
 
     public function index(Request $request): Response
@@ -636,6 +638,8 @@ class ActivoController extends Controller
             ->where('condicion', '!=', CondicionUnidadActivo::Funcionando)
             ->count();
 
+        $estadoCantidades = $esIndividual ? null : $this->estadoInventario->porActivo($activo);
+
         return Inertia::render('Activos/Detalle', [
             'activo' => [
                 ...$activo->only(['id', 'nombre', 'descripcion', 'codigo', 'categoria', 'activo']),
@@ -650,6 +654,8 @@ class ActivoController extends Controller
             ],
             'saldos' => $saldos,
             'usaVariantes' => $activo->tallas()->exists(),
+            'resumenCantidades' => $estadoCantidades['resumen'] ?? null,
+            'desgloseCantidades' => $estadoCantidades['desglose'] ?? null,
             'resumenUnidades' => $resumenUnidades === null ? null : [
                 'en_almacen' => (int) ($resumenUnidades['en_almacen'] ?? 0),
                 'no_disponibles' => $noDisponiblesEnAlmacen,

@@ -4,6 +4,7 @@ import {
     ArrowLeft,
     Boxes,
     Building,
+    ChevronDown,
     Layers,
     Package,
     PackagePlus,
@@ -41,6 +42,19 @@ type Saldo = {
     bajo_minimo: boolean;
 };
 
+type EstadoCantidad = 'disponible' | 'asignado' | 'danado' | 'baja';
+
+type VarianteEstadoCantidad = Record<EstadoCantidad, number> & {
+    talla_id: number | null;
+    talla: string | null;
+};
+
+type AlmacenEstadoCantidad = {
+    almacen_id: number;
+    almacen: string;
+    variantes: VarianteEstadoCantidad[];
+};
+
 const props = defineProps<{
     activo: {
         id: number;
@@ -60,6 +74,8 @@ const props = defineProps<{
     };
     saldos: Saldo[];
     usaVariantes: boolean;
+    resumenCantidades: Record<EstadoCantidad, number> | null;
+    desgloseCantidades: AlmacenEstadoCantidad[] | null;
     resumenUnidades: {
         en_almacen: number;
         no_disponibles: number;
@@ -92,6 +108,42 @@ defineOptions({
 });
 
 const dialogoExistencias = ref(false);
+
+// --- Existencias por estado (Disponible/Asignado/Dañado/Baja): 4 tarjetas
+// con desglose desplegable por almacén (+ variante si el activo las usa). No
+// se muestra "Devueltos": una devolución termina en Disponible, Dañado o
+// Baja, nunca es un estado en sí mismo. ---
+const tarjetasEstadoCantidad: { clave: EstadoCantidad; etiqueta: string }[] = [
+    { clave: 'disponible', etiqueta: 'Disponible' },
+    { clave: 'asignado', etiqueta: 'Asignado' },
+    { clave: 'danado', etiqueta: 'Dañado' },
+    { clave: 'baja', etiqueta: 'Baja' },
+];
+
+const estadoCantidadExpandido = ref<EstadoCantidad | null>(null);
+
+function alternarEstadoCantidad(clave: EstadoCantidad): void {
+    estadoCantidadExpandido.value =
+        estadoCantidadExpandido.value === clave ? null : clave;
+}
+
+function valorEstado(fila: Record<EstadoCantidad, number>): number {
+    return estadoCantidadExpandido.value
+        ? fila[estadoCantidadExpandido.value]
+        : 0;
+}
+
+const desgloseEstadoCantidadActual = computed(() => {
+    if (!estadoCantidadExpandido.value || !props.desgloseCantidades) return [];
+
+    return props.desgloseCantidades
+        .map((a) => ({
+            almacen_id: a.almacen_id,
+            almacen: a.almacen,
+            variantes: a.variantes.filter((v) => valorEstado(v) > 0),
+        }))
+        .filter((a) => a.variantes.length > 0);
+});
 
 // --- Mínimo individual (una fila = una combinación empresa+almacén+variante) ---
 const dialogoMinimo = ref(false);
@@ -423,200 +475,329 @@ function confirmarMinimoMasivo(): void {
                 </div>
             </section>
 
-            <section v-else class="min-w-0 rounded-xl border p-4">
-                <div
-                    class="mb-3 flex flex-wrap items-center justify-between gap-2"
+            <div v-else class="flex min-w-0 flex-col gap-4">
+                <section
+                    v-if="resumenCantidades"
+                    class="min-w-0 rounded-xl border p-4"
                 >
-                    <h2 class="flex items-center gap-2 text-sm font-semibold">
+                    <h2
+                        class="mb-3 flex items-center gap-2 text-sm font-semibold"
+                    >
                         <Boxes class="text-muted-foreground size-4" />
-                        Existencias por almacén
+                        Existencias por estado
                         <AyudaTooltip
-                            texto="Existencias actuales de este activo en cada almacén y variante. El almacén elegido al crear el activo fue sólo el de la entrada inicial; puede tener existencia en varios."
-                            etiqueta="Ayuda sobre existencias"
+                            texto="Disponible: listo para entregar ahora mismo. Asignado: en posesión de colaboradores (entregado y no devuelto). Dañado: devuelto en condición no utilizable. Baja: devuelto y retirado de forma permanente. Toca una tarjeta para ver el desglose por almacén."
+                            etiqueta="Ayuda sobre estados de existencias"
                         />
                     </h2>
-                    <div class="flex flex-wrap gap-2">
-                        <Button
-                            v-if="
-                                usaVariantes &&
-                                permisos.minimos &&
-                                saldos.length
+
+                    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <button
+                            v-for="t in tarjetasEstadoCantidad"
+                            :key="t.clave"
+                            type="button"
+                            :aria-expanded="estadoCantidadExpandido === t.clave"
+                            :aria-label="`Ver desglose de ${t.etiqueta}`"
+                            class="bg-muted/40 hover:bg-muted focus-visible:ring-ring flex flex-col items-center gap-1 rounded-lg border p-3 text-center transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                            :class="
+                                estadoCantidadExpandido === t.clave
+                                    ? 'ring-ring bg-muted ring-2'
+                                    : ''
                             "
-                            variant="outline"
-                            size="sm"
-                            @click="abrirMinimoMasivo"
+                            @click="alternarEstadoCantidad(t.clave)"
                         >
-                            <Settings2 class="size-3.5" />
-                            Aplicar mismo mínimo a todas las variantes
-                        </Button>
-                        <Button
-                            v-if="
-                                usaVariantes === false && permisos.administrar
-                            "
-                            variant="ghost"
-                            size="sm"
-                            as-child
-                        >
-                            <Link
-                                :href="`/inventario/movimientos?activo_id=${activo.id}`"
-                                >Ver movimientos</Link
-                            >
-                        </Button>
+                            <p class="text-2xl font-semibold">
+                                {{ resumenCantidades[t.clave] }}
+                            </p>
+                            <p class="text-muted-foreground text-xs">
+                                {{ t.etiqueta }}
+                            </p>
+                            <ChevronDown
+                                class="text-muted-foreground size-3.5 transition-transform"
+                                :class="
+                                    estadoCantidadExpandido === t.clave
+                                        ? 'rotate-180'
+                                        : ''
+                                "
+                            />
+                        </button>
                     </div>
-                </div>
 
-                <div
-                    v-if="!saldos.length"
-                    class="text-muted-foreground rounded-lg border px-3 py-6 text-center text-sm"
-                >
-                    Este activo todavía no tiene existencias.
-                    <span v-if="permisos.agregar_existencias">
-                        Usa "Agregar existencias" para registrar la primera
-                        entrada.</span
-                    >
-                </div>
-
-                <template v-else>
-                    <!-- Escritorio / tablet ancha: tabla -->
                     <div
-                        class="hidden overflow-x-auto rounded-lg border md:block"
+                        v-if="estadoCantidadExpandido"
+                        class="mt-3 rounded-lg border p-3"
                     >
-                        <table class="w-full min-w-[560px] text-sm">
-                            <thead
-                                class="bg-muted/50 text-muted-foreground text-left"
-                            >
-                                <tr>
-                                    <th class="px-3 py-2 font-medium">
-                                        Almacén
-                                    </th>
-                                    <th class="px-3 py-2 font-medium">
-                                        Variante
-                                    </th>
-                                    <th
-                                        class="px-3 py-2 text-right font-medium"
-                                    >
-                                        Existencia
-                                    </th>
-                                    <th
-                                        class="px-3 py-2 text-right font-medium"
-                                    >
-                                        Mínimo
-                                    </th>
-                                    <th class="px-3 py-2 font-medium">
-                                        Estado
-                                    </th>
-                                    <th class="px-3 py-2"></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="(s, i) in saldos"
-                                    :key="i"
-                                    class="border-t"
-                                >
-                                    <td class="px-3 py-2">
-                                        {{ s.almacen ?? '—' }}
-                                    </td>
-                                    <td class="px-3 py-2">
-                                        {{ s.talla ?? 'Sin variante' }}
-                                    </td>
-                                    <td
-                                        class="px-3 py-2 text-right font-medium"
-                                    >
-                                        {{ s.cantidad }}
-                                    </td>
-                                    <td
-                                        class="text-muted-foreground px-3 py-2 text-right"
-                                    >
-                                        {{ s.minimo }}
-                                    </td>
-                                    <td class="px-3 py-2">
-                                        <Badge
-                                            v-if="s.bajo_minimo"
-                                            variant="secondary"
-                                            class="text-amber-600"
-                                            >Bajo mínimo</Badge
-                                        >
-                                        <span
-                                            v-else
-                                            class="text-muted-foreground"
-                                            >OK</span
-                                        >
-                                    </td>
-                                    <td class="px-3 py-2 text-right">
-                                        <Button
-                                            v-if="permisos.minimos"
-                                            variant="ghost"
-                                            size="sm"
-                                            @click="abrirMinimoIndividual(s)"
-                                        >
-                                            <Settings2 class="size-3.5" />
-                                            Configurar mínimo
-                                        </Button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- Móvil: una card por combinación almacén + variante -->
-                    <div class="grid gap-3 md:hidden">
-                        <div
-                            v-for="(s, i) in saldos"
-                            :key="i"
-                            class="flex flex-col gap-2 rounded-lg border p-3 text-sm"
+                        <p
+                            class="text-muted-foreground mb-2 text-xs font-medium"
                         >
-                            <div class="flex items-start justify-between gap-2">
-                                <div class="min-w-0">
-                                    <p class="truncate font-medium">
-                                        {{ s.almacen ?? '—' }}
-                                    </p>
-                                    <p class="text-muted-foreground text-xs">
-                                        {{ s.talla ?? 'Sin variante' }}
-                                    </p>
-                                </div>
-                                <Badge
-                                    v-if="s.bajo_minimo"
-                                    variant="secondary"
-                                    class="shrink-0 text-amber-600"
-                                    >Bajo mínimo</Badge
+                            Desglose de "{{
+                                tarjetasEstadoCantidad.find(
+                                    (t) => t.clave === estadoCantidadExpandido,
+                                )?.etiqueta
+                            }}" por almacén<template v-if="usaVariantes">
+                                y variante</template
+                            >
+                        </p>
+
+                        <p
+                            v-if="!desgloseEstadoCantidadActual.length"
+                            class="text-muted-foreground text-sm"
+                        >
+                            Sin existencia en este estado.
+                        </p>
+
+                        <ul v-else class="grid gap-2">
+                            <li
+                                v-for="a in desgloseEstadoCantidadActual"
+                                :key="a.almacen_id"
+                                class="rounded-md border p-2 text-sm"
+                            >
+                                <p class="truncate font-medium">
+                                    {{ a.almacen }}
+                                </p>
+                                <ul
+                                    v-if="usaVariantes"
+                                    class="mt-1 grid gap-1 pl-3"
                                 >
-                                <span
+                                    <li
+                                        v-for="v in a.variantes"
+                                        :key="v.talla_id ?? 'sin-variante'"
+                                        class="flex items-center justify-between gap-2"
+                                    >
+                                        <span class="text-muted-foreground">{{
+                                            v.talla ?? 'Sin variante'
+                                        }}</span>
+                                        <span class="font-medium">{{
+                                            valorEstado(v)
+                                        }}</span>
+                                    </li>
+                                </ul>
+                                <p
                                     v-else
-                                    class="text-muted-foreground shrink-0 text-xs"
-                                    >OK</span
+                                    class="text-muted-foreground flex items-center justify-between gap-2"
                                 >
-                            </div>
-                            <div class="grid grid-cols-2 gap-2">
-                                <div>
-                                    <p class="text-muted-foreground text-xs">
-                                        Existencia
-                                    </p>
-                                    <p class="font-medium">{{ s.cantidad }}</p>
-                                </div>
-                                <div>
-                                    <p class="text-muted-foreground text-xs">
-                                        Mínimo
-                                    </p>
-                                    <p class="text-muted-foreground">
-                                        {{ s.minimo }}
-                                    </p>
-                                </div>
-                            </div>
+                                    <span>Cantidad</span>
+                                    <span class="text-foreground font-medium">{{
+                                        a.variantes[0]
+                                            ? valorEstado(a.variantes[0])
+                                            : 0
+                                    }}</span>
+                                </p>
+                            </li>
+                        </ul>
+                    </div>
+                </section>
+
+                <section class="min-w-0 rounded-xl border p-4">
+                    <div
+                        class="mb-3 flex flex-wrap items-center justify-between gap-2"
+                    >
+                        <h2
+                            class="flex items-center gap-2 text-sm font-semibold"
+                        >
+                            <Boxes class="text-muted-foreground size-4" />
+                            Existencias por almacén
+                            <AyudaTooltip
+                                texto="Existencias actuales de este activo en cada almacén y variante. El almacén elegido al crear el activo fue sólo el de la entrada inicial; puede tener existencia en varios."
+                                etiqueta="Ayuda sobre existencias"
+                            />
+                        </h2>
+                        <div class="flex flex-wrap gap-2">
                             <Button
-                                v-if="permisos.minimos"
+                                v-if="
+                                    usaVariantes &&
+                                    permisos.minimos &&
+                                    saldos.length
+                                "
                                 variant="outline"
                                 size="sm"
-                                class="w-fit"
-                                @click="abrirMinimoIndividual(s)"
+                                @click="abrirMinimoMasivo"
                             >
                                 <Settings2 class="size-3.5" />
-                                Configurar mínimo
+                                Aplicar mismo mínimo a todas las variantes
+                            </Button>
+                            <Button
+                                v-if="
+                                    usaVariantes === false &&
+                                    permisos.administrar
+                                "
+                                variant="ghost"
+                                size="sm"
+                                as-child
+                            >
+                                <Link
+                                    :href="`/inventario/movimientos?activo_id=${activo.id}`"
+                                    >Ver movimientos</Link
+                                >
                             </Button>
                         </div>
                     </div>
-                </template>
-            </section>
+
+                    <div
+                        v-if="!saldos.length"
+                        class="text-muted-foreground rounded-lg border px-3 py-6 text-center text-sm"
+                    >
+                        Este activo todavía no tiene existencias.
+                        <span v-if="permisos.agregar_existencias">
+                            Usa "Agregar existencias" para registrar la primera
+                            entrada.</span
+                        >
+                    </div>
+
+                    <template v-else>
+                        <!-- Escritorio / tablet ancha: tabla -->
+                        <div
+                            class="hidden overflow-x-auto rounded-lg border md:block"
+                        >
+                            <table class="w-full min-w-[560px] text-sm">
+                                <thead
+                                    class="bg-muted/50 text-muted-foreground text-left"
+                                >
+                                    <tr>
+                                        <th class="px-3 py-2 font-medium">
+                                            Almacén
+                                        </th>
+                                        <th class="px-3 py-2 font-medium">
+                                            Variante
+                                        </th>
+                                        <th
+                                            class="px-3 py-2 text-right font-medium"
+                                        >
+                                            Existencia
+                                        </th>
+                                        <th
+                                            class="px-3 py-2 text-right font-medium"
+                                        >
+                                            Mínimo
+                                        </th>
+                                        <th class="px-3 py-2 font-medium">
+                                            Estado
+                                        </th>
+                                        <th class="px-3 py-2"></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr
+                                        v-for="(s, i) in saldos"
+                                        :key="i"
+                                        class="border-t"
+                                    >
+                                        <td class="px-3 py-2">
+                                            {{ s.almacen ?? '—' }}
+                                        </td>
+                                        <td class="px-3 py-2">
+                                            {{ s.talla ?? 'Sin variante' }}
+                                        </td>
+                                        <td
+                                            class="px-3 py-2 text-right font-medium"
+                                        >
+                                            {{ s.cantidad }}
+                                        </td>
+                                        <td
+                                            class="text-muted-foreground px-3 py-2 text-right"
+                                        >
+                                            {{ s.minimo }}
+                                        </td>
+                                        <td class="px-3 py-2">
+                                            <Badge
+                                                v-if="s.bajo_minimo"
+                                                variant="secondary"
+                                                class="text-amber-600"
+                                                >Bajo mínimo</Badge
+                                            >
+                                            <span
+                                                v-else
+                                                class="text-muted-foreground"
+                                                >OK</span
+                                            >
+                                        </td>
+                                        <td class="px-3 py-2 text-right">
+                                            <Button
+                                                v-if="permisos.minimos"
+                                                variant="ghost"
+                                                size="sm"
+                                                @click="
+                                                    abrirMinimoIndividual(s)
+                                                "
+                                            >
+                                                <Settings2 class="size-3.5" />
+                                                Configurar mínimo
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Móvil: una card por combinación almacén + variante -->
+                        <div class="grid gap-3 md:hidden">
+                            <div
+                                v-for="(s, i) in saldos"
+                                :key="i"
+                                class="flex flex-col gap-2 rounded-lg border p-3 text-sm"
+                            >
+                                <div
+                                    class="flex items-start justify-between gap-2"
+                                >
+                                    <div class="min-w-0">
+                                        <p class="truncate font-medium">
+                                            {{ s.almacen ?? '—' }}
+                                        </p>
+                                        <p
+                                            class="text-muted-foreground text-xs"
+                                        >
+                                            {{ s.talla ?? 'Sin variante' }}
+                                        </p>
+                                    </div>
+                                    <Badge
+                                        v-if="s.bajo_minimo"
+                                        variant="secondary"
+                                        class="shrink-0 text-amber-600"
+                                        >Bajo mínimo</Badge
+                                    >
+                                    <span
+                                        v-else
+                                        class="text-muted-foreground shrink-0 text-xs"
+                                        >OK</span
+                                    >
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <p
+                                            class="text-muted-foreground text-xs"
+                                        >
+                                            Existencia
+                                        </p>
+                                        <p class="font-medium">
+                                            {{ s.cantidad }}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <p
+                                            class="text-muted-foreground text-xs"
+                                        >
+                                            Mínimo
+                                        </p>
+                                        <p class="text-muted-foreground">
+                                            {{ s.minimo }}
+                                        </p>
+                                    </div>
+                                </div>
+                                <Button
+                                    v-if="permisos.minimos"
+                                    variant="outline"
+                                    size="sm"
+                                    class="w-fit"
+                                    @click="abrirMinimoIndividual(s)"
+                                >
+                                    <Settings2 class="size-3.5" />
+                                    Configurar mínimo
+                                </Button>
+                            </div>
+                        </div>
+                    </template>
+                </section>
+            </div>
         </div>
 
         <PanelSuspendidos

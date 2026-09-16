@@ -13,6 +13,7 @@ use App\Models\Almacen;
 use App\Models\Empresa;
 use App\Models\Talla;
 use App\Models\TraspasoInventario;
+use App\Models\TraspasoRenglon;
 use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\HomologadorActivo;
@@ -161,6 +162,19 @@ class RegistrarTraspasoInventario
             $this->traspasarUnidades($traspaso, $empresaOrigen, $almacenOrigen, $empresaDestino, $almacenDestino, $activoOrigen, $renglon, $manualDestinoId, $realizadoPor);
         }
 
+        // Snapshot inmutable de "qué se traspasó" para la Auditoría: reutiliza
+        // las columnas `*_snapshot` que cada renglón ya guardó en el momento
+        // del traspaso (no una consulta en vivo) — si el activo se renombra
+        // después, este registro histórico queda legible tal como ocurrió.
+        $renglonesSnapshot = $traspaso->renglones()->get()->map(fn (TraspasoRenglon $r): array => [
+            'control' => $r->control->value,
+            'activo_origen' => $r->activo_origen_nombre_snapshot,
+            'activo_destino' => $r->activo_destino_nombre_snapshot,
+            'talla' => $r->talla_valor_snapshot,
+            'cantidad' => $r->cantidad,
+            'unidad_codigo' => $r->unidad_codigo_snapshot,
+        ])->all();
+
         $this->auditoria->registrar('inventario', 'traspaso', [
             'tipo_entidad' => TraspasoInventario::class,
             'entidad_id' => $traspaso->getKey(),
@@ -173,7 +187,7 @@ class RegistrarTraspasoInventario
                 $almacenOrigen->nombre,
                 $empresaDestino->nombre_comercial,
                 $almacenDestino->nombre,
-                $traspaso->renglones()->count(),
+                count($renglonesSnapshot),
             ),
             'valores_nuevos' => [
                 'folio' => $traspaso->folio,
@@ -182,7 +196,7 @@ class RegistrarTraspasoInventario
                 'almacen_origen' => $almacenOrigen->nombre,
                 'empresa_destino' => $empresaDestino->nombre_comercial,
                 'almacen_destino' => $almacenDestino->nombre,
-                'renglones' => $traspaso->renglones()->count(),
+                'renglones' => $renglonesSnapshot,
             ],
         ]);
 

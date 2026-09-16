@@ -103,7 +103,11 @@ class DescripcionAuditoria
     {
         return $clave === 'id'
             || str_ends_with($clave, '_id')
-            || in_array($clave, ['created_at', 'updated_at', 'deleted_at'], true);
+            || in_array($clave, ['created_at', 'updated_at', 'deleted_at'], true)
+            // Los renglones de un traspaso (qué activos se movieron) tienen su
+            // propia sección dedicada en Auditoría — no la genérica de
+            // "Campo | Antes | Ahora", que sólo resumiría "N elementos".
+            || $clave === 'renglones';
     }
 
     /**

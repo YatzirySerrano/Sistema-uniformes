@@ -2,6 +2,7 @@
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import {
     Building2,
+    Layers,
     PackagePlus,
     Search,
     Settings2,
@@ -520,10 +521,7 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
                     </div>
                 </div>
 
-                <div
-                    v-if="permisos.ajustar || permisos.minimos"
-                    class="mt-auto flex flex-wrap gap-2 pt-1"
-                >
+                <div class="mt-auto flex flex-wrap gap-2 pt-1">
                     <Button
                         v-if="permisos.ajustar"
                         variant="outline"
@@ -542,6 +540,12 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
                         <Link :href="`/activos/${s.activo_id}`">
                             <Settings2 class="size-3.5" />
                             Configurar mínimo
+                        </Link>
+                    </Button>
+                    <Button v-else variant="ghost" size="sm" as-child>
+                        <Link :href="`/activos/${s.activo_id}`">
+                            <Layers class="size-3.5" />
+                            Ver desglose
                         </Link>
                     </Button>
                 </div>
@@ -601,6 +605,17 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
                                     <Link :href="`/activos/${s.activo_id}`">
                                         <Settings2 class="size-3.5" />
                                         Configurar mínimo
+                                    </Link>
+                                </Button>
+                                <Button
+                                    v-else
+                                    variant="ghost"
+                                    size="sm"
+                                    as-child
+                                >
+                                    <Link :href="`/activos/${s.activo_id}`">
+                                        <Layers class="size-3.5" />
+                                        Ver desglose
                                     </Link>
                                 </Button>
                             </div>
