@@ -201,3 +201,117 @@ it('sin permiso de crear colaboradores, el alta se rechaza aunque la CURP sea v�
 
     expect(Colaborador::query()->where('nombre_completo', 'Sin Permiso')->exists())->toBeFalse();
 });
+
+/*
+|--------------------------------------------------------------------------
+| POST /colaboradores/validar-curp — comprobación anticipada (UX), nunca
+| sustituye Rule::unique()/el índice de BD. Va por POST + body (nunca query
+| string) porque la CURP es dato personal y no debe quedar en logs/URLs.
+|--------------------------------------------------------------------------
+*/
+
+it('POST validar-curp: una CURP libre responde disponible true', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+    $curp = curpDeQaValida();
+
+    $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', ['curp' => $curp])
+        ->assertOk()
+        ->assertExactJson(['disponible' => true]);
+});
+
+it('POST validar-curp: una CURP existente responde disponible false', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+    $existente = Colaborador::factory()
+        ->for($this->datos['empresaA'])->for($this->datos['sucursalA'])
+        ->create();
+
+    $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', ['curp' => $existente->curp])
+        ->assertOk()
+        ->assertExactJson(['disponible' => false]);
+});
+
+it('POST validar-curp: en edición, excluye al propio colaborador (su CURP no es "duplicada")', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+    $colaborador = Colaborador::factory()
+        ->for($this->datos['empresaA'])->for($this->datos['sucursalA'])
+        ->create();
+
+    $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', [
+            'curp' => $colaborador->curp,
+            'colaborador_id' => $colaborador->id,
+        ])
+        ->assertOk()
+        ->assertExactJson(['disponible' => true]);
+});
+
+it('POST validar-curp: la CURP de OTRO colaborador sigue marcándose no disponible en edición', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+    $otro = Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create();
+    $colaborador = Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create();
+
+    $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', [
+            'curp' => $otro->curp,
+            'colaborador_id' => $colaborador->id,
+        ])
+        ->assertOk()
+        ->assertExactJson(['disponible' => false]);
+});
+
+it('POST validar-curp: 18 caracteres pero formato inválido responde disponible null (sin consultar BD)', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+    // Exactamente 18 caracteres, pero sin ninguna estructura de CURP real
+    // (segundo carácter no es vocal, sin fecha/sexo/entidad válidos, etc.).
+    $curpFormatoInvalido = '123456789012345678';
+
+    $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', ['curp' => $curpFormatoInvalido])
+        ->assertOk()
+        ->assertExactJson(['disponible' => null]);
+});
+
+it('POST validar-curp: un formato incompleto no se acepta como consulta real', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+
+    $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', ['curp' => 'CORTA123'])
+        ->assertOk()
+        ->assertExactJson(['disponible' => null]);
+});
+
+it('POST validar-curp: sin permiso de crear/editar colaboradores, se rechaza', function () {
+    $encargado = usuarioCon(RolSistema::Encargado->value, [$this->datos['empresaA']]);
+
+    $this->actingAs($encargado)
+        ->postJson('/colaboradores/validar-curp', ['curp' => curpDeQaValida()])
+        ->assertForbidden();
+});
+
+it('POST validar-curp: la respuesta nunca expone datos del propietario de la CURP', function () {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+    $existente = Colaborador::factory()
+        ->for($this->datos['empresaA'])->for($this->datos['sucursalA'])
+        ->create(['nombre_completo' => 'Persona Privada']);
+
+    $respuesta = $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', ['curp' => $existente->curp])
+        ->assertOk();
+
+    $respuesta->assertJsonStructure(['disponible']);
+    expect($respuesta->json())->toBe(['disponible' => false])
+        ->and($respuesta->getContent())->not->toContain('Persona Privada');
+});
+
+it('el endpoint de validar-curp ya no responde a GET (la CURP no debe viajar en la URL)', function () {
+    // Sólo existe la ruta POST: Laravel ni siquiera reconoce la URI para GET
+    // (404, no 405) — confirma que no hay ningún camino GET funcional que
+    // pudiera dejar la CURP en la query string.
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+
+    $this->actingAs($admin)
+        ->get('/colaboradores/validar-curp?curp='.curpDeQaValida())
+        ->assertNotFound();
+});

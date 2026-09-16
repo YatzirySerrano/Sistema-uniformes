@@ -82,6 +82,29 @@ it('filtra el listado de colaboradores por sucursal_id', function () {
         ->assertInertia(fn ($page) => $page->where('colaboradores.total', 1));
 });
 
+it('el filtro sucursal_id se devuelve como entero, no como texto (evita que el selector se limpie solo)', function () {
+    // Un query string SIEMPRE llega como texto ("12"). Si `filtrosListado()`
+    // no lo castea antes de devolverlo en `filtros`, el frontend compara
+    // "12" (string) contra el `id` numérico de la opción ya elegida en el
+    // combobox con `===`, nunca coincide, y limpia la sucursal seleccionada
+    // aunque el filtro siga aplicado correctamente en la consulta.
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    Colaborador::factory()->for($empresa)->for($sucursal)->create();
+
+    $admin = usuarioCon(RolSistema::Administrador->value);
+
+    $this->actingAs($admin)
+        ->get("/colaboradores?sucursal_id={$sucursal->id}")
+        ->assertInertia(fn ($page) => $page
+            ->where(
+                'filtros.sucursal_id',
+                fn ($valor) => $valor === $sucursal->id,
+            )
+            ->where('colaboradores.total', 1)
+        );
+});
+
 /*
 |--------------------------------------------------------------------------
 | Preselección de sucursal en "Nuevo colaborador"

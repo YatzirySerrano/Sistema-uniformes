@@ -859,3 +859,124 @@ it('muestra un mensaje claro cuando PHP rechaza la subida del logo antes de vali
         ])
         ->assertSessionHasErrors(['logo' => 'El logotipo no pudo cargarse. Verifica que el archivo no supere los 2 MB.']);
 });
+
+/*
+|--------------------------------------------------------------------------
+| POST /empresas/validar-rfc — comprobación anticipada (UX), nunca sustituye
+| Rule::unique()/el índice de BD. Va por POST + body (nunca query string)
+| como refuerzo general de privacidad, igual que validar-curp.
+|--------------------------------------------------------------------------
+*/
+
+it('POST validar-rfc: un RFC libre responde disponible true', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', ['rfc' => rfcDeQaValido()])
+        ->assertOk()
+        ->assertExactJson(['disponible' => true]);
+});
+
+it('POST validar-rfc: un RFC existente responde disponible false', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $existente = Empresa::factory()->create();
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', ['rfc' => $existente->rfc])
+        ->assertOk()
+        ->assertExactJson(['disponible' => false]);
+});
+
+it('POST validar-rfc: en edición, excluye a la propia empresa (su RFC no es "duplicado")', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $empresa = Empresa::factory()->create();
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', [
+            'rfc' => $empresa->rfc,
+            'empresa_id' => $empresa->id,
+        ])
+        ->assertOk()
+        ->assertExactJson(['disponible' => true]);
+});
+
+it('POST validar-rfc: el RFC de OTRA empresa sigue marcándose no disponible en edición', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $otra = Empresa::factory()->create();
+    $empresa = Empresa::factory()->create();
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', [
+            'rfc' => $otra->rfc,
+            'empresa_id' => $empresa->id,
+        ])
+        ->assertOk()
+        ->assertExactJson(['disponible' => false]);
+});
+
+it('POST validar-rfc: funciona igual para RFC de persona moral (12) y física (13)', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', ['rfc' => 'ABC010203XYZ'])
+        ->assertOk()
+        ->assertExactJson(['disponible' => true]);
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', ['rfc' => 'PEXJ850101AB1'])
+        ->assertOk()
+        ->assertExactJson(['disponible' => true]);
+});
+
+it('POST validar-rfc: longitud válida pero formato inválido responde disponible null (sin consultar BD)', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    // 12 caracteres (longitud de persona moral), pero sin la estructura real
+    // de un RFC (dígitos donde deberían ir letras, etc.).
+    $rfcFormatoInvalido = '123456789012';
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', ['rfc' => $rfcFormatoInvalido])
+        ->assertOk()
+        ->assertExactJson(['disponible' => null]);
+});
+
+it('POST validar-rfc: un formato incompleto no se acepta como consulta real', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', ['rfc' => 'CORTO'])
+        ->assertOk()
+        ->assertExactJson(['disponible' => null]);
+});
+
+it('POST validar-rfc: sin permiso de crear/editar empresas, se rechaza', function () {
+    $supervisor = usuarioCon(RolSistema::Supervisor->value);
+
+    $this->actingAs($supervisor)
+        ->postJson('/empresas/validar-rfc', ['rfc' => rfcDeQaValido()])
+        ->assertForbidden();
+});
+
+it('POST validar-rfc: la respuesta nunca expone datos internos de la empresa dueña del RFC', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $existente = Empresa::factory()->create(['nombre_comercial' => 'Empresa Privada']);
+
+    $respuesta = $this->actingAs($super)
+        ->postJson('/empresas/validar-rfc', ['rfc' => $existente->rfc])
+        ->assertOk();
+
+    $respuesta->assertJsonStructure(['disponible']);
+    expect($respuesta->json())->toBe(['disponible' => false])
+        ->and($respuesta->getContent())->not->toContain('Empresa Privada');
+});
+
+it('el endpoint de validar-rfc ya no responde a GET (el RFC no debe viajar en la URL)', function () {
+    // Sólo existe la ruta POST: Laravel ni siquiera reconoce la URI para GET
+    // (404, no 405) — confirma que no hay ningún camino GET funcional que
+    // pudiera dejar el RFC en la query string.
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->get('/empresas/validar-rfc?rfc='.rfcDeQaValido())
+        ->assertNotFound();
+});

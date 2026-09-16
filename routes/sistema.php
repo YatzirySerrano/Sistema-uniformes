@@ -49,6 +49,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('colaboradores/importar/confirmar', [ImportacionColaboradorController::class, 'confirmar'])->name('colaboradores.importar.confirmar');
     Route::get('colaboradores/buscar', [ColaboradorController::class, 'buscar'])->name('colaboradores.buscar');
     Route::get('colaboradores/siguiente-numero', [ColaboradorController::class, 'siguienteNumeroEmpleado'])->name('colaboradores.siguiente-numero');
+    Route::post('colaboradores/validar-curp', [ColaboradorController::class, 'validarCurp'])->name('colaboradores.validar-curp');
     Route::get('colaboradores/exportar', [ColaboradorController::class, 'exportar'])->name('colaboradores.exportar');
     Route::get('colaboradores/crear', [ColaboradorController::class, 'create'])->name('colaboradores.create');
     Route::post('colaboradores', [ColaboradorController::class, 'store'])->name('colaboradores.store');
@@ -263,6 +264,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('empresas', [EmpresaController::class, 'index'])->name('empresas.index');
     Route::get('empresas/buscar', [EmpresaController::class, 'buscar'])->name('empresas.buscar');
     Route::get('empresas/siguiente-codigo', [EmpresaController::class, 'siguienteCodigo'])->name('empresas.siguiente-codigo');
+    Route::post('empresas/validar-rfc', [EmpresaController::class, 'validarRfc'])->name('empresas.validar-rfc');
     Route::get('empresas/exportar', [EmpresaController::class, 'exportar'])->name('empresas.exportar');
     Route::post('empresas', [EmpresaController::class, 'store'])->name('empresas.store');
     Route::get('empresas/{empresa}', [EmpresaController::class, 'show'])->name('empresas.show');

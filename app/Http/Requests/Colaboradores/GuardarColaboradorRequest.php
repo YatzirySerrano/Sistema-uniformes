@@ -24,8 +24,12 @@ class GuardarColaboradorRequest extends FormRequest
      * un catálogo fijo de 32 claves) + 3 consonantes + 1 alfanumérico
      * (diferenciador) + 1 dígito (verificador). Rechaza longitudes o
      * caracteres claramente inválidos sin pretender validar la identidad real.
+     *
+     * Pública para que `ColaboradorController::validarCurp()` (comprobación
+     * anticipada de disponibilidad) reutilice exactamente el mismo formato,
+     * sin duplicar el patrón.
      */
-    private const REGEX_CURP = '/^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM]'
+    public const REGEX_CURP = '/^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM]'
         .'(AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)'
         .'[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/';
 

@@ -29,6 +29,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
@@ -141,12 +142,28 @@ class ColaboradorController extends Controller
      */
     private function filtrosListado(Request $request): array
     {
-        return $request->validate([
+        $filtros = $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
             'sucursal_id' => ['nullable', 'integer'],
             'area_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'in:activos,inactivos,todos'],
         ]);
+
+        // `validate()` con la regla `integer` sólo comprueba el formato, no
+        // castea: un query string SIEMPRE llega como texto ("12"). Estos
+        // filtros se devuelven tal cual al frontend en `filtros` (ver
+        // `index()`), que los compara por igualdad estricta contra el `id`
+        // numérico de la opción ya seleccionada en el combobox — sin este
+        // cast, "12" !== 12 se lee como "el servidor eligió otra sucursal" y
+        // el selector se limpia solo. Mismo cast que ya aplica
+        // `ConEmpresa::empresaDelFiltro()` para `empresa_id`.
+        foreach (['sucursal_id', 'area_id'] as $campo) {
+            if (isset($filtros[$campo])) {
+                $filtros[$campo] = (int) $filtros[$campo];
+            }
+        }
+
+        return $filtros;
     }
 
     /**
@@ -626,6 +643,43 @@ class ColaboradorController extends Controller
         return response()->json([
             'numero_empleado' => $this->generadorNumeroEmpleado->previsualizar($empresa, $nombreCompleto),
         ]);
+    }
+
+    /**
+     * Validación ANTICIPADA (UX) de disponibilidad de CURP — nunca sustituye
+     * a `GuardarColaboradorRequest` (`Rule::unique` + el índice único en BD
+     * siguen siendo la autoridad final ante una carrera de concurrencia).
+     * Respuesta mínima a propósito: sólo `{disponible: bool}`, nunca el
+     * nombre/empresa del colaborador dueño de esa CURP (es dato personal).
+     * En edición, `colaborador_id` excluye el registro propio para que su
+     * CURP actual no se marque como duplicada contra sí misma.
+     */
+    public function validarCurp(Request $request): JsonResponse
+    {
+        $colaboradorId = $request->filled('colaborador_id') ? (int) $request->input('colaborador_id') : null;
+        $colaborador = $colaboradorId !== null ? Colaborador::query()->find($colaboradorId) : null;
+
+        $this->authorize($colaborador !== null ? 'update' : 'create', $colaborador ?? Colaborador::class);
+
+        // Mismo formato que `GuardarColaboradorRequest` (la autoridad
+        // definitiva al guardar): un formato inválido nunca llega a
+        // consultar la BD, sólo responde "no lo sé todavía" (null), nunca un
+        // 422 — es una comprobación anticipada mientras el usuario escribe.
+        $curp = Str::upper(trim((string) $request->input('curp', '')));
+
+        if (strlen($curp) !== 18 || ! preg_match(GuardarColaboradorRequest::REGEX_CURP, $curp)) {
+            return response()->json(['disponible' => null]);
+        }
+
+        // `withTrashed()`: una CURP de un colaborador eliminado lógicamente
+        // sigue reservada (mismo criterio que el índice único de BD, que no
+        // excluye `deleted_at`) — nunca debe reportarse como "disponible".
+        $existe = Colaborador::withTrashed()
+            ->where('curp', $curp)
+            ->when($colaborador !== null, fn ($q) => $q->whereKeyNot($colaborador->id))
+            ->exists();
+
+        return response()->json(['disponible' => ! $existe]);
     }
 
     /**

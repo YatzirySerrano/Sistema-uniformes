@@ -7,6 +7,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { xsrfToken } from '@/lib/utils';
 
 export type EmpresaEditable = {
     id: number;
@@ -164,9 +165,93 @@ if (!esEdicion.value) {
     );
 }
 
+// --- RFC: aviso ANTICIPADO de disponibilidad (UX). NUNCA sustituye la
+// validación real de `GuardarEmpresaRequest` (Rule::unique + el índice único
+// en BD siguen siendo la autoridad final ante una carrera de concurrencia,
+// ya blindada en store()/update()) — sólo evita que el usuario llene el
+// resto del formulario para enterarse hasta el final de que el RFC ya existe.
+type EstadoDisponibilidad =
+    | 'idle'
+    | 'invalido'
+    | 'validando'
+    | 'disponible'
+    | 'duplicado'
+    | 'error';
+
+const estadoRfc = ref<EstadoDisponibilidad>('idle');
+let controladorRfc: AbortController | undefined;
+let temporizadorRfc: ReturnType<typeof setTimeout> | undefined;
+let secuenciaRfc = 0;
+
+async function validarRfc(): Promise<void> {
+    const valor = form.rfc.trim().toUpperCase();
+
+    if (valor.length < 12 || valor.length > 13 || !rfcRegex.test(valor)) {
+        estadoRfc.value = valor === '' ? 'idle' : 'invalido';
+        return;
+    }
+
+    // El RFC propio sin cambios en edición no necesita ir al servidor.
+    if (esEdicion.value && valor === props.empresa?.rfc) {
+        estadoRfc.value = 'disponible';
+        return;
+    }
+
+    controladorRfc?.abort();
+    controladorRfc = new AbortController();
+    const miTurno = ++secuenciaRfc;
+    estadoRfc.value = 'validando';
+
+    try {
+        // POST (nunca query string): evita que el RFC quede registrado en
+        // logs de acceso, proxies o herramientas de monitoreo de URLs.
+        const cuerpo: Record<string, string> = { rfc: valor };
+        if (esEdicion.value && props.empresa) {
+            cuerpo.empresa_id = String(props.empresa.id);
+        }
+        const res = await fetch('/empresas/validar-rfc', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-XSRF-TOKEN': xsrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(cuerpo),
+            signal: controladorRfc.signal,
+        });
+        // Respuesta obsoleta (el usuario ya cambió el RFC de nuevo): nunca
+        // debe pisar el estado de un valor más reciente.
+        if (miTurno !== secuenciaRfc) return;
+        if (!res.ok) {
+            estadoRfc.value = 'error';
+            return;
+        }
+        const data = (await res.json()) as { disponible: boolean | null };
+        estadoRfc.value =
+            data.disponible === true
+                ? 'disponible'
+                : data.disponible === false
+                  ? 'duplicado'
+                  : 'idle';
+    } catch {
+        if (miTurno === secuenciaRfc) estadoRfc.value = 'error';
+    }
+}
+
+watch(
+    () => form.rfc,
+    () => {
+        clearTimeout(temporizadorRfc);
+        temporizadorRfc = setTimeout(validarRfc, 500);
+    },
+);
+
 onBeforeUnmount(() => {
     clearTimeout(temporizadorPreview);
     controladorPreview?.abort();
+    clearTimeout(temporizadorRfc);
+    controladorRfc?.abort();
 });
 
 function enviar(): void {
@@ -248,6 +333,31 @@ function enviar(): void {
                     @blur="marcar('rfc')"
                 />
                 <InputError :message="error('rfc')" />
+                <p
+                    v-if="!error('rfc') && estadoRfc === 'validando'"
+                    class="text-muted-foreground text-xs"
+                >
+                    Validando RFC…
+                </p>
+                <p
+                    v-else-if="!error('rfc') && estadoRfc === 'disponible'"
+                    class="text-xs text-emerald-600"
+                >
+                    RFC disponible.
+                </p>
+                <p
+                    v-else-if="!error('rfc') && estadoRfc === 'duplicado'"
+                    class="text-destructive text-xs"
+                >
+                    Este RFC ya está registrado.
+                </p>
+                <p
+                    v-else-if="!error('rfc') && estadoRfc === 'error'"
+                    class="text-muted-foreground text-xs"
+                >
+                    No se pudo verificar el RFC en este momento; se validará al
+                    guardar.
+                </p>
             </div>
 
             <div class="grid gap-1.5">
@@ -385,7 +495,11 @@ function enviar(): void {
             </Button>
             <Button
                 type="submit"
-                :disabled="form.processing || hayErroresLocales"
+                :disabled="
+                    form.processing ||
+                    hayErroresLocales ||
+                    estadoRfc === 'duplicado'
+                "
             >
                 {{ esEdicion ? 'Guardar cambios' : 'Registrar empresa' }}
             </Button>

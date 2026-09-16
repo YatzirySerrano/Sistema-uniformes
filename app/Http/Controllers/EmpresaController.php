@@ -477,6 +477,41 @@ class EmpresaController extends Controller
     }
 
     /**
+     * Validación ANTICIPADA (UX) de disponibilidad de RFC — nunca sustituye a
+     * `GuardarEmpresaRequest` (`Rule::unique` + el índice único en BD siguen
+     * siendo la autoridad final ante una carrera de concurrencia, ya
+     * blindada en `store()`/`update()`). Respuesta mínima a propósito: sólo
+     * `{disponible: bool}`, nunca el nombre de la empresa dueña de ese RFC.
+     * En edición, `empresa_id` excluye el registro propio.
+     */
+    public function validarRfc(Request $request): JsonResponse
+    {
+        $empresaId = $request->filled('empresa_id') ? (int) $request->input('empresa_id') : null;
+        $empresa = $empresaId !== null ? Empresa::query()->find($empresaId) : null;
+
+        $this->authorize($empresa !== null ? 'update' : 'create', $empresa ?? Empresa::class);
+
+        // Mismo formato que `GuardarEmpresaRequest` (la autoridad definitiva
+        // al guardar): un formato inválido nunca llega a consultar la BD,
+        // sólo responde "no lo sé todavía" (null), nunca un 422 — es una
+        // comprobación anticipada mientras el usuario escribe.
+        $rfc = Str::upper(trim((string) $request->input('rfc', '')));
+
+        if (strlen($rfc) < 12 || strlen($rfc) > 13 || ! preg_match(GuardarEmpresaRequest::REGEX_RFC, $rfc)) {
+            return response()->json(['disponible' => null]);
+        }
+
+        // `withTrashed()`: un RFC de una empresa eliminada lógicamente sigue
+        // reservado (mismo criterio que el índice único de BD).
+        $existe = Empresa::withTrashed()
+            ->where('rfc', $rfc)
+            ->when($empresa !== null, fn ($q) => $q->whereKeyNot($empresa->id))
+            ->exists();
+
+        return response()->json(['disponible' => ! $existe]);
+    }
+
+    /**
      * @return array{0: string, 1: string}
      */
     private function baseYAmbitoCodigo(string $nombre): array

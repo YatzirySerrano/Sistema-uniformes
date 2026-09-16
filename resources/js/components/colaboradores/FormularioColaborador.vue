@@ -8,6 +8,7 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { xsrfToken } from '@/lib/utils';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Opcion = { id: number; nombre: string };
@@ -181,9 +182,97 @@ if (!esEdicion.value) {
     });
 }
 
+// --- CURP: aviso ANTICIPADO de disponibilidad (UX). NUNCA sustituye la
+// validación real de `GuardarColaboradorRequest` (Rule::unique + el índice
+// único en BD siguen siendo la autoridad final ante una carrera de
+// concurrencia) — sólo evita que el usuario llene el resto del formulario
+// para enterarse hasta el final de que la CURP ya existe.
+type EstadoDisponibilidad =
+    | 'idle'
+    | 'invalido'
+    | 'validando'
+    | 'disponible'
+    | 'duplicado'
+    | 'error';
+
+const curpRegex =
+    /^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM](AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/;
+
+const estadoCurp = ref<EstadoDisponibilidad>('idle');
+let controladorCurp: AbortController | undefined;
+let temporizadorCurp: ReturnType<typeof setTimeout> | undefined;
+let secuenciaCurp = 0;
+
+async function validarCurp(): Promise<void> {
+    const valor = form.curp.trim().toUpperCase();
+
+    if (valor.length !== 18 || !curpRegex.test(valor)) {
+        estadoCurp.value = valor === '' ? 'idle' : 'invalido';
+        return;
+    }
+
+    // La CURP propia sin cambios en edición no necesita ir al servidor.
+    if (esEdicion.value && valor === props.colaborador?.curp) {
+        estadoCurp.value = 'disponible';
+        return;
+    }
+
+    controladorCurp?.abort();
+    controladorCurp = new AbortController();
+    const miTurno = ++secuenciaCurp;
+    estadoCurp.value = 'validando';
+
+    try {
+        // POST (nunca query string): la CURP es dato personal y no debe
+        // quedar registrada en logs de acceso, proxies o herramientas de
+        // monitoreo que capturan URLs.
+        const cuerpo: Record<string, string> = { curp: valor };
+        if (esEdicion.value && props.colaborador) {
+            cuerpo.colaborador_id = String(props.colaborador.id);
+        }
+        const res = await fetch('/colaboradores/validar-curp', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'X-XSRF-TOKEN': xsrfToken(),
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(cuerpo),
+            signal: controladorCurp.signal,
+        });
+        // Respuesta obsoleta (el usuario ya cambió la CURP de nuevo):
+        // nunca debe pisar el estado de un valor más reciente.
+        if (miTurno !== secuenciaCurp) return;
+        if (!res.ok) {
+            estadoCurp.value = 'error';
+            return;
+        }
+        const data = (await res.json()) as { disponible: boolean | null };
+        estadoCurp.value =
+            data.disponible === true
+                ? 'disponible'
+                : data.disponible === false
+                  ? 'duplicado'
+                  : 'idle';
+    } catch {
+        if (miTurno === secuenciaCurp) estadoCurp.value = 'error';
+    }
+}
+
+watch(
+    () => form.curp,
+    () => {
+        clearTimeout(temporizadorCurp);
+        temporizadorCurp = setTimeout(validarCurp, 500);
+    },
+);
+
 onBeforeUnmount(() => {
     clearTimeout(temporizadorPreview);
     controladorPreview?.abort();
+    clearTimeout(temporizadorCurp);
+    controladorCurp?.abort();
 });
 
 function enviar(): void {
@@ -306,6 +395,31 @@ function enviar(): void {
                 autocomplete="off"
             />
             <InputError :message="form.errors.curp" />
+            <p
+                v-if="!form.errors.curp && estadoCurp === 'validando'"
+                class="text-muted-foreground text-xs"
+            >
+                Validando CURP…
+            </p>
+            <p
+                v-else-if="!form.errors.curp && estadoCurp === 'disponible'"
+                class="text-xs text-emerald-600"
+            >
+                CURP disponible.
+            </p>
+            <p
+                v-else-if="!form.errors.curp && estadoCurp === 'duplicado'"
+                class="text-destructive text-xs"
+            >
+                Esta CURP ya está registrada.
+            </p>
+            <p
+                v-else-if="!form.errors.curp && estadoCurp === 'error'"
+                class="text-muted-foreground text-xs"
+            >
+                No se pudo verificar la CURP en este momento; se validará al
+                guardar.
+            </p>
         </div>
 
         <div class="grid gap-4 sm:grid-cols-2">
@@ -386,7 +500,10 @@ function enviar(): void {
             >
                 Cancelar
             </Button>
-            <Button type="submit" :disabled="form.processing">
+            <Button
+                type="submit"
+                :disabled="form.processing || estadoCurp === 'duplicado'"
+            >
                 {{ esEdicion ? 'Guardar cambios' : 'Registrar colaborador' }}
             </Button>
         </div>

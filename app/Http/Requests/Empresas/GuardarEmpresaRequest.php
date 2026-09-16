@@ -16,6 +16,13 @@ class GuardarEmpresaRequest extends FormRequest
 {
     use NormalizaEntrada;
 
+    // Persona moral: 3 letras + 6 dígitos + 3 alfanumérico (homoclave) = 12.
+    // Persona física: 4 letras + 6 dígitos + 3 alfanumérico (homoclave) = 13.
+    // La homoclave SIEMPRE son 3 caracteres (nunca 0-2). Pública para que
+    // `EmpresaController::validarRfc()` (comprobación anticipada de
+    // disponibilidad) reutilice exactamente el mismo formato.
+    public const REGEX_RFC = '/^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/';
+
     public function authorize(): bool
     {
         $empresa = $this->route('empresa');
@@ -50,13 +57,9 @@ class GuardarEmpresaRequest extends FormRequest
         return [
             'nombre_comercial' => ['required', 'string', 'max:255'],
             'razon_social' => ['nullable', 'string', 'max:255'],
-            // Persona moral: 3 letras + 6 dígitos + 3 alfanumérico (homoclave) = 12.
-            // Persona física: 4 letras + 6 dígitos + 3 alfanumérico (homoclave) = 13.
-            // La homoclave SIEMPRE son 3 caracteres (nunca 0-2, a diferencia de la
-            // regex anterior, que aceptaba longitudes intermedias inválidas).
             'rfc' => [
                 'required', 'string', 'max:13',
-                'regex:/^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/',
+                'regex:'.self::REGEX_RFC,
                 Rule::unique('empresas', 'rfc')->ignore($empresaId),
             ],
             // `codigo` NUNCA se valida como entrada del usuario: lo genera

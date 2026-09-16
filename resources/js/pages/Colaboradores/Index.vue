@@ -48,7 +48,7 @@ const props = defineProps<{
     filtros: {
         buscar?: string;
         empresa_id?: number | null;
-        sucursal_id?: number;
+        sucursal_id?: number | null;
         estado?: string;
     };
     empresasAutorizadas: EmpresaAutorizada[];
@@ -65,14 +65,26 @@ defineOptions({
     },
 });
 
+// `props.filtros.*` viaja como query string en el round-trip: aunque el
+// backend ya castea `sucursal_id`/`empresa_id` a entero, esta normalización
+// es una segunda barrera barata contra cualquier futuro filtro que llegue
+// como texto — comparar "12" (string) contra 12 (number) con === siempre da
+// falso, y eso es exactamente lo que hacía que el selector de sucursal se
+// limpiara solo después de elegirla.
+function idONull(valor: number | string | null | undefined): number | null {
+    return valor === null || valor === undefined ? null : Number(valor);
+}
+
 const buscar = ref(props.filtros.buscar ?? '');
 const empresaSeleccionada = ref<EmpresaAutorizada | null>(
-    props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
-        null,
+    props.empresasAutorizadas.find(
+        (e) => e.id === idONull(props.filtros.empresa_id),
+    ) ?? null,
 );
 const empresaId = computed(() => empresaSeleccionada.value?.id ?? '');
 const sucursalSeleccionada = ref<{ id: number; nombre: string } | null>(
-    props.sucursales.find((s) => s.id === props.filtros.sucursal_id) ?? null,
+    props.sucursales.find((s) => s.id === idONull(props.filtros.sucursal_id)) ??
+        null,
 );
 const sucursalId = computed(() => sucursalSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado ?? 'todos');
@@ -83,18 +95,20 @@ const estado = ref(props.filtros.estado ?? 'todos');
 watch(
     () => props.filtros.empresa_id,
     (nuevoId) => {
-        if (nuevoId !== (empresaSeleccionada.value?.id ?? null)) {
+        const id = idONull(nuevoId);
+        if (id !== (empresaSeleccionada.value?.id ?? null)) {
             empresaSeleccionada.value =
-                props.empresasAutorizadas.find((e) => e.id === nuevoId) ?? null;
+                props.empresasAutorizadas.find((e) => e.id === id) ?? null;
         }
     },
 );
 watch(
     () => props.filtros.sucursal_id,
     (nuevoId) => {
-        if (nuevoId !== (sucursalSeleccionada.value?.id ?? null)) {
+        const id = idONull(nuevoId);
+        if (id !== (sucursalSeleccionada.value?.id ?? null)) {
             sucursalSeleccionada.value =
-                props.sucursales.find((s) => s.id === nuevoId) ?? null;
+                props.sucursales.find((s) => s.id === id) ?? null;
         }
     },
 );
