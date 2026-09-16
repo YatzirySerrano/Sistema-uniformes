@@ -4,11 +4,11 @@ namespace App\Exports;
 
 use App\Exports\Concerns\DecoraConContexto;
 use App\Soporte\ContextoExportacion;
-use Illuminate\Support\Str;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use Maatwebsite\Excel\Concerns\WithTitle;
 
 /**
@@ -21,8 +21,16 @@ use Maatwebsite\Excel\Concerns\WithTitle;
  * clase boilerplate una y otra vez. El encabezado corporativo (metadata +
  * logo + estilos) lo aporta `DecoraConContexto`, compartido con los exports
  * de forma propia.
+ *
+ * `WithStrictNullComparison`: sin ella, `Maatwebsite\Excel\Sheet::append()`
+ * compara cada valor contra `null` con `!=` en vez de `!==`, y en PHP
+ * `0 == null` — cualquier columna numérica en `0` (o `''`/`false`) de
+ * CUALQUIER módulo que use este export quedaría vacía en la celda en vez de
+ * mostrar el valor real. Afecta a todos los consumidores de `ListadoExport`
+ * por igual; es un cambio puramente aditivo (sólo un `null` real se sigue
+ * omitiendo) sin downside.
  */
-class ListadoExport implements FromArray, ShouldAutoSize, WithEvents, WithHeadings, WithTitle
+class ListadoExport implements FromArray, ShouldAutoSize, WithEvents, WithHeadings, WithStrictNullComparison, WithTitle
 {
     use DecoraConContexto;
 
@@ -54,12 +62,10 @@ class ListadoExport implements FromArray, ShouldAutoSize, WithEvents, WithHeadin
 
     public function title(): string
     {
-        // Los nombres de hoja de Excel no admiten : \ / ? * [ ] ni más de 31 caracteres.
-        return Str::of($this->contexto->titulo)
-            ->replaceMatches('/[:\\\\\/\?\*\[\]]/', ' ')
-            ->limit(31, '')
-            ->trim()
-            ->value() ?: 'Reporte';
+        // Fijo: la hoja "Resumen" (título real del reporte + KPIs/gráficas)
+        // la antepone `DecoraConContexto::construirHojaResumen()`; ésta es
+        // siempre la hoja de datos crudos.
+        return 'Datos';
     }
 
     protected function contextoExportacion(): ContextoExportacion

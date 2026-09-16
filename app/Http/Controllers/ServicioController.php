@@ -117,7 +117,7 @@ class ServicioController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Servicios', $empresaFiltro, $filtrosHumanos, $servicios->count());
+        $contexto = new ContextoExportacion('Servicios', $empresaFiltro, $filtrosHumanos, $servicios->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Contrato', 'Sucursal', 'Dirección', 'Estado', 'Empresa',

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Acciones\RegistrarTraspasoFirmado;
+use App\Enums\TipoGrafica;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
@@ -18,6 +19,7 @@ use App\Models\User;
 use App\Servicios\HomologadorActivo;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\FechaHora;
+use App\Soporte\SerieGraficaReporte;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -169,12 +171,73 @@ class MovimientoInventarioController extends Controller
             'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
         ]);
 
-        $contexto = new ContextoExportacion('Traspasos de inventario', $empresaFiltro, $filtrosHumanos, $traspasos->count());
+        $contexto = new ContextoExportacion(
+            'Traspasos de inventario',
+            $empresaFiltro,
+            $filtrosHumanos,
+            $traspasos->count(),
+            generadoPor: $request->user()?->name,
+            kpis: $this->kpisTraspasos($traspasos),
+            graficas: $this->graficasTraspasos($traspasos),
+        );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Folio', 'Empresa origen', 'Almacén origen', 'Empresa destino', 'Almacén destino',
             'Renglones', 'Unidades', 'Realizó', 'Fecha',
         ], $contexto);
+    }
+
+    /**
+     * @param  Collection<int, TraspasoInventario>  $traspasos
+     * @return array<string, string|int>
+     */
+    private function kpisTraspasos(Collection $traspasos): array
+    {
+        return [
+            'Traspasos' => $traspasos->count(),
+            'Unidades movidas' => (int) $traspasos->sum(fn (TraspasoInventario $t): int => (int) ($t->renglones_sum_cantidad ?? 0)),
+            'Almacenes origen' => $traspasos->pluck('almacen_origen_id')->unique()->count(),
+            'Almacenes destino' => $traspasos->pluck('almacen_destino_id')->unique()->count(),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, TraspasoInventario>  $traspasos
+     * @return array<int, SerieGraficaReporte>
+     */
+    private function graficasTraspasos(Collection $traspasos): array
+    {
+        if ($traspasos->isEmpty()) {
+            return [];
+        }
+
+        $porOrigen = $traspasos
+            ->groupBy(fn (TraspasoInventario $t): string => $t->almacenOrigen->nombre)
+            ->map->count()
+            ->sortDesc()
+            ->take(8);
+
+        $porDestino = $traspasos
+            ->groupBy(fn (TraspasoInventario $t): string => $t->almacenDestino->nombre)
+            ->map->count()
+            ->sortDesc()
+            ->take(8);
+
+        $porMes = $traspasos
+            ->groupBy(fn (TraspasoInventario $t): string => $t->ocurrido_en->format('Y-m'))
+            ->sortKeys()
+            ->map->count();
+
+        return [
+            new SerieGraficaReporte('Traspasos por almacén origen', TipoGrafica::Barras, $porOrigen->keys()->all(), $porOrigen->values()->all()),
+            new SerieGraficaReporte('Traspasos por almacén destino', TipoGrafica::Barras, $porDestino->keys()->all(), $porDestino->values()->all()),
+            new SerieGraficaReporte(
+                'Traspasos por mes',
+                TipoGrafica::Linea,
+                $porMes->keys()->map(fn (string $mes): string => Carbon::createFromFormat('Y-m', $mes)->translatedFormat('M Y'))->all(),
+                $porMes->values()->all(),
+            ),
+        ];
     }
 
     /**
@@ -525,7 +588,7 @@ class MovimientoInventarioController extends Controller
             'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
         ]);
 
-        $contexto = new ContextoExportacion('Movimientos de inventario', $empresaFiltro, $filtrosHumanos, $movimientos->count());
+        $contexto = new ContextoExportacion('Movimientos de inventario', $empresaFiltro, $filtrosHumanos, $movimientos->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Fecha', 'Empresa', 'Tipo', 'Dirección', 'Cantidad', 'Existencia anterior', 'Existencia resultante',

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { xsrfToken } from '@/lib/utils';
+import { formatoRfcValido } from '@/lib/validacionCurpRfc';
 
 export type EmpresaEditable = {
     id: number;
@@ -65,7 +66,6 @@ function filtrarTelefono(evento: Event): void {
     objetivo.value = limpio;
 }
 
-const rfcRegex = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/i;
 const correoRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const erroresLocales = computed<Record<string, string>>(() => {
@@ -97,7 +97,7 @@ const erroresLocales = computed<Record<string, string>>(() => {
     } else if (
         tocado.rfc &&
         form.rfc.trim() !== '' &&
-        !rfcRegex.test(form.rfc.trim())
+        !formatoRfcValido(form.rfc.trim().toUpperCase())
     ) {
         e.rfc = 'RFC con formato no válido (ej. ABC010203XYZ).';
     }
@@ -178,6 +178,42 @@ type EstadoDisponibilidad =
     | 'duplicado'
     | 'error';
 
+type MensajeEstado = { texto: string; clase: string } | null;
+
+/**
+ * Switch EXHAUSTIVO (la rama `default` fuerza `never`): si algún día se
+ * agrega un valor nuevo a `EstadoDisponibilidad` sin darle mensaje aquí,
+ * `vue-tsc`/`npm run check` fallan en build — no un estado que
+ * silenciosamente no muestra nada (la regresión real que tuvo esta pantalla:
+ * `estadoRfc === 'invalido'` existía pero ningún `<p v-else-if>` lo cubría).
+ */
+function mensajeDeEstado(estado: EstadoDisponibilidad): MensajeEstado {
+    switch (estado) {
+        case 'idle':
+            return null;
+        case 'invalido':
+            return {
+                texto: 'Formato de RFC incompleto o inválido (12 caracteres persona moral, 13 persona física).',
+                clase: 'text-destructive text-xs',
+            };
+        case 'validando':
+            return { texto: 'Validando RFC…', clase: 'text-muted-foreground text-xs' };
+        case 'disponible':
+            return { texto: 'RFC disponible.', clase: 'text-xs text-emerald-600' };
+        case 'duplicado':
+            return { texto: 'Este RFC ya está registrado.', clase: 'text-destructive text-xs' };
+        case 'error':
+            return {
+                texto: 'No se pudo verificar el RFC en este momento; se validará al guardar.',
+                clase: 'text-muted-foreground text-xs',
+            };
+        default: {
+            const _exhaustivo: never = estado;
+            return _exhaustivo;
+        }
+    }
+}
+
 const estadoRfc = ref<EstadoDisponibilidad>('idle');
 let controladorRfc: AbortController | undefined;
 let temporizadorRfc: ReturnType<typeof setTimeout> | undefined;
@@ -186,7 +222,7 @@ let secuenciaRfc = 0;
 async function validarRfc(): Promise<void> {
     const valor = form.rfc.trim().toUpperCase();
 
-    if (valor.length < 12 || valor.length > 13 || !rfcRegex.test(valor)) {
+    if (!formatoRfcValido(valor)) {
         estadoRfc.value = valor === '' ? 'idle' : 'invalido';
         return;
     }
@@ -245,6 +281,10 @@ watch(
         clearTimeout(temporizadorRfc);
         temporizadorRfc = setTimeout(validarRfc, 500);
     },
+);
+
+const mensajeRfc = computed<MensajeEstado>(() =>
+    error('rfc') ? null : mensajeDeEstado(estadoRfc.value),
 );
 
 onBeforeUnmount(() => {
@@ -333,30 +373,8 @@ function enviar(): void {
                     @blur="marcar('rfc')"
                 />
                 <InputError :message="error('rfc')" />
-                <p
-                    v-if="!error('rfc') && estadoRfc === 'validando'"
-                    class="text-muted-foreground text-xs"
-                >
-                    Validando RFC…
-                </p>
-                <p
-                    v-else-if="!error('rfc') && estadoRfc === 'disponible'"
-                    class="text-xs text-emerald-600"
-                >
-                    RFC disponible.
-                </p>
-                <p
-                    v-else-if="!error('rfc') && estadoRfc === 'duplicado'"
-                    class="text-destructive text-xs"
-                >
-                    Este RFC ya está registrado.
-                </p>
-                <p
-                    v-else-if="!error('rfc') && estadoRfc === 'error'"
-                    class="text-muted-foreground text-xs"
-                >
-                    No se pudo verificar el RFC en este momento; se validará al
-                    guardar.
+                <p v-if="mensajeRfc" :class="mensajeRfc.clase">
+                    {{ mensajeRfc.texto }}
                 </p>
             </div>
 

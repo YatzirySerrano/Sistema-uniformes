@@ -4,8 +4,9 @@ namespace App\Http\Controllers\Concerns;
 
 use App\Exports\ListadoExport;
 use App\Soporte\ContextoExportacion;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Maatwebsite\Excel\Facades\Excel;
+use Spatie\LaravelPdf\Enums\Format;
+use Spatie\LaravelPdf\Facades\Pdf;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
@@ -14,8 +15,14 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
  * filas que ve la pantalla (`?formato=xlsx` por defecto, `?formato=pdf`).
  * Cada controller construye sus propias `$filas`/`$encabezados` desde LA
  * MISMA consulta filtrada que usa su `index()` (nunca una consulta aparte)
- * y un `ContextoExportacion` (empresa/filtros humanizados/total), y delega
- * aquí sólo el mecanismo de descarga + identidad visual compartida.
+ * y un `ContextoExportacion` (empresa/filtros humanizados/total/KPIs/
+ * gráficas), y delega aquí sólo el mecanismo de descarga + identidad visual
+ * compartida.
+ *
+ * El PDF de los reportes ejecutivos usa `spatie/laravel-pdf` con el driver
+ * Browsershot (Chromium real: CSS Grid/Flexbox, gráficas ApexCharts vivas)
+ * — NUNCA DomPDF, que se conserva exclusivamente para acuses/documentos
+ * firmados (`ServicioAcusePdf`, `resources/views/acuses/*`), sin tocar.
  */
 trait ExportaListado
 {
@@ -28,13 +35,21 @@ trait ExportaListado
         $nombreArchivo = $contexto->nombreArchivo();
 
         if ($formato === 'pdf') {
-            $pdf = Pdf::loadView('reportes.listado-generico', [
+            $reporte = Pdf::view('reportes.listado-generico', [
                 'contexto' => $contexto,
                 'encabezados' => $encabezados,
                 'filas' => $filas,
-            ])->setPaper('letter', 'landscape');
+            ])
+                ->format(Format::Letter)
+                ->landscape()
+                ->margins(10, 10, 16, 10)
+                ->footerView('reportes._pie');
 
-            return response($pdf->output(), 200, [
+            if ($contexto->graficas !== []) {
+                $reporte->waitUntilReady();
+            }
+
+            return response($reporte->generatePdfContent(), 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => 'attachment; filename="'.$nombreArchivo.'.pdf"',
             ]);

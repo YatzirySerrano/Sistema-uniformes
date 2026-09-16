@@ -11,6 +11,7 @@ use App\Acciones\RestaurarCondicionUnidadActivo;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\EstadoVisibleUnidad;
+use App\Enums\TipoGrafica;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Activos\ActualizarEspecificacionUnidadRequest;
@@ -27,6 +28,8 @@ use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioEtiquetasQr;
 use App\Servicios\ServicioEvidencias;
 use App\Soporte\ContextoExportacion;
+use App\Soporte\PaletaGraficas;
+use App\Soporte\SerieGraficaReporte;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -34,6 +37,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response as HttpResponse;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -165,12 +169,69 @@ class UnidadActivoController extends Controller
             'Posesión' => ($filtros['estado_visible'] ?? null) ? EstadoVisibleUnidad::from($filtros['estado_visible'])->etiqueta() : null,
         ]);
 
-        $contexto = new ContextoExportacion('Unidades identificadas', $empresaFiltro, $filtrosHumanos, $unidades->count());
+        $contexto = new ContextoExportacion(
+            'Unidades identificadas',
+            $empresaFiltro,
+            $filtrosHumanos,
+            $unidades->count(),
+            generadoPor: $request->user()?->name,
+            kpis: $this->kpisUnidades($unidades),
+            graficas: $this->graficasUnidades($unidades),
+        );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Activo', 'Almacén', 'Colaborador', 'Servicio', 'Estado', 'Posesión', 'Condición',
             'Marca', 'Modelo', 'IMEI', 'Número', 'Operador', 'Plan',
         ], $contexto);
+    }
+
+    /**
+     * @param  Collection<int, UnidadActivo>  $unidades
+     * @return array<string, string|int>
+     */
+    private function kpisUnidades(Collection $unidades): array
+    {
+        $porVisible = $unidades->countBy(fn (UnidadActivo $u): string => $u->estadoVisible()->value);
+
+        $disponibles = (int) ($porVisible[EstadoVisibleUnidad::Disponible->value] ?? 0);
+        $asignadas = (int) ($porVisible[EstadoVisibleUnidad::Asignado->value] ?? 0);
+
+        return [
+            'Unidades' => $unidades->count(),
+            'Disponibles' => $disponibles,
+            'Asignadas' => $asignadas,
+            'Fuera de operación' => $unidades->count() - $disponibles - $asignadas,
+        ];
+    }
+
+    /**
+     * @param  Collection<int, UnidadActivo>  $unidades
+     * @return array<int, SerieGraficaReporte>
+     */
+    private function graficasUnidades(Collection $unidades): array
+    {
+        if ($unidades->isEmpty()) {
+            return [];
+        }
+
+        $porVisible = $unidades->countBy(fn (UnidadActivo $u): string => $u->estadoVisible()->value);
+
+        // Recorre SIEMPRE los 6 casos del enum (orden estable) en vez de las
+        // claves presentes en `$porVisible` — así la dona no reordena sus
+        // colores entre exportaciones cuando falta algún estado.
+        $estados = collect(EstadoVisibleUnidad::cases())->filter(
+            fn (EstadoVisibleUnidad $e): bool => ($porVisible[$e->value] ?? 0) > 0,
+        );
+
+        return [
+            new SerieGraficaReporte(
+                'Unidades por posesión',
+                TipoGrafica::Dona,
+                $estados->map(fn (EstadoVisibleUnidad $e): string => $e->etiqueta())->values()->all(),
+                $estados->map(fn (EstadoVisibleUnidad $e): int => $porVisible[$e->value] ?? 0)->values()->all(),
+                $estados->map(fn (EstadoVisibleUnidad $e): string => PaletaGraficas::estadoUnidad($e))->values()->all(),
+            ),
+        ];
     }
 
     /**

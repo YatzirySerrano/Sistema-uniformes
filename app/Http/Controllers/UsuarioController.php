@@ -107,7 +107,7 @@ class UsuarioController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Usuarios', $empresaFiltro, $filtrosHumanos, $usuarios->count());
+        $contexto = new ContextoExportacion('Usuarios', $empresaFiltro, $filtrosHumanos, $usuarios->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Correo', 'Roles', 'Empresas', 'Sucursales', 'Estado', 'Correo verificado',

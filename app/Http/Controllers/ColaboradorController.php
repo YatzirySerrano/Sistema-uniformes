@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Acciones\CambiarEmpresaColaborador;
 use App\Acciones\CambiarServicioColaborador;
+use App\Enums\TipoGrafica;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Colaboradores\ActualizarFotoColaboradorRequest;
@@ -22,6 +23,8 @@ use App\Servicios\ServicioExpediente;
 use App\Servicios\ServicioHistoricoColaborador;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\GeneradorNumeroEmpleado;
+use App\Soporte\PaletaGraficas;
+use App\Soporte\SerieGraficaReporte;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -130,11 +133,73 @@ class ColaboradorController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Colaboradores', $empresaFiltro, $filtrosHumanos, $colaboradores->count());
+        $contexto = new ContextoExportacion(
+            'Colaboradores',
+            $empresaFiltro,
+            $filtrosHumanos,
+            $colaboradores->count(),
+            generadoPor: $request->user()?->name,
+            kpis: $this->kpisColaboradores($colaboradores),
+            graficas: $this->graficasColaboradores($colaboradores),
+        );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'N.º empleado', 'Nombre completo', 'CURP', 'Puesto', 'Área', 'Correo', 'Empresa', 'Sucursal', 'Estado',
         ], $contexto);
+    }
+
+    /**
+     * @param  Collection<int, Colaborador>  $colaboradores
+     * @return array<string, string|int>
+     */
+    private function kpisColaboradores(Collection $colaboradores): array
+    {
+        $activos = $colaboradores->filter(fn (Colaborador $c): bool => $c->activo)->count();
+
+        return [
+            'Colaboradores' => $colaboradores->count(),
+            'Activos' => $activos,
+            'Inactivos' => $colaboradores->count() - $activos,
+            'Empresas' => $colaboradores->pluck('empresa_id')->unique()->count(),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, Colaborador>  $colaboradores
+     * @return array<int, SerieGraficaReporte>
+     */
+    private function graficasColaboradores(Collection $colaboradores): array
+    {
+        if ($colaboradores->isEmpty()) {
+            return [];
+        }
+
+        $porEmpresa = $colaboradores
+            ->groupBy(fn (Colaborador $c): string => $c->empresa->nombre_comercial)
+            ->map->count()
+            ->sortDesc()
+            ->take(8);
+
+        $porSucursal = $colaboradores
+            ->groupBy(fn (Colaborador $c): string => $c->sucursal->nombre)
+            ->map->count()
+            ->sortDesc()
+            ->take(8);
+
+        $activos = $colaboradores->filter(fn (Colaborador $c): bool => $c->activo)->count();
+        $inactivos = $colaboradores->count() - $activos;
+
+        return [
+            new SerieGraficaReporte('Colaboradores por empresa', TipoGrafica::Barras, $porEmpresa->keys()->all(), $porEmpresa->values()->all()),
+            new SerieGraficaReporte('Colaboradores por sucursal', TipoGrafica::Barras, $porSucursal->keys()->all(), $porSucursal->values()->all()),
+            new SerieGraficaReporte(
+                'Activos / inactivos',
+                TipoGrafica::Dona,
+                ['Activos', 'Inactivos'],
+                [$activos, $inactivos],
+                [PaletaGraficas::booleano(true), PaletaGraficas::booleano(false)],
+            ),
+        ];
     }
 
     /**

@@ -10,9 +10,14 @@ use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 use Maatwebsite\Excel\Concerns\WithEvents;
 use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\WithStrictNullComparison;
 use Maatwebsite\Excel\Concerns\WithTitle;
 
-class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, WithHeadings, WithTitle
+/**
+ * `WithStrictNullComparison`: ver nota en `InventarioExport` — sin ella,
+ * una cantidad en `0` se omitiría de la celda en vez de mostrarse.
+ */
+class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, WithHeadings, WithStrictNullComparison, WithTitle
 {
     use DecoraConContexto;
 
@@ -41,10 +46,9 @@ class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, With
                     $entrega->colaborador?->numero_empleado,
                     $entrega->colaborador?->nombre_completo,
                     $entrega->encargado?->name,
-                    $entrega->servicio === null ? null : $entrega->servicio->contrato->nombre.' — '.$entrega->servicio->nombre,
-                    $entrega->estado->etiqueta(),
+                    $entrega->servicio === null ? 'Sin servicio' : $entrega->servicio->contrato->nombre.' — '.$entrega->servicio->nombre,
                     $detalle->activo_nombre_snapshot,
-                    $detalle->talla_valor_snapshot,
+                    $detalle->talla_valor_snapshot ?? 'Sin talla',
                     $detalle->cantidad,
                 ]);
             }
@@ -58,12 +62,12 @@ class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, With
      */
     public function headings(): array
     {
-        return ['Folio', 'Fecha de entrega', 'Empresa', 'Sucursal', 'N.º empleado', 'Colaborador', 'Responsable', 'Servicio', 'Estado', 'Activo', 'Talla', 'Cantidad'];
+        return ['Folio', 'Fecha de entrega', 'Empresa', 'Sucursal', 'N.º empleado', 'Colaborador', 'Responsable', 'Servicio', 'Activo', 'Talla', 'Cantidad'];
     }
 
     public function title(): string
     {
-        return 'Entregas';
+        return 'Datos';
     }
 
     protected function contextoExportacion(): ContextoExportacion

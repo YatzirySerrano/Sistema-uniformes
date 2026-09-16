@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { xsrfToken } from '@/lib/utils';
+import { formatoCurpValido } from '@/lib/validacionCurpRfc';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
 type Opcion = { id: number; nombre: string };
@@ -195,8 +196,42 @@ type EstadoDisponibilidad =
     | 'duplicado'
     | 'error';
 
-const curpRegex =
-    /^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM](AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/;
+type MensajeEstado = { texto: string; clase: string } | null;
+
+/**
+ * Switch EXHAUSTIVO (la rama `default` fuerza `never`): si algún día se
+ * agrega un valor nuevo a `EstadoDisponibilidad` sin darle mensaje aquí,
+ * `vue-tsc`/`npm run check` fallan en build — no un estado que
+ * silenciosamente no muestra nada (la regresión real que tuvo esta pantalla:
+ * `estadoCurp === 'invalido'` existía pero ningún `<p v-else-if>` lo cubría,
+ * así que escribir algo como "ASASAS¿" no mostraba ningún aviso).
+ */
+function mensajeDeEstado(estado: EstadoDisponibilidad): MensajeEstado {
+    switch (estado) {
+        case 'idle':
+            return null;
+        case 'invalido':
+            return {
+                texto: 'Formato de CURP incompleto o inválido (18 caracteres, formato CURP mexicano).',
+                clase: 'text-destructive text-xs',
+            };
+        case 'validando':
+            return { texto: 'Validando CURP…', clase: 'text-muted-foreground text-xs' };
+        case 'disponible':
+            return { texto: 'CURP disponible.', clase: 'text-xs text-emerald-600' };
+        case 'duplicado':
+            return { texto: 'Esta CURP ya está registrada.', clase: 'text-destructive text-xs' };
+        case 'error':
+            return {
+                texto: 'No se pudo verificar la CURP en este momento; se validará al guardar.',
+                clase: 'text-muted-foreground text-xs',
+            };
+        default: {
+            const _exhaustivo: never = estado;
+            return _exhaustivo;
+        }
+    }
+}
 
 const estadoCurp = ref<EstadoDisponibilidad>('idle');
 let controladorCurp: AbortController | undefined;
@@ -206,7 +241,7 @@ let secuenciaCurp = 0;
 async function validarCurp(): Promise<void> {
     const valor = form.curp.trim().toUpperCase();
 
-    if (valor.length !== 18 || !curpRegex.test(valor)) {
+    if (!formatoCurpValido(valor)) {
         estadoCurp.value = valor === '' ? 'idle' : 'invalido';
         return;
     }
@@ -266,6 +301,10 @@ watch(
         clearTimeout(temporizadorCurp);
         temporizadorCurp = setTimeout(validarCurp, 500);
     },
+);
+
+const mensajeCurp = computed<MensajeEstado>(() =>
+    form.errors.curp ? null : mensajeDeEstado(estadoCurp.value),
 );
 
 onBeforeUnmount(() => {
@@ -395,30 +434,8 @@ function enviar(): void {
                 autocomplete="off"
             />
             <InputError :message="form.errors.curp" />
-            <p
-                v-if="!form.errors.curp && estadoCurp === 'validando'"
-                class="text-muted-foreground text-xs"
-            >
-                Validando CURP…
-            </p>
-            <p
-                v-else-if="!form.errors.curp && estadoCurp === 'disponible'"
-                class="text-xs text-emerald-600"
-            >
-                CURP disponible.
-            </p>
-            <p
-                v-else-if="!form.errors.curp && estadoCurp === 'duplicado'"
-                class="text-destructive text-xs"
-            >
-                Esta CURP ya está registrada.
-            </p>
-            <p
-                v-else-if="!form.errors.curp && estadoCurp === 'error'"
-                class="text-muted-foreground text-xs"
-            >
-                No se pudo verificar la CURP en este momento; se validará al
-                guardar.
+            <p v-if="mensajeCurp" :class="mensajeCurp.clase">
+                {{ mensajeCurp.texto }}
             </p>
         </div>
 

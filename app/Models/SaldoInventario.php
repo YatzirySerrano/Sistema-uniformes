@@ -21,9 +21,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $empresa_id
  * @property int $almacen_id
  * @property int $activo_id
- * @property int $talla_id
+ * @property int|null $talla_id "Sin variante" cuando el activo no usa tallas.
  * @property int $cantidad
  * @property int $minimo
+ * @property-read Talla|null $talla "Sin variante" cuando `talla_id` es null.
  */
 class SaldoInventario extends Model
 {

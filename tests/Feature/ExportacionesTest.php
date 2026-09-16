@@ -211,28 +211,38 @@ it('exporta la Auditoría a Excel y PDF, respetando el alcance del usuario', fun
 | para confirmar que ese código corre sin fallar y produce lo esperado.
 */
 
-it('el Excel real incluye el bloque de metadata (reporte/empresa/filtros/registros) y el logo', function () {
+it('el Excel real incluye el bloque de metadata (reporte/empresa/filtros/registros), el logo y la hoja Resumen', function () {
     Storage::fake('public');
     $empresa = Empresa::factory()->create(['nombre_comercial' => 'Con Logo Real']);
     $ruta = UploadedFile::fake()->image('logo.png', 100, 100)->store("empresas/{$empresa->id}", 'public');
     $empresa->update(['logo_ruta' => $ruta]);
 
-    $contexto = new ContextoExportacion('Sucursales', $empresa, ['Estado' => 'Activas'], 2);
+    $contexto = new ContextoExportacion('Sucursales', $empresa, ['Estado' => 'Activas'], 2, generadoPor: 'Ana Prueba');
     $export = new ListadoExport([[1, 'Uno'], [2, 'Dos']], ['Código', 'Nombre'], $contexto);
 
     $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
     file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
 
-    $hoja = IOFactory::load($temporal)->getActiveSheet();
+    $libro = IOFactory::load($temporal);
 
+    expect($libro->getSheetNames())->toBe(['Resumen', 'Datos']);
+
+    $resumen = $libro->getSheetByName('Resumen');
+    expect($resumen->getCell('A1')->getValue())->toBe('Sucursales');
+    expect($resumen->getCell('A2')->getValue())->toBe('Con Logo Real');
+    expect($resumen->getCell('A3')->getValue())->toContain('Ana Prueba');
+    // El logo se dibuja en la hoja Resumen (una sola vez, no repetido en Datos).
+    expect(count($resumen->getDrawingCollection()))->toBe(1);
+
+    $hoja = $libro->getSheetByName('Datos');
     expect($hoja->getCell('A1')->getValue())->toBe('Reporte:');
     expect($hoja->getCell('B1')->getValue())->toBe('Sucursales');
     expect($hoja->getCell('A2')->getValue())->toBe('Empresa:');
     expect($hoja->getCell('B2')->getValue())->toBe('Con Logo Real');
     expect($hoja->getCell('A3')->getValue())->toBe('Estado:');
     expect($hoja->getCell('B3')->getValue())->toBe('Activas');
-    expect($hoja->getCell('A7')->getValue())->toBe('Código');
-    expect((int) $hoja->getCell('A8')->getValue())->toBe(1);
+    expect($hoja->getCell('A8')->getValue())->toBe('Código');
+    expect((int) $hoja->getCell('A9')->getValue())->toBe(1);
     expect(count($hoja->getDrawingCollection()))->toBe(1);
 
     @unlink($temporal);
@@ -245,10 +255,13 @@ it('el Excel real sin empresa ni filtros no falla y omite el logo', function () 
     $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
     file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
 
-    $hoja = IOFactory::load($temporal)->getActiveSheet();
+    $libro = IOFactory::load($temporal);
+    $resumen = $libro->getSheetByName('Resumen');
+    $hoja = $libro->getSheetByName('Datos');
 
+    expect($resumen->getCell('A2')->getValue())->toBe('Todas las empresas');
     expect($hoja->getCell('B2')->getValue())->toBe('Todas las empresas');
-    expect(count($hoja->getDrawingCollection()))->toBe(0);
+    expect(count($resumen->getDrawingCollection()) + count($hoja->getDrawingCollection()))->toBe(0);
 
     @unlink($temporal);
 });

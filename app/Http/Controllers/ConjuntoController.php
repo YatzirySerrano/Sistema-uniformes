@@ -105,7 +105,7 @@ class ConjuntoController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Conjuntos', $empresaFiltro, $filtrosHumanos, $conjuntos->count());
+        $contexto = new ContextoExportacion('Conjuntos', $empresaFiltro, $filtrosHumanos, $conjuntos->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Descripción', 'Estado', 'Empresa', 'Componentes',

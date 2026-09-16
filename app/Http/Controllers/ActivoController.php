@@ -180,7 +180,7 @@ class ActivoController extends Controller
             } : null,
         ]);
 
-        $contexto = new ContextoExportacion('Activos', $empresaFiltro, $filtrosHumanos, $activos->count());
+        $contexto = new ContextoExportacion('Activos', $empresaFiltro, $filtrosHumanos, $activos->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Tipo', 'Categoría', 'Empresa', 'Control', 'Existencias', 'Bajo mínimo', 'Estado',

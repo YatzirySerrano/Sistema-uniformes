@@ -103,7 +103,7 @@ class AreaController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Áreas', $empresaFiltro, $filtrosHumanos, $areas->count());
+        $contexto = new ContextoExportacion('Áreas', $empresaFiltro, $filtrosHumanos, $areas->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Descripción', 'Estado', 'Empresa', 'Colaboradores (total)', 'Colaboradores activos',

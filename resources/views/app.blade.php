@@ -53,6 +53,12 @@
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
+        {{-- Aplicación privada autenticada, nunca un sitio de marketing:
+        noindex/nofollow fijo aquí (fuera de x-inertia::head) para que
+        ningún <Head> de página pueda quitarlo. Ver App\Http\Middleware\
+        AgregaEncabezadoRobots para el header HTTP equivalente. --}}
+        <meta name="robots" content="noindex, nofollow, noarchive">
+
         @fonts
 
         @vite(['resources/css/app.css', 'resources/js/app.ts', "resources/js/pages/{$page['component']}.vue"])

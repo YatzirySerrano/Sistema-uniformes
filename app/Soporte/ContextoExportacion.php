@@ -22,12 +22,17 @@ final class ContextoExportacion
 
     /**
      * @param  array<string, string>  $filtros  Pares "Etiqueta" => "Valor humano", ya listos para mostrar (nunca `empresa_id: 4`, siempre "Empresa: DASTI").
+     * @param  array<string, string|int>  $kpis  Pares "Etiqueta" => valor para la hoja Resumen (Excel) / bloque KPI (PDF). Vacío = sólo el bloque genérico (título/empresa/filtros/total).
+     * @param  array<int, SerieGraficaReporte>  $graficas  Gráficas propias del módulo (vacío = ninguna — no todos los módulos aportan una dimensión graficable).
      */
     public function __construct(
         public readonly string $titulo,
         public readonly ?Empresa $empresa,
         public readonly array $filtros,
         public readonly int $total,
+        public readonly ?string $generadoPor = null,
+        public readonly array $kpis = [],
+        public readonly array $graficas = [],
     ) {
         $this->generadoEn = CarbonImmutable::now();
     }

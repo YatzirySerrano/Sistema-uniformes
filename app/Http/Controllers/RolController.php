@@ -7,7 +7,6 @@ use App\Http\Controllers\Concerns\ExportaListado;
 use App\Servicios\ServicioAuditoria;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\Permisos;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -16,6 +15,8 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Spatie\LaravelPdf\Enums\Format;
+use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\Permission\Models\Role;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
@@ -83,15 +84,25 @@ class RolController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Roles y permisos', null, $filtrosHumanos, $roles->count());
+        $contexto = new ContextoExportacion(
+            'Roles y permisos',
+            null,
+            $filtrosHumanos,
+            $roles->count(),
+            generadoPor: $request->user()?->name,
+        );
 
         if ($request->input('formato', 'xlsx') === 'pdf') {
-            $pdf = Pdf::loadView('reportes.roles-permisos', [
+            $pdf = Pdf::view('reportes.roles-permisos', [
                 'contexto' => $contexto,
                 'roles' => $roles->map(fn (Role $r): array => $this->rolParaPdf($r))->all(),
-            ])->setPaper('letter', 'portrait');
+            ])
+                ->format(Format::Letter)
+                ->portrait()
+                ->margins(10, 10, 16, 10)
+                ->footerView('reportes._pie');
 
-            return response($pdf->output(), 200, [
+            return response($pdf->generatePdfContent(), 200, [
                 'Content-Type' => 'application/pdf',
                 'Content-Disposition' => 'attachment; filename="'.$contexto->nombreArchivo().'.pdf"',
             ]);

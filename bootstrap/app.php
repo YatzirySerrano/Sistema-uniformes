@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AgregaEncabezadoRobots;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\VerificarUsuarioActivo;
@@ -25,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
             VerificarUsuarioActivo::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
+            AgregaEncabezadoRobots::class,
         ]);
 
         $middleware->alias([

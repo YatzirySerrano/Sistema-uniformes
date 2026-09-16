@@ -335,6 +335,7 @@ class InventarioFisicoController extends Controller
                 'Estado' => ($filtros['estado'] ?? null) ? EstadoInventarioFisico::from($filtros['estado'])->etiqueta() : null,
             ]),
             count($filas),
+            generadoPor: $request->user()?->name,
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
@@ -388,6 +389,7 @@ class InventarioFisicoController extends Controller
                 'Sección' => 'Unidades identificadas · '.($seccion === 'todos' ? 'Todos' : ucfirst(str_replace('_', ' ', $seccion))),
             ]),
             count($filas),
+            generadoPor: $request->user()?->name,
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
@@ -426,6 +428,7 @@ class InventarioFisicoController extends Controller
                 'Sección' => 'Artículos por cantidad',
             ]),
             count($filas),
+            generadoPor: $request->user()?->name,
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [

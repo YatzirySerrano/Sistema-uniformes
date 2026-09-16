@@ -109,7 +109,7 @@ class SucursalController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Sucursales', $empresaFiltro, $filtrosHumanos, $sucursales->count());
+        $contexto = new ContextoExportacion('Sucursales', $empresaFiltro, $filtrosHumanos, $sucursales->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Nombre', 'Dirección', 'Teléfono', 'Estado', 'Empresa', 'Colaboradores activos',

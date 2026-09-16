@@ -29,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
         $this->configureAutorizacion();
         $this->configureVerificacionCorreo();
+        $this->configureReportesPdf();
         Schema::defaultStringLength(191);
 
         Carbon::setLocale(config('app.locale'));
@@ -61,6 +62,37 @@ class AppServiceProvider extends ServiceProvider
             ->action('Verificar correo electrónico', $url)
             ->line('Si no creaste una cuenta, no es necesario que hagas nada.')
             ->salutation("Saludos,  \nSistema Uniformes"));
+    }
+
+    /**
+     * `spatie/laravel-pdf` (driver Browsershot) necesita la ruta de un
+     * binario Chrome/Chromium real. En producción se fija explícitamente con
+     * `LARAVEL_PDF_CHROME_PATH` (ver runbook de despliegue); si no está
+     * configurada, se autodetectan rutas habituales (Chrome de macOS para
+     * este equipo de desarrollo, Chromium/Chrome de Linux) para que los
+     * reportes ejecutivos funcionen sin tocar `.env`. Si no se encuentra
+     * nada, se deja sin configurar: Browsershot falla con su propio mensaje
+     * claro en vez de que aquí se invente una ruta que no existe.
+     */
+    protected function configureReportesPdf(): void
+    {
+        if (config('laravel-pdf.browsershot.chrome_path')) {
+            return;
+        }
+
+        $rutasConocidas = [
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+        ];
+
+        $ruta = collect($rutasConocidas)->first(fn (string $r): bool => is_file($r) && is_executable($r));
+
+        if ($ruta !== null) {
+            config(['laravel-pdf.browsershot.chrome_path' => $ruta]);
+        }
     }
 
     protected function configureDefaults(): void

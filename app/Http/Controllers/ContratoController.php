@@ -114,7 +114,7 @@ class ContratoController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Contratos', $empresaFiltro, $filtrosHumanos, $contratos->count());
+        $contexto = new ContextoExportacion('Contratos', $empresaFiltro, $filtrosHumanos, $contratos->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Descripción', 'Fecha inicio', 'Fecha fin', 'Estado', 'Empresa', 'Servicios (total)', 'Servicios activos',

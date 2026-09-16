@@ -135,7 +135,7 @@ class EmpresaController extends Controller
 
         // El listado de Empresas nunca está acotado a UNA empresa: siempre
         // es "Todas las empresas" (con o sin filtros de estado/relaciones).
-        $contexto = new ContextoExportacion('Empresas', null, $filtrosHumanos, $empresas->count());
+        $contexto = new ContextoExportacion('Empresas', null, $filtrosHumanos, $empresas->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Nombre comercial', 'Razón social', 'RFC', 'Teléfono', 'Correo',

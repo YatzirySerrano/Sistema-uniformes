@@ -3,19 +3,9 @@
 <head>
     <meta charset="utf-8">
     <title>{{ $contexto->titulo }}</title>
+    @include('reportes._estilos', ['colorPrincipal' => \App\Soporte\PaletaGraficas::principal()])
     <style>
-        * { font-family: DejaVu Sans, sans-serif; box-sizing: border-box; }
-        body { font-size: 9px; color: #1e293b; margin: 0; }
-        .encabezado { width: 100%; border-bottom: 2px solid #1e293b; padding-bottom: 8px; margin-bottom: 10px; }
-        .encabezado table { width: 100%; border-collapse: collapse; }
-        .encabezado td { border: none; padding: 0; vertical-align: middle; }
-        .logo img { max-height: 42px; max-width: 140px; }
-        h1 { font-size: 16px; margin: 0 0 2px; color: #0f172a; }
-        .empresa { font-size: 11px; font-weight: bold; color: #334155; margin: 0 0 4px; }
-        .metadata { font-size: 8.5px; color: #475569; }
-        .metadata span { margin-right: 14px; }
-        .metadata b { color: #1e293b; }
-        .rol { border: 1px solid #cbd5e1; border-radius: 4px; padding: 10px 12px; margin-bottom: 10px; page-break-inside: avoid; }
+        .rol { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; page-break-inside: avoid; }
         .rol-encabezado { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
         .rol-encabezado td { border: none; padding: 0; vertical-align: middle; }
         .rol-nombre { font-size: 12px; font-weight: bold; color: #0f172a; }
@@ -29,13 +19,11 @@
         .categoria-titulo { font-size: 9px; font-weight: bold; color: #1e293b; background: #f1f5f9; padding: 3px 6px; margin: 6px 0 2px; border-radius: 3px; }
         .categoria-lista { margin: 0 0 4px; padding-left: 14px; }
         .categoria-lista li { margin-bottom: 1px; }
-        .pie { position: fixed; bottom: -18px; left: 0; right: 0; font-size: 8px; color: #94a3b8; text-align: right; }
-        .pie:after { content: "Sistema de Uniformes · página " counter(page) " de " counter(pages); }
-        .vacio { padding: 10px 0; color: #64748b; font-style: italic; }
     </style>
 </head>
 <body>
     @include('reportes._encabezado')
+    @include('reportes._kpis')
 
     @if (count($roles) === 0)
         <p class="vacio">No hay roles que coincidan con los filtros aplicados.</p>
@@ -81,7 +69,5 @@
             </div>
         @endforeach
     @endif
-
-    <div class="pie"></div>
 </body>
 </html>

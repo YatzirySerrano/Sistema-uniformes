@@ -119,7 +119,7 @@ class AlmacenController extends Controller
             },
         ]);
 
-        $contexto = new ContextoExportacion('Almacenes', $empresaFiltro, $filtrosHumanos, $almacenes->count());
+        $contexto = new ContextoExportacion('Almacenes', $empresaFiltro, $filtrosHumanos, $almacenes->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Nombre', 'Código', 'Dirección', 'Estado', 'Empresas abastecidas', 'Responsable',

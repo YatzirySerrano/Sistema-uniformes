@@ -8,6 +8,7 @@ use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\TipoGrafica;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Devoluciones\GuardarDevolucionRequest;
@@ -23,11 +24,14 @@ use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\FechaHora;
+use App\Soporte\PaletaGraficas;
+use App\Soporte\SerieGraficaReporte;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -93,7 +97,10 @@ class DevolucionController extends Controller
 
         $empresaFiltro = $this->empresaDelFiltro($request);
         $filtros = $this->filtrosListado($request);
-        $devoluciones = $this->consultaDevoluciones($request)->get();
+        // `detalles:id,devolucion_id,condicion` es un eager-load ligero
+        // adicional sobre la MISMA consulta filtrada (no una consulta
+        // aparte): alimenta la gráfica "por condición" sin tocar el resto.
+        $devoluciones = $this->consultaDevoluciones($request)->with('detalles:id,devolucion_id,condicion')->get();
 
         $filas = $devoluciones->map(fn (Devolucion $d): array => [
             $d->folio,
@@ -114,11 +121,64 @@ class DevolucionController extends Controller
             'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
         ]);
 
-        $contexto = new ContextoExportacion('Devoluciones', $empresaFiltro, $filtrosHumanos, $devoluciones->count());
+        $contexto = new ContextoExportacion(
+            'Devoluciones',
+            $empresaFiltro,
+            $filtrosHumanos,
+            $devoluciones->count(),
+            generadoPor: $request->user()?->name,
+            kpis: $this->kpisDevoluciones($devoluciones),
+            graficas: $this->graficasDevoluciones($devoluciones),
+        );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Folio', 'Empresa', 'Colaborador', 'Entrega', 'Sucursal', 'Estado', 'Registró', 'Fecha', 'Renglones',
         ], $contexto);
+    }
+
+    /**
+     * @param  Collection<int, Devolucion>  $devoluciones
+     * @return array<string, string|int>
+     */
+    private function kpisDevoluciones(Collection $devoluciones): array
+    {
+        $renglones = $devoluciones->flatMap(fn (Devolucion $d) => $d->detalles);
+
+        return [
+            'Devoluciones' => $devoluciones->count(),
+            'Renglones' => $renglones->count(),
+            'Reutilizables' => $renglones->filter(fn (DetalleDevolucion $d): bool => $d->condicion === CondicionDevolucion::Reutilizable)->count(),
+            'Confirmadas' => $devoluciones->filter(fn (Devolucion $d): bool => $d->estado === EstadoDevolucion::Confirmada)->count(),
+        ];
+    }
+
+    /**
+     * @param  Collection<int, Devolucion>  $devoluciones
+     * @return array<int, SerieGraficaReporte>
+     */
+    private function graficasDevoluciones(Collection $devoluciones): array
+    {
+        $renglones = $devoluciones->flatMap(fn (Devolucion $d) => $d->detalles);
+
+        if ($renglones->isEmpty()) {
+            return [];
+        }
+
+        $porCondicion = $renglones->countBy(fn (DetalleDevolucion $d): string => $d->condicion->value);
+
+        $condiciones = collect(CondicionDevolucion::cases())->filter(
+            fn (CondicionDevolucion $c): bool => ($porCondicion[$c->value] ?? 0) > 0,
+        );
+
+        return [
+            new SerieGraficaReporte(
+                'Renglones por condición',
+                TipoGrafica::Dona,
+                $condiciones->map(fn (CondicionDevolucion $c): string => $c->etiqueta())->values()->all(),
+                $condiciones->map(fn (CondicionDevolucion $c): int => $porCondicion[$c->value] ?? 0)->values()->all(),
+                $condiciones->map(fn (CondicionDevolucion $c): string => PaletaGraficas::condicionDevolucion($c))->values()->all(),
+            ),
+        ];
     }
 
     /**

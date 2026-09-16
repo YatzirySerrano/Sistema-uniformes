@@ -87,7 +87,7 @@ class BitacoraController extends Controller
             'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
         ]);
 
-        $contexto = new ContextoExportacion('Auditoría', $empresaFiltro, $filtrosHumanos, $registros->count());
+        $contexto = new ContextoExportacion('Auditoría', $empresaFiltro, $filtrosHumanos, $registros->count(), generadoPor: $request->user()?->name);
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Fecha', 'Usuario', 'Módulo', 'Acción', 'Descripción', 'Entidad', 'Motivo', 'IP',
