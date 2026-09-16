@@ -19,6 +19,7 @@ use App\Http\Controllers\DocumentoExpedienteController;
 use App\Http\Controllers\EmpresaController;
 use App\Http\Controllers\EntregaController;
 use App\Http\Controllers\ImportacionColaboradorController;
+use App\Http\Controllers\ImportacionMaestraController;
 use App\Http\Controllers\InventarioController;
 use App\Http\Controllers\InventarioFisicoController;
 use App\Http\Controllers\MovimientoInventarioController;
@@ -275,6 +276,12 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Configuración (personalización visual GLOBAL de la instancia, no por empresa)
     Route::get('configuracion', [ConfiguracionController::class, 'edit'])->name('configuracion.edit');
     Route::post('configuracion', [ConfiguracionController::class, 'update'])->name('configuracion.update');
+
+    // Importación de datos maestros (carga inicial de plataforma, permiso datos.importar_maestro)
+    Route::get('datos/importar-maestro', [ImportacionMaestraController::class, 'create'])->name('datos.importar-maestro');
+    Route::post('datos/importar-maestro/prevalidar', [ImportacionMaestraController::class, 'prevalidar'])->name('datos.importar-maestro.prevalidar');
+    Route::post('datos/importar-maestro/confirmar', [ImportacionMaestraController::class, 'confirmar'])->name('datos.importar-maestro.confirmar');
+    Route::post('datos/importar-maestro/errores', [ImportacionMaestraController::class, 'descargarErrores'])->name('datos.importar-maestro.errores');
 
     // Almacenes
     Route::get('almacenes', [AlmacenController::class, 'index'])->name('almacenes.index');

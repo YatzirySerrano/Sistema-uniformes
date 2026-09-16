@@ -13,6 +13,8 @@ use Database\Seeders\RolesPermisosSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Tests\TestCase;
 
 /*
@@ -174,6 +176,145 @@ function curpDeQaValida(): string
 function rfcDeQaValido(): string
 {
     return Str::upper(fake()->unique()->bothify('???######???'));
+}
+
+/**
+ * Encabezados fijos de las 10 hojas del importador de base de datos maestra
+ * (`App\Servicios\ServicioImportacionMaestra::ENCABEZADOS`, duplicado aquí a
+ * propósito: un test que rompiera si alguien cambia el formato real es
+ * justamente la señal que queremos).
+ *
+ * @return array<string, list<string>>
+ */
+function encabezadosImportacionMaestra(): array
+{
+    return [
+        'EMPRESAS' => ['nombre_comercial', 'razon_social', 'rfc', 'telefono', 'correo', 'direccion', 'activa'],
+        'SUCURSALES' => ['empresa', 'nombre', 'direccion', 'telefono', 'activa'],
+        'CONTRATOS' => ['empresa', 'nombre', 'descripcion', 'fecha_inicio', 'fecha_fin', 'activo'],
+        'SERVICIOS' => ['empresa', 'contrato', 'sucursal', 'nombre', 'direccion', 'activo'],
+        'COLABORADORES' => ['empresa', 'sucursal', 'nombre_completo', 'curp', 'puesto', 'area', 'servicio', 'correo', 'activo'],
+        'TALLAS' => ['valor'],
+        'ACTIVOS' => ['empresa', 'nombre', 'categoria', 'tipo_control', 'activo'],
+        'ACTIVO_TALLA' => ['empresa', 'activo', 'talla'],
+        'ALMACENES' => ['nombre', 'direccion', 'telefono', 'correo', 'empresas_abastecidas', 'activo'],
+        'UNIDADES_ACTIVO' => [
+            'empresa', 'activo', 'almacen', 'estado', 'condicion', 'colaborador', 'colaborador_curp',
+            'marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan', 'observaciones',
+        ],
+    ];
+}
+
+/**
+ * Construye un .xlsx real con las 10 hojas fijas del importador de base de
+ * datos maestra, en el orden exacto que el servicio espera. Sólo hace falta
+ * pasar las hojas que le interesen a la prueba: las demás quedan vacías (sin
+ * filas — válido, el servicio no exige que toda hoja tenga datos), y cada
+ * fila puede traer sólo las columnas que le importen a la prueba (el resto
+ * queda en blanco).
+ *
+ * @param  array<string, list<array<string, mixed>>>  $hojas  nombre de hoja => filas, cada fila como columna => valor
+ */
+function construirWorkbookMaestro(array $hojas): UploadedFile
+{
+    $encabezados = encabezadosImportacionMaestra();
+
+    $spreadsheet = new Spreadsheet;
+    $spreadsheet->removeSheetByIndex(0);
+
+    foreach (array_keys($encabezados) as $nombreHoja) {
+        $hoja = $spreadsheet->createSheet();
+        $hoja->setTitle($nombreHoja);
+        $hoja->fromArray($encabezados[$nombreHoja], null, 'A1');
+
+        foreach (array_values($hojas[$nombreHoja] ?? []) as $indice => $fila) {
+            $filaOrdenada = array_map(fn (string $columna) => $fila[$columna] ?? null, $encabezados[$nombreHoja]);
+            $hoja->fromArray($filaOrdenada, null, 'A'.($indice + 2));
+        }
+    }
+
+    $ruta = tempnam(sys_get_temp_dir(), 'maestro_').'.xlsx';
+    (new Xlsx($spreadsheet))->save($ruta);
+
+    return new UploadedFile($ruta, 'BD_MAESTRA_REAL_2026.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+}
+
+/**
+ * Fixture completa de las 10 hojas del importador de base de datos maestra:
+ * 2 empresas, 1 sucursal por empresa, 1 contrato, 1 servicio, 1 colaborador
+ * (con la CURP devuelta en `curp`, para poder referenciarla en
+ * `colaborador_curp` de UNIDADES_ACTIVO), 1 talla, 2 activos (uno por
+ * cantidad y uno de seguimiento individual), un vínculo activo_talla, 1
+ * almacén compartido por ambas empresas y 1 unidad identificada asignada al
+ * colaborador. Ejercita las 10 hojas en un solo archivo.
+ *
+ * @return array{curp: string, hojas: array<string, list<array<string, mixed>>>}
+ */
+function workbookMaestroCompleto(): array
+{
+    $curp = curpDeQaValida();
+
+    return [
+        'curp' => $curp,
+        'hojas' => [
+            'EMPRESAS' => [
+                ['nombre_comercial' => 'INMAG', 'rfc' => rfcDeQaValido(), 'activa' => true],
+                ['nombre_comercial' => 'ESTRATEGIAS', 'rfc' => rfcDeQaValido(), 'activa' => true],
+            ],
+            'SUCURSALES' => [
+                ['empresa' => 'INMAG', 'nombre' => 'MEX', 'activa' => true],
+                ['empresa' => 'ESTRATEGIAS', 'nombre' => 'ZACATECAS', 'activa' => true],
+            ],
+            'CONTRATOS' => [
+                ['empresa' => 'INMAG', 'nombre' => 'AUTOMOTORES PEDREGAL', 'activo' => true],
+            ],
+            'SERVICIOS' => [
+                ['empresa' => 'INMAG', 'contrato' => 'AUTOMOTORES PEDREGAL', 'sucursal' => 'MEX', 'nombre' => 'SONIC PEDREGAL', 'activo' => true],
+            ],
+            'COLABORADORES' => [
+                ['empresa' => 'INMAG', 'sucursal' => 'MEX', 'nombre_completo' => 'Juan Perez Lopez', 'curp' => $curp, 'servicio' => 'SONIC PEDREGAL', 'area' => 'Operaciones', 'activo' => true],
+            ],
+            'TALLAS' => [
+                ['valor' => 'Unica'],
+            ],
+            'ACTIVOS' => [
+                ['empresa' => 'INMAG', 'nombre' => 'Camisola', 'categoria' => 'Prenda', 'tipo_control' => 'cantidad', 'activo' => true],
+                ['empresa' => 'INMAG', 'nombre' => 'Radio', 'categoria' => 'Dispositivo', 'tipo_control' => 'individual', 'activo' => true],
+            ],
+            'ACTIVO_TALLA' => [
+                ['empresa' => 'INMAG', 'activo' => 'Camisola', 'talla' => 'Unica'],
+            ],
+            'ALMACENES' => [
+                ['nombre' => 'Almacen Central', 'empresas_abastecidas' => 'INMAG;ESTRATEGIAS', 'activo' => true],
+            ],
+            'UNIDADES_ACTIVO' => [
+                ['empresa' => 'INMAG', 'activo' => 'Radio', 'almacen' => 'Almacen Central', 'colaborador_curp' => $curp, 'marca' => 'Motorola', 'imei' => '123456789012345'],
+            ],
+        ],
+    ];
+}
+
+/**
+ * Envía el archivo a `/datos/importar-maestro/prevalidar` como el usuario
+ * dado y devuelve el prop `analisis` de la respuesta Inertia (mismo patrón
+ * de captura que `DashboardKpiCoherenciaTest::kpisDelDashboard()`).
+ *
+ * @param  array<string, list<array<string, mixed>>>  $hojas
+ * @return array<string, mixed>
+ */
+function prevalidarWorkbookMaestro(TestCase $test, User $usuario, array $hojas): array
+{
+    $archivo = construirWorkbookMaestro($hojas);
+
+    $analisis = null;
+    $test->actingAs($usuario)
+        ->post('/datos/importar-maestro/prevalidar', ['archivo' => $archivo])
+        ->assertOk()
+        ->assertInertia(function ($page) use (&$analisis): void {
+            $analisis = $page->toArray()['props']['analisis'];
+        });
+
+    return $analisis;
 }
 
 /**

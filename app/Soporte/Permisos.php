@@ -200,6 +200,12 @@ final class Permisos
                 'configuracion.administrar' => 'Editar la personalización visual global del sistema',
             ],
         ],
+        'datos' => [
+            'etiqueta' => 'Importación de datos maestros',
+            'permisos' => [
+                'datos.importar_maestro' => 'Importar la base de datos maestra (carga inicial de plataforma)',
+            ],
+        ],
     ];
 
     /**

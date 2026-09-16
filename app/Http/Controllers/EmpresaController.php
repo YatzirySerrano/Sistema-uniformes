@@ -6,7 +6,6 @@ use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Controllers\Concerns\ReactivaSuspendidos;
-use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Empresas\GuardarEmpresaRequest;
 use App\Models\Activo;
 use App\Models\Area;
@@ -17,7 +16,7 @@ use App\Models\Sucursal;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
 use App\Soporte\ContextoExportacion;
-use App\Soporte\ServicioGeneradorCodigosGlobal;
+use App\Soporte\GeneradorCodigoEmpresa;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -38,12 +37,11 @@ class EmpresaController extends Controller
     use CreaConCodigoUnico;
     use ExportaListado;
     use ReactivaSuspendidos;
-    use ReconciliaSecuenciaCodigo;
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
         private readonly ServicioCascadaSuspension $cascada,
-        private readonly ServicioGeneradorCodigosGlobal $codigosGlobales,
+        private readonly GeneradorCodigoEmpresa $generadorCodigo,
     ) {}
 
     public function index(Request $request): Response
@@ -279,7 +277,7 @@ class EmpresaController extends Controller
         try {
             $empresa = $this->crearConCodigoUnico(fn () => Empresa::query()->create([
                 ...$datos,
-                'codigo' => $this->generarCodigo($datos['nombre_comercial']),
+                'codigo' => $this->generadorCodigo->generar($datos['nombre_comercial']),
             ]));
         } catch (QueryException $e) {
             // `CreaConCodigoUnico` reintenta CUALQUIER violación de unicidad
@@ -431,30 +429,10 @@ class EmpresaController extends Controller
     }
 
     /**
-     * Genera un código legible a partir del nombre comercial ("ALIMEN01").
-     * Cada prefijo derivado del nombre tiene su propio contador dentro de
-     * `secuencias_codigo_globales` (ámbito "empresa:{base}"), reutilizando
-     * la misma arquitectura race-safe que Almacén/Sucursal/Área/Activo —
-     * nunca el `while (...exists())` anterior, que dos altas concurrentes
-     * con nombres parecidos podían calcular igual. Reconcilia contra el
-     * mayor sufijo REALMENTE existente con ese prefijo en cada llamada.
-     */
-    private function generarCodigo(string $nombre): string
-    {
-        [$base, $ambito] = $this->baseYAmbitoCodigo($nombre);
-
-        $siguiente = $this->codigosGlobales->siguienteNumero($ambito, fn (): int => $this->maximoSufijo(
-            Empresa::query()->where('codigo', 'like', $base.'%')->pluck('codigo'),
-            $base,
-        ));
-
-        return $base.str_pad((string) $siguiente, 2, '0', STR_PAD_LEFT);
-    }
-
-    /**
      * Previsualización NO autoritativa del siguiente código de empresa para
      * el nombre comercial indicado — no reserva el consecutivo. El valor
-     * definitivo se calcula de nuevo, atómicamente, en `store()`.
+     * definitivo se calcula de nuevo, atómicamente, en `store()`
+     * (`GeneradorCodigoEmpresa::generar()`).
      */
     public function siguienteCodigo(Request $request): JsonResponse
     {
@@ -462,18 +440,7 @@ class EmpresaController extends Controller
 
         $nombre = trim((string) $request->query('nombre_comercial', ''));
 
-        if ($nombre === '') {
-            return response()->json(['codigo' => null]);
-        }
-
-        [$base, $ambito] = $this->baseYAmbitoCodigo($nombre);
-
-        $siguiente = $this->codigosGlobales->siguienteNumeroAproximado($ambito, fn (): int => $this->maximoSufijo(
-            Empresa::query()->where('codigo', 'like', $base.'%')->pluck('codigo'),
-            $base,
-        ));
-
-        return response()->json(['codigo' => $base.str_pad((string) $siguiente, 2, '0', STR_PAD_LEFT)]);
+        return response()->json(['codigo' => $nombre === '' ? null : $this->generadorCodigo->previsualizar($nombre)]);
     }
 
     /**
@@ -509,16 +476,5 @@ class EmpresaController extends Controller
             ->exists();
 
         return response()->json(['disponible' => ! $existe]);
-    }
-
-    /**
-     * @return array{0: string, 1: string}
-     */
-    private function baseYAmbitoCodigo(string $nombre): array
-    {
-        $base = Str::upper(Str::slug(Str::substr($nombre, 0, 6), ''));
-        $base = $base !== '' ? $base : 'EMP';
-
-        return [$base, 'empresa:'.$base];
     }
 }
