@@ -212,6 +212,7 @@ it('sube una foto de perfil válida al registrar un colaborador', function () {
     $this->actingAs($admin)->post('/colaboradores', [
         'empresa_id' => $empresa->id,
         'nombre_completo' => 'Con Foto',
+        'curp' => curpDeQaValida(),
         'sucursal_id' => $sucursal->id,
         'foto' => UploadedFile::fake()->image('perfil.jpg'),
     ]);
@@ -235,18 +236,20 @@ it('reemplazar la foto borra la anterior del disco', function () {
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
         'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
         'sucursal_id' => $colaborador->sucursal_id,
         'foto' => UploadedFile::fake()->image('primera.jpg'),
-    ]);
+    ])->assertSessionHasNoErrors();
 
     $rutaAnterior = $colaborador->fresh()->foto_ruta;
     Storage::disk('local')->assertExists($rutaAnterior);
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
         'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
         'sucursal_id' => $colaborador->sucursal_id,
         'foto' => UploadedFile::fake()->image('segunda.jpg'),
-    ]);
+    ])->assertSessionHasNoErrors();
 
     $colaborador->refresh();
 
@@ -263,18 +266,20 @@ it('quitar la foto (eliminar_foto) borra la asociación y el archivo', function 
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
         'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
         'sucursal_id' => $colaborador->sucursal_id,
         'foto' => UploadedFile::fake()->image('perfil.jpg'),
-    ]);
+    ])->assertSessionHasNoErrors();
 
     $ruta = $colaborador->fresh()->foto_ruta;
     Storage::disk('local')->assertExists($ruta);
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
         'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
         'sucursal_id' => $colaborador->sucursal_id,
         'eliminar_foto' => true,
-    ]);
+    ])->assertSessionHasNoErrors();
 
     expect($colaborador->fresh()->foto_ruta)->toBeNull();
     Storage::disk('local')->assertMissing($ruta);
@@ -289,9 +294,10 @@ it('un colaborador nulo por eliminar_foto no falla si ya no tenía foto', functi
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
         'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
         'sucursal_id' => $colaborador->sucursal_id,
         'eliminar_foto' => true,
-    ])->assertRedirect();
+    ])->assertRedirect()->assertSessionHasNoErrors();
 
     expect($colaborador->fresh()->foto_ruta)->toBeNull();
 });
@@ -305,15 +311,17 @@ it('no toca la foto si no se manda archivo nuevo ni la bandera eliminar_foto', f
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
         'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
         'sucursal_id' => $colaborador->sucursal_id,
         'foto' => UploadedFile::fake()->image('perfil.jpg'),
-    ]);
+    ])->assertSessionHasNoErrors();
     $ruta = $colaborador->fresh()->foto_ruta;
 
     $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
         'nombre_completo' => 'Nombre Cambiado',
+        'curp' => $colaborador->curp,
         'sucursal_id' => $colaborador->sucursal_id,
-    ]);
+    ])->assertSessionHasNoErrors();
 
     expect($colaborador->fresh()->foto_ruta)->toBe($ruta);
     Storage::disk('local')->assertExists($ruta);

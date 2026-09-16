@@ -26,6 +26,7 @@ it('transforma el before/after de una edición a "Campo | Antes | Ahora" legible
         ->put("/colaboradores/{$colaborador->id}", [
             'numero_empleado' => 'EMP-001',
             'nombre_completo' => 'Juan Pérez',
+            'curp' => $colaborador->curp,
             'sucursal_id' => $sucursal->id,
             'puesto' => 'Supervisor',
             'activo' => true,

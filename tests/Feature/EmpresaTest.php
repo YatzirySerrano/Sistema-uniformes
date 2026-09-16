@@ -5,7 +5,9 @@ use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\Sucursal;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -92,6 +94,7 @@ it('un administrador puede registrar una empresa', function () {
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/empresas', [
             'nombre_comercial' => 'Empresa del Admin',
+            'rfc' => rfcDeQaValido(),
             'telefono' => '55-1234-5678',
         ])
         ->assertRedirect('/empresas')
@@ -117,6 +120,7 @@ it('un administrador puede editar cualquier empresa', function () {
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->put("/empresas/{$empresa->id}", [
             'nombre_comercial' => 'Después',
+            'rfc' => $empresa->rfc,
             'codigo' => $empresa->codigo,
         ])
         ->assertRedirect()
@@ -221,6 +225,221 @@ it('acepta un RFC y un teléfono con formato válido tras normalizar', function 
     $empresa = Empresa::query()->where('nombre_comercial', 'Con Datos')->first();
     expect($empresa->rfc)->toBe('ABC010203XY1');
     expect($empresa->telefono)->toBe('7771234567');
+});
+
+it('rechaza el alta de una empresa sin RFC', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Sin Rfc'])
+        ->assertSessionHasErrors('rfc');
+
+    expect(Empresa::query()->where('nombre_comercial', 'Sin Rfc')->exists())->toBeFalse();
+});
+
+it('acepta un RFC de persona moral (12 caracteres)', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Persona Moral', 'rfc' => 'ABC010203XYZ'])
+        ->assertSessionHasNoErrors();
+
+    $empresa = Empresa::query()->where('nombre_comercial', 'Persona Moral')->first();
+    expect($empresa->rfc)->toBe('ABC010203XYZ')->and(strlen($empresa->rfc))->toBe(12);
+});
+
+it('acepta un RFC de persona física (13 caracteres)', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Persona Fisica', 'rfc' => 'PEXJ850101AB1'])
+        ->assertSessionHasNoErrors();
+
+    $empresa = Empresa::query()->where('nombre_comercial', 'Persona Fisica')->first();
+    expect($empresa->rfc)->toBe('PEXJ850101AB1')->and(strlen($empresa->rfc))->toBe(13);
+});
+
+it('recorta espacios alrededor del RFC antes de validar', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Rfc Con Espacios', 'rfc' => '  ABC010203XY1  '])
+        ->assertSessionHasNoErrors();
+
+    expect(Empresa::query()->where('nombre_comercial', 'Rfc Con Espacios')->value('rfc'))->toBe('ABC010203XY1');
+});
+
+it('rechaza un RFC ya usado por otra empresa', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $existente = Empresa::factory()->create();
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Rfc Duplicado', 'rfc' => $existente->rfc])
+        ->assertSessionHasErrors(['rfc' => 'Ya existe una empresa registrada con este RFC.']);
+
+    expect(Empresa::query()->where('nombre_comercial', 'Rfc Duplicado')->exists())->toBeFalse();
+});
+
+it('editar una empresa conservando su propio RFC no genera error de duplicado', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $empresa = Empresa::factory()->create();
+
+    $this->actingAs($super)
+        ->put("/empresas/{$empresa->id}", ['nombre_comercial' => 'Nombre Nuevo', 'rfc' => $empresa->rfc])
+        ->assertSessionHasNoErrors();
+
+    expect($empresa->fresh()->rfc)->toBe($empresa->rfc);
+});
+
+it('editar el RFC a uno nuevo y libre persiste correctamente', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $empresa = Empresa::factory()->create();
+    $rfcNuevo = rfcDeQaValido();
+
+    $this->actingAs($super)
+        ->put("/empresas/{$empresa->id}", ['nombre_comercial' => $empresa->nombre_comercial, 'rfc' => $rfcNuevo])
+        ->assertSessionHasNoErrors();
+
+    expect($empresa->fresh()->rfc)->toBe($rfcNuevo);
+});
+
+it('editar una empresa no permite tomar el RFC de otra', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $otra = Empresa::factory()->create();
+    $empresa = Empresa::factory()->create();
+    $rfcOriginal = $empresa->rfc;
+
+    $this->actingAs($super)
+        ->put("/empresas/{$empresa->id}", ['nombre_comercial' => $empresa->nombre_comercial, 'rfc' => $otra->rfc])
+        ->assertSessionHasErrors(['rfc' => 'Ya existe una empresa registrada con este RFC.']);
+
+    expect($empresa->fresh()->rfc)->toBe($rfcOriginal);
+});
+
+it('una empresa soft-deleted mantiene su RFC reservado: ninguna otra puede usarlo', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $eliminada = Empresa::factory()->create();
+    $rfcReservado = $eliminada->rfc;
+    $eliminada->delete();
+
+    expect($eliminada->trashed())->toBeTrue();
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Intento Reusar Rfc', 'rfc' => $rfcReservado])
+        ->assertSessionHasErrors('rfc');
+
+    expect(Empresa::query()->where('nombre_comercial', 'Intento Reusar Rfc')->exists())->toBeFalse();
+});
+
+it('editar una empresa no permite tomar el RFC de una empresa soft-deleted', function () {
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $eliminada = Empresa::factory()->create();
+    $rfcReservado = $eliminada->rfc;
+    $eliminada->delete();
+
+    $empresa = Empresa::factory()->create();
+    $rfcOriginal = $empresa->rfc;
+
+    $this->actingAs($super)
+        ->put("/empresas/{$empresa->id}", ['nombre_comercial' => $empresa->nombre_comercial, 'rfc' => $rfcReservado])
+        ->assertSessionHasErrors('rfc');
+
+    expect($empresa->fresh()->rfc)->toBe($rfcOriginal);
+});
+
+it('una carrera de concurrencia con RFC duplicado durante la EDICIÓN no expone un 500: responde 422 y conserva el RFC anterior', function () {
+    // Empresa A y Empresa B, cada una con su RFC. Se edita B hacia un RFC
+    // NUEVO que, al validar, todavía está libre. Justo antes del UPDATE real
+    // de B (evento `updating`, el punto más tardío disponible antes de la
+    // query), OTRO proceso ya tomó ese mismo RFC para A (simulado con un
+    // UPDATE directo a la tabla, que no dispara eventos de Eloquent —
+    // reproduce fielmente una escritura concurrente ajena). El UPDATE de B
+    // choca contra el índice único y debe convertirse en un 422 claro, sin
+    // dejar a B a medio actualizar.
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $empresaA = Empresa::factory()->create(['rfc' => 'AAA010101AAA']);
+    $empresaB = Empresa::factory()->create(['rfc' => 'BBB010101BBB']);
+    $rfcEnDisputa = 'CCC010101CCC';
+
+    Empresa::updating(function () use ($empresaA, $rfcEnDisputa): void {
+        DB::table('empresas')->where('id', $empresaA->id)->update(['rfc' => $rfcEnDisputa]);
+    });
+
+    $this->actingAs($super)
+        ->put("/empresas/{$empresaB->id}", ['nombre_comercial' => $empresaB->nombre_comercial, 'rfc' => $rfcEnDisputa])
+        ->assertSessionHasErrors(['rfc' => 'Ya existe una empresa registrada con este RFC.']);
+
+    expect($empresaB->fresh()->rfc)->toBe('BBB010101BBB')
+        ->and(Empresa::query()->where('rfc', $rfcEnDisputa)->count())->toBe(1);
+});
+
+it('una carrera de concurrencia con el mismo RFC nuevo no expone un 500: responde 422 con el mensaje claro', function () {
+    // Simula la carrera real que `GuardarEmpresaRequest` no puede detectar:
+    // al momento de validar, el RFC todavía no existía. Justo antes del
+    // INSERT real (evento `creating`, el punto más tardío disponible antes
+    // de que Eloquent ejecute la query), OTRA transacción inserta el MISMO
+    // RFC directo a la tabla — así el INSERT de esta petición sí choca con
+    // el índice único de `rfc` en BD, y `CreaConCodigoUnico` reintenta 3
+    // veces con un `codigo` nuevo cada vez (cambiar el código nunca libera
+    // el RFC) antes de relanzar el `QueryException` original.
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $rfc = 'RAC010203XYZ';
+
+    Empresa::creating(function () use ($rfc): void {
+        DB::table('empresas')->insert([
+            'codigo' => 'RACE-'.Str::random(6),
+            'nombre_comercial' => 'Ganó la carrera',
+            'rfc' => $rfc,
+            'color_principal' => '#2563eb',
+            'color_secundario' => '#1e40af',
+            'color_acento' => '#f59e0b',
+            'activa' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Perdió la carrera', 'rfc' => $rfc])
+        ->assertSessionHasErrors(['rfc' => 'Ya existe una empresa registrada con este RFC.']);
+
+    expect(Empresa::query()->where('nombre_comercial', 'Perdió la carrera')->exists())->toBeFalse()
+        ->and(Empresa::query()->where('rfc', $rfc)->count())->toBe(1);
+});
+
+it('una colisión real del código autogenerado sigue reintentándose (no se confunde con RFC)', function () {
+    // Fuerza que el PRIMER intento de INSERT choque por `codigo` (simulando
+    // que otro proceso insertó ese código exacto justo antes de que esta
+    // petición terminara su propio INSERT): `CreaConCodigoUnico` debe
+    // reintentar con un código nuevo y completar el alta con éxito, sin
+    // confundir esta colisión con la del RFC.
+    $super = usuarioCon(RolSistema::Superadministrador->value);
+    $intentos = 0;
+
+    Empresa::creating(function (Empresa $empresa) use (&$intentos): void {
+        $intentos++;
+
+        if ($intentos === 1) {
+            DB::table('empresas')->insert([
+                'codigo' => $empresa->codigo,
+                'nombre_comercial' => 'Ganó la carrera de código',
+                'rfc' => 'ZZZ010203ZZZ',
+                'color_principal' => '#2563eb',
+                'color_secundario' => '#1e40af',
+                'color_acento' => '#f59e0b',
+                'activa' => true,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+    });
+
+    $this->actingAs($super)
+        ->post('/empresas', ['nombre_comercial' => 'Reintenta Codigo', 'rfc' => rfcDeQaValido()])
+        ->assertSessionHasNoErrors();
+
+    expect($intentos)->toBeGreaterThan(1)
+        ->and(Empresa::query()->where('nombre_comercial', 'Reintenta Codigo')->exists())->toBeTrue();
 });
 
 it('no produce un error 500 cuando un campo llega con un tipo inesperado', function () {
@@ -396,7 +615,7 @@ it('respeta el orden alfabético descendente', function () {
 
 it('registra una empresa sin logo correctamente', function () {
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
-        ->post('/empresas', ['nombre_comercial' => 'Sin Logo'])
+        ->post('/empresas', ['nombre_comercial' => 'Sin Logo', 'rfc' => rfcDeQaValido()])
         ->assertRedirect('/empresas')
         ->assertSessionHasNoErrors();
 
@@ -409,6 +628,7 @@ it('registra una empresa con logo PNG y lo persiste en storage', function () {
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/empresas', [
             'nombre_comercial' => 'Con Logo PNG',
+            'rfc' => rfcDeQaValido(),
             'logo' => UploadedFile::fake()->image('logo.png', 200, 200),
         ])
         ->assertRedirect('/empresas')
@@ -425,6 +645,7 @@ it('registra una empresa con logo JPG y lo persiste en storage', function () {
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/empresas', [
             'nombre_comercial' => 'Con Logo JPG',
+            'rfc' => rfcDeQaValido(),
             'logo' => UploadedFile::fake()->image('logo.jpg', 200, 200),
         ])
         ->assertRedirect('/empresas')
@@ -441,6 +662,7 @@ it('el detalle de una empresa con logo expone logo_url', function () {
 
     $this->actingAs($admin)->post('/empresas', [
         'nombre_comercial' => 'Con Logo Detalle',
+        'rfc' => rfcDeQaValido(),
         'logo' => UploadedFile::fake()->image('logo.png'),
     ]);
 
@@ -456,6 +678,7 @@ it('editar una empresa sin subir un logo nuevo conserva el logo previamente carg
 
     $this->actingAs($admin)->post('/empresas', [
         'nombre_comercial' => 'Editar Conserva Logo',
+        'rfc' => rfcDeQaValido(),
         'logo' => UploadedFile::fake()->image('logo.png'),
     ]);
     $empresa = Empresa::query()->where('nombre_comercial', 'Editar Conserva Logo')->first();
@@ -463,6 +686,7 @@ it('editar una empresa sin subir un logo nuevo conserva el logo previamente carg
 
     $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
         'nombre_comercial' => 'Editar Conserva Logo Actualizada',
+        'rfc' => $empresa->rfc,
         'codigo' => $empresa->codigo,
     ])->assertSessionHasNoErrors();
 
@@ -476,6 +700,7 @@ it('reemplazar el logo en edición guarda el nuevo archivo y borra el anterior',
 
     $this->actingAs($admin)->post('/empresas', [
         'nombre_comercial' => 'Reemplazo Logo',
+        'rfc' => rfcDeQaValido(),
         'logo' => UploadedFile::fake()->image('logo.png'),
     ]);
     $empresa = Empresa::query()->where('nombre_comercial', 'Reemplazo Logo')->first();
@@ -483,6 +708,7 @@ it('reemplazar el logo en edición guarda el nuevo archivo y borra el anterior',
 
     $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
         'nombre_comercial' => 'Reemplazo Logo',
+        'rfc' => $empresa->rfc,
         'codigo' => $empresa->codigo,
         'logo' => UploadedFile::fake()->image('logo-nuevo.png'),
     ])->assertSessionHasNoErrors();
@@ -499,6 +725,7 @@ it('quitar el logo (eliminar_logo) borra la asociación y el archivo del disco',
 
     $this->actingAs($admin)->post('/empresas', [
         'nombre_comercial' => 'Quitar Logo',
+        'rfc' => rfcDeQaValido(),
         'logo' => UploadedFile::fake()->image('logo.png'),
     ]);
     $empresa = Empresa::query()->where('nombre_comercial', 'Quitar Logo')->first();
@@ -507,6 +734,7 @@ it('quitar el logo (eliminar_logo) borra la asociación y el archivo del disco',
 
     $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
         'nombre_comercial' => 'Quitar Logo',
+        'rfc' => $empresa->rfc,
         'eliminar_logo' => true,
     ])->assertSessionHasNoErrors();
 
@@ -520,6 +748,7 @@ it('elegir un logo nuevo prevalece aunque llegue también eliminar_logo (Caso D)
 
     $this->actingAs($admin)->post('/empresas', [
         'nombre_comercial' => 'Nuevo Gana',
+        'rfc' => rfcDeQaValido(),
         'logo' => UploadedFile::fake()->image('logo.png'),
     ]);
     $empresa = Empresa::query()->where('nombre_comercial', 'Nuevo Gana')->first();
@@ -527,6 +756,7 @@ it('elegir un logo nuevo prevalece aunque llegue también eliminar_logo (Caso D)
 
     $this->actingAs($admin)->put("/empresas/{$empresa->id}", [
         'nombre_comercial' => 'Nuevo Gana',
+        'rfc' => $empresa->rfc,
         'eliminar_logo' => true,
         'logo' => UploadedFile::fake()->image('logo-nuevo.png'),
     ])->assertSessionHasNoErrors();
@@ -544,6 +774,7 @@ it('eliminar_logo no rompe si la empresa no tenía logo o el archivo ya no exist
     $sinLogo = Empresa::factory()->create(['logo_ruta' => null]);
     $this->actingAs($admin)->put("/empresas/{$sinLogo->id}", [
         'nombre_comercial' => $sinLogo->nombre_comercial,
+        'rfc' => $sinLogo->rfc,
         'eliminar_logo' => true,
     ])->assertSessionHasNoErrors();
     expect($sinLogo->fresh()->logo_ruta)->toBeNull();
@@ -551,6 +782,7 @@ it('eliminar_logo no rompe si la empresa no tenía logo o el archivo ya no exist
     $rutaFantasma = Empresa::factory()->create(['logo_ruta' => 'empresas/999/no-existe.png']);
     $this->actingAs($admin)->put("/empresas/{$rutaFantasma->id}", [
         'nombre_comercial' => $rutaFantasma->nombre_comercial,
+        'rfc' => $rutaFantasma->rfc,
         'eliminar_logo' => true,
     ])->assertSessionHasNoErrors();
     expect($rutaFantasma->fresh()->logo_ruta)->toBeNull();

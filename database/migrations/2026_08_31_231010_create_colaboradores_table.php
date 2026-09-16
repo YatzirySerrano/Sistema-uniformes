@@ -21,6 +21,7 @@ return new class extends Migration
             $table->foreignId('usuario_id')->nullable()->constrained('users')->nullOnDelete();
             $table->string('numero_empleado', 60);
             $table->string('nombre_completo');
+            $table->string('curp', 18)->unique();
             $table->string('puesto')->nullable();
             $table->string('area')->nullable();
             $table->foreignId('area_id')->nullable()->constrained('areas')->cascadeOnUpdate()->nullOnDelete();

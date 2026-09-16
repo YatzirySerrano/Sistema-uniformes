@@ -17,6 +17,7 @@ export type ColaboradorEditable = {
     empresa_id: number;
     numero_empleado: string;
     nombre_completo: string;
+    curp: string;
     sucursal_id: number;
     sucursal: Opcion | null;
     puesto: string | null;
@@ -69,6 +70,7 @@ const areaSel = ref<Opcion | null>(props.colaborador?.area_actual ?? null);
 const form = useForm<{
     empresa_id: number | null;
     nombre_completo: string;
+    curp: string;
     sucursal_id: number | '';
     puesto: string;
     area_id: number | '';
@@ -79,6 +81,7 @@ const form = useForm<{
 }>({
     empresa_id: empresaId.value === '' ? null : empresaId.value,
     nombre_completo: props.colaborador?.nombre_completo ?? '',
+    curp: props.colaborador?.curp ?? '',
     sucursal_id: sucursalSel.value?.id ?? '',
     puesto: props.colaborador?.puesto ?? '',
     area_id: areaSel.value?.id ?? '',
@@ -283,6 +286,26 @@ function enviar(): void {
                 required
             />
             <InputError :message="form.errors.nombre_completo" />
+        </div>
+
+        <div class="grid gap-1.5">
+            <Label for="fc-curp" class="flex items-center gap-1.5">
+                CURP
+                <span class="text-destructive">*</span>
+                <AyudaTooltip
+                    texto="Clave Única de Registro de Población, a 18 caracteres. Identifica a la persona, no cambia si se transfiere de empresa. Se guarda en mayúsculas."
+                    etiqueta="Ayuda sobre la CURP"
+                />
+            </Label>
+            <Input
+                id="fc-curp"
+                v-model="form.curp"
+                class="uppercase"
+                maxlength="18"
+                required
+                autocomplete="off"
+            />
+            <InputError :message="form.errors.curp" />
         </div>
 
         <div class="grid gap-4 sm:grid-cols-2">

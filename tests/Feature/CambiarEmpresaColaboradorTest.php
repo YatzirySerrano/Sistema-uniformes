@@ -234,6 +234,15 @@ it('conserva el mismo colaborador (id) tras la transferencia', function () {
         ->and(Colaborador::query()->count())->toBe(1);
 });
 
+it('la transferencia conserva la CURP: identidad de persona, no cambia con la empresa', function () {
+    $c = ($this->colaborador)();
+    $curpAntes = $c->curp;
+
+    ($this->transferir)($c)->assertSessionHasNoErrors();
+
+    expect($c->fresh()->curp)->toBe($curpAntes);
+});
+
 it('registra la transferencia en la bitácora de auditoría', function () {
     $c = ($this->colaborador)();
 

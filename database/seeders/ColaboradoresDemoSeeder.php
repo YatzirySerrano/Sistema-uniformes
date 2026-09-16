@@ -36,6 +36,13 @@ class ColaboradoresDemoSeeder extends Seeder
                     [
                         'sucursal_id' => $sucursales->random()->id,
                         'nombre_completo' => fake()->name(),
+                        // Estructuralmente válida (mismo patrón que
+                        // GuardarColaboradorRequest), única a nivel plataforma;
+                        // no pretende ser una CURP real de RENAPO.
+                        'curp' => fake()->unique()->regexify(
+                            '[A-Z][AEIOU][A-Z]{2}[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|1[0-9]|2[0-8])'
+                            .'[HM](DF|NL|JC|MC|BC|GT|VZ|SL)[BCDFGHJKLMNPQRSTVWXYZ]{3}[A-Z0-9][0-9]',
+                        ),
                         'puesto' => fake()->randomElement($puestos),
                         'area' => $areaNombre,
                         'area_id' => $areasEmpresa[$areaNombre],

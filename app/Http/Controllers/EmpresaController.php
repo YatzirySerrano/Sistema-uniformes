@@ -19,12 +19,14 @@ use App\Servicios\ServicioCascadaSuspension;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -274,10 +276,31 @@ class EmpresaController extends Controller
     {
         $datos = $request->safe()->except(['logo', 'eliminar_logo']);
 
-        $empresa = $this->crearConCodigoUnico(fn () => Empresa::query()->create([
-            ...$datos,
-            'codigo' => $this->generarCodigo($datos['nombre_comercial']),
-        ]));
+        try {
+            $empresa = $this->crearConCodigoUnico(fn () => Empresa::query()->create([
+                ...$datos,
+                'codigo' => $this->generarCodigo($datos['nombre_comercial']),
+            ]));
+        } catch (QueryException $e) {
+            // `CreaConCodigoUnico` reintenta CUALQUIER violación de unicidad
+            // (SQLSTATE 23000) asumiendo que es el `codigo` autogenerado —
+            // correcto para eso, pero un RFC duplicado (carrera de
+            // concurrencia entre dos altas simultáneas con el mismo RFC
+            // nuevo; el caso normal ya lo bloquea `GuardarEmpresaRequest`
+            // antes de llegar aquí) agota los 3 reintentos sin poder
+            // resolverse — cambiar el código no libera el RFC — y termina
+            // relanzando el QueryException original. Se distingue por el
+            // mensaje del driver, nunca reutilizando el mismo criterio
+            // "23000" de la retry, para no tratar cualquier índice único
+            // futuro de esta tabla como si fuera el RFC.
+            if (str_contains($e->getMessage(), 'rfc_unique') || str_contains($e->getMessage(), 'empresas.rfc')) {
+                throw ValidationException::withMessages([
+                    'rfc' => 'Ya existe una empresa registrada con este RFC.',
+                ]);
+            }
+
+            throw $e;
+        }
 
         if ($request->hasFile('logo')) {
             $rutaLogo = $request->file('logo')->store("empresas/{$empresa->id}", 'public');
@@ -325,7 +348,23 @@ class EmpresaController extends Controller
             $logoEliminado = true;
         }
 
-        $empresa->save();
+        try {
+            $empresa->save();
+        } catch (QueryException $e) {
+            // Mismo criterio que `store()`: distingue una violación UNIQUE de
+            // `rfc` (carrera de concurrencia — el caso normal ya lo bloquea
+            // `GuardarEmpresaRequest::rules()` antes de llegar aquí) de
+            // cualquier otro error de integridad, que nunca se oculta.
+            // Portátil entre MySQL/MariaDB (nombra el índice) y SQLite de
+            // testing (nombra tabla.columna).
+            if (str_contains($e->getMessage(), 'rfc_unique') || str_contains($e->getMessage(), 'empresas.rfc')) {
+                throw ValidationException::withMessages([
+                    'rfc' => 'Ya existe una empresa registrada con este RFC.',
+                ]);
+            }
+
+            throw $e;
+        }
 
         if ($rutaLogoABorrar) {
             // `delete()` de una ruta inexistente devuelve false sin lanzar.

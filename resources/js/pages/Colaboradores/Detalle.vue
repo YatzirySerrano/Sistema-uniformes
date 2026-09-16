@@ -399,6 +399,12 @@ const modalEmpresa = ref(false);
                     <dt class="text-muted-foreground text-xs">Puesto</dt>
                     <dd>{{ colaborador.puesto ?? '—' }}</dd>
                 </div>
+                <div class="min-w-0">
+                    <dt class="text-muted-foreground text-xs">CURP</dt>
+                    <dd class="font-mono break-words">
+                        {{ colaborador.curp }}
+                    </dd>
+                </div>
                 <div>
                     <dt
                         class="text-muted-foreground flex items-center gap-1 text-xs"

@@ -18,9 +18,15 @@ use Maatwebsite\Excel\Facades\Excel;
  */
 class ServicioImportacionColaboradores
 {
-    private const COLUMNAS = ['numero_empleado', 'nombre_completo', 'puesto', 'area', 'correo', 'sucursal_codigo'];
+    private const COLUMNAS = ['numero_empleado', 'nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
 
     private const DISCO_TEMP = 'local';
+
+    // Misma estructura que App\Http\Requests\Colaboradores\GuardarColaboradorRequest
+    // (sin verificar contra RENAPO ni recalcular el dígito verificador).
+    private const REGEX_CURP = '/^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM]'
+        .'(AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)'
+        .'[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/';
 
     public function __construct(private readonly ServicioAuditoria $auditoria) {}
 
@@ -80,7 +86,7 @@ class ServicioImportacionColaboradores
             array_shift($filas),
         );
 
-        $faltantes = array_diff(['numero_empleado', 'nombre_completo', 'sucursal_codigo'], $encabezados);
+        $faltantes = array_diff(['numero_empleado', 'nombre_completo', 'curp', 'sucursal_codigo'], $encabezados);
         if ($faltantes !== []) {
             return [
                 'total' => 0, 'validos' => [], 'duplicados' => [], 'importados' => 0,
@@ -94,10 +100,18 @@ class ServicioImportacionColaboradores
         $existentes = $empresa->colaboradores()->withTrashed()->pluck('numero_empleado')
             ->map(fn ($n): string => Str::lower((string) $n))->flip()->all();
 
+        // La CURP es única a nivel PLATAFORMA (no por empresa, a diferencia
+        // del número de empleado), así que la búsqueda de duplicados en BD
+        // NO se acota a `$empresa` — incluye soft-deleted, igual que el
+        // constraint único de la columna.
+        $existentesCurp = Colaborador::query()->withTrashed()->pluck('curp')
+            ->map(fn ($c): string => Str::lower((string) $c))->flip()->all();
+
         $validos = [];
         $duplicados = [];
         $errores = [];
         $vistosEnArchivo = [];
+        $vistosEnArchivoCurp = [];
         $importados = 0;
         $aInsertar = [];
 
@@ -114,11 +128,19 @@ class ServicioImportacionColaboradores
                 $datos[$col] = $pos !== false && isset($fila[$pos]) ? trim((string) $fila[$pos]) : null;
             }
 
+            // La inserción final usa `insert()` en lote (bypassa Eloquent y
+            // cualquier normalización de modelo), así que la CURP se
+            // uppercasea aquí mismo, antes de validar/comparar duplicados.
+            if ($datos['curp'] !== null && $datos['curp'] !== '') {
+                $datos['curp'] = Str::upper($datos['curp']);
+            }
+
             $erroresFila = [];
 
             $validador = Validator::make($datos, [
                 'numero_empleado' => ['required', 'string', 'max:60'],
                 'nombre_completo' => ['required', 'string', 'max:255'],
+                'curp' => ['required', 'string', 'size:18', 'regex:'.self::REGEX_CURP],
                 'puesto' => ['nullable', 'string', 'max:255'],
                 'area' => ['nullable', 'string', 'max:255'],
                 'correo' => ['nullable', 'email', 'max:255'],
@@ -126,6 +148,9 @@ class ServicioImportacionColaboradores
             ], [
                 'numero_empleado.required' => 'El número de empleado es obligatorio.',
                 'nombre_completo.required' => 'El nombre del colaborador es obligatorio.',
+                'curp.required' => 'La CURP es obligatoria.',
+                'curp.size' => 'La CURP debe tener exactamente 18 caracteres.',
+                'curp.regex' => 'La CURP no tiene un formato válido.',
                 'correo.email' => 'El correo electrónico no es válido.',
                 'sucursal_codigo.required' => 'La sucursal es obligatoria.',
             ]);
@@ -156,6 +181,20 @@ class ServicioImportacionColaboradores
                 continue;
             }
 
+            $claveCurp = Str::lower((string) $datos['curp']);
+
+            if ($datos['curp'] !== null && isset($vistosEnArchivoCurp[$claveCurp])) {
+                $duplicados[] = ['fila' => $numeroFila, 'datos' => $datos, 'motivo' => 'La CURP se repite en la fila '.$vistosEnArchivoCurp[$claveCurp].' del archivo.'];
+
+                continue;
+            }
+
+            if ($datos['curp'] !== null && isset($existentesCurp[$claveCurp])) {
+                $duplicados[] = ['fila' => $numeroFila, 'datos' => $datos, 'motivo' => 'La CURP ya existe en el sistema.'];
+
+                continue;
+            }
+
             if ($erroresFila !== []) {
                 $errores[] = ['fila' => $numeroFila, 'errores' => $erroresFila];
 
@@ -163,6 +202,7 @@ class ServicioImportacionColaboradores
             }
 
             $vistosEnArchivo[$claveNum] = $numeroFila;
+            $vistosEnArchivoCurp[$claveCurp] = $numeroFila;
             $validos[] = ['fila' => $numeroFila, 'datos' => $datos];
 
             $aInsertar[] = [
@@ -170,6 +210,7 @@ class ServicioImportacionColaboradores
                 'sucursal_id' => $sucursalId,
                 'numero_empleado' => $datos['numero_empleado'],
                 'nombre_completo' => $datos['nombre_completo'],
+                'curp' => $datos['curp'],
                 'puesto' => $datos['puesto'] ?: null,
                 'area' => $datos['area'] ?: null,
                 'correo' => $datos['correo'] ?: null,

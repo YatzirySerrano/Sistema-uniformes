@@ -6,6 +6,7 @@ use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Models\Empresa;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 
 /**
  * Validación de alta y edición de empresas. Es la autoridad final: el frontend
@@ -43,10 +44,21 @@ class GuardarEmpresaRequest extends FormRequest
      */
     public function rules(): array
     {
+        $empresa = $this->route('empresa');
+        $empresaId = $empresa instanceof Empresa ? $empresa->getKey() : null;
+
         return [
             'nombre_comercial' => ['required', 'string', 'max:255'],
             'razon_social' => ['nullable', 'string', 'max:255'],
-            'rfc' => ['nullable', 'string', 'max:13', 'regex:/^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{0,3}$/'],
+            // Persona moral: 3 letras + 6 dígitos + 3 alfanumérico (homoclave) = 12.
+            // Persona física: 4 letras + 6 dígitos + 3 alfanumérico (homoclave) = 13.
+            // La homoclave SIEMPRE son 3 caracteres (nunca 0-2, a diferencia de la
+            // regex anterior, que aceptaba longitudes intermedias inválidas).
+            'rfc' => [
+                'required', 'string', 'max:13',
+                'regex:/^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/',
+                Rule::unique('empresas', 'rfc')->ignore($empresaId),
+            ],
             // `codigo` NUNCA se valida como entrada del usuario: lo genera
             // el backend (autogenerado a partir del nombre comercial) en el
             // alta y es inmutable en edición.
@@ -70,8 +82,10 @@ class GuardarEmpresaRequest extends FormRequest
             'nombre_comercial.required' => 'El nombre comercial es obligatorio.',
             'nombre_comercial.max' => 'El nombre comercial no puede superar los 255 caracteres.',
             'razon_social.max' => 'La razón social no puede superar los 255 caracteres.',
+            'rfc.required' => 'El RFC es obligatorio.',
             'rfc.regex' => 'El RFC no tiene un formato válido (por ejemplo: ABC010203XYZ).',
             'rfc.max' => 'El RFC no puede superar los 13 caracteres.',
+            'rfc.unique' => 'Ya existe una empresa registrada con este RFC.',
             'telefono.digits' => 'El teléfono debe contener 10 dígitos.',
             'correo.email' => 'Introduce un correo electrónico válido.',
             'direccion.max' => 'La dirección no puede superar los 500 caracteres.',

@@ -109,6 +109,7 @@ class ColaboradorController extends Controller
         $filas = $colaboradores->map(fn (Colaborador $c): array => [
             $c->numero_empleado,
             $c->nombre_completo,
+            $c->curp,
             $c->puesto,
             $c->area,
             $c->correo,
@@ -131,7 +132,7 @@ class ColaboradorController extends Controller
         $contexto = new ContextoExportacion('Colaboradores', $empresaFiltro, $filtrosHumanos, $colaboradores->count());
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'N.º empleado', 'Nombre completo', 'Puesto', 'Área', 'Correo', 'Empresa', 'Sucursal', 'Estado',
+            'N.º empleado', 'Nombre completo', 'CURP', 'Puesto', 'Área', 'Correo', 'Empresa', 'Sucursal', 'Estado',
         ], $contexto);
     }
 
@@ -173,7 +174,8 @@ class ColaboradorController extends Controller
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
             ->when($filtros['buscar'] ?? null, fn (Builder $q, $b) => $q->where(fn (Builder $s) => $s
                 ->where('nombre_completo', 'like', "%{$b}%")
-                ->orWhere('numero_empleado', 'like', "%{$b}%")))
+                ->orWhere('numero_empleado', 'like', "%{$b}%")
+                ->orWhere('curp', 'like', "%{$b}%")))
             ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
             ->when($filtros['area_id'] ?? null, fn (Builder $q, $a) => $q->where('area_id', $a))
             ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
@@ -256,7 +258,7 @@ class ColaboradorController extends Controller
 
         return Inertia::render('Colaboradores/Formulario', [
             'colaborador' => [
-                ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
+                ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'curp', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
                 'sucursal' => $colaborador->sucursal === null ? null : ['id' => $colaborador->sucursal->id, 'nombre' => $colaborador->sucursal->nombre],
                 'area_actual' => $colaborador->departamento === null ? null : ['id' => $colaborador->departamento->id, 'nombre' => $colaborador->departamento->nombre],
                 'foto_url' => $colaborador->foto_ruta !== null ? route('colaboradores.foto', $colaborador) : null,
@@ -303,7 +305,7 @@ class ColaboradorController extends Controller
 
         return Inertia::render('Colaboradores/Detalle', [
             'colaborador' => [
-                ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
+                ...$colaborador->only(['id', 'empresa_id', 'numero_empleado', 'nombre_completo', 'curp', 'sucursal_id', 'puesto', 'area', 'area_id', 'correo', 'activo']),
                 'empresa_nombre' => $colaborador->empresa?->nombre_comercial,
                 'sucursal' => $colaborador->sucursal === null ? null : ['id' => $colaborador->sucursal->id, 'nombre' => $colaborador->sucursal->nombre],
                 'area_actual' => $colaborador->departamento === null ? null : ['id' => $colaborador->departamento->id, 'nombre' => $colaborador->departamento->nombre],
@@ -570,7 +572,8 @@ class ColaboradorController extends Controller
             ->whereHas('sucursal', fn ($q) => $q->where('activa', true))
             ->when($termino !== '', fn ($q) => $q->where(fn ($sub) => $sub
                 ->where('nombre_completo', 'like', "%{$termino}%")
-                ->orWhere('numero_empleado', 'like', "%{$termino}%")))
+                ->orWhere('numero_empleado', 'like', "%{$termino}%")
+                ->orWhere('curp', 'like', "%{$termino}%")))
             ->with(['empresa:id,nombre_comercial', 'sucursal:id,nombre', 'servicioActual:id,nombre,contrato_id', 'servicioActual.contrato:id,nombre'])
             ->orderBy('nombre_completo')
             ->limit(20)

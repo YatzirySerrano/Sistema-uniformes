@@ -24,7 +24,7 @@ class EmpresaFactory extends Factory
             'codigo' => Str::upper(Str::random(6)),
             'nombre_comercial' => $nombre,
             'razon_social' => $nombre.' S.A. de C.V.',
-            'rfc' => Str::upper(fake()->bothify('???######???')),
+            'rfc' => Str::upper(fake()->unique()->bothify('???######???')),
             'telefono' => fake()->phoneNumber(),
             'correo' => fake()->companyEmail(),
             'direccion' => fake()->address(),

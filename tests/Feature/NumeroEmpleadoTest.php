@@ -20,6 +20,7 @@ function datosColaborador(Empresa $empresa, Sucursal $sucursal, string $nombre):
     return [
         'empresa_id' => $empresa->id,
         'nombre_completo' => $nombre,
+        'curp' => curpDeQaValida(),
         'sucursal_id' => $sucursal->id,
         // Intento de manipulación: el backend debe ignorarlo siempre.
         'numero_empleado' => 'TEST123',
@@ -57,6 +58,7 @@ it('la edición nunca cambia el número de empleado aunque el cliente mande uno 
     $this->actingAs($admin)
         ->put("/colaboradores/{$colaborador->id}", [
             'nombre_completo' => 'Nombre Editado',
+            'curp' => $colaborador->curp,
             'sucursal_id' => $sucursal->id,
             'numero_empleado' => 'OTRO-999',
         ])

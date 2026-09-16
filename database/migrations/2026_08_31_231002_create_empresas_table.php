@@ -13,7 +13,7 @@ return new class extends Migration
             $table->string('codigo')->unique();
             $table->string('nombre_comercial');
             $table->string('razon_social')->nullable();
-            $table->string('rfc', 20)->nullable();
+            $table->string('rfc', 13)->unique();
             $table->string('logo_ruta')->nullable();
             $table->string('telefono', 40)->nullable();
             $table->string('correo')->nullable();

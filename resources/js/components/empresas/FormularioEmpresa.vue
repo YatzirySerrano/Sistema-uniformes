@@ -64,7 +64,7 @@ function filtrarTelefono(evento: Event): void {
     objetivo.value = limpio;
 }
 
-const rfcRegex = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{0,3}$/i;
+const rfcRegex = /^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/i;
 const correoRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const erroresLocales = computed<Record<string, string>>(() => {
@@ -91,7 +91,9 @@ const erroresLocales = computed<Record<string, string>>(() => {
         }
     }
 
-    if (
+    if (tocado.rfc && form.rfc.trim() === '') {
+        e.rfc = 'El RFC es obligatorio.';
+    } else if (
         tocado.rfc &&
         form.rfc.trim() !== '' &&
         !rfcRegex.test(form.rfc.trim())
@@ -169,8 +171,9 @@ onBeforeUnmount(() => {
 
 function enviar(): void {
     tocado.nombre_comercial = true;
+    tocado.rfc = true;
 
-    if (form.nombre_comercial.trim() === '') {
+    if (form.nombre_comercial.trim() === '' || form.rfc.trim() === '') {
         return;
     }
 
@@ -229,8 +232,9 @@ function enviar(): void {
             <div class="grid gap-1.5">
                 <Label for="ef-rfc" class="flex items-center gap-1.5">
                     RFC
+                    <span class="text-destructive">*</span>
                     <AyudaTooltip
-                        texto="Registro Federal de Contribuyentes de la empresa. 12 o 13 caracteres; se guarda en mayúsculas."
+                        texto="Registro Federal de Contribuyentes de la empresa. 12 caracteres (persona moral) o 13 (persona física); se guarda en mayúsculas."
                         etiqueta="Ayuda sobre el RFC"
                     />
                 </Label>
@@ -239,6 +243,8 @@ function enviar(): void {
                     v-model="form.rfc"
                     class="uppercase"
                     maxlength="13"
+                    required
+                    autocomplete="off"
                     @blur="marcar('rfc')"
                 />
                 <InputError :message="error('rfc')" />

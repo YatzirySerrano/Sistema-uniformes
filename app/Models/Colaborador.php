@@ -37,6 +37,7 @@ class Colaborador extends Model
         'usuario_id',
         'numero_empleado',
         'nombre_completo',
+        'curp',
         'puesto',
         'area',
         'area_id',

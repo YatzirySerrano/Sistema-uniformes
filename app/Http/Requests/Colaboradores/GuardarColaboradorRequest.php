@@ -2,9 +2,11 @@
 
 namespace App\Http\Requests\Colaboradores;
 
+use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\Colaborador;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -13,7 +15,33 @@ use Illuminate\Validation\Rule;
  */
 class GuardarColaboradorRequest extends FormRequest
 {
-    use ResuelveEmpresa;
+    use NormalizaEntrada, ResuelveEmpresa;
+
+    /**
+     * Estructura de una CURP mexicana (18 caracteres), sin verificar contra
+     * RENAPO ni recalcular el dígito verificador: 4 letras (2.º carácter
+     * vocal) + fecha de nacimiento AAMMDD + sexo H/M + entidad (2 letras, de
+     * un catálogo fijo de 32 claves) + 3 consonantes + 1 alfanumérico
+     * (diferenciador) + 1 dígito (verificador). Rechaza longitudes o
+     * caracteres claramente inválidos sin pretender validar la identidad real.
+     */
+    private const REGEX_CURP = '/^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM]'
+        .'(AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)'
+        .'[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/';
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge([
+            'curp' => $this->curp(),
+        ]);
+    }
+
+    private function curp(): ?string
+    {
+        $curp = $this->limpiar($this->input('curp'));
+
+        return $curp === null ? null : Str::upper($curp);
+    }
 
     public function authorize(): bool
     {
@@ -41,6 +69,11 @@ class GuardarColaboradorRequest extends FormRequest
             // cliente para este campo se ignora (no está en las reglas, así
             // que `validated()`/`safe()` nunca lo incluyen).
             'nombre_completo' => ['required', 'string', 'max:255'],
+            'curp' => [
+                'required', 'string', 'size:18',
+                'regex:'.self::REGEX_CURP,
+                Rule::unique('colaboradores', 'curp')->ignore($colaboradorId),
+            ],
             'sucursal_id' => [
                 'required', 'integer',
                 Rule::exists('sucursales', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
@@ -67,6 +100,10 @@ class GuardarColaboradorRequest extends FormRequest
     {
         return [
             'empresa_id.required' => 'Selecciona la empresa del colaborador.',
+            'curp.required' => 'La CURP es obligatoria.',
+            'curp.size' => 'La CURP debe tener exactamente 18 caracteres.',
+            'curp.regex' => 'La CURP no tiene un formato válido.',
+            'curp.unique' => 'Ya existe un colaborador registrado con esta CURP.',
             'sucursal_id.exists' => 'La sucursal seleccionada no pertenece a esta empresa.',
             'area_id.exists' => 'El área seleccionada no pertenece a esta empresa.',
         ];

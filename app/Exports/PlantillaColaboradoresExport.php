@@ -24,8 +24,8 @@ class PlantillaColaboradoresExport implements FromArray, WithHeadings, WithTitle
         $ejemploSucursal = (string) ($this->codigosSucursal[0] ?? 'MATRIZ');
 
         return [
-            ['1001', 'Juan Pérez López', 'Operador', 'Producción', 'juan.perez@example.test', $ejemploSucursal],
-            ['1002', 'María García Ruiz', 'Supervisora', 'Almacén', '', $ejemploSucursal],
+            ['1001', 'Juan Pérez López', 'PELJ850101HDFRZN08', 'Operador', 'Producción', 'juan.perez@example.test', $ejemploSucursal],
+            ['1002', 'María García Ruiz', 'GARM900215MDFRZR03', 'Supervisora', 'Almacén', '', $ejemploSucursal],
         ];
     }
 
@@ -34,7 +34,7 @@ class PlantillaColaboradoresExport implements FromArray, WithHeadings, WithTitle
      */
     public function headings(): array
     {
-        return ['numero_empleado', 'nombre_completo', 'puesto', 'area', 'correo', 'sucursal_codigo'];
+        return ['numero_empleado', 'nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
     }
 
     public function title(): string

@@ -119,7 +119,7 @@ it('el código de empresa lo genera el backend a partir del nombre comercial, ig
     $admin = usuarioCon(RolSistema::Administrador->value);
 
     $this->actingAs($admin)
-        ->post('/empresas', ['nombre_comercial' => 'Distribuidora Central', 'codigo' => 'HACKEADO'])
+        ->post('/empresas', ['nombre_comercial' => 'Distribuidora Central', 'rfc' => rfcDeQaValido(), 'codigo' => 'HACKEADO'])
         ->assertSessionHasNoErrors();
 
     $empresa = Empresa::query()->where('nombre_comercial', 'Distribuidora Central')->firstOrFail();
@@ -133,7 +133,7 @@ it('la edición de empresa nunca cambia el código ya asignado', function () {
     $admin = usuarioCon(RolSistema::Administrador->value);
 
     $this->actingAs($admin)
-        ->put("/empresas/{$empresa->id}", ['nombre_comercial' => 'Nombre Nuevo', 'codigo' => 'OTRO-CODIGO'])
+        ->put("/empresas/{$empresa->id}", ['nombre_comercial' => 'Nombre Nuevo', 'rfc' => $empresa->rfc, 'codigo' => 'OTRO-CODIGO'])
         ->assertSessionHasNoErrors();
 
     expect($empresa->fresh()->codigo)->toBe($codigoOriginal);

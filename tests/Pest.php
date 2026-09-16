@@ -12,6 +12,7 @@ use App\Models\User;
 use Database\Seeders\RolesPermisosSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /*
@@ -151,6 +152,28 @@ function firmaDemoBase64(): string
     imagedestroy($img);
 
     return 'data:image/png;base64,'.base64_encode($binario);
+}
+
+/**
+ * CURP estructuralmente válida (mismo patrón que
+ * `GuardarColaboradorRequest::REGEX_CURP`) y única para pruebas: cada llamada
+ * genera una distinta, para no chocar con el nuevo constraint único de BD.
+ */
+function curpDeQaValida(): string
+{
+    return fake()->unique()->regexify(
+        '[A-Z][AEIOU][A-Z]{2}[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|1[0-9]|2[0-8])'
+        .'[HM](DF|NL|JC|MC|BC|GT|VZ|SL)[BCDFGHJKLMNPQRSTVWXYZ]{3}[A-Z0-9][0-9]',
+    );
+}
+
+/**
+ * RFC (persona moral, 12 caracteres) estructuralmente válido y único para
+ * pruebas, mismo patrón que `GuardarEmpresaRequest`.
+ */
+function rfcDeQaValido(): string
+{
+    return Str::upper(fake()->unique()->bothify('???######???'));
 }
 
 /**
