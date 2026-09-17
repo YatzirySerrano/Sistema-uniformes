@@ -33,7 +33,7 @@ class RolController extends Controller
 
         $filtros = $this->filtrosListado($request);
 
-        $roles = $this->consultaRoles($filtros)->get()
+        $roles = $this->consultaRoles($request, $filtros)->get()
             ->map(fn (Role $r): array => [
                 'id' => $r->id,
                 'name' => $r->name,
@@ -73,7 +73,7 @@ class RolController extends Controller
         abort_unless($request->user()->can('roles.ver'), 403);
 
         $filtros = $this->filtrosListado($request);
-        $roles = $this->consultaRoles($filtros)->get();
+        $roles = $this->consultaRoles($request, $filtros)->get();
 
         $filtrosHumanos = array_filter([
             'Búsqueda' => $filtros['buscar'] ?? null,
@@ -192,13 +192,17 @@ class RolController extends Controller
      * @param  array<string, mixed>  $filtros
      * @return Builder<Role>
      */
-    private function consultaRoles(array $filtros): Builder
+    private function consultaRoles(Request $request, array $filtros): Builder
     {
         $base = RolSistema::valores();
 
         return Role::query()
             ->with('permissions:id,name')
             ->withCount('users')
+            // El rol Superadministrador es exclusivo del equipo técnico: no
+            // debe aparecer en el módulo de Roles y permisos para nadie más
+            // (ni en el listado ni en la exportación).
+            ->when(! $request->user()->esSuperadministrador(), fn (Builder $q) => $q->where('name', '!=', RolSistema::Superadministrador->value))
             ->when(($filtros['tipo'] ?? null) === 'base', fn (Builder $q) => $q->whereIn('name', $base))
             ->when(($filtros['tipo'] ?? null) === 'personalizados', fn (Builder $q) => $q->whereNotIn('name', $base))
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $buscar): void {

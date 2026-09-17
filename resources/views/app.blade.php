@@ -49,15 +49,36 @@
             }
         </style>
 
-        <link rel="icon" href="/favicon.ico" sizes="any">
-        <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        {{-- Favicon a partir del logo real de la empresa (`public/images/logo-seretia.jpeg`,
+        centrado sobre lienzo cuadrado sin recortar ni deformar). `?v=2` fuerza
+        a los navegadores a descartar la caché del ícono placeholder anterior
+        servido desde estas mismas rutas. --}}
+        <link rel="icon" href="/favicon.ico?v=2" sizes="any">
+        <link rel="icon" href="/favicon.png?v=2" type="image/png" sizes="512x512">
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
 
         {{-- Aplicación privada autenticada, nunca un sitio de marketing:
         noindex/nofollow fijo aquí (fuera de x-inertia::head) para que
         ningún <Head> de página pueda quitarlo. Ver App\Http\Middleware\
         AgregaEncabezadoRobots para el header HTTP equivalente. --}}
         <meta name="robots" content="noindex, nofollow, noarchive">
+
+        {{-- Metadata general (título/descripción/Open Graph/Twitter Card):
+        valores por defecto renderizados en el servidor con `data-inertia`
+        para que el <Head> de cada página los pueda reemplazar sin duplicar
+        (nunca los toca `<meta name="robots">` de arriba). Ver
+        https://inertiajs.com/docs/v3/the-basics/title-and-meta. --}}
+        <meta data-inertia="description" name="description" content="{{ config('app.name') }}: sistema privado de control y gestión de uniformes y activos de la empresa.">
+        <link data-inertia="canonical" rel="canonical" href="{{ config('app.url') }}">
+        <meta data-inertia="og:type" property="og:type" content="website">
+        <meta data-inertia="og:site_name" property="og:site_name" content="{{ config('app.name') }}">
+        <meta data-inertia="og:title" property="og:title" content="{{ config('app.name') }}">
+        <meta data-inertia="og:description" property="og:description" content="Sistema privado de control y gestión de uniformes y activos de la empresa.">
+        <meta data-inertia="og:url" property="og:url" content="{{ config('app.url') }}">
+        <meta data-inertia="og:locale" property="og:locale" content="es_MX">
+        <meta data-inertia="twitter:card" name="twitter:card" content="summary">
+        <meta data-inertia="twitter:title" name="twitter:title" content="{{ config('app.name') }}">
+        <meta data-inertia="twitter:description" name="twitter:description" content="Sistema privado de control y gestión de uniformes y activos de la empresa.">
 
         @fonts
 

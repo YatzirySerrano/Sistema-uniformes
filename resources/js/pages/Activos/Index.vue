@@ -532,7 +532,7 @@ const vista = useVistaPreferida('activos');
 
         <div
             v-else-if="vista === 'cards'"
-            class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
         >
             <div
                 v-for="a in activos"
@@ -540,7 +540,7 @@ const vista = useVistaPreferida('activos');
                 role="button"
                 tabindex="0"
                 :aria-label="`Ver detalle de ${a.nombre}`"
-                class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                class="group focus-visible:ring-ring hover:border-primary/20 flex min-w-0 cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                 @click="router.visit(`/activos/${a.id}`)"
                 @keydown.enter="router.visit(`/activos/${a.id}`)"
                 @keydown.space.prevent="router.visit(`/activos/${a.id}`)"
@@ -589,14 +589,23 @@ const vista = useVistaPreferida('activos');
                     </Badge>
                 </div>
 
-                <div class="flex flex-wrap gap-1.5">
-                    <Badge v-if="a.tipo" variant="outline" class="gap-1">
-                        <Layers class="size-3" /> {{ a.tipo }}
+                <div class="flex min-w-0 flex-wrap gap-1.5">
+                    <Badge
+                        v-if="a.tipo"
+                        variant="outline"
+                        class="max-w-full gap-1"
+                    >
+                        <Layers class="size-3 shrink-0" />
+                        <span class="truncate">{{ a.tipo }}</span>
                     </Badge>
                     <Badge variant="outline" class="gap-1">
                         <Boxes class="size-3" /> {{ a.tipo_control_etiqueta }}
                     </Badge>
-                    <Badge v-if="a.categoria" variant="secondary">
+                    <Badge
+                        v-if="a.categoria"
+                        variant="secondary"
+                        class="max-w-full truncate"
+                    >
                         {{ a.categoria }}
                     </Badge>
                 </div>

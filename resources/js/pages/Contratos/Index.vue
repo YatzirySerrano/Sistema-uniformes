@@ -326,14 +326,14 @@ function alternarEstado(c: ContratoFila): void {
         </EstadoVacio>
 
         <TooltipProvider v-else-if="vista === 'cards'" :delay-duration="150">
-            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div
                     v-for="c in contratos.data"
                     :key="c.id"
                     role="button"
                     tabindex="0"
                     :aria-label="`Ver detalles de ${c.nombre}`"
-                    class="group focus-visible:ring-ring hover:border-primary/20 flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                    class="group focus-visible:ring-ring hover:border-primary/20 flex min-w-0 cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                     @click="verDetalle(c)"
                     @keydown.enter="verDetalle(c)"
                     @keydown.space.prevent="verDetalle(c)"
@@ -383,10 +383,12 @@ function alternarEstado(c: ContratoFila): void {
                     </div>
 
                     <p
-                        class="text-muted-foreground flex items-center gap-1.5 text-xs"
+                        class="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs"
                     >
-                        <Building2 class="size-3" />
-                        {{ c.empresa.nombre_comercial }}
+                        <Building2 class="size-3 shrink-0" />
+                        <span class="truncate">{{
+                            c.empresa.nombre_comercial
+                        }}</span>
                     </p>
 
                     <p

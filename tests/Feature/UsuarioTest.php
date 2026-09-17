@@ -78,7 +78,11 @@ it('cambia el estado de un usuario y renombra los mensajes a eliminar/restaurar'
     expect($objetivo->fresh()->activo)->toBeTrue();
 });
 
-it('marca puedeCambiarEstado en falso para el propio usuario y para un superadministrador', function () {
+it('marca puedeCambiarEstado en falso para el propio usuario, y nunca lista a un superadministrador', function () {
+    // El Superadministrador es exclusivo del equipo técnico: un
+    // Administrador ni siquiera debe verlo en el listado (ver
+    // `SuperadministradorAislamientoTest`), así que aquí sólo queda
+    // verificar el propio usuario.
     $superadmin = usuarioCon(RolSistema::Superadministrador->value, [$this->empresa]);
     usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
 
@@ -86,7 +90,7 @@ it('marca puedeCambiarEstado en falso para el propio usuario y para un superadmi
     $filas = collect($respuesta->viewData('page')['props']['usuarios']['data'])->keyBy('id');
 
     expect($filas[$this->admin->id]['puedeCambiarEstado'])->toBeFalse()
-        ->and($filas[$superadmin->id]['puedeCambiarEstado'])->toBeFalse();
+        ->and($filas->has($superadmin->id))->toBeFalse();
 });
 
 it('busca usuarios por nombre y por correo', function () {

@@ -30,7 +30,23 @@ defineProps<{
 </script>
 
 <template>
-    <Head title="Iniciar sesión" />
+    <Head title="Iniciar sesión">
+        <meta
+            head-key="description"
+            name="description"
+            content="Accede a tu cuenta para gestionar la entrega y el control de uniformes y activos de la empresa."
+        />
+        <meta
+            head-key="og:title"
+            property="og:title"
+            content="Iniciar sesión"
+        />
+        <meta
+            head-key="og:description"
+            property="og:description"
+            content="Accede a tu cuenta para gestionar la entrega y el control de uniformes y activos de la empresa."
+        />
+    </Head>
 
     <div
         v-if="status"

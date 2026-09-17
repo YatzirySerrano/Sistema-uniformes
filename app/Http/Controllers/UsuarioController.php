@@ -142,6 +142,16 @@ class UsuarioController extends Controller
 
         return User::query()
             ->when(! $request->user()->esSuperadministrador(), fn (Builder $q) => $q->whereHas('empresas', fn (Builder $e) => $e->whereIn('empresas.id', $empresasIds)))
+            // El Superadministrador es exclusivo del equipo técnico: nunca
+            // debe aparecer en el listado/exportación de un Administrador,
+            // sin importar si comparte alguna empresa por `empresa_usuario`
+            // (el alcance global de Superadministrador no depende de esa
+            // tabla — ver `User::tieneAlcanceGlobal()`). Filtrado en la
+            // query, no sólo ocultado en Vue.
+            ->when(! $request->user()->esSuperadministrador(), fn (Builder $q) => $q->whereDoesntHave(
+                'roles',
+                fn (Builder $r) => $r->where('name', RolSistema::Superadministrador->value),
+            ))
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->whereHas('empresas', fn (Builder $e) => $e->where('empresas.id', $empresaFiltro->id)))
             ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
             ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))

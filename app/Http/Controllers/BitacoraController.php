@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\RolSistema;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Models\BitacoraAuditoria;
@@ -122,6 +123,16 @@ class BitacoraController extends Controller
         return BitacoraAuditoria::query()
             ->with(['empresa:id,nombre_comercial', 'sucursal:id,nombre'])
             ->when(! $superadmin, fn (Builder $q) => $q->where(fn (Builder $s) => $s->whereIn('empresa_id', $idsAutorizadas)->orWhereNull('empresa_id')))
+            // El Superadministrador es exclusivo del equipo técnico: ningún
+            // otro rol debe ver ni saber que sus acciones existen, en
+            // listado, exportación ni conteo — se filtra en la query, nunca
+            // sólo en la vista. Un superadministrador sí ve todo, incluidas
+            // acciones de otros superadministradores (Gate::before ya lo
+            // exime de la condición `! $superadmin`).
+            ->when(! $superadmin, fn (Builder $q) => $q->whereDoesntHave(
+                'usuario',
+                fn (Builder $u) => $u->whereHas('roles', fn (Builder $r) => $r->where('name', RolSistema::Superadministrador->value)),
+            ))
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
             ->when($filtros['modulo'] ?? null, fn (Builder $q, $v) => $q->where('modulo', $v))
             ->when($filtros['accion'] ?? null, fn (Builder $q, $v) => $q->where('accion', $v))
