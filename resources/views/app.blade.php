@@ -49,12 +49,15 @@
             }
         </style>
 
-        {{-- Favicon a partir del logo real de la empresa (`public/images/logo-seretia.jpeg`,
-        centrado sobre lienzo cuadrado sin recortar ni deformar). `?v=2` fuerza
-        a los navegadores a descartar la caché del ícono placeholder anterior
-        servido desde estas mismas rutas. --}}
-        <link rel="icon" href="/favicon.ico?v=2" sizes="any">
-        <link rel="icon" href="/favicon.png?v=2" type="image/png" sizes="512x512">
+        {{-- Favicon a partir del logo real de la empresa, recortado a fondo
+        transparente (`public/images/logo-seretia-transparente.png`),
+        centrado sobre lienzo cuadrado sin recortar ni deformar. `apple-touch-icon.png`
+        se queda con fondo sólido a propósito (iOS rellena de negro las zonas
+        transparentes de un ícono de pantalla de inicio). El `?v=` fuerza a
+        los navegadores a descartar la caché del ícono anterior servido
+        desde estas mismas rutas. --}}
+        <link rel="icon" href="/favicon.ico?v=3" sizes="any">
+        <link rel="icon" href="/favicon.png?v=3" type="image/png" sizes="512x512">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
 
         {{-- Aplicación privada autenticada, nunca un sitio de marketing:

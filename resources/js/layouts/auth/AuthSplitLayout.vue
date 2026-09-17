@@ -123,7 +123,7 @@ const beneficios = [
 
             <div class="relative z-10 flex w-full max-w-sm flex-col gap-6">
                 <img
-                    src="/images/logo-seretia.jpeg"
+                    src="/images/logo-seretia-transparente.png"
                     alt="Logo de la empresa"
                     class="mx-auto h-16 w-auto object-contain sm:h-20"
                 />
