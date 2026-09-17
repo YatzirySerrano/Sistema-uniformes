@@ -373,17 +373,44 @@ export function useGraficasDashboard() {
     }
 
     /**
+     * "Nombre base (Variante)" partido en 2 líneas — la variante/talla queda
+     * SIEMPRE completa en su propia línea, nunca a medias por un corte de
+     * ancho máximo. Si la etiqueta no trae ese sufijo entre paréntesis, se
+     * devuelve intacta (1 sola línea, comportamiento de siempre). El tipo del
+     * parámetro de `ApexYAxis.labels.formatter` está declarado como `number`
+     * (pensado para el eje de VALORES); en modo `horizontal: true` ApexCharts
+     * lo reutiliza para las categorías del eje, que en tiempo real llegan
+     * como `string` — de ahí el `String(valor)` defensivo.
+     */
+    function partirEtiquetaVariante(valor: string | number): string | string[] {
+        const etiqueta = String(valor);
+        const coincidencia = etiqueta.match(/^(.+)\s(\([^)]+\))$/);
+
+        return coincidencia ? [coincidencia[1], coincidencia[2]] : etiqueta;
+    }
+
+    /**
      * Barras horizontales — mejor que verticales cuando las etiquetas
      * (nombres de almacén, categoría…) son largas.
+     *
+     * `etiquetaLargaEnDosLineas` es OPT-IN (por defecto `false`) a propósito:
+     * el Dashboard usa esta misma función para almacenes/categorías que
+     * nunca traen un sufijo "(variante)", así que su render queda
+     * bit-a-bit idéntico. Sólo Reportes lo activa para "Top activos
+     * entregados"/"Riesgo de desabasto", donde el corte por ancho máximo
+     * por defecto de ApexCharts (160px) cortaba justo antes de la talla —
+     * p. ej. "Calzado de Seguridad (…" en vez de "Calzado de Seguridad (28)".
      */
     function opcionesBarrasHorizontales(
         categorias: string[],
         opciones: {
             formatoValor?: (valor: number) => string;
             colores?: string[];
+            etiquetaLargaEnDosLineas?: boolean;
         } = {},
     ): ApexOptions {
         const fValor = opciones.formatoValor ?? formatoNumero;
+        const dosLineas = opciones.etiquetaLargaEnDosLineas ?? false;
 
         return {
             chart: chartBase('bar'),
@@ -412,15 +439,31 @@ export function useGraficasDashboard() {
                 axisBorder: { color: colores.value.border },
                 axisTicks: { color: colores.value.border },
             },
-            yaxis: { labels: { style: ejeEstilo() } },
+            yaxis: {
+                labels: {
+                    style: ejeEstilo(),
+                    maxWidth: dosLineas ? 220 : 160,
+                    ...(dosLineas
+                        ? {
+                              formatter: (valor: number) =>
+                                  partirEtiquetaVariante(valor),
+                          }
+                        : {}),
+                },
+            },
             responsive: [
                 {
                     breakpoint: 480,
                     options: {
-                        chart: { height: 240 },
+                        chart: { height: dosLineas ? 300 : 240 },
                         plotOptions: { bar: { barHeight: '70%' } },
                         dataLabels: { style: { fontSize: '10px' } },
-                        yaxis: { labels: { style: { fontSize: '10px' } } },
+                        yaxis: {
+                            labels: {
+                                style: { fontSize: '10px' },
+                                maxWidth: dosLineas ? 150 : undefined,
+                            },
+                        },
                     },
                 },
             ],

@@ -224,10 +224,10 @@ const CLASE_ESTADO_STOCK: Record<string, string> = {
 // el respaldo si el backend agrega un KPI nuevo sin actualizar este mapa.
 const ICONO_KPI: Record<string, unknown> = {
     'Entregas realizadas': PackageCheck,
-    'Líneas de detalle entregadas': ListOrdered,
+    'Registros de artículos': ListOrdered,
     'Piezas entregadas': Package,
-    'Colaboradores únicos con entrega': Users,
-    'Tipos de activos distintos entregados': Shapes,
+    'Colaboradores con entrega': Users,
+    'Tipos de activos entregados': Shapes,
     'Piezas disponibles': Boxes,
     'Variantes/tallas bajo mínimo': TriangleAlert,
     'Variantes/tallas sin existencias': PackageX,
@@ -235,26 +235,29 @@ const ICONO_KPI: Record<string, unknown> = {
     'Unidades asignadas': UserCheck,
 };
 
+// Mismo texto que `ReporteController::descripcionesKpis{Entregas,Inventario}()`
+// (duplicado a propósito: Vue no puede leer un array PHP en build-time).
 const DESCRIPCION_KPI: Record<string, string> = {
     'Entregas realizadas':
-        'Cantidad total de entregas registradas en el periodo filtrado',
-    'Líneas de detalle entregadas':
-        'Suma de los renglones/detalles dentro de todas las entregas',
-    'Piezas entregadas': 'Suma total de piezas entregadas',
-    'Colaboradores únicos con entrega':
-        'Colaboradores distintos que recibieron al menos una entrega',
-    'Tipos de activos distintos entregados':
-        'Cantidad de activos diferentes entregados en el periodo',
+        'Número de entregas registradas en el periodo filtrado.',
+    'Registros de artículos':
+        'Renglones de artículos incluidos en las entregas; un registro puede contener varias piezas.',
+    'Piezas entregadas':
+        'Suma total de piezas entregadas en el periodo filtrado.',
+    'Colaboradores con entrega':
+        'Colaboradores distintos que recibieron al menos una entrega.',
+    'Tipos de activos entregados':
+        'Activos distintos incluidos en las entregas del periodo.',
     'Piezas disponibles':
-        'Suma de existencias disponibles en el alcance filtrado',
+        'Suma de existencias disponibles en el alcance filtrado.',
     'Variantes/tallas bajo mínimo':
-        'Combinaciones de activo y variante cuya existencia ya alcanzó su mínimo configurado',
+        'Posiciones de inventario (empresa + almacén + activo + variante, cuando el activo la usa) cuya existencia disponible llegó a su mínimo configurado o está por debajo.',
     'Variantes/tallas sin existencias':
-        'Combinaciones de activo y variante sin ninguna pieza disponible',
+        'Posiciones de inventario (empresa + almacén + activo + variante, cuando el activo la usa) sin ninguna pieza disponible.',
     'Unidades disponibles':
-        'Unidades de seguimiento individual listas para entregar',
+        'Unidades de seguimiento individual listas para entregar.',
     'Unidades asignadas':
-        'Unidades de seguimiento individual entregadas a un colaborador',
+        'Unidades de seguimiento individual actualmente entregadas a un colaborador.',
 };
 
 const { colores, temaApex, opcionesBarrasHorizontales, opcionesDonut } =
@@ -355,7 +358,7 @@ function etiquetaTopActivo(a: {
 const opcionesTopActivos = computed<ApexOptions>(() =>
     opcionesBarrasHorizontales(
         (props.graficas.top_activos ?? []).map(etiquetaTopActivo),
-        { formatoValor: formatoNumero },
+        { formatoValor: formatoNumero, etiquetaLargaEnDosLineas: true },
     ),
 );
 const seriesTopActivos = computed(() => [
@@ -419,7 +422,11 @@ function etiquetaDesabasto(r: {
 const opcionesRiesgoDesabasto = computed<ApexOptions>(() =>
     opcionesBarrasHorizontales(
         (props.graficas.riesgo_desabasto ?? []).map(etiquetaDesabasto),
-        { formatoValor: formatoNumero, colores: ['#f59e0b'] },
+        {
+            formatoValor: formatoNumero,
+            colores: ['#f59e0b'],
+            etiquetaLargaEnDosLineas: true,
+        },
     ),
 );
 const seriesRiesgoDesabasto = computed(() => [
@@ -562,13 +569,13 @@ const seriesRiesgoDesabasto = computed(() => [
                     <VueApexCharts
                         v-if="graficasListas"
                         type="bar"
-                        height="280"
+                        height="320"
                         :options="opcionesTopActivos"
                         :series="seriesTopActivos"
                     />
                     <div
                         v-else
-                        class="bg-muted/50 h-[280px] rounded-lg motion-safe:animate-pulse"
+                        class="bg-muted/50 h-[320px] rounded-lg motion-safe:animate-pulse"
                     />
                 </CardContent>
             </Card>
@@ -669,13 +676,13 @@ const seriesRiesgoDesabasto = computed(() => [
                     <VueApexCharts
                         v-if="graficasListas"
                         type="bar"
-                        height="280"
+                        height="320"
                         :options="opcionesRiesgoDesabasto"
                         :series="seriesRiesgoDesabasto"
                     />
                     <div
                         v-else
-                        class="bg-muted/50 h-[280px] rounded-lg motion-safe:animate-pulse"
+                        class="bg-muted/50 h-[320px] rounded-lg motion-safe:animate-pulse"
                     />
                 </CardContent>
             </Card>

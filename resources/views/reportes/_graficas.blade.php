@@ -1,4 +1,5 @@
 @if ($contexto->graficas !== [])
+    @include('reportes._partir-etiqueta-variante')
     <h2 class="seccion">Indicadores gráficos</h2>
     <div class="graficas">
         @foreach ($contexto->graficas as $indice => $grafica)
@@ -9,6 +10,13 @@
             <script>
                 (function () {
                     var opciones = {!! json_encode($grafica->opcionesApex(), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR) !!};
+                    @if ($grafica->etiquetasLargasEnDosLineas)
+                        opciones.yaxis = Object.assign({}, opciones.yaxis, {
+                            labels: Object.assign({}, (opciones.yaxis && opciones.yaxis.labels) || {}, {
+                                formatter: partirEtiquetaVarianteEnDosLineas,
+                            }),
+                        });
+                    @endif
                     var grafica = new ApexCharts(document.querySelector('#grafica-{{ $indice }}'), opciones);
                     window.__graficasPendientes.push(grafica.render());
                 })();

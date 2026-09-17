@@ -25,6 +25,7 @@ final readonly class SerieGraficaReporte
      * @param  ?string  $etiquetaSerie  Nombre de la serie principal en modo comparativo (p. ej. "Piezas entregadas"). Ignorado si no es comparativa.
      * @param  ?array<int, int|float>  $valoresComparacion  Segunda serie opcional, mismo orden/longitud que `$etiquetas`. `null` = gráfica de una sola serie.
      * @param  ?string  $etiquetaComparacion  Nombre de la segunda serie (p. ej. "Piezas devueltas").
+     * @param  bool  $etiquetasLargasEnDosLineas  OPT-IN (por defecto `false`, retrocompatible con toda gráfica existente de otros módulos): activa, sólo en barras horizontales de una serie, el corte "Nombre base (Variante)" → 2 líneas en el eje de categorías (`_apex-lib.blade.php::partirEtiquetaVarianteEnDosLineas`), para que la variante/talla nunca quede a medias por el ancho máximo del eje. Ver `Reportes/Index.vue` para el equivalente en pantalla (`opcionesBarrasHorizontales({ etiquetaLargaEnDosLineas: true })`).
      */
     public function __construct(
         public string $titulo,
@@ -35,6 +36,7 @@ final readonly class SerieGraficaReporte
         public ?string $etiquetaSerie = null,
         public ?array $valoresComparacion = null,
         public ?string $etiquetaComparacion = null,
+        public bool $etiquetasLargasEnDosLineas = false,
     ) {}
 
     public function esComparativa(): bool
@@ -110,10 +112,27 @@ final readonly class SerieGraficaReporte
         return match ($this->tipo) {
             TipoGrafica::Barras => [
                 ...$base,
+                // Sin `etiquetasLargasEnDosLineas` (todo lo que no es
+                // "Activo (Variante)"), `chart.height` queda igual que
+                // siempre — idéntico byte a byte para cualquier otro
+                // módulo/gráfica. Con el flag, un poco más de alto: cada
+                // barra necesita espacio para 2 líneas de etiqueta, no 1.
+                'chart' => $this->etiquetasLargasEnDosLineas
+                    ? [...$base['chart'], 'height' => 300]
+                    : $base['chart'],
                 'series' => [['name' => $this->titulo, 'data' => $this->valores]],
                 'plotOptions' => ['bar' => ['horizontal' => true, 'borderRadius' => 3, 'distributed' => true]],
                 'legend' => [...$base['legend'], 'show' => false],
                 'xaxis' => ['categories' => $this->etiquetas, 'labels' => ['style' => ['fontFamily' => $fuente]]],
+                // `yaxis.labels.maxWidth`: ApexCharts corta con "…" a partir
+                // de 160px por defecto — insuficiente para "Activo
+                // (Variante)", cortaba justo antes de la variante. El
+                // formatter que además la parte en 2 líneas vive en
+                // `reportes/_partir-etiqueta-variante.blade.php` (JS no
+                // serializa por JSON, así que no puede ir en este array).
+                ...($this->etiquetasLargasEnDosLineas
+                    ? ['yaxis' => ['labels' => ['maxWidth' => 320]]]
+                    : []),
             ],
             TipoGrafica::Dona => [
                 ...$base,

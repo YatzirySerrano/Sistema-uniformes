@@ -24,6 +24,7 @@ final class ContextoExportacion
      * @param  array<string, string>  $filtros  Pares "Etiqueta" => "Valor humano", ya listos para mostrar (nunca `empresa_id: 4`, siempre "Empresa: DASTI").
      * @param  array<string, string|int>  $kpis  Pares "Etiqueta" => valor para la hoja Resumen (Excel) / bloque KPI (PDF). Vacío = sólo el bloque genérico (título/empresa/filtros/total).
      * @param  array<int, SerieGraficaReporte>  $graficas  Gráficas propias del módulo (vacío = ninguna — no todos los módulos aportan una dimensión graficable).
+     * @param  array<string, string>  $kpiDescripciones  Pares "Etiqueta" => frase corta explicando ese KPI, OPCIONAL y RETROCOMPATIBLE: las claves deben calzar con `$kpis`, pero un módulo puede no pasar nada (vacío por defecto) y `kpisResueltos()` simplemente arma tarjetas sin descripción — ningún consumidor existente de `$kpis` se rompe.
      */
     public function __construct(
         public readonly string $titulo,
@@ -33,8 +34,29 @@ final class ContextoExportacion
         public readonly ?string $generadoPor = null,
         public readonly array $kpis = [],
         public readonly array $graficas = [],
+        public readonly array $kpiDescripciones = [],
     ) {
         $this->generadoEn = CarbonImmutable::now();
+    }
+
+    /**
+     * `$kpis` (etiqueta => valor) resuelto a tarjetas tipadas, cruzando cada
+     * etiqueta con `$kpiDescripciones` cuando exista — única fábrica de
+     * `KpiExportacion`, así ningún consumidor arma la tarjeta a mano.
+     *
+     * @return array<int, KpiExportacion>
+     */
+    public function kpisResueltos(): array
+    {
+        return array_map(
+            fn (string $etiqueta, string|int $valor): KpiExportacion => new KpiExportacion(
+                $etiqueta,
+                $valor,
+                $this->kpiDescripciones[$etiqueta] ?? null,
+            ),
+            array_keys($this->kpis),
+            array_values($this->kpis),
+        );
     }
 
     public function nombreEmpresa(): string

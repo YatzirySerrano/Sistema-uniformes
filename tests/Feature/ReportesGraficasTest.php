@@ -220,6 +220,53 @@ it('el PDF de un módulo sin gráficas no carga ApexCharts (evita ~900 KB de JS 
     Pdf::assertDontSee('new ApexCharts');
 });
 
+it('el PDF de "Top activos entregados" parte la etiqueta activo+talla en 2 líneas para no cortarla', function () {
+    sembrarRolesPermisos();
+    Pdf::fake();
+
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+    $activo = Activo::factory()->for($empresa)->create(['nombre' => 'Calzado de Seguridad Industrial']);
+
+    $entrega = EntregaUniforme::factory()->for($empresa)->for($sucursal)->create(['almacen_id' => $almacen->id, 'estado' => 'firmada']);
+    DetalleEntrega::factory()->for($entrega, 'entrega')->for($activo)->create([
+        'cantidad' => 3, 'activo_nombre_snapshot' => 'Calzado de Seguridad Industrial', 'talla_valor_snapshot' => '28',
+    ]);
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    // El nombre del activo (con la talla) llega intacto al HTML del PDF —
+    // ApexCharts corta VISUALMENTE en el navegador, no en el string fuente,
+    // así que la fuente siempre trae el texto completo. Lo que cambia con
+    // `etiquetasLargasEnDosLineas` es la config que evita ese corte visual.
+    $this->actingAs($admin)->get('/reportes/entregas/exportar?formato=pdf')->assertOk();
+    Pdf::assertSee([
+        'Calzado de Seguridad Industrial (28)',
+        'partirEtiquetaVarianteEnDosLineas',
+        '"maxWidth":320',
+    ]);
+});
+
+it('el PDF de Colaboradores (otra gráfica de barras compartida) NUNCA activa el corte en 2 líneas — es opt-in, sólo Reportes lo usa', function () {
+    sembrarRolesPermisos();
+    Pdf::fake();
+
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    Colaborador::factory()->for($empresa)->for($sucursal)->create();
+
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    $this->actingAs($admin)->get('/colaboradores/exportar?formato=pdf')->assertOk();
+    // El helper JS se incluye siempre que la página trae alguna gráfica
+    // (utilidad compartida, sin efecto si nadie la usa como formatter —
+    // igual que ApexCharts mismo se carga siempre). Lo que SÍ debe seguir
+    // ausente es que algún `yaxis` la haya activado como formatter real.
+    Pdf::assertDontSee('"maxWidth":320');
+    Pdf::assertDontSee('formatter: partirEtiquetaVarianteEnDosLineas');
+});
+
 it('el PDF de Reportes > Entregas incluye el glosario de KPIs para que el usuario no tenga que adivinar', function () {
     sembrarRolesPermisos();
     Pdf::fake();
@@ -228,7 +275,9 @@ it('el PDF de Reportes > Entregas incluye el glosario de KPIs para que el usuari
     $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
 
     $this->actingAs($admin)->get('/reportes/entregas/exportar?formato=pdf')->assertOk();
-    Pdf::assertSee(['Colaboradores únicos con entrega', 'Colaboradores distintos que recibieron al menos una entrega']);
+    Pdf::assertSee(['Colaboradores con entrega', 'Colaboradores distintos que recibieron al menos una entrega']);
+    Pdf::assertSee(['Registros de artículos', 'un registro puede contener varias piezas']);
+    Pdf::assertDontSee('Líneas de detalle entregadas');
 });
 
 it('el PDF de Reportes > Inventario incluye el glosario de KPIs para que el usuario no tenga que adivinar', function () {
@@ -243,7 +292,7 @@ it('el PDF de Reportes > Inventario incluye el glosario de KPIs para que el usua
     $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
 
     $this->actingAs($admin)->get('/reportes/inventario/exportar?formato=pdf')->assertOk();
-    Pdf::assertSee(['Variantes/tallas bajo mínimo', 'Combinaciones de activo y variante cuya existencia ya alcanzó su mínimo configurado']);
+    Pdf::assertSee(['Variantes/tallas bajo mínimo', 'Posiciones de inventario']);
 });
 
 it('el Excel de Entregas trae comparativa entregas/devoluciones, top activos y Resumen/Datos — sin charts nativos', function () {

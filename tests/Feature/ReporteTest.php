@@ -203,11 +203,12 @@ it('KPIs de Entregas: entregas, renglones, piezas, colaboradores y tipos de acti
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('kpis.Entregas realizadas', 2)
-            ->where('kpis.Líneas de detalle entregadas', 3)
+            ->where('kpis.Registros de artículos', 3)
             ->where('kpis.Piezas entregadas', 10)
-            ->where('kpis.Colaboradores únicos con entrega', 2)
-            ->where('kpis.Tipos de activos distintos entregados', 2)
-            ->missing('kpis.Sucursales atendidas'));
+            ->where('kpis.Colaboradores con entrega', 2)
+            ->where('kpis.Tipos de activos entregados', 2)
+            ->missing('kpis.Sucursales atendidas')
+            ->missing('kpis.Líneas de detalle entregadas'));
 });
 
 it('Top activos entregados incluye la variante/talla cuando el renglón la tiene', function () {

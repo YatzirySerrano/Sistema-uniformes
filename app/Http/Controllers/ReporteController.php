@@ -133,6 +133,7 @@ class ReporteController extends Controller
             generadoPor: $request->user()?->name,
             kpis: $this->kpisEntregas($metricas),
             graficas: $this->graficasEntregas($metricas, $comparativa),
+            kpiDescripciones: $this->descripcionesKpisEntregas(),
         );
 
         if ($formato === 'pdf') {
@@ -140,7 +141,6 @@ class ReporteController extends Controller
                 'entregas' => $entregas,
                 'filtros' => $filtros,
                 'contexto' => $contexto,
-                'glosario' => $this->glosarioKpisEntregas(),
             ])
                 ->format(Format::Letter)
                 ->landscape()
@@ -165,6 +165,13 @@ class ReporteController extends Controller
      * adivinar (ver `.ai/rules` — nunca un tecnicismo interno tipo
      * "renglón" sin contexto). Misma fuente para pantalla, Excel y PDF.
      *
+     * "Registros de artículos" = `$metricas['renglones']`: cuenta FILAS de
+     * `detalles_entrega` (un registro por combinación entrega+activo+
+     * variante), NUNCA piezas — un registro puede agrupar varias piezas.
+     * Deliberadamente distinto de "Piezas entregadas" (`$metricas['piezas']`,
+     * la suma de cantidades). Ver `descripcionesKpisEntregas()` para el texto
+     * exacto que evita esa confusión en Excel/PDF/pantalla.
+     *
      * @param  array{entregas: int, renglones: int, piezas: int, colaboradores: int, tipos_activos: int, top_activos: array<int, FilaTopActivo>, por_sucursal: array<int, FilaPorSucursal>}  $metricas
      * @return array<string, int>
      */
@@ -172,27 +179,31 @@ class ReporteController extends Controller
     {
         return [
             'Entregas realizadas' => $metricas['entregas'],
-            'Líneas de detalle entregadas' => $metricas['renglones'],
+            'Registros de artículos' => $metricas['renglones'],
             'Piezas entregadas' => $metricas['piezas'],
-            'Colaboradores únicos con entrega' => $metricas['colaboradores'],
-            'Tipos de activos distintos entregados' => $metricas['tipos_activos'],
+            'Colaboradores con entrega' => $metricas['colaboradores'],
+            'Tipos de activos entregados' => $metricas['tipos_activos'],
         ];
     }
 
     /**
-     * Glosario breve para el PDF (misma explicación que `TarjetaKpi` muestra
-     * en pantalla) — las claves deben calzar exactamente con `kpisEntregas()`.
+     * Descripción breve por KPI — fuente ÚNICA para la tarjeta del Excel
+     * (`ContextoExportacion::kpiDescripciones` → `kpisResueltos()`), el
+     * glosario del PDF (`reportes/_glosario-kpis.blade.php`, que lee
+     * `$contexto->kpiDescripciones` directamente) y `TarjetaKpi` en pantalla
+     * (`DESCRIPCION_KPI` en `Reportes/Index.vue` — mismo texto, runtime
+     * distinto). Las claves deben calzar exactamente con `kpisEntregas()`.
      *
      * @return array<string, string>
      */
-    private function glosarioKpisEntregas(): array
+    private function descripcionesKpisEntregas(): array
     {
         return [
-            'Entregas realizadas' => 'Total de entregas registradas en el periodo filtrado',
-            'Líneas de detalle entregadas' => 'Suma de los renglones/detalles dentro de todas las entregas',
-            'Piezas entregadas' => 'Suma total de piezas entregadas',
-            'Colaboradores únicos con entrega' => 'Colaboradores distintos que recibieron al menos una entrega',
-            'Tipos de activos distintos entregados' => 'Cantidad de activos diferentes entregados en el periodo',
+            'Entregas realizadas' => 'Número de entregas registradas en el periodo filtrado.',
+            'Registros de artículos' => 'Renglones de artículos incluidos en las entregas; un registro puede contener varias piezas.',
+            'Piezas entregadas' => 'Suma total de piezas entregadas en el periodo filtrado.',
+            'Colaboradores con entrega' => 'Colaboradores distintos que recibieron al menos una entrega.',
+            'Tipos de activos entregados' => 'Activos distintos incluidos en las entregas del periodo.',
         ];
     }
 
@@ -227,10 +238,12 @@ class ReporteController extends Controller
 
         if ($metricas['top_activos'] !== []) {
             $graficas[] = new SerieGraficaReporte(
-                'Top activos entregados (piezas)',
-                TipoGrafica::Barras,
-                array_map(fn (array $r): string => $r['talla'] ? "{$r['activo']} ({$r['talla']})" : $r['activo'], $metricas['top_activos']),
-                array_column($metricas['top_activos'], 'piezas'),
+                titulo: 'Top activos entregados (piezas)',
+                tipo: TipoGrafica::Barras,
+                etiquetas: array_map(fn (array $r): string => $r['talla'] ? "{$r['activo']} ({$r['talla']})" : $r['activo'], $metricas['top_activos']),
+                valores: array_column($metricas['top_activos'], 'piezas'),
+                // Nombre + variante: nunca cortar la variante a medias.
+                etiquetasLargasEnDosLineas: true,
             );
         }
 
@@ -283,13 +296,13 @@ class ReporteController extends Controller
             generadoPor: $request->user()?->name,
             kpis: $this->kpisInventario($metricasInventario, $metricasUnidades),
             graficas: $this->graficasInventario($metricasInventario, $metricasUnidades),
+            kpiDescripciones: $this->descripcionesKpisInventario(),
         );
 
         if ($formato === 'pdf') {
             $pdf = Pdf::view('reportes.inventario', [
                 'saldos' => $saldos,
                 'contexto' => $contexto,
-                'glosario' => $this->glosarioKpisInventario(),
             ])
                 ->format(Format::Letter)
                 ->landscape()
@@ -333,19 +346,28 @@ class ReporteController extends Controller
     }
 
     /**
-     * Glosario breve para el PDF — las claves deben calzar exactamente con
-     * `kpisInventario()`.
+     * Descripción breve por KPI — misma fuente única que
+     * `descripcionesKpisEntregas()` (Excel/PDF/pantalla). Las claves deben
+     * calzar exactamente con `kpisInventario()`.
+     *
+     * "Variantes/tallas..." es la etiqueta, pero la DIMENSIÓN real no
+     * siempre es una talla: `saldos_inventario` se llavea por
+     * `empresa + almacén + activo + talla`, y `talla_id` es NULLABLE
+     * ("sin variante" cuando el activo no usa tallas). Por eso la
+     * descripción habla de "posiciones de inventario" en vez de asumir que
+     * siempre hay una talla — sería una descripción falsa para un activo sin
+     * variantes.
      *
      * @return array<string, string>
      */
-    private function glosarioKpisInventario(): array
+    private function descripcionesKpisInventario(): array
     {
         return [
-            'Piezas disponibles' => 'Suma de existencias disponibles en el alcance filtrado',
-            'Variantes/tallas bajo mínimo' => 'Combinaciones de activo y variante cuya existencia ya alcanzó su mínimo configurado',
-            'Variantes/tallas sin existencias' => 'Combinaciones de activo y variante sin ninguna pieza disponible',
-            'Unidades disponibles' => 'Unidades de seguimiento individual listas para entregar',
-            'Unidades asignadas' => 'Unidades de seguimiento individual entregadas a un colaborador',
+            'Piezas disponibles' => 'Suma de existencias disponibles en el alcance filtrado.',
+            'Variantes/tallas bajo mínimo' => 'Posiciones de inventario (empresa + almacén + activo + variante, cuando el activo la usa) cuya existencia disponible llegó a su mínimo configurado o está por debajo.',
+            'Variantes/tallas sin existencias' => 'Posiciones de inventario (empresa + almacén + activo + variante, cuando el activo la usa) sin ninguna pieza disponible.',
+            'Unidades disponibles' => 'Unidades de seguimiento individual listas para entregar.',
+            'Unidades asignadas' => 'Unidades de seguimiento individual actualmente entregadas a un colaborador.',
         ];
     }
 
@@ -383,11 +405,13 @@ class ReporteController extends Controller
 
         if ($metricasInventario['riesgo_desabasto']->isNotEmpty()) {
             $graficas[] = new SerieGraficaReporte(
-                'Riesgo de desabasto (faltante)',
-                TipoGrafica::Barras,
-                $metricasInventario['riesgo_desabasto']->map(fn (array $r): string => $r['talla'] ? "{$r['activo']} ({$r['talla']})" : $r['activo'])->all(),
-                $metricasInventario['riesgo_desabasto']->pluck('faltante')->all(),
-                [PaletaGraficas::alerta()],
+                titulo: 'Riesgo de desabasto (faltante)',
+                tipo: TipoGrafica::Barras,
+                etiquetas: $metricasInventario['riesgo_desabasto']->map(fn (array $r): string => $r['talla'] ? "{$r['activo']} ({$r['talla']})" : $r['activo'])->all(),
+                valores: $metricasInventario['riesgo_desabasto']->pluck('faltante')->all(),
+                colores: [PaletaGraficas::alerta()],
+                // Nombre + variante: nunca cortar la variante a medias.
+                etiquetasLargasEnDosLineas: true,
             );
         }
 

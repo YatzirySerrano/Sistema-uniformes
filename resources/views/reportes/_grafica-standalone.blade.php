@@ -10,6 +10,7 @@
 <body>
     <div id="grafica"></div>
     <script>{!! file_get_contents(base_path('node_modules/apexcharts/dist/apexcharts.min.js')) !!}</script>
+    @include('reportes._partir-etiqueta-variante')
     <script>
         window.__graficaLista = false;
         (function () {
@@ -19,6 +20,13 @@
                 height: {{ $alto }},
                 animations: { enabled: false },
             });
+            @if ($grafica->etiquetasLargasEnDosLineas)
+                opciones.yaxis = Object.assign({}, opciones.yaxis, {
+                    labels: Object.assign({}, (opciones.yaxis && opciones.yaxis.labels) || {}, {
+                        formatter: partirEtiquetaVarianteEnDosLineas,
+                    }),
+                });
+            @endif
             var instancia = new ApexCharts(document.querySelector('#grafica'), opciones);
             instancia.render()
                 .then(function () { window.__graficaLista = true; })
