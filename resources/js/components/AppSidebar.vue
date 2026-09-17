@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeftRight,
     Boxes,
@@ -28,7 +28,6 @@ import {
     Warehouse,
 } from '@lucide/vue';
 import { computed } from 'vue';
-import AppLogo from '@/components/AppLogo.vue';
 import NavUser from '@/components/NavUser.vue';
 import {
     Sidebar,
@@ -46,6 +45,7 @@ import { useCurrentUrl } from '@/composables/useCurrentUrl';
 
 const { puede } = usePermisos();
 const { isCurrentOrParentUrl } = useCurrentUrl();
+const name = usePage().props.name;
 
 type Enlace = {
     titulo: string;
@@ -261,7 +261,21 @@ const grupos = computed<Grupo[]>(() =>
                 <SidebarMenuItem>
                     <SidebarMenuButton size="lg" as-child>
                         <Link href="/dashboard">
-                            <AppLogo />
+                            <div
+                                class="flex aspect-square size-8 items-center justify-center"
+                            >
+                                <img
+                                    src="/images/logo-seretia-transparente.png"
+                                    alt="Logo de Seretia"
+                                    class="size-full object-contain"
+                                />
+                            </div>
+                            <div class="ml-1 grid flex-1 text-left text-sm">
+                                <span
+                                    class="mb-0.5 truncate leading-tight font-semibold"
+                                    >{{ name }}</span
+                                >
+                            </div>
                         </Link>
                     </SidebarMenuButton>
                 </SidebarMenuItem>
