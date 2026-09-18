@@ -108,9 +108,7 @@ class RolController extends Controller
             ]);
         }
 
-        $etiquetasPermiso = Permisos::etiquetas();
-
-        $filas = $roles->map(function (Role $r) use ($etiquetasPermiso): array {
+        $filas = $roles->map(function (Role $r): array {
             $permisos = $r->permissions->pluck('name');
             $esBase = in_array($r->name, RolSistema::valores(), true);
 
@@ -119,7 +117,7 @@ class RolController extends Controller
                 $esBase ? 'Base del sistema' : 'Personalizado',
                 (int) $r->users_count,
                 $permisos->count(),
-                $this->resumenPermisos($permisos->all(), $etiquetasPermiso),
+                $this->resumenPermisos($permisos->all()),
             ];
         })->all();
 
@@ -215,31 +213,32 @@ class RolController extends Controller
     }
 
     /**
-     * Agrupa los permisos de un rol por módulo, ya humanizados
-     * ("Empresas: Ver, Crear · Activos: Ver"), para que el reporte quede
-     * legible en vez de una lista interminable de claves técnicas.
+     * Representación legible de los permisos de un rol para la columna
+     * "Permisos" del Excel: un bloque de texto POR MÓDULO (nombre en su
+     * propia línea) con cada permiso en una línea aparte con viñeta `•`, y
+     * una línea en blanco entre módulos — antes era una sola cadena unida
+     * por " · " (`"Activos: Ver · Acuses: Ver, Firmar"`), ilegible en
+     * cuanto un rol tenía varios módulos. Los saltos de línea los interpreta
+     * `ajustarColumnasYAlineacion()` (`DecoraConContexto`) para activar
+     * `wrapText` + alto de fila automático; ver `.ai/rules/sistema.md`.
+     * Reutiliza `agruparPermisos()` (misma fuente que ya usa el PDF de este
+     * export) para que el orden y las etiquetas de módulo sean IDÉNTICOS en
+     * ambos formatos — nunca se reimplementa el agrupado aquí.
      *
      * @param  array<int, string>  $permisos
-     * @param  array<string, string>  $etiquetas
      */
-    private function resumenPermisos(array $permisos, array $etiquetas): string
+    private function resumenPermisos(array $permisos): string
     {
         if ($permisos === []) {
             return 'Sin permisos';
         }
 
-        $porGrupo = [];
-        foreach ($permisos as $permiso) {
-            $grupo = str_contains($permiso, '.') ? Str::before($permiso, '.') : $permiso;
-            $porGrupo[$grupo][] = $etiquetas[$permiso] ?? $permiso;
+        $bloques = [];
+        foreach ($this->agruparPermisos($permisos) as $etiquetaGrupo => $items) {
+            $bloques[] = $etiquetaGrupo."\n".implode("\n", array_map(fn (string $item): string => "• {$item}", $items));
         }
 
-        $partes = [];
-        foreach ($porGrupo as $grupo => $items) {
-            $partes[] = Str::of($grupo)->replace('-', ' ')->title()->value().': '.implode(', ', $items);
-        }
-
-        return implode(' · ', $partes);
+        return implode("\n\n", $bloques);
     }
 
     public function store(Request $request): RedirectResponse

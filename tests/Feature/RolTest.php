@@ -4,7 +4,9 @@ use App\Enums\RolSistema;
 use App\Exports\ListadoExport;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\Permisos;
+use Maatwebsite\Excel\Excel as ExcelFormatos;
 use Maatwebsite\Excel\Facades\Excel;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
@@ -167,6 +169,74 @@ it('exporta roles a Excel respetando los filtros y sin claves técnicas de permi
 
         return true;
     });
+});
+
+it('la columna Permisos del Excel agrupa por módulo con viñetas y saltos de línea, ya no una sola cadena unida por " · "', function () {
+    Excel::fake();
+    $admin = usuarioCon(RolSistema::Administrador->value);
+    Role::create(['name' => 'multi_modulo', 'guard_name' => 'web'])
+        ->syncPermissions(['reportes.ver', 'reportes.exportar', 'empresas.ver']);
+
+    $this->actingAs($admin)->get('/roles/exportar')->assertOk();
+
+    Excel::assertDownloaded('roles-y-permisos-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $export): bool {
+        $fila = collect($export->array())->firstWhere(0, 'Multi Modulo');
+        expect($fila)->not->toBeNull();
+
+        $permisos = $fila[4];
+
+        expect($permisos)->toContain("\n")
+            ->and($permisos)->toContain('Reportes')
+            ->and($permisos)->toContain('Empresas')
+            ->and($permisos)->toContain('• Ver reportes')
+            ->and($permisos)->toContain('• Exportar reportes')
+            ->and($permisos)->toContain('• Ver empresas')
+            // Ya NO es una sola línea "Reportes: Ver, Exportar · Empresas: Ver".
+            ->and($permisos)->not->toContain('Reportes: Ver reportes, Exportar reportes · Empresas');
+
+        return true;
+    });
+});
+
+it('el .xlsx real de Roles envuelve la columna Permisos (wrapText, alineación superior) y le da alto de fila suficiente', function () {
+    // Mismo patrón que las pruebas de "Excel real" de ExportacionesTest.php:
+    // se construye el `ListadoExport` con una fila cuya columna "Permisos"
+    // tiene EXACTAMENTE la forma que produce `RolController::resumenPermisos()`
+    // (bloques "Módulo\n• permiso\n• permiso" separados por línea en blanco),
+    // y se genera el .xlsx real para inspeccionar el estilo con PhpSpreadsheet.
+    $permisos = "Empresas\n• Ver empresas\n• Crear empresas\n• Editar empresas\n\nReportes\n• Ver reportes\n• Exportar reportes";
+    $contexto = new ContextoExportacion('Roles y permisos', null, [], 1, generadoPor: 'Ana Prueba');
+    $export = new ListadoExport(
+        [['Multi Modulo', 'Personalizado', 0, 5, $permisos]],
+        ['Rol', 'Tipo', 'Usuarios', 'N.º de permisos', 'Permisos'],
+        $contexto,
+    );
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+    $libro = IOFactory::load($temporal);
+    $hoja = $libro->getSheetByName('Datos');
+
+    // Reporte/Empresa/Generado por/Generado/Registros (5) + fila en blanco
+    // = 6, encabezado en la 7, dato en la 8.
+    $filaEncabezado = 7;
+    $filaDato = $filaEncabezado + 1;
+
+    expect($hoja->getCell("E{$filaEncabezado}")->getValue())->toBe('Permisos');
+
+    $valor = (string) $hoja->getCell("E{$filaDato}")->getValue();
+    expect($valor)->toBe($permisos);
+
+    $estilo = $hoja->getStyle("E{$filaDato}");
+    expect($estilo->getAlignment()->getWrapText())->toBeTrue();
+    expect($estilo->getAlignment()->getVertical())->toBe('top');
+
+    // Alto de fila suficiente para ver todas las líneas (nunca el alto de
+    // una sola línea con contenido de varias): al menos 14pt por línea.
+    $lineas = substr_count($valor, "\n") + 1;
+    expect((float) $hoja->getRowDimension($filaDato)->getRowHeight())->toBeGreaterThanOrEqual($lineas * 14 - 0.01);
+
+    @unlink($temporal);
 });
 
 it('exporta roles a PDF', function () {

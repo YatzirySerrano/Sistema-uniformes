@@ -182,6 +182,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('conjuntos/exportar', [ConjuntoController::class, 'exportar'])->name('conjuntos.exportar');
     Route::post('conjuntos', [ConjuntoController::class, 'store'])->name('conjuntos.store');
     Route::get('conjuntos/{conjunto}', [ConjuntoController::class, 'show'])->name('conjuntos.show');
+    Route::get('conjuntos/{conjunto}/disponibilidad', [ConjuntoController::class, 'disponibilidad'])->name('conjuntos.disponibilidad');
     Route::get('conjuntos/{conjunto}/editar', [ConjuntoController::class, 'edit'])->name('conjuntos.edit');
     Route::put('conjuntos/{conjunto}', [ConjuntoController::class, 'update'])->name('conjuntos.update');
     Route::post('conjuntos/{conjunto}/estado', [ConjuntoController::class, 'toggle'])->name('conjuntos.toggle');

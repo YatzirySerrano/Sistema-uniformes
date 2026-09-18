@@ -338,6 +338,62 @@ class ConjuntoController extends Controller
     }
 
     /**
+     * Disponibilidad EN VIVO de un conjunto para el flujo de Entrega,
+     * considerando las variantes REALMENTE seleccionadas para sus
+     * componentes de talla libre (nunca el agregado de todas las variantes:
+     * ver `Conjunto::disponibilidad()`). Única fuente también usada por la
+     * validación backend (`GuardarEntregaRequest`, `CrearEntregaUniforme`);
+     * esto es sólo UX — el backend siempre revalida con lock al confirmar.
+     */
+    public function disponibilidad(Request $request, Conjunto $conjunto): JsonResponse
+    {
+        $this->authorize('view', $conjunto);
+
+        $datos = $request->validate([
+            'almacen_id' => [
+                'required', 'integer',
+                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $conjunto->empresa_id)),
+            ],
+            'cantidad' => ['nullable', 'integer', 'min:1'],
+            'variantes' => ['nullable', 'array'],
+            'variantes.*' => ['nullable', 'integer', Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('activa', true))],
+        ]);
+
+        $cantidad = (int) ($datos['cantidad'] ?? 1);
+        $variantes = $datos['variantes'] ?? [];
+
+        $desglose = $conjunto->desglosePorComponente((int) $datos['almacen_id'], $variantes);
+
+        $componentes = array_map(function (array $c) use ($cantidad): array {
+            $requeridasTotal = $c['cantidad_requerida'] * $cantidad;
+            $disponibles = $c['existencia'];
+
+            return [
+                'componente_id' => $c['componente_id'],
+                'activo_id' => $c['activo_id'],
+                'activo_nombre' => $c['activo_nombre'],
+                'tipo_control' => $c['tipo_control'],
+                'talla_id' => $c['talla_id'],
+                'talla_valor' => $c['talla_valor'],
+                'requiere_variante' => $c['requiere_variante'],
+                'requeridas_por_conjunto' => $c['cantidad_requerida'],
+                'requeridas_total' => $requeridasTotal,
+                'disponibles' => $disponibles,
+                'faltantes' => $disponibles === null ? null : max(0, $requeridasTotal - $disponibles),
+                'suficiente' => ! $c['requiere_variante'] && $disponibles !== null && $disponibles >= $requeridasTotal,
+            ];
+        }, $desglose);
+
+        $requiereSeleccion = in_array(true, array_column($desglose, 'requiere_variante'), true);
+
+        return response()->json([
+            'disponible' => $requiereSeleccion || $desglose === [] ? null : min(array_column($desglose, 'capacidad')),
+            'requiere_seleccion_variante' => $requiereSeleccion,
+            'componentes' => array_values($componentes),
+        ]);
+    }
+
+    /**
      * Genera un código consecutivo y único dentro de la empresa (CON-0001,
      * CON-0002, …), con la misma filosofía que Sucursal/Área/Activo. Race-safe:
      * `ServicioGeneradorCodigos` bloquea el contador dentro de una transacción

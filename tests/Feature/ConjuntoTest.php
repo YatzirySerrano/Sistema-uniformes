@@ -190,6 +190,107 @@ it('la disponibilidad es 0 si algún componente no tiene existencia en ese almac
     expect($conjunto->disponibilidad($this->almacen->id))->toBe(0);
 });
 
+// ------------------------------------------------------------------
+// Componente de variante LIBRE: la disponibilidad de un conjunto en el
+// contexto de una Entrega debe usar SÓLO el stock de la variante realmente
+// elegida — nunca la suma de todas las variantes del activo (bug real:
+// "Disponibles: 15 conjuntos" con una camisa de la que sólo había 5 piezas
+// en la variante seleccionada, porque se sumaba talla 19 1/2 + talla 20).
+// ------------------------------------------------------------------
+
+it('con variante libre: sin mapa de selección (modo plantilla) se agrega la existencia de todas las variantes elegibles', function () {
+    $camisa = Activo::factory()->for($this->empresa)->create();
+    $tallaChica = Talla::factory()->create(['valor' => '19 1/2']);
+    $tallaGrande = Talla::factory()->create(['valor' => '20']);
+    $camisa->tallas()->attach([$tallaChica->id, $tallaGrande->id]);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $tallaChica->id, 'cantidad' => 5]);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $tallaGrande->id, 'cantidad' => 10]);
+
+    $conjunto = Conjunto::factory()->for($this->empresa)->create();
+    $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+
+    // Sin contexto de Entrega ($variantesPorComponente === null): agregado
+    // de todas las variantes — comportamiento preexistente para vistas sin
+    // selección (p. ej. `Conjuntos/Detalle.vue`), sin cambios.
+    expect($conjunto->disponibilidad($this->almacen->id))->toBe(15);
+});
+
+it('con variante libre y mapa de selección (modo Entrega): la disponibilidad usa SÓLO el stock de la variante elegida', function () {
+    $camisa = Activo::factory()->for($this->empresa)->create(['nombre' => 'Camisa blanca hombre']);
+    $tallaChica = Talla::factory()->create(['valor' => '19 1/2']);
+    $tallaGrande = Talla::factory()->create(['valor' => '20']);
+    $camisa->tallas()->attach([$tallaChica->id, $tallaGrande->id]);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $tallaChica->id, 'cantidad' => 5]);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $tallaGrande->id, 'cantidad' => 10]);
+
+    $pantalon = Activo::factory()->for($this->empresa)->create(['nombre' => 'Pantalón']);
+    $tallaUnica = Talla::factory()->create(['valor' => '34']);
+    $pantalon->tallas()->attach($tallaUnica);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($pantalon)->create(['talla_id' => $tallaUnica->id, 'cantidad' => 15]);
+
+    $conjunto = Conjunto::factory()->for($this->empresa)->create();
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+    $conjunto->componentes()->create(['activo_id' => $pantalon->id, 'cantidad_requerida' => 1, 'talla_id' => $tallaUnica->id]);
+
+    // Caso A del reporte: variante chica seleccionada -> 5, NUNCA 15.
+    expect($conjunto->disponibilidad($this->almacen->id, [$compCamisa->id => $tallaChica->id]))->toBe(5);
+
+    // Caso B: cambia a la variante grande -> 10.
+    expect($conjunto->disponibilidad($this->almacen->id, [$compCamisa->id => $tallaGrande->id]))->toBe(10);
+
+    // Un componente de talla libre SIN selección en el mapa (mapa vacío) no
+    // puede armarse: 0, nunca el agregado de 15.
+    expect($conjunto->disponibilidad($this->almacen->id, []))->toBe(0);
+});
+
+it('con cantidad_requerida > 1 la capacidad del componente es floor(existencia / requerida), y el conjunto usa el mínimo entre componentes', function () {
+    $camisa = Activo::factory()->for($this->empresa)->create();
+    $tallaChica = Talla::factory()->create(['valor' => 'A']);
+    $camisa->tallas()->attach($tallaChica);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $tallaChica->id, 'cantidad' => 10]);
+
+    $pantalon = Activo::factory()->for($this->empresa)->create();
+    $tallaUnica = Talla::factory()->create(['valor' => 'C']);
+    $pantalon->tallas()->attach($tallaUnica);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($pantalon)->create(['talla_id' => $tallaUnica->id, 'cantidad' => 15]);
+
+    $conjunto = Conjunto::factory()->for($this->empresa)->create();
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 2, 'talla_libre' => true]);
+    $conjunto->componentes()->create(['activo_id' => $pantalon->id, 'cantidad_requerida' => 1, 'talla_id' => $tallaUnica->id]);
+
+    // floor(10/2)=5 camisas; floor(15/1)=15 pantalones -> mínimo 5.
+    expect($conjunto->disponibilidad($this->almacen->id, [$compCamisa->id => $tallaChica->id]))->toBe(5);
+});
+
+it('combina un componente de variante libre con uno de seguimiento individual: el mínimo entre ambos manda', function () {
+    $camisa = Activo::factory()->for($this->empresa)->create();
+    $tallaChica = Talla::factory()->create(['valor' => 'A']);
+    $camisa->tallas()->attach($tallaChica);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $tallaChica->id, 'cantidad' => 5]);
+
+    $radio = Activo::factory()->for($this->empresa)->seguimientoIndividual()->create();
+    UnidadActivo::factory()->for($this->empresa)->for($radio)->for($this->almacen)->count(3)->create();
+
+    $conjunto = Conjunto::factory()->for($this->empresa)->create();
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+    $conjunto->componentes()->create(['activo_id' => $radio->id, 'cantidad_requerida' => 1]);
+
+    // min(5, 3) = 3.
+    expect($conjunto->disponibilidad($this->almacen->id, [$compCamisa->id => $tallaChica->id]))->toBe(3);
+});
+
+it('sólo cuenta las unidades individuales REALMENTE entregables: excluye asignadas y dadas de baja', function () {
+    $radio = Activo::factory()->for($this->empresa)->seguimientoIndividual()->create();
+    UnidadActivo::factory()->for($this->empresa)->for($radio)->for($this->almacen)->count(3)->create();
+    UnidadActivo::factory()->for($this->empresa)->for($radio)->for($this->almacen)->asignada()->create();
+    UnidadActivo::factory()->for($this->empresa)->for($radio)->for($this->almacen)->baja()->create();
+
+    $conjunto = Conjunto::factory()->for($this->empresa)->create();
+    $conjunto->componentes()->create(['activo_id' => $radio->id, 'cantidad_requerida' => 1]);
+
+    expect($conjunto->disponibilidad($this->almacen->id))->toBe(3);
+});
+
 it('muestra el detalle de un conjunto con disponibilidad por almacén', function () {
     $conjunto = Conjunto::factory()->for($this->empresa)->create();
     $activo = Activo::factory()->for($this->empresa)->create();
@@ -292,4 +393,75 @@ it('la búsqueda de conjuntos se acota a la empresa indicada', function () {
         ->get("/conjuntos/buscar?empresa_id={$this->empresa->id}&q=Kit")
         ->assertOk()
         ->assertJson(['conjuntos' => [['id' => $conjunto->id, 'nombre' => 'Kit Oficina', 'codigo' => $conjunto->codigo]]]);
+});
+
+// ------------------------------------------------------------------
+// GET conjuntos/{id}/disponibilidad — endpoint de disponibilidad EN VIVO
+// para el flujo de Entrega, con desglose por componente.
+// ------------------------------------------------------------------
+
+it('el endpoint de disponibilidad exige variante para un componente de talla libre antes de calcular', function () {
+    $camisa = Activo::factory()->for($this->empresa)->create(['nombre' => 'Camisa']);
+    $talla = Talla::factory()->create(['valor' => 'A']);
+    $camisa->tallas()->attach($talla);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $talla->id, 'cantidad' => 5]);
+
+    $conjunto = Conjunto::factory()->for($this->empresa)->create();
+    $componente = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+
+    $respuesta = $this->actingAs($this->admin)
+        ->getJson("/conjuntos/{$conjunto->id}/disponibilidad?almacen_id={$this->almacen->id}&cantidad=1")
+        ->assertOk()
+        ->json();
+
+    expect($respuesta['disponible'])->toBeNull()
+        ->and($respuesta['requiere_seleccion_variante'])->toBeTrue()
+        ->and($respuesta['componentes'][0]['requiere_variante'])->toBeTrue()
+        ->and($respuesta['componentes'][0]['componente_id'])->toBe($componente->id);
+});
+
+it('el endpoint de disponibilidad, con la variante elegida, indica exactamente qué componente limita al conjunto', function () {
+    $camisa = Activo::factory()->for($this->empresa)->create(['nombre' => 'Camisa blanca hombre']);
+    $tallaChica = Talla::factory()->create(['valor' => '19 1/2']);
+    $camisa->tallas()->attach($tallaChica);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($camisa)->create(['talla_id' => $tallaChica->id, 'cantidad' => 5]);
+
+    $pantalon = Activo::factory()->for($this->empresa)->create(['nombre' => 'Pantalón']);
+    $tallaUnica = Talla::factory()->create(['valor' => '34']);
+    $pantalon->tallas()->attach($tallaUnica);
+    SaldoInventario::factory()->for($this->empresa)->for($this->almacen)->for($pantalon)->create(['talla_id' => $tallaUnica->id, 'cantidad' => 15]);
+
+    $conjunto = Conjunto::factory()->for($this->empresa)->create();
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+    $conjunto->componentes()->create(['activo_id' => $pantalon->id, 'cantidad_requerida' => 1, 'talla_id' => $tallaUnica->id]);
+
+    $respuesta = $this->actingAs($this->admin)
+        ->getJson("/conjuntos/{$conjunto->id}/disponibilidad?almacen_id={$this->almacen->id}&cantidad=8&variantes[{$compCamisa->id}]={$tallaChica->id}")
+        ->assertOk()
+        ->json();
+
+    $porActivo = collect($respuesta['componentes'])->keyBy('activo_id');
+
+    expect($respuesta['disponible'])->toBe(5)
+        ->and($respuesta['requiere_seleccion_variante'])->toBeFalse()
+        ->and($porActivo[$camisa->id]['disponibles'])->toBe(5)
+        ->and($porActivo[$camisa->id]['requeridas_total'])->toBe(8)
+        ->and($porActivo[$camisa->id]['faltantes'])->toBe(3)
+        ->and($porActivo[$camisa->id]['suficiente'])->toBeFalse()
+        ->and($porActivo[$pantalon->id]['disponibles'])->toBe(15)
+        ->and($porActivo[$pantalon->id]['faltantes'])->toBe(0)
+        ->and($porActivo[$pantalon->id]['suficiente'])->toBeTrue();
+});
+
+it('un rol restringido no puede consultar la disponibilidad de un conjunto de otra empresa', function () {
+    $ajena = Empresa::factory()->create();
+    $almacenAjeno = Almacen::factory()->paraEmpresa($ajena)->create();
+    $conjuntoAjeno = Conjunto::factory()->for($ajena)->create();
+
+    $supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->empresa]);
+
+    $respuesta = $this->actingAs($supervisor)
+        ->getJson("/conjuntos/{$conjuntoAjeno->id}/disponibilidad?almacen_id={$almacenAjeno->id}");
+
+    expect($respuesta->status())->toBeIn([403, 404]);
 });

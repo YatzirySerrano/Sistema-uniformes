@@ -231,6 +231,9 @@ trait DecoraConContexto
             return;
         }
 
+        /** @var array<int, string> $columnasEnvueltas */
+        $columnasEnvueltas = [];
+
         for ($col = 1; $col <= $numColumnas; $col++) {
             $colLetra = Coordinate::stringFromColumnIndex($col);
             $maxLargo = 0;
@@ -271,6 +274,46 @@ trait DecoraConContexto
             if ($maxLargo > self::ANCHO_MAXIMO_COLUMNA) {
                 $hoja->getColumnDimension($colLetra)->setAutoSize(false)->setWidth(self::ANCHO_MAXIMO_COLUMNA);
                 $hoja->getStyle($rangoColumna)->getAlignment()->setWrapText(true)->setVertical('top');
+                $columnasEnvueltas[] = $colLetra;
+            }
+        }
+
+        if ($columnasEnvueltas !== []) {
+            $this->ajustarAlturaFilasEnvueltas($hoja, $columnasEnvueltas, $primeraFilaDatos, $ultimaFila);
+        }
+    }
+
+    /**
+     * Alto de fila suficiente para ver TODO el contenido envuelto arriba
+     * (nunca desbordado ni cortado): una "línea" de alto por cada salto de
+     * línea real (`\n`) del contenido más largo de la fila entre las
+     * columnas que se envolvieron. Sin esto, `wrapText` sólo ajusta el
+     * texto visualmente pero la fila conserva el alto de una sola línea
+     * hasta que el usuario la agranda a mano. Una celda de una sola línea
+     * (la inmensa mayoría de columnas de texto libre de otros módulos, que
+     * nunca traen `\n`) no se toca — conserva el alto por defecto de
+     * siempre.
+     *
+     * @param  array<int, string>  $columnasEnvueltas
+     */
+    private function ajustarAlturaFilasEnvueltas(Worksheet $hoja, array $columnasEnvueltas, int $primeraFilaDatos, int $ultimaFila): void
+    {
+        for ($fila = $primeraFilaDatos; $fila <= $ultimaFila; $fila++) {
+            $maxLineas = 1;
+
+            foreach ($columnasEnvueltas as $colLetra) {
+                $valor = $hoja->getCell("{$colLetra}{$fila}")->getValue();
+                if ($valor === null || $valor === '') {
+                    continue;
+                }
+
+                $maxLineas = max($maxLineas, substr_count((string) $valor, "\n") + 1);
+            }
+
+            if ($maxLineas > 1) {
+                // ~14pt por línea de texto (tamaño de fuente normal),
+                // suficiente para leer sin filas exageradamente altas.
+                $hoja->getRowDimension($fila)->setRowHeight($maxLineas * 14);
             }
         }
     }

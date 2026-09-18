@@ -334,6 +334,168 @@ it('23. un conjunto cuyo componente de seguimiento individual no tiene unidades 
 });
 
 // ------------------------------------------------------------------
+// Conjuntos con componente de variante LIBRE: la disponibilidad y la
+// validación deben usar SÓLO el stock de la variante realmente elegida en
+// la entrega, nunca la suma de todas las variantes del activo. Bug real
+// reportado: una camisa con variante libre mostraba/permitía la
+// disponibilidad AGREGADA de todas sus tallas (p. ej. "15 conjuntos") en
+// vez de la de la variante elegida (sólo 5 piezas de esa talla).
+// ------------------------------------------------------------------
+
+it('24. con variante libre, solicitar más conjuntos de los que permite la variante elegida es rechazado aunque el agregado de todas las variantes sí alcanzaría', function () {
+    $camisa = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Camisa blanca hombre']);
+    $tallaChica = Talla::factory()->create(['valor' => '19 1/2']);
+    $tallaGrande = Talla::factory()->create(['valor' => '20']);
+    $camisa->tallas()->attach([$tallaChica->id, $tallaGrande->id]);
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $camisa->id, tallaId: $tallaChica->id, tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $camisa->id, tallaId: $tallaGrande->id, tipo: TipoMovimiento::Inicial, cantidad: 10,
+    ));
+
+    $pantalon = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Pantalón']);
+    $tallaPantalon = Talla::factory()->create(['valor' => '34']);
+    $pantalon->tallas()->attach($tallaPantalon);
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $pantalon->id, tallaId: $tallaPantalon->id, tipo: TipoMovimiento::Inicial, cantidad: 15,
+    ));
+
+    $conjunto = Conjunto::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Traje hombre']);
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+    $conjunto->componentes()->create(['activo_id' => $pantalon->id, 'cantidad_requerida' => 1, 'talla_id' => $tallaPantalon->id]);
+
+    // Agregado de las dos variantes de camisa = 15; con la variante chica
+    // elegida sólo hay 5. Pedir 8 debe rechazarse (antes del fix, el
+    // agregado hacía que 8 pareciera válido).
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+    ])->assertSessionHasErrors('conjuntos.0.cantidad');
+
+    expect(EntregaUniforme::count())->toBe(0)
+        ->and(SaldoInventario::where('activo_id', $camisa->id)->where('talla_id', $tallaChica->id)->value('cantidad'))->toBe(5)
+        ->and(SaldoInventario::where('activo_id', $camisa->id)->where('talla_id', $tallaGrande->id)->value('cantidad'))->toBe(10)
+        ->and(SaldoInventario::where('activo_id', $pantalon->id)->value('cantidad'))->toBe(15);
+
+    // Exactamente el límite real de la variante elegida (5) sí es válido.
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 5, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+    ])->assertSessionHasNoErrors();
+
+    expect(EntregaUniforme::count())->toBe(1)
+        ->and(SaldoInventario::where('activo_id', $camisa->id)->where('talla_id', $tallaChica->id)->value('cantidad'))->toBe(0)
+        ->and(SaldoInventario::where('activo_id', $camisa->id)->where('talla_id', $tallaGrande->id)->value('cantidad'))->toBe(10)
+        ->and(SaldoInventario::where('activo_id', $pantalon->id)->value('cantidad'))->toBe(10);
+});
+
+it('25. cambiar la variante elegida de un componente de talla libre cambia la disponibilidad real del conjunto', function () {
+    $camisa = Activo::factory()->for($this->datos['empresaA'])->create(['nombre' => 'Camisa']);
+    $tallaChica = Talla::factory()->create(['valor' => 'A']);
+    $tallaGrande = Talla::factory()->create(['valor' => 'B']);
+    $camisa->tallas()->attach([$tallaChica->id, $tallaGrande->id]);
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $camisa->id, tallaId: $tallaChica->id, tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $camisa->id, tallaId: $tallaGrande->id, tipo: TipoMovimiento::Inicial, cantidad: 10,
+    ));
+
+    $conjunto = Conjunto::factory()->for($this->datos['empresaA'])->create();
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+
+    // 8 con la variante chica (sólo 5) -> rechazado.
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+    ])->assertSessionHasErrors('conjuntos.0.cantidad');
+
+    // Los mismos 8, pero con la variante grande (10 disponibles) -> válido.
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaGrande->id]]],
+    ])->assertSessionHasNoErrors();
+
+    expect(EntregaUniforme::count())->toBe(1);
+});
+
+it('26. seleccionar en la entrega una variante que no pertenece al activo del componente es rechazada', function () {
+    $camisa = Activo::factory()->for($this->datos['empresaA'])->create();
+    $tallaPropia = Talla::factory()->create(['valor' => 'A']);
+    $camisa->tallas()->attach($tallaPropia);
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $camisa->id, tallaId: $tallaPropia->id, tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+    $tallaAjena = Talla::factory()->create(['valor' => 'Z']); // nunca asociada a la camisa
+
+    $conjunto = Conjunto::factory()->for($this->datos['empresaA'])->create();
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+
+    postEntrega($this, [
+        ...payloadBase($this->datos, $this->admin->id),
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'variantes' => [$compCamisa->id => $tallaAjena->id]]],
+    ])->assertSessionHasErrors("conjuntos.0.variantes.{$compCamisa->id}");
+
+    expect(EntregaUniforme::count())->toBe(0);
+});
+
+it('27. combina un componente de variante libre con uno de seguimiento individual: el mínimo real de ambos manda y el rechazo no descuenta ningún componente (atomicidad)', function () {
+    $camisa = Activo::factory()->for($this->datos['empresaA'])->create();
+    $tallaChica = Talla::factory()->create(['valor' => 'A']);
+    $camisa->tallas()->attach($tallaChica);
+    app(ServicioInventario::class)->registrarMovimiento(new MovimientoInventarioDatos(
+        empresaId: $this->datos['empresaA']->id, almacenId: $this->datos['almacenA']->id,
+        activoId: $camisa->id, tallaId: $tallaChica->id, tipo: TipoMovimiento::Inicial, cantidad: 5,
+    ));
+
+    $radio = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
+    UnidadActivo::factory()->for($this->datos['empresaA'], 'empresa')->for($radio)->for($this->datos['almacenA'])->count(3)->create();
+
+    $conjunto = Conjunto::factory()->for($this->datos['empresaA'])->create();
+    $compCamisa = $conjunto->componentes()->create(['activo_id' => $camisa->id, 'cantidad_requerida' => 1, 'talla_libre' => true]);
+    $conjunto->componentes()->create(['activo_id' => $radio->id, 'cantidad_requerida' => 1]);
+
+    // min(5 camisas, 3 radios) = 3 -> pedir 4 se rechaza (la acción, fuente
+    // autoritativa, se llama directo: prueba el candado real, no sólo el
+    // Form Request).
+    expect(fn () => app(CrearEntregaUniforme::class)->ejecutar(
+        $this->datos['colaboradorA']->id,
+        $this->datos['almacenA']->id,
+        $this->admin->id,
+        now()->toDateString(),
+        [],
+        [],
+        [['conjunto_id' => $conjunto->id, 'cantidad' => 4, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+    ))->toThrow(ExcepcionDeNegocioSimple::class);
+
+    expect(EntregaUniforme::count())->toBe(0)
+        ->and(SaldoInventario::where('activo_id', $camisa->id)->where('talla_id', $tallaChica->id)->value('cantidad'))->toBe(5)
+        ->and(UnidadActivo::where('activo_id', $radio->id)->where('estado', EstadoUnidadActivo::EnAlmacen)->count())->toBe(3);
+
+    // Exactamente 3 sí es válido.
+    app(CrearEntregaUniforme::class)->ejecutar(
+        $this->datos['colaboradorA']->id,
+        $this->datos['almacenA']->id,
+        $this->admin->id,
+        now()->toDateString(),
+        [],
+        [],
+        [['conjunto_id' => $conjunto->id, 'cantidad' => 3, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+    );
+
+    expect(EntregaUniforme::count())->toBe(1)
+        ->and(SaldoInventario::where('activo_id', $camisa->id)->where('talla_id', $tallaChica->id)->value('cantidad'))->toBe(2)
+        ->and(UnidadActivo::where('activo_id', $radio->id)->where('estado', EstadoUnidadActivo::Asignada)->count())->toBe(3);
+});
+
+// ------------------------------------------------------------------
 // Concurrencia (sin stock negativo, sin doble consumo del último saldo)
 // ------------------------------------------------------------------
 

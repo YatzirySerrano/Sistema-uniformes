@@ -248,8 +248,12 @@ class GuardarEntregaRequest extends FormRequest
                 // Disponibilidad real del conjunto en ESE almacén (mínimo por
                 // componente — mismo cálculo que `Conjunto::disponibilidad()`,
                 // fuente única también usada por `CrearEntregaUniforme`).
+                // Se pasa SIEMPRE el mapa de variantes elegidas (aunque venga
+                // vacío): activa el modo "Entrega" en `disponibilidad()`, que
+                // nunca suma stock de una variante distinta a la elegida para
+                // un componente de talla libre.
                 $cantidadSolicitada = (int) ($fila['cantidad'] ?? 0);
-                $disponibleConjunto = $conjunto->disponibilidad($almacenId);
+                $disponibleConjunto = $conjunto->disponibilidad($almacenId, $variantesElegidas);
 
                 if ($cantidadSolicitada > $disponibleConjunto) {
                     $validator->errors()->add(

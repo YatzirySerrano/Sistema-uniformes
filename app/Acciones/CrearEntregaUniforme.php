@@ -260,7 +260,11 @@ class CrearEntregaUniforme
         $cantidadConjuntos = (int) $fila['cantidad'];
         $variantesElegidas = $fila['variantes'] ?? [];
 
-        if ($conjunto->disponibilidad($almacenId) < $cantidadConjuntos) {
+        // Se pasa SIEMPRE el mapa de variantes elegidas (aunque venga vacío):
+        // activa el modo "Entrega" de `Conjunto::disponibilidad()`, que nunca
+        // suma stock de una variante distinta a la elegida por el usuario
+        // para un componente de talla libre.
+        if ($conjunto->disponibilidad($almacenId, $variantesElegidas) < $cantidadConjuntos) {
             throw new ExcepcionDeNegocioSimple("No hay suficiente disponibilidad del conjunto «{$conjunto->nombre}» en el almacén seleccionado.");
         }
 

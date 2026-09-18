@@ -93,6 +93,34 @@ type OpcionConjunto = {
     disponible: number | null;
 };
 
+/** Desglose por componente que devuelve `GET conjuntos/{id}/disponibilidad`. */
+type ComponenteDisponibilidadConjunto = {
+    componente_id: number;
+    activo_id: number;
+    activo_nombre: string | null;
+    tipo_control: 'cantidad' | 'individual' | null;
+    talla_id: number | null;
+    talla_valor: string | null;
+    requiere_variante: boolean;
+    requeridas_por_conjunto: number;
+    requeridas_total: number;
+    disponibles: number | null;
+    faltantes: number | null;
+    suficiente: boolean;
+};
+
+/**
+ * Disponibilidad REAL del conjunto para la fila de la entrega, recalculada
+ * en backend cada vez que cambian variante / cantidad / almacén — nunca el
+ * agregado de todas las variantes de un componente de talla libre (ver
+ * `Conjunto::disponibilidad()`).
+ */
+type DisponibilidadConjuntoEntrega = {
+    disponible: number | null;
+    requiere_seleccion_variante: boolean;
+    componentes: ComponenteDisponibilidadConjunto[];
+};
+
 const props = defineProps<{
     encargado: { name: string; email: string };
     textoConsentimiento: string;
@@ -265,6 +293,7 @@ function limpiarRenglones(): void {
     unidadesUI.splice(0, unidadesUI.length);
     conjuntosUI.splice(0, conjuntosUI.length);
     disponibilidad.value = {};
+    limpiarDisponibilidadConjuntos();
 }
 
 // ------------------------------------------------------------------
@@ -287,7 +316,12 @@ type FilaUnidad = {
 type FilaConjunto = {
     conjunto_id: number | '';
     cantidad: number;
-    variantes: Record<number, number | null>;
+    // `Record<string, …>` (no `number`): las claves son ids de componente
+    // usados como índice de objeto JS (siempre string en tiempo de
+    // ejecución) — con `Record<number, …>`, el tipo `FormDataKeys` de
+    // Inertia no puede generar la ruta `conjuntos.${i}.variantes.${id}` que
+    // usa `form.clearErrors()` más abajo.
+    variantes: Record<string, number | null>;
 };
 
 const form = useForm<{
@@ -543,6 +577,92 @@ function conjuntoSinDisponibilidad(item: OpcionConjunto): string | false {
         : 'Sin disponibilidad en este almacén';
 }
 
+/**
+ * Texto del combobox mientras se BUSCA un conjunto: sólo un indicativo para
+ * decidir cuál elegir. Un conjunto con componentes de variante libre no
+ * tiene todavía una disponibilidad real (depende de la variante que se
+ * elija después) — la cifra final SIEMPRE sale de `disponibilidadConjuntos`
+ * (recalculada en backend con la variante seleccionada).
+ */
+function descripcionConjunto(item: OpcionConjunto): string {
+    return item.componentes_variante_libre.length > 0
+        ? `Disponible aprox.: ${item.disponible ?? 0} (varía según la variante elegida)`
+        : `Disponible: ${item.disponible ?? 0}`;
+}
+
+// Disponibilidad REAL por renglón de conjunto, recalculada en backend
+// (`GET conjuntos/{id}/disponibilidad`) cada vez que cambia la variante, la
+// cantidad o el almacén. Única fuente de verdad — nunca se reimplementa el
+// cálculo (mínimo por componente) aquí; sólo se muestra lo que devuelve el
+// servidor.
+const disponibilidadConjuntos = reactive<
+    Record<number, DisponibilidadConjuntoEntrega | undefined>
+>({});
+const tokensDisponibilidadConjunto: Record<number, number> = {};
+const timersDisponibilidadConjunto: Record<
+    number,
+    ReturnType<typeof setTimeout>
+> = {};
+
+function limpiarDisponibilidadConjuntos(): void {
+    for (const k of Object.keys(disponibilidadConjuntos).map(Number)) {
+        delete disponibilidadConjuntos[k];
+    }
+    for (const k of Object.keys(timersDisponibilidadConjunto).map(Number)) {
+        clearTimeout(timersDisponibilidadConjunto[k]);
+        delete timersDisponibilidadConjunto[k];
+    }
+    for (const k of Object.keys(tokensDisponibilidadConjunto).map(Number)) {
+        delete tokensDisponibilidadConjunto[k];
+    }
+}
+
+async function recalcularDisponibilidadConjunto(i: number): Promise<void> {
+    const fila = form.conjuntos[i];
+    if (!fila || fila.conjunto_id === '' || !almacenSel.value) {
+        delete disponibilidadConjuntos[i];
+        return;
+    }
+
+    const token = (tokensDisponibilidadConjunto[i] ?? 0) + 1;
+    tokensDisponibilidadConjunto[i] = token;
+
+    const params = new URLSearchParams();
+    params.set('almacen_id', String(almacenSel.value.id));
+    params.set('cantidad', String(fila.cantidad > 0 ? fila.cantidad : 1));
+    for (const [componenteId, tallaId] of Object.entries(fila.variantes)) {
+        if (tallaId !== null && tallaId !== undefined) {
+            params.set(`variantes[${componenteId}]`, String(tallaId));
+        }
+    }
+
+    const res = await fetch(
+        `/conjuntos/${fila.conjunto_id}/disponibilidad?${params.toString()}`,
+        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
+    );
+
+    // Descarta respuestas obsoletas: pudo cambiar la variante/cantidad/
+    // conjunto mientras esta petición estaba en vuelo.
+    if (tokensDisponibilidadConjunto[i] !== token) return;
+
+    if (!res.ok) {
+        delete disponibilidadConjuntos[i];
+        return;
+    }
+
+    disponibilidadConjuntos[i] =
+        (await res.json()) as DisponibilidadConjuntoEntrega;
+}
+
+function recalcularDisponibilidadConjuntoConRetraso(i: number): void {
+    if (timersDisponibilidadConjunto[i]) {
+        clearTimeout(timersDisponibilidadConjunto[i]);
+    }
+    timersDisponibilidadConjunto[i] = setTimeout(() => {
+        void recalcularDisponibilidadConjunto(i);
+    }, 300);
+}
+
 function agregarConjunto(): void {
     form.conjuntos.push({ conjunto_id: '', cantidad: 1, variantes: {} });
     conjuntosUI.push({ sel: null });
@@ -551,6 +671,13 @@ function agregarConjunto(): void {
 function quitarConjunto(i: number): void {
     form.conjuntos.splice(i, 1);
     conjuntosUI.splice(i, 1);
+
+    // Los índices de las filas restantes cambiaron: en vez de reindexar el
+    // mapa a mano, se limpia y se recalcula lo que siga seleccionado.
+    limpiarDisponibilidadConjuntos();
+    form.conjuntos.forEach((f, idx) => {
+        if (f.conjunto_id !== '') void recalcularDisponibilidadConjunto(idx);
+    });
 }
 
 function alElegirConjunto(i: number, o: OpcionConjunto | null): void {
@@ -558,6 +685,17 @@ function alElegirConjunto(i: number, o: OpcionConjunto | null): void {
     form.conjuntos[i].conjunto_id = o?.id ?? '';
     form.conjuntos[i].variantes = {};
     form.clearErrors(`conjuntos.${i}.conjunto_id`);
+    void recalcularDisponibilidadConjunto(i);
+}
+
+function alElegirVarianteComponenteConjunto(
+    i: number,
+    componenteId: number,
+    tallaId: number | null,
+): void {
+    form.conjuntos[i].variantes[componenteId] = tallaId;
+    form.clearErrors(`conjuntos.${i}.variantes.${componenteId}`);
+    void recalcularDisponibilidadConjunto(i);
 }
 
 // ------------------------------------------------------------------
@@ -630,11 +768,29 @@ const problemasPaso2 = computed<string[]>(() => {
 
     form.conjuntos.forEach((fila, i) => {
         if (fila.conjunto_id === '') return;
-        const sel = conjuntosUI[i]?.sel;
-        const disp = sel?.disponible ?? 0;
-        if (fila.cantidad > disp) {
+        const nombre = conjuntosUI[i]?.sel?.nombre ?? 'Conjunto';
+
+        if (fila.cantidad < 1) {
             problemas.push(
-                `Conjunto «${sel?.nombre ?? ''}»: sólo hay ${disp} completos.`,
+                `Conjunto «${nombre}»: la cantidad debe ser al menos 1.`,
+            );
+            return;
+        }
+
+        const det = disponibilidadConjuntos[i];
+        if (!det) {
+            problemas.push(`Conjunto «${nombre}»: calculando disponibilidad…`);
+            return;
+        }
+        if (det.requiere_seleccion_variante) {
+            problemas.push(
+                `Conjunto «${nombre}»: selecciona las variantes para calcular disponibilidad.`,
+            );
+            return;
+        }
+        if (det.componentes.some((c) => !c.suficiente)) {
+            problemas.push(
+                `Conjunto «${nombre}»: no hay existencias suficientes para entregar ${fila.cantidad}.`,
             );
         }
     });
@@ -1332,7 +1488,9 @@ function enviar(): void {
                                     "
                                     :descripcion="
                                         (c) =>
-                                            `Disponible: ${(c as OpcionConjunto).disponible ?? 0}`
+                                            descripcionConjunto(
+                                                c as OpcionConjunto,
+                                            )
                                     "
                                     placeholder="Buscar conjunto…"
                                     placeholder-busqueda="Buscar por nombre"
@@ -1363,27 +1521,52 @@ function enviar(): void {
                                     type="number"
                                     min="1"
                                     :max="
-                                        conjuntosUI[i].sel?.disponible ??
-                                        undefined
+                                        disponibilidadConjuntos[i]
+                                            ?.disponible ?? undefined
                                     "
                                     class="h-9"
+                                    @input="
+                                        recalcularDisponibilidadConjuntoConRetraso(
+                                            i,
+                                        )
+                                    "
                                 />
                                 <p
-                                    v-if="
-                                        conjuntosUI[i].sel &&
-                                        conjuntosUI[i].sel?.disponible != null
-                                    "
+                                    v-if="conjuntosUI[i].sel"
                                     class="mt-0.5 text-[11px]"
                                     :class="
+                                        disponibilidadConjuntos[i] &&
+                                        !disponibilidadConjuntos[i]
+                                            ?.requiere_seleccion_variante &&
                                         fila.cantidad >
-                                        (conjuntosUI[i].sel?.disponible ?? 0)
+                                            (disponibilidadConjuntos[i]
+                                                ?.disponible ?? 0)
                                             ? 'text-destructive'
                                             : 'text-muted-foreground'
                                     "
                                 >
-                                    Disponibles:
-                                    {{ conjuntosUI[i].sel?.disponible }}
-                                    conjuntos completos
+                                    <template
+                                        v-if="!disponibilidadConjuntos[i]"
+                                    >
+                                        Calculando disponibilidad…
+                                    </template>
+                                    <template
+                                        v-else-if="
+                                            disponibilidadConjuntos[i]
+                                                ?.requiere_seleccion_variante
+                                        "
+                                    >
+                                        Selecciona las variantes para calcular
+                                        disponibilidad.
+                                    </template>
+                                    <template v-else>
+                                        Disponibles:
+                                        {{
+                                            disponibilidadConjuntos[i]
+                                                ?.disponible
+                                        }}
+                                        conjuntos completos
+                                    </template>
                                 </p>
                                 <InputError
                                     :message="
@@ -1437,9 +1620,11 @@ function enviar(): void {
                                     "
                                     @update:model-value="
                                         (v) =>
-                                            (fila.variantes[
-                                                comp.componente_id
-                                            ] = v as number | null)
+                                            alElegirVarianteComponenteConjunto(
+                                                i,
+                                                comp.componente_id,
+                                                v as number | null,
+                                            )
                                     "
                                 />
                                 <InputError
@@ -1450,6 +1635,51 @@ function enviar(): void {
                                     "
                                 />
                             </div>
+                        </div>
+
+                        <!-- Componente(s) insuficiente(s): queda asociado
+                             visualmente al activo/variante que limita al
+                             conjunto, no sólo a un mensaje genérico. -->
+                        <div
+                            v-if="
+                                disponibilidadConjuntos[i] &&
+                                !disponibilidadConjuntos[i]
+                                    ?.requiere_seleccion_variante &&
+                                disponibilidadConjuntos[i]?.componentes.some(
+                                    (c) => !c.suficiente,
+                                )
+                            "
+                            class="border-destructive/40 bg-destructive/5 space-y-1 rounded-md border p-2 text-xs"
+                        >
+                            <p class="text-destructive font-medium">
+                                No hay existencias suficientes para entregar
+                                {{ fila.cantidad }}
+                                {{
+                                    fila.cantidad === 1
+                                        ? 'conjunto'
+                                        : 'conjuntos'
+                                }}.
+                            </p>
+                            <p
+                                v-for="c in disponibilidadConjuntos[
+                                    i
+                                ]?.componentes.filter((c) => !c.suficiente)"
+                                :key="c.componente_id"
+                                class="text-destructive"
+                            >
+                                {{ c.activo_nombre
+                                }}{{
+                                    c.talla_valor ? ` · ${c.talla_valor}` : ''
+                                }}
+                                —
+                                {{
+                                    c.tipo_control === 'individual'
+                                        ? 'Unidades disponibles'
+                                        : 'Disponibles'
+                                }}: {{ c.disponibles ?? 0 }} · Requeridas:
+                                {{ c.requeridas_total }} · Faltan:
+                                {{ c.faltantes ?? c.requeridas_total }}
+                            </p>
                         </div>
                     </div>
                     <p
