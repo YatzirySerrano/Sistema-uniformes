@@ -5,8 +5,10 @@ namespace App\Servicios;
 use App\Enums\CondicionDevolucion;
 use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoEntrega;
+use App\Enums\TipoMovimiento;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\CondicionInventario;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
 use App\Models\SaldoInventario;
@@ -21,16 +23,20 @@ use App\Models\Talla;
  *
  * Semántica (confirmada por auditoría de código antes de implementar, no
  * inventada):
- * - Disponible = `SaldoInventario.cantidad` (entregable ahora mismo).
+ * - Disponible = `SaldoInventario.cantidad` (entregable ahora mismo; ya
+ *   refleja cualquier pieza marcada Dañado/Baja, porque `MarcarCondicionInventario`/
+ *   `RestaurarCondicionInventario` la ajustan vía `ServicioInventario::registrarMovimiento()`,
+ *   nunca aparte).
  * - Asignado = entregado (entregas firmada/corregida) − devuelto (CUALQUIER
  *   condición, devolución confirmada). Una pieza devuelta ya no está en
  *   posesión del colaborador sin importar en qué condición volvió.
- * - Dañado / Baja = suma histórica de `detalles_devolucion.cantidad` por
- *   `condicion`, sólo de devoluciones confirmadas. Es seguro sumar el
- *   histórico completo porque `condicion` se escribe una única vez al
- *   registrar la devolución y ningún código la modifica después — no existe
- *   una acción de "reparar" o "recuperar" para piezas por cantidad (eso sólo
- *   existe para `UnidadActivo`, fuera de este alcance).
+ * - Dañado / Baja = suma de DOS fuentes independientes, nunca se pisan entre
+ *   sí: (1) histórico de `detalles_devolucion.cantidad` por `condicion`, sólo
+ *   de devoluciones confirmadas (se escribe una única vez, nunca se
+ *   modifica); (2) `condiciones_inventario` (marcado directo desde stock,
+ *   fuera del flujo de devolución — `MarcarCondicionInventario`/
+ *   `RestaurarCondicionInventario`), neto de "marcar" menos "restaurar" para
+ *   Dañado (Baja es terminal, sin restauración).
  */
 class ServicioEstadoInventario
 {
@@ -115,6 +121,36 @@ class ServicioEstadoInventario
             $fila['asignado'] = max(0, $fila['asignado'] - (int) $devuelto->getAttribute('devuelto_total'));
             $fila['danado'] += (int) $devuelto->getAttribute('danado');
             $fila['baja'] += (int) $devuelto->getAttribute('baja');
+            unset($fila);
+        }
+
+        // --- Condición marcada directamente desde stock (fuera del flujo de
+        // devolución): neto de "marcar" (Incidencia/Baja) menos "restaurar"
+        // (Recuperacion, sólo aplica a Dañado — Baja es terminal). Se SUMA a
+        // lo que ya aportaron las devoluciones, nunca lo reemplaza: ambas
+        // fuentes son reales y distintas. ---
+        foreach (
+            CondicionInventario::query()
+                ->where('empresa_id', $activo->empresa_id)
+                ->where('activo_id', $activo->id)
+                ->selectRaw(
+                    'almacen_id, talla_id, '
+                    .'SUM(CASE WHEN condicion = ? AND tipo = ? THEN cantidad WHEN condicion = ? AND tipo = ? THEN -cantidad ELSE 0 END) as danado, '
+                    .'SUM(CASE WHEN condicion = ? AND tipo = ? THEN cantidad ELSE 0 END) as baja',
+                    [
+                        CondicionDevolucion::Danado->value, TipoMovimiento::Incidencia->value,
+                        CondicionDevolucion::Danado->value, TipoMovimiento::Recuperacion->value,
+                        CondicionDevolucion::Baja->value, TipoMovimiento::Baja->value,
+                    ],
+                )
+                ->groupBy('almacen_id', 'talla_id')
+                ->get() as $marcado
+        ) {
+            $almacenId = (int) $marcado->getAttribute('almacen_id');
+            $tallaId = $this->tallaId($marcado->getAttribute('talla_id'));
+            $fila = &$this->fila($filas, $almacenId, $tallaId);
+            $fila['danado'] += max(0, (int) $marcado->getAttribute('danado'));
+            $fila['baja'] += (int) $marcado->getAttribute('baja');
             unset($fila);
         }
 

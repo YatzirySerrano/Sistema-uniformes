@@ -197,3 +197,56 @@ it('oculta claves *_id y las claves técnicas fijas sin importar el tipo de valo
 
     expect($cambios)->toBe([]);
 });
+
+// ------------------------------------------------------------------
+// categoria(): clasificación CRUD comprensible (Creación/Actualización/
+// Eliminación/Reactivación) para el filtro y las insignias de Auditoría.
+// NUNCA heurísticas de texto sobre la descripción — sólo el cambio real
+// capturado en activo/activa/deleted_at, o el verbo exacto de la acción.
+// ------------------------------------------------------------------
+
+it('crear -> creación; editar -> actualización (por el verbo exacto de la acción, sin antes/después)', function () {
+    $servicio = new DescripcionAuditoria;
+
+    expect($servicio->categoria('crear', null, null))->toBe('creacion')
+        ->and($servicio->categoria('conjunto_crear', null, null))->toBe('creacion')
+        ->and($servicio->categoria('editar', null, null))->toBe('actualizacion')
+        ->and($servicio->categoria('area_editar', null, null))->toBe('actualizacion');
+});
+
+it('activo/activa true->false es Eliminación y false->true es Reactivación, con prioridad sobre el nombre de la acción', function () {
+    $servicio = new DescripcionAuditoria;
+
+    // La acción se llama "editar" pero el cambio real es un apagado: manda
+    // el dato real, nunca el nombre de la acción.
+    expect($servicio->categoria('editar', ['activo' => true], ['activo' => false]))->toBe('eliminacion')
+        ->and($servicio->categoria('editar', ['activa' => false], ['activa' => true]))->toBe('reactivacion');
+});
+
+it('desactivar/eliminar -> Eliminación; activar -> Reactivación (por el verbo, cuando no hay antes/después capturado)', function () {
+    $servicio = new DescripcionAuditoria;
+
+    expect($servicio->categoria('desactivar', null, null))->toBe('eliminacion')
+        ->and($servicio->categoria('conjunto_desactivar', null, null))->toBe('eliminacion')
+        ->and($servicio->categoria('eliminar', null, null))->toBe('eliminacion')
+        ->and($servicio->categoria('activar', null, null))->toBe('reactivacion')
+        ->and($servicio->categoria('conjunto_activar', null, null))->toBe('reactivacion');
+});
+
+it('deleted_at nulo->con valor es Eliminación; con valor->nulo (restore) es Reactivación', function () {
+    $servicio = new DescripcionAuditoria;
+
+    expect($servicio->categoria('editar', ['deleted_at' => null], ['deleted_at' => '2026-01-01 10:00:00']))->toBe('eliminacion')
+        ->and($servicio->categoria('editar', ['deleted_at' => '2026-01-01 10:00:00'], ['deleted_at' => null]))->toBe('reactivacion');
+});
+
+it('una acción operativa (sin verbo CRUD y sin cambio de estado) no clasifica en ninguna categoría', function () {
+    $servicio = new DescripcionAuditoria;
+
+    expect($servicio->categoria('ajuste', null, null))->toBeNull()
+        ->and($servicio->categoria('entrada', null, null))->toBeNull()
+        ->and($servicio->categoria('unidad_baja', null, null))->toBeNull()
+        ->and($servicio->categoria('unidad_incidencia', null, null))->toBeNull()
+        ->and($servicio->categoria('unidad_recuperacion', null, null))->toBeNull()
+        ->and($servicio->categoria('confirmar', null, null))->toBeNull();
+});

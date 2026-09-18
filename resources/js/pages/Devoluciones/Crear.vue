@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { Calendar, ChevronLeft, ChevronRight } from '@lucide/vue';
+import { useMediaQuery } from '@vueuse/core';
 import { computed, nextTick, ref, watch } from 'vue';
+import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
@@ -398,9 +400,40 @@ watch(paso, (p) => {
     }
 });
 
+// ------------------------------------------------------------------
+// Alerta móvil/tablet al pulsar "Continuar" con errores — mismo patrón que
+// `Entregas/Crear.vue`: conserva el recuadro amarillo siempre, y en
+// pantallas angostas añade un Dialog que sólo aparece al intentar avanzar
+// (nunca mientras se escribe), con acceso directo de vuelta al recuadro.
+// ------------------------------------------------------------------
+const esMovilOTablet = useMediaQuery('(max-width: 1024px)');
+const dialogoProblemasMovil = ref(false);
+const resumenProblemasRef = ref<HTMLElement | null>(null);
+
+function desplazarseAResumenProblemas(): void {
+    void nextTick(() => {
+        resumenProblemasRef.value?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+        });
+        resumenProblemasRef.value?.focus();
+    });
+}
+
+function irAlPrimerProblema(): void {
+    dialogoProblemasMovil.value = false;
+    desplazarseAResumenProblemas();
+}
+
 function irA(n: 1 | 2 | 3): void {
     if (n >= 2 && !puedeAvanzar1.value) return;
-    if (n === 3 && !puedeAvanzar2.value) return;
+    if (n === 3 && !puedeAvanzar2.value) {
+        if (puedeAvanzar1.value && problemasPaso2.value.length) {
+            if (esMovilOTablet.value) dialogoProblemasMovil.value = true;
+            else desplazarseAResumenProblemas();
+        }
+        return;
+    }
     paso.value = n;
 }
 
@@ -707,7 +740,9 @@ function enviar(): void {
 
                     <div
                         v-if="problemasPaso2.length"
-                        class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                        ref="resumenProblemasRef"
+                        tabindex="-1"
+                        class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 outline-none dark:text-amber-400"
                     >
                         <p class="font-medium">
                             Revisa lo siguiente antes de continuar:
@@ -1098,5 +1133,11 @@ function enviar(): void {
                 </div>
             </form>
         </template>
+
+        <AlertaProblemasMovil
+            v-model:open="dialogoProblemasMovil"
+            :problemas="problemasPaso2"
+            @ir-al-problema="irAlPrimerProblema"
+        />
     </div>
 </template>

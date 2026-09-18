@@ -662,12 +662,22 @@ class ActivoController extends Controller
                 'asignada' => (int) ($resumenUnidades['asignada'] ?? 0),
                 'baja' => (int) ($resumenUnidades['baja'] ?? 0),
             ],
+            // Mismas listas que ya usa `Activos/UnidadDetalle.vue` (fuente
+            // única `CondicionUnidadActivo`, nunca texto duplicado en Vue):
+            // "recuperación" y "restauración" comparten el mismo conjunto de
+            // condiciones destino (nunca pérdida/robo).
+            'condicionesIncidencia' => ! $esIndividual ? null : collect(CondicionUnidadActivo::cases())->filter(fn ($c) => $c->esIncidencia())->values()
+                ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
+            'condicionesNoIncidencia' => ! $esIndividual ? null : collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
+                ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'permisos' => [
                 'editar' => $request->user()->can('update', $activo),
                 'administrar' => $request->user()->can('administrar', $activo),
                 'agregar_existencias' => $request->user()->can('inventario.entrada')
                     && $request->user()->can('update', $activo),
                 'minimos' => $request->user()->can('inventario.minimos'),
+                'ajustar_inventario' => $request->user()->can('inventario.ajustar'),
+                'gestionar_unidades' => $request->user()->can('unidades-activo.administrar'),
             ],
             'suspendidos' => $this->cascada->paraVista($this->cascada->checklistDe($activo)),
         ]);

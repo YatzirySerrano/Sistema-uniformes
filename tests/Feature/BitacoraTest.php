@@ -1,5 +1,7 @@
 <?php
 
+use App\Acciones\AjustarInventario;
+use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\RolSistema;
 use App\Models\Activo;
 use App\Models\Almacen;
@@ -207,4 +209,128 @@ it('Superadmin también puede abrir /auditoria con registros de estructura compl
         ->get('/auditoria')
         ->assertOk()
         ->assertInertia(fn ($page) => $page->component('Auditoria/Index')->has('registros.data', 1));
+});
+
+// ------------------------------------------------------------------
+// Filtro por categoría (Creación/Actualización/Eliminación/Reactivación):
+// se aplica en BACKEND antes de paginar/exportar; las acciones operativas
+// (ajuste, entrada, incidencia…) se conservan sin forzarlas a una categoría.
+// ------------------------------------------------------------------
+
+it('el filtro de categoría "Eliminación" sólo devuelve desactivaciones/bajas reales, no ediciones normales ni acciones operativas', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $sucursal = Sucursal::factory()->for($empresa)->create();
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    $area = Area::factory()->for($empresa)->create(['activa' => true]);
+    $this->actingAs($admin)->post("/areas/{$area->id}/estado")->assertRedirect(); // desactivar -> Eliminación
+
+    $colaborador = Colaborador::factory()->for($empresa)->for($sucursal)->create(['puesto' => 'Auxiliar']);
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'numero_empleado' => $colaborador->numero_empleado,
+        'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
+        'sucursal_id' => $sucursal->id,
+        'puesto' => 'Supervisor',
+        'activo' => true,
+    ])->assertSessionHasNoErrors(); // editar -> Actualización, no debe salir
+
+    $this->actingAs($admin)
+        ->get('/auditoria?categoria=eliminacion')
+        ->assertInertia(fn ($page) => $page
+            ->has('registros.data', 1)
+            ->where('registros.data.0.accion', 'desactivar')
+            ->where('registros.data.0.categoria', 'eliminacion'),
+        );
+});
+
+it('el filtro de categoría "Reactivación" encuentra una activación aunque haya desactivaciones y ediciones de por medio', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+    $area = Area::factory()->for($empresa)->create(['activa' => true]);
+
+    $this->actingAs($admin)->post("/areas/{$area->id}/estado"); // desactivar
+    $this->actingAs($admin)->post("/areas/{$area->id}/estado"); // activar
+
+    $this->actingAs($admin)
+        ->get('/auditoria?categoria=reactivacion')
+        ->assertInertia(fn ($page) => $page
+            ->has('registros.data', 1)
+            ->where('registros.data.0.accion', 'activar')
+            ->where('registros.data.0.categoria', 'reactivacion'),
+        );
+});
+
+it('el filtro de categoría se aplica ANTES de paginar: el total refleja sólo lo filtrado', function () {
+    sembrarRolesPermisos();
+    config(['uniformes.por_pagina' => 2]);
+    $empresa = Empresa::factory()->create();
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    foreach (range(1, 3) as $i) {
+        $area = Area::factory()->for($empresa)->create(['activa' => true]);
+        $this->actingAs($admin)->post("/areas/{$area->id}/estado"); // 3x desactivar -> Eliminación
+    }
+    $colaborador = Colaborador::factory()->for($empresa)->for(Sucursal::factory()->for($empresa))->create();
+    $this->actingAs($admin)->put("/colaboradores/{$colaborador->id}", [
+        'numero_empleado' => $colaborador->numero_empleado,
+        'nombre_completo' => $colaborador->nombre_completo,
+        'curp' => $colaborador->curp,
+        'sucursal_id' => $colaborador->sucursal_id,
+        'activo' => true,
+    ]); // editar -> no debe contar
+
+    $this->actingAs($admin)
+        ->get('/auditoria?categoria=eliminacion')
+        ->assertInertia(fn ($page) => $page
+            ->has('registros.data', 2) // página 1 de 2 (por_pagina=2)
+            ->where('registros.total', 3),
+        );
+});
+
+it('una acción operativa (ajuste de inventario) no clasifica en ninguna categoría y sigue visible sin filtro', function () {
+    sembrarRolesPermisos();
+    $datos = escenarioMultiempresa();
+    $admin = usuarioCon(RolSistema::Administrador->value, [$datos['empresaA']]);
+
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        $datos['empresaA']->id, $datos['almacenA']->id,
+        [['activo_id' => $datos['activoA']->id, 'talla_id' => $datos['tallaA']->id, 'cantidad' => 10]],
+        'Alta', null,
+    );
+    app(AjustarInventario::class)->ejecutar(
+        $datos['empresaA']->id, $datos['almacenA']->id, $datos['activoA']->id, $datos['tallaA']->id, 5, 'Conteo físico', null,
+    );
+
+    $this->actingAs($admin)
+        ->get('/auditoria')
+        ->assertInertia(fn ($page) => $page->where(
+            'registros.data',
+            fn ($data) => collect($data)->contains(fn ($r) => $r['accion'] === 'ajuste' && $r['categoria'] === null),
+        ));
+
+    // No debe aparecer en ninguna de las 4 categorías CRUD.
+    foreach (['creacion', 'actualizacion', 'eliminacion', 'reactivacion'] as $categoria) {
+        $this->actingAs($admin)
+            ->get("/auditoria?categoria={$categoria}")
+            ->assertInertia(fn ($page) => $page->where(
+                'registros.data',
+                fn ($data) => collect($data)->doesntContain(fn ($r) => $r['accion'] === 'ajuste'),
+            ));
+    }
+});
+
+it('el filtro de categoría expone las 4 opciones comprensibles al frontend', function () {
+    sembrarRolesPermisos();
+    $empresa = Empresa::factory()->create();
+    $admin = usuarioCon(RolSistema::Administrador->value, [$empresa]);
+
+    $this->actingAs($admin)
+        ->get('/auditoria')
+        ->assertInertia(fn ($page) => $page
+            ->has('categorias', 4)
+            ->where('categorias', fn ($cats) => collect($cats)->pluck('valor')->all() === ['creacion', 'actualizacion', 'eliminacion', 'reactivacion']),
+        );
 });

@@ -57,6 +57,7 @@ class ServicioHistoricoColaborador
             'servicios' => $periodo['empresa_id'] === null ? [] : $this->serviciosDelPeriodo($colaborador, $periodo),
             'entregas' => $periodo['empresa_id'] === null ? [] : $this->entregasDelPeriodo($colaborador, $periodo),
             'devoluciones' => $periodo['empresa_id'] === null ? [] : $this->devolucionesDelPeriodo($colaborador, $periodo),
+            'movimientosInternos' => $this->movimientosInternosDelPeriodo($colaborador, $periodo),
             'fecha_inicio' => $periodo['fecha_inicio']?->toIso8601String(),
             'fecha_fin' => $periodo['fecha_fin']?->toIso8601String(),
         ], $periodos);
@@ -225,6 +226,49 @@ class ServicioHistoricoColaborador
             ->map(fn (BitacoraAuditoria $e): array => [
                 'servicio' => $e->valores_nuevos['servicio'] ?? 'Sin servicio',
                 'contrato' => $e->valores_nuevos['contrato'] ?? null,
+                'ocurrido_en' => $e->created_at?->toIso8601String(),
+            ]);
+
+        return array_values($eventos->all());
+    }
+
+    /**
+     * Cambios de SUCURSAL/ÁREA dentro de la MISMA empresa (edición normal del
+     * colaborador, `ColaboradorController::update()` — nunca
+     * `CambiarEmpresaColaborador`, que ya tiene su propio tramo estructurado
+     * vía `transferencias_colaborador`). No crea una tabla nueva: se
+     * reconstruye de `bitacora_auditoria` (`accion=editar`), que
+     * `ColaboradorController::update()` enriquece con el nombre de sucursal
+     * ANTES/DESPUÉS sólo cuando de verdad cambió (`area` ya lo trae siempre,
+     * es columna espejo de texto) — mismo criterio de "sólo si hay una
+     * diferencia real" que ya usa `DescripcionAuditoria::cambios()`.
+     *
+     * @param  array<string, mixed>  $periodo
+     * @return list<array{sucursal_anterior: ?string, sucursal_nueva: ?string, area_anterior: ?string, area_nueva: ?string, usuario: ?string, ocurrido_en: ?string}>
+     */
+    private function movimientosInternosDelPeriodo(Colaborador $colaborador, array $periodo): array
+    {
+        $eventos = BitacoraAuditoria::query()
+            ->where('tipo_entidad', Colaborador::class)
+            ->where('entidad_id', $colaborador->id)
+            ->where('accion', 'editar')
+            ->when(! $periodo['fecha_inicio_es_alta_registro'], fn ($q) => $q->where('created_at', '>=', $periodo['fecha_inicio']))
+            ->when($periodo['fecha_fin'] !== null, fn ($q) => $q->where('created_at', '<', $periodo['fecha_fin']))
+            ->orderBy('created_at')
+            ->limit(50)
+            ->get()
+            ->filter(function (BitacoraAuditoria $e): bool {
+                $cambioSucursal = array_key_exists('sucursal', $e->valores_nuevos ?? []);
+                $cambioArea = ($e->valores_anteriores['area'] ?? null) !== ($e->valores_nuevos['area'] ?? null);
+
+                return $cambioSucursal || $cambioArea;
+            })
+            ->map(fn (BitacoraAuditoria $e): array => [
+                'sucursal_anterior' => $e->valores_anteriores['sucursal'] ?? null,
+                'sucursal_nueva' => $e->valores_nuevos['sucursal'] ?? null,
+                'area_anterior' => $e->valores_anteriores['area'] ?? null,
+                'area_nueva' => $e->valores_nuevos['area'] ?? null,
+                'usuario' => $e->nombre_usuario_snapshot,
                 'ocurrido_en' => $e->created_at?->toIso8601String(),
             ]);
 

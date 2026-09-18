@@ -48,6 +48,8 @@ type RenglonTraspaso = {
     unidad_codigo: string | null;
 };
 
+type Categoria = 'creacion' | 'actualizacion' | 'eliminacion' | 'reactivacion';
+
 type Registro = {
     id: number;
     fecha: string;
@@ -60,6 +62,7 @@ type Registro = {
     sucursal: string | null;
     motivo: string | null;
     ip: string | null;
+    categoria: Categoria | null;
     cambios: Cambio[];
     valores_anteriores: Record<string, unknown> | null;
     valores_nuevos: Record<string, unknown> | null;
@@ -70,6 +73,7 @@ const props = defineProps<{
     filtros: Record<string, string | number | undefined>;
     empresasAutorizadas: EmpresaAutorizada[];
     modulos: string[];
+    categorias: { valor: Categoria; etiqueta: string }[];
 }>();
 
 defineOptions({
@@ -79,6 +83,7 @@ defineOptions({
 const f = ref({
     empresa_id: props.filtros.empresa_id ?? '',
     modulo: props.filtros.modulo ?? '',
+    categoria: props.filtros.categoria ?? '',
     buscar: props.filtros.buscar ?? '',
     desde: String(props.filtros.desde ?? ''),
     hasta: String(props.filtros.hasta ?? ''),
@@ -121,7 +126,14 @@ watch(
 );
 
 function limpiar() {
-    f.value = { empresa_id: '', modulo: '', buscar: '', desde: '', hasta: '' };
+    f.value = {
+        empresa_id: '',
+        modulo: '',
+        categoria: '',
+        buscar: '',
+        desde: '',
+        hasta: '',
+    };
     empresaSeleccionada.value = null;
 }
 
@@ -154,31 +166,27 @@ const AZUL =
     'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-400';
 const GRIS = 'border-border bg-muted text-muted-foreground';
 
-function claseAccion(accion: string): string {
-    if (
-        accion.includes('desactivar') ||
-        accion.includes('eliminar') ||
-        accion.includes('baja') ||
-        accion.includes('incidencia')
-    ) {
-        return ROJO;
-    }
-    if (
-        accion.includes('crear') ||
-        accion.includes('activar') ||
-        accion.includes('recuperacion')
-    ) {
-        return VERDE;
-    }
-    if (
-        accion.includes('editar') ||
-        accion.includes('actualizar') ||
-        accion.includes('reordenar')
-    ) {
-        return AZUL;
-    }
-    return GRIS;
+// La categoría (Creación/Actualización/Eliminación/Reactivación) la calcula
+// el BACKEND (`App\Soporte\DescripcionAuditoria::categoria()`) a partir de la
+// acción registrada y el cambio real capturado (`activo`/`activa`/
+// `deleted_at`) — nunca aquí por texto/`includes()` sobre la descripción o el
+// nombre de la acción. `null` = acción OPERATIVA (entrada, ajuste, entrega,
+// devolución, baja de unidad, incidencia, traspaso…): se conserva visible,
+// simplemente sin una de estas 4 categorías.
+const CLASE_CATEGORIA: Record<Categoria, string> = {
+    creacion: VERDE,
+    reactivacion: VERDE,
+    actualizacion: AZUL,
+    eliminacion: ROJO,
+};
+
+function claseCategoria(categoria: Categoria | null): string {
+    return categoria ? CLASE_CATEGORIA[categoria] : GRIS;
 }
+
+const ETIQUETA_CATEGORIA: Record<Categoria, string> = Object.fromEntries(
+    props.categorias.map((c) => [c.valor, c.etiqueta]),
+) as Record<Categoria, string>;
 
 function etiquetaAccion(accion: string): string {
     return accion
@@ -268,6 +276,18 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                     ]"
                 />
             </div>
+            <div class="w-48">
+                <SelectSimple
+                    v-model="f.categoria"
+                    :opciones="[
+                        { valor: '', etiqueta: 'Toda acción' },
+                        ...categorias.map((c) => ({
+                            valor: c.valor,
+                            etiqueta: c.etiqueta,
+                        })),
+                    ]"
+                />
+            </div>
             <Input
                 v-model="f.buscar"
                 placeholder="Buscar en descripción o usuario"
@@ -304,13 +324,18 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                 <div class="flex items-start justify-between gap-2">
                     <span
                         class="inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium"
-                        :class="claseAccion(r.accion)"
+                        :class="claseCategoria(r.categoria)"
                     >
                         <component
                             :is="iconoModulo(r.modulo)"
                             class="size-3.5"
                         />
-                        {{ r.modulo }} · {{ etiquetaAccion(r.accion) }}
+                        {{ r.modulo }} ·
+                        {{
+                            r.categoria
+                                ? ETIQUETA_CATEGORIA[r.categoria]
+                                : etiquetaAccion(r.accion)
+                        }}
                     </span>
                     <span
                         class="text-muted-foreground shrink-0 text-xs whitespace-nowrap"
@@ -367,6 +392,12 @@ function jsonLegible(valor: Record<string, unknown> | null): string {
                             <span class="font-medium">{{ r.modulo }}</span>
                             <span class="text-muted-foreground"
                                 >/{{ etiquetaAccion(r.accion) }}</span
+                            >
+                            <span
+                                v-if="r.categoria"
+                                class="ml-1.5 inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium"
+                                :class="claseCategoria(r.categoria)"
+                                >{{ ETIQUETA_CATEGORIA[r.categoria] }}</span
                             >
                         </td>
                         <td class="px-3 py-2">

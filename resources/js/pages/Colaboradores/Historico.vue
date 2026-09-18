@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ArrowLeft, Briefcase, Building2, Truck, Undo2 } from '@lucide/vue';
+import {
+    ArrowLeft,
+    Briefcase,
+    Building2,
+    MapPin,
+    Truck,
+    Undo2,
+} from '@lucide/vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -14,6 +21,15 @@ type ServicioPeriodo = {
 };
 
 type ReferenciaPeriodo = { id: number; folio: string; fecha: string };
+
+type MovimientoInterno = {
+    sucursal_anterior: string | null;
+    sucursal_nueva: string | null;
+    area_anterior: string | null;
+    area_nueva: string | null;
+    usuario: string | null;
+    ocurrido_en: string | null;
+};
 
 type Periodo = {
     origen: 'inicial' | 'bitacora' | 'estructurado';
@@ -29,6 +45,7 @@ type Periodo = {
     servicios: ServicioPeriodo[];
     entregas: ReferenciaPeriodo[];
     devoluciones: ReferenciaPeriodo[];
+    movimientosInternos: MovimientoInterno[];
 };
 
 defineProps<{
@@ -185,6 +202,43 @@ function fechaSimple(fechaIso: string): string {
                                 <span class="text-muted-foreground">{{
                                     fecha(s.ocurrido_en)
                                 }}</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div
+                        v-if="periodo.movimientosInternos.length"
+                        class="mt-4 border-t pt-3"
+                    >
+                        <p
+                            class="text-muted-foreground mb-2 flex items-center gap-1 text-xs"
+                        >
+                            <MapPin class="size-3" /> Cambios de sucursal /
+                            área dentro de esta empresa
+                        </p>
+                        <ul class="grid gap-1 sm:grid-cols-2">
+                            <li
+                                v-for="(m, j) in periodo.movimientosInternos"
+                                :key="j"
+                                class="rounded-lg border px-2.5 py-1.5 text-xs"
+                            >
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="text-muted-foreground">{{
+                                        m.usuario ?? 'Sistema'
+                                    }}</span>
+                                    <span class="text-muted-foreground">{{
+                                        fecha(m.ocurrido_en)
+                                    }}</span>
+                                </div>
+                                <p v-if="m.sucursal_anterior !== m.sucursal_nueva">
+                                    Sucursal:
+                                    {{ m.sucursal_anterior ?? '—' }} →
+                                    {{ m.sucursal_nueva ?? '—' }}
+                                </p>
+                                <p v-if="m.area_anterior !== m.area_nueva">
+                                    Área: {{ m.area_anterior ?? '—' }} →
+                                    {{ m.area_nueva ?? '—' }}
+                                </p>
                             </li>
                         </ul>
                     </div>

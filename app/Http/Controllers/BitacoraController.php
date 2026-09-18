@@ -11,6 +11,7 @@ use App\Soporte\DescripcionAuditoria;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -45,6 +46,7 @@ class BitacoraController extends Controller
                 'sucursal' => $b->sucursal?->nombre,
                 'motivo' => $b->motivo,
                 'ip' => $b->ip,
+                'categoria' => $this->descripcionAuditoria->categoria($b->accion, $b->valores_anteriores, $b->valores_nuevos),
                 'cambios' => $this->descripcionAuditoria->cambios($b->tipo_entidad, $b->valores_anteriores, $b->valores_nuevos),
                 'valores_anteriores' => $b->valores_anteriores,
                 'valores_nuevos' => $b->valores_nuevos,
@@ -55,6 +57,9 @@ class BitacoraController extends Controller
             'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'modulos' => BitacoraAuditoria::query()->distinct()->orderBy('modulo')->pluck('modulo'),
+            'categorias' => collect(DescripcionAuditoria::CATEGORIAS)
+                ->map(fn (string $etiqueta, string $valor): array => ['valor' => $valor, 'etiqueta' => $etiqueta])
+                ->values(),
         ]);
     }
 
@@ -84,6 +89,7 @@ class BitacoraController extends Controller
             'Búsqueda' => $filtros['buscar'] ?? null,
             'Módulo' => $filtros['modulo'] ?? null,
             'Acción' => $filtros['accion'] ?? null,
+            'Categoría' => isset($filtros['categoria']) ? (DescripcionAuditoria::CATEGORIAS[$filtros['categoria']] ?? null) : null,
             'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
             'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
         ]);
@@ -103,11 +109,31 @@ class BitacoraController extends Controller
         return $request->validate([
             'modulo' => ['nullable', 'string', 'max:60'],
             'accion' => ['nullable', 'string', 'max:60'],
+            'categoria' => ['nullable', Rule::in(array_keys(DescripcionAuditoria::CATEGORIAS))],
             'buscar' => ['nullable', 'string', 'max:100'],
             'empresa_id' => ['nullable', 'integer'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
         ]);
+    }
+
+    /**
+     * Traduce una categoría comprensible (`creacion`/`editar`/…) a la lista
+     * de valores REALES de `accion` que clasifican ahí, para poder filtrar
+     * en SQL con `whereIn` (antes de paginar) en vez de cargar todo a PHP.
+     * Se clasifica cada acción SIN antes/después (`categoria($accion, null,
+     * null)`), forzando el criterio de convención de nombre — el único que
+     * tiene sentido evaluar sin cargar cada fila: el mismo criterio que ya
+     * usa `categoria()` como último recurso, así que el resultado nunca
+     * diverge del que ve el usuario por fila.
+     *
+     * @return array<int, string>
+     */
+    private function accionesDeCategoria(string $categoria): array
+    {
+        return BitacoraAuditoria::query()->distinct()->pluck('accion')
+            ->filter(fn (string $accion): bool => $this->descripcionAuditoria->categoria($accion, null, null) === $categoria)
+            ->values()->all();
     }
 
     /**
@@ -136,6 +162,7 @@ class BitacoraController extends Controller
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
             ->when($filtros['modulo'] ?? null, fn (Builder $q, $v) => $q->where('modulo', $v))
             ->when($filtros['accion'] ?? null, fn (Builder $q, $v) => $q->where('accion', $v))
+            ->when($filtros['categoria'] ?? null, fn (Builder $q, string $v) => $q->whereIn('accion', $this->accionesDeCategoria($v)))
             ->when($filtros['buscar'] ?? null, fn (Builder $q, $v) => $q->where(fn (Builder $s) => $s
                 ->where('descripcion', 'like', "%{$v}%")
                 ->orWhere('nombre_usuario_snapshot', 'like', "%{$v}%")))

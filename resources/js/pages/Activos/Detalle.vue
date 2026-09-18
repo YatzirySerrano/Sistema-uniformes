@@ -10,12 +10,16 @@ import {
     PackagePlus,
     ScrollText,
     Settings2,
+    Wrench,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import AgregarExistenciasDialog from '@/components/sistema/AgregarExistenciasDialog.vue';
+import AjustarExistenciaDialog from '@/components/sistema/AjustarExistenciaDialog.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import GestionarUnidadDialog from '@/components/sistema/GestionarUnidadDialog.vue';
 import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
+import RegistrarCondicionInventarioDialog from '@/components/sistema/RegistrarCondicionInventarioDialog.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -27,6 +31,12 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -82,11 +92,15 @@ const props = defineProps<{
         asignada: number;
         baja: number;
     } | null;
+    condicionesIncidencia: { valor: string; etiqueta: string }[] | null;
+    condicionesNoIncidencia: { valor: string; etiqueta: string }[] | null;
     permisos: {
         editar: boolean;
         administrar: boolean;
         agregar_existencias: boolean;
         minimos: boolean;
+        ajustar_inventario: boolean;
+        gestionar_unidades: boolean;
     };
     suspendidos: {
         id: number;
@@ -108,6 +122,9 @@ defineOptions({
 });
 
 const dialogoExistencias = ref(false);
+const dialogoAjuste = ref(false);
+const dialogoCondicion = ref(false);
+const dialogoGestionarUnidad = ref(false);
 
 // --- Existencias por estado (Disponible/Asignado/Dañado/Baja): 4 tarjetas
 // con desglose desplegable por almacén (+ variante si el activo las usa). No
@@ -317,6 +334,34 @@ function confirmarMinimoMasivo(): void {
                             : 'Agregar existencias'
                     }}
                 </Button>
+                <DropdownMenu
+                    v-if="
+                        activo.tipo_control === 'cantidad' &&
+                        permisos.ajustar_inventario
+                    "
+                >
+                    <DropdownMenuTrigger as-child>
+                        <Button variant="outline" size="sm">
+                            <Wrench class="size-3.5" />
+                            Gestionar inventario
+                            <ChevronDown class="size-3.5 opacity-60" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-56">
+                        <DropdownMenuItem
+                            class="cursor-pointer"
+                            @select="dialogoAjuste = true"
+                        >
+                            Ajustar existencia
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            class="cursor-pointer"
+                            @select="dialogoCondicion = true"
+                        >
+                            Registrar daño / baja / restaurar
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
                 <BotonEditar
                     v-if="permisos.editar"
                     :href="`/activos/${activo.id}/editar`"
@@ -423,11 +468,22 @@ function confirmarMinimoMasivo(): void {
                             etiqueta="Ayuda sobre unidades"
                         />
                     </h2>
-                    <Button variant="outline" size="sm" as-child>
-                        <Link :href="`/activos/unidades?activo_id=${activo.id}`"
-                            >Ver todas las unidades</Link
+                    <div class="flex flex-wrap gap-2">
+                        <Button
+                            v-if="permisos.gestionar_unidades"
+                            variant="outline"
+                            size="sm"
+                            @click="dialogoGestionarUnidad = true"
                         >
-                    </Button>
+                            Gestionar unidad
+                        </Button>
+                        <Button variant="outline" size="sm" as-child>
+                            <Link
+                                :href="`/activos/unidades?activo_id=${activo.id}`"
+                                >Ver todas las unidades</Link
+                            >
+                        </Button>
+                    </div>
                 </div>
 
                 <div
@@ -814,6 +870,32 @@ function confirmarMinimoMasivo(): void {
             :usa-variantes="usaVariantes"
             :es-seguimiento-individual="activo.tipo_control === 'individual'"
             :perfil-tecnico="activo.perfil_tecnico"
+        />
+
+        <AjustarExistenciaDialog
+            v-if="activo.tipo_control === 'cantidad'"
+            v-model:open="dialogoAjuste"
+            :activo-id="activo.id"
+            :empresa-id="activo.empresa.id"
+            :usa-variantes="usaVariantes"
+            :saldos="saldos"
+        />
+
+        <RegistrarCondicionInventarioDialog
+            v-if="activo.tipo_control === 'cantidad'"
+            v-model:open="dialogoCondicion"
+            :activo-id="activo.id"
+            :empresa-id="activo.empresa.id"
+            :usa-variantes="usaVariantes"
+        />
+
+        <GestionarUnidadDialog
+            v-if="activo.tipo_control === 'individual'"
+            v-model:open="dialogoGestionarUnidad"
+            :activo-id="activo.id"
+            :empresa-id="activo.empresa.id"
+            :condiciones-incidencia="condicionesIncidencia ?? []"
+            :condiciones-no-incidencia="condicionesNoIncidencia ?? []"
         />
 
         <Dialog v-model:open="dialogoMinimo">

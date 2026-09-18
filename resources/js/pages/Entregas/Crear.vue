@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Calendar, ChevronLeft, ChevronRight, Plus, Trash2 } from '@lucide/vue';
+import { useMediaQuery } from '@vueuse/core';
 import { computed, nextTick, reactive, ref, watch } from 'vue';
+import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
@@ -822,10 +824,43 @@ const puedeConfirmar = computed(
         !form.processing,
 );
 
+// ------------------------------------------------------------------
+// Alerta móvil/tablet al pulsar "Continuar" con errores: el recuadro
+// amarillo de siempre se conserva (nunca se elimina), pero en pantallas
+// angostas puede quedar fuera del viewport con muchos renglones. Un Dialog
+// aparece SÓLO al intentar continuar (nunca mientras se escribe) con el
+// resumen y un acceso directo de vuelta al recuadro. En desktop no hay
+// modal: sólo se hace scroll/foco al recuadro si por algo quedó fuera de
+// vista, sin bloquear nada.
+// ------------------------------------------------------------------
+const esMovilOTablet = useMediaQuery('(max-width: 1024px)');
+const dialogoProblemasMovil = ref(false);
+const resumenProblemasRef = ref<HTMLElement | null>(null);
+
+function desplazarseAResumenProblemas(): void {
+    void nextTick(() => {
+        resumenProblemasRef.value?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+        });
+        resumenProblemasRef.value?.focus();
+    });
+}
+
+function irAlPrimerProblema(): void {
+    dialogoProblemasMovil.value = false;
+    desplazarseAResumenProblemas();
+}
+
 function irA(n: 1 | 2 | 3): void {
     if (n === 2 && !puedeAvanzarPaso1.value) return;
-    if (n === 3 && (!puedeAvanzarPaso1.value || !puedeAvanzarPaso2.value))
+    if (n === 3 && (!puedeAvanzarPaso1.value || !puedeAvanzarPaso2.value)) {
+        if (puedeAvanzarPaso1.value && problemasPaso2.value.length) {
+            if (esMovilOTablet.value) dialogoProblemasMovil.value = true;
+            else desplazarseAResumenProblemas();
+        }
         return;
+    }
     paso.value = n;
 }
 
@@ -1103,7 +1138,9 @@ function enviar(): void {
 
                 <div
                     v-if="problemasPaso2.length"
-                    class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                    ref="resumenProblemasRef"
+                    tabindex="-1"
+                    class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 outline-none dark:text-amber-400"
                 >
                     <p class="font-medium">
                         Revisa lo siguiente antes de continuar:
@@ -1938,5 +1975,11 @@ function enviar(): void {
                 </Button>
             </div>
         </form>
+
+        <AlertaProblemasMovil
+            v-model:open="dialogoProblemasMovil"
+            :problemas="problemasPaso2"
+            @ir-al-problema="irAlPrimerProblema"
+        />
     </div>
 </template>

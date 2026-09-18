@@ -4,7 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Acciones\AjustarInventario;
 use App\Acciones\AjustarMinimoInventario;
+use App\Acciones\MarcarCondicionInventario;
 use App\Acciones\RegistrarEntradaInventario;
+use App\Acciones\RestaurarCondicionInventario;
+use App\Enums\CondicionDevolucion;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Requests\Activos\RegistrarEntradaInventarioRequest;
@@ -166,6 +169,64 @@ class InventarioController extends Controller
         );
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Ajuste de existencias registrado.']);
+    }
+
+    /**
+     * Marca N piezas de un activo por CANTIDAD como Dañado o Baja,
+     * directamente desde el stock disponible (nunca desde una devolución).
+     * Mismo permiso que "Ajustar existencias": conceptualmente es también
+     * una corrección del inventario físico frente al conteo real.
+     */
+    public function marcarCondicion(Request $request, MarcarCondicionInventario $accion): RedirectResponse
+    {
+        abort_unless($request->user()->can('inventario.ajustar'), 403);
+        $empresa = $this->resolverEmpresa($request);
+
+        $datos = $this->validarOperacion($request, $empresa->id, [
+            'condicion' => ['required', Rule::in([CondicionDevolucion::Danado->value, CondicionDevolucion::Baja->value])],
+            'cantidad' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'motivo' => ['required', 'string', 'max:255'],
+        ]);
+
+        $accion->ejecutar(
+            $empresa->id,
+            (int) $datos['almacen_id'],
+            (int) $datos['activo_id'],
+            isset($datos['talla_id']) ? (int) $datos['talla_id'] : null,
+            CondicionDevolucion::from($datos['condicion']),
+            (int) $datos['cantidad'],
+            $datos['motivo'],
+            $request->user()->id,
+        );
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Condición de inventario registrada.']);
+    }
+
+    /**
+     * Restaura N piezas marcadas como Dañado de vuelta a Disponible (se
+     * repararon o el conteo estaba mal). Nunca aplica a Baja (terminal).
+     */
+    public function restaurarCondicion(Request $request, RestaurarCondicionInventario $accion): RedirectResponse
+    {
+        abort_unless($request->user()->can('inventario.ajustar'), 403);
+        $empresa = $this->resolverEmpresa($request);
+
+        $datos = $this->validarOperacion($request, $empresa->id, [
+            'cantidad' => ['required', 'integer', 'min:1', 'max:1000000'],
+            'motivo' => ['required', 'string', 'max:255'],
+        ]);
+
+        $accion->ejecutar(
+            $empresa->id,
+            (int) $datos['almacen_id'],
+            (int) $datos['activo_id'],
+            isset($datos['talla_id']) ? (int) $datos['talla_id'] : null,
+            (int) $datos['cantidad'],
+            $datos['motivo'],
+            $request->user()->id,
+        );
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Existencia restaurada a disponible.']);
     }
 
     public function minimos(Request $request, AjustarMinimoInventario $ajustarMinimo): RedirectResponse

@@ -470,9 +470,10 @@ class UnidadActivoController extends Controller
             ->orderBy('codigo')
             ->limit(30)
             ->with(['activo:id,nombre', 'almacen:id,nombre', 'especificacion'])
-            ->get(['id', 'codigo', 'estado', 'condicion', 'activo_id', 'almacen_id', 'colaborador_id', 'observaciones'])
+            ->get(['id', 'public_token', 'codigo', 'estado', 'condicion', 'activo_id', 'almacen_id', 'colaborador_id', 'observaciones'])
             ->map(fn (UnidadActivo $u): array => [
                 'id' => $u->id,
+                'public_token' => $u->public_token,
                 'codigo' => $u->codigo,
                 'activo' => $u->activo?->nombre,
                 'almacen' => $u->almacen?->nombre,
@@ -480,6 +481,8 @@ class UnidadActivoController extends Controller
                 'marca_modelo' => $u->especificacion?->marcaModelo(),
                 'imei_mascara' => $u->especificacion?->imeiMascara(),
                 'numero_telefonico' => $u->especificacion?->numero_telefonico,
+                'estado' => $u->estado->value,
+                'condicion' => $u->condicion->value,
                 'estado_visible_etiqueta' => $u->estadoVisible()->etiqueta(),
                 'condicion_etiqueta' => $u->condicion->etiqueta(),
                 'entregable' => $u->esEntregable(),

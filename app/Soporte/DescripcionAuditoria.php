@@ -33,6 +33,23 @@ use UnitEnum;
 class DescripcionAuditoria
 {
     /**
+     * Etiquetas comprensibles de las 4 categorías CRUD que puede devolver
+     * `categoria()`. Cualquier acción que no clasifique en ninguna (la
+     * mayoría de las acciones OPERATIVAS: entrada, salida, ajuste, entrega,
+     * devolución, baja, incidencia, confirmar, firmar, traspaso, corregir,
+     * importar…) devuelve `null` — se mantienen visibles y buscables tal
+     * cual, nunca se ocultan ni se fuerzan a una de estas 4 categorías.
+     *
+     * @var array<string, string>
+     */
+    public const CATEGORIAS = [
+        'creacion' => 'Creación',
+        'actualizacion' => 'Actualización',
+        'eliminacion' => 'Eliminación',
+        'reactivacion' => 'Reactivación',
+    ];
+
+    /**
      * @var array<string, string>
      */
     private const ETIQUETAS_CAMPO = [
@@ -48,6 +65,7 @@ class DescripcionAuditoria
         'rfc' => 'RFC',
         'puesto' => 'Puesto',
         'area' => 'Área',
+        'sucursal' => 'Sucursal',
         'numero_empleado' => 'Número de empleado',
         'activo' => 'Estado',
         'activa' => 'Estado',
@@ -97,6 +115,63 @@ class DescripcionAuditoria
         }
 
         return $cambios;
+    }
+
+    /**
+     * Clasifica un registro de auditoría en una de las 4 categorías CRUD
+     * comprensibles para el usuario (`self::CATEGORIAS`), o `null` si es una
+     * acción OPERATIVA que no encaja en ninguna (nunca se fuerza).
+     *
+     * Fuente de verdad, en orden de prioridad — NUNCA heurísticas de texto
+     * sobre la descripción:
+     * 1. Cambio REAL capturado en `activo`/`activa` (el borrado lógico de
+     *    este dominio): `true → false` = Eliminación, `false → true` =
+     *    Reactivación.
+     * 2. Cambio REAL capturado en `deleted_at` (los modelos con
+     *    `SoftDeletes` puro): de vacío a con valor = Eliminación, de con
+     *    valor a vacío (restore) = Reactivación.
+     * 3. Si ninguno de los dos se capturó (la mayoría de las acciones sólo
+     *    registran `descripcion`, ver docblock de la clase), se usa el
+     *    ÚLTIMO segmento de la propia acción registrada (`Str::afterLast`,
+     *    nunca `str_contains`/`includes`): convención real y consistente en
+     *    todo el dominio — cada módulo sufija su acción con el verbo exacto
+     *    (`conjunto_crear`, `area_editar`… y las simples `crear`/`editar`/
+     *    `activar`/`desactivar`/`eliminar`) — `crear` → Creación, `editar` →
+     *    Actualización, `activar` → Reactivación, `desactivar`/`eliminar` →
+     *    Eliminación. Cualquier otro verbo (`entrada`, `ajuste`, `entrega`,
+     *    `devolucion`, `baja`, `incidencia`, `recuperacion`, `confirmar`,
+     *    `firmar`, `traspaso`, `corregir`, `importar`…) es OPERATIVO: `null`.
+     *
+     * @param  array<string, mixed>|null  $anteriores
+     * @param  array<string, mixed>|null  $nuevos
+     */
+    public function categoria(string $accion, ?array $anteriores, ?array $nuevos): ?string
+    {
+        foreach (['activo', 'activa'] as $campoEstado) {
+            if (is_array($anteriores) && is_array($nuevos) && array_key_exists($campoEstado, $anteriores) && array_key_exists($campoEstado, $nuevos)) {
+                $antes = (bool) $anteriores[$campoEstado];
+                $despues = (bool) $nuevos[$campoEstado];
+                if ($antes !== $despues) {
+                    return $despues ? 'reactivacion' : 'eliminacion';
+                }
+            }
+        }
+
+        if (is_array($anteriores) && is_array($nuevos) && array_key_exists('deleted_at', $anteriores) && array_key_exists('deleted_at', $nuevos)) {
+            $antes = $anteriores['deleted_at'] !== null;
+            $despues = $nuevos['deleted_at'] !== null;
+            if ($antes !== $despues) {
+                return $despues ? 'eliminacion' : 'reactivacion';
+            }
+        }
+
+        return match (Str::afterLast($accion, '_')) {
+            'crear' => 'creacion',
+            'editar' => 'actualizacion',
+            'activar' => 'reactivacion',
+            'desactivar', 'eliminar' => 'eliminacion',
+            default => null,
+        };
     }
 
     private function esClaveOculta(string $clave): bool

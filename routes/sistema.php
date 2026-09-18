@@ -150,6 +150,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventario/entrada', [InventarioController::class, 'formularioEntrada'])->name('inventario.entrada-formulario');
     Route::post('inventario/entrada', [InventarioController::class, 'entrada'])->name('inventario.entrada');
     Route::post('inventario/ajuste', [InventarioController::class, 'ajuste'])->name('inventario.ajuste');
+    Route::post('inventario/condicion', [InventarioController::class, 'marcarCondicion'])->name('inventario.condicion');
+    Route::post('inventario/condicion/restaurar', [InventarioController::class, 'restaurarCondicion'])->name('inventario.condicion.restaurar');
     Route::post('inventario/minimos', [InventarioController::class, 'minimos'])->name('inventario.minimos');
     Route::get('inventario/minimos/masivo', [InventarioController::class, 'previsualizarMinimoMasivo'])->name('inventario.minimos.masivo-preview');
     Route::post('inventario/minimos/masivo', [InventarioController::class, 'aplicarMinimoMasivo'])->name('inventario.minimos.masivo');

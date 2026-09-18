@@ -460,6 +460,14 @@ class ColaboradorController extends Controller
     public function update(GuardarColaboradorRequest $request, Colaborador $colaborador): RedirectResponse
     {
         $anteriores = $colaborador->toArray();
+        // `sucursal_id` es un `*_id` y `DescripcionAuditoria` oculta esas
+        // claves del diff humano a propósito (evita mostrar un id crudo sin
+        // nombre resuelto) — a diferencia de `area` (columna espejo de
+        // texto, ya legible tal cual), sucursal no tiene mirror. Se
+        // resuelve el nombre ANTES/DESPUÉS aquí mismo (sin tocar el modelo)
+        // sólo para que el cambio de sucursal quede trazable en Auditoría/
+        // Histórico — ver `ServicioHistoricoColaborador::movimientosInternosDelPeriodo()`.
+        $sucursalAnteriorId = $colaborador->sucursal_id;
         $rutaFotoAnterior = $colaborador->foto_ruta;
         $rutaFotoNueva = $request->hasFile('foto') ? $this->guardarFotoSegura($request->file('foto'), $colaborador->empresa_id) : null;
         // Caso C/E: "Quitar" sin reemplazo. Sólo cuenta si no llegó foto nueva.
@@ -488,11 +496,18 @@ class ColaboradorController extends Controller
             Storage::disk('local')->delete($rutaFotoAnterior);
         }
 
+        $nuevos = $colaborador->toArray();
+
+        if ($sucursalAnteriorId !== $colaborador->sucursal_id) {
+            $anteriores['sucursal'] = Sucursal::query()->find($sucursalAnteriorId)?->nombre;
+            $nuevos['sucursal'] = Sucursal::query()->find($colaborador->sucursal_id)?->nombre;
+        }
+
         $this->auditoria->registrar('colaboradores', 'editar', [
             'tipo_entidad' => Colaborador::class, 'entidad_id' => $colaborador->id, 'empresa_id' => $colaborador->empresa_id,
             'descripcion' => 'Edición de colaborador '.$colaborador->nombre_completo.($eliminarFoto ? ' · foto eliminada' : ''),
             'valores_anteriores' => $anteriores,
-            'valores_nuevos' => $colaborador->toArray(),
+            'valores_nuevos' => $nuevos,
         ]);
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Colaborador actualizado.']);
