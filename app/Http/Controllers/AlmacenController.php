@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\CondicionUnidadActivo;
+use App\Enums\EstadoUnidadActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
@@ -11,6 +13,7 @@ use App\Models\Almacen;
 use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\SaldoInventario;
+use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\ServicioGeneradorCodigosGlobal;
@@ -189,11 +192,7 @@ class AlmacenController extends Controller
         return Inertia::render('Almacenes/Detalle', [
             'resumen' => [
                 'empresas_abastecidas' => $almacen->empresas->count(),
-                'activos_con_existencia' => SaldoInventario::query()
-                    ->where('almacen_id', $almacen->id)
-                    ->where('cantidad', '>', 0)
-                    ->distinct()
-                    ->count('activo_id'),
+                'activos_con_existencia' => $this->contarActivosConExistencia($almacen),
             ],
             'almacen' => [
                 ...$almacen->only(['id', 'nombre', 'codigo', 'descripcion', 'direccion', 'telefono', 'correo', 'activo']),
@@ -262,9 +261,12 @@ class AlmacenController extends Controller
 
     /**
      * Regla crítica: no se puede retirar una empresa abastecida de un almacén
-     * si todavía existen existencias operativas de esa empresa en él (saldo
-     * con cantidad > 0). Los históricos (movimientos, saldos en cero) nunca
-     * bloquean la operación. El mensaje nombra la empresa afectada.
+     * si todavía existen existencias operativas de esa empresa en él — saldo
+     * con cantidad > 0 (control por cantidad) O unidades identificadas que
+     * siguen operativas ahí (en almacén o asignadas; una `Baja` ya no cuenta,
+     * es histórico). Los históricos (movimientos, saldos en cero, unidades
+     * dadas de baja) nunca bloquean la operación. El mensaje nombra la
+     * empresa afectada.
      *
      * @param  Collection<int, int>  $empresaIdsRetiradas
      */
@@ -277,7 +279,13 @@ class AlmacenController extends Controller
                 ->where('cantidad', '>', 0)
                 ->exists();
 
-            if ($tieneExistencias) {
+            $tieneUnidades = UnidadActivo::query()
+                ->where('almacen_id', $almacen->id)
+                ->where('empresa_id', $empresaId)
+                ->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->exists();
+
+            if ($tieneExistencias || $tieneUnidades) {
                 $nombre = Empresa::query()->whereKey($empresaId)->value('nombre_comercial');
 
                 throw ValidationException::withMessages([
@@ -285,6 +293,35 @@ class AlmacenController extends Controller
                 ]);
             }
         }
+    }
+
+    /**
+     * "Activos con existencia" del resumen de Almacén: cuenta ACTIVOS
+     * DISTINTOS (no piezas) con existencia real en este almacén, combinando
+     * las dos fuentes de verdad del dominio — `SaldoInventario` (control por
+     * cantidad) y `UnidadActivo` (seguimiento individual, que nunca tiene
+     * saldo agregado). Mismo criterio de "disponible" que
+     * `Conjunto::disponibilidad()`/`ActivoController::buscar()`: unidad
+     * `en_almacen` + `funcionando` — una unidad asignada o dada de baja no
+     * cuenta como existencia en almacén. Deduplicado por `activo_id` para que
+     * varias tallas/unidades del mismo activo cuenten una sola vez.
+     */
+    private function contarActivosConExistencia(Almacen $almacen): int
+    {
+        $porCantidad = SaldoInventario::query()
+            ->where('almacen_id', $almacen->id)
+            ->where('cantidad', '>', 0)
+            ->distinct()
+            ->pluck('activo_id');
+
+        $individuales = UnidadActivo::query()
+            ->where('almacen_id', $almacen->id)
+            ->where('estado', EstadoUnidadActivo::EnAlmacen)
+            ->where('condicion', CondicionUnidadActivo::Funcionando)
+            ->distinct()
+            ->pluck('activo_id');
+
+        return $porCantidad->merge($individuales)->unique()->count();
     }
 
     public function toggle(Almacen $almacen): RedirectResponse

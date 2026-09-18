@@ -131,7 +131,11 @@ async function buscarVariantes(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionVariante[]> {
-    const res = await fetch(`/tallas/buscar?q=${encodeURIComponent(q)}`, {
+    const params = new URLSearchParams({
+        activo_id: String(props.activoId),
+        q,
+    });
+    const res = await fetch(`/tallas/buscar?${params.toString()}`, {
         headers: { Accept: 'application/json' },
         credentials: 'same-origin',
         signal,

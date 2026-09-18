@@ -7,6 +7,7 @@ use App\Acciones\RegistrarEntregaFirmada;
 use App\Enums\EstadoEntrega;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Entregas\GuardarEntregaRequest;
 use App\Http\Requests\Entregas\GuardarIdentidadEntregaRequest;
 use App\Models\Colaborador;
@@ -19,14 +20,20 @@ use App\Models\User;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
+use App\Soporte\ContextoExportacion;
 use App\Soporte\FechaHora;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
@@ -40,45 +47,16 @@ use Throwable;
 class EntregaController extends Controller
 {
     use ConEmpresa;
+    use ExportaListado;
 
     public function index(Request $request): Response
     {
         $this->authorize('viewAny', EntregaUniforme::class);
 
-        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
-
-        $filtros = $request->validate([
-            'buscar' => ['nullable', 'string', 'max:100'],
-            'empresa_id' => ['nullable', 'integer'],
-            'sucursal_id' => ['nullable', 'integer'],
-            'almacen_id' => ['nullable', 'integer'],
-            'estado' => ['nullable', 'string'],
-            'contrato_id' => ['nullable', 'integer'],
-            'servicio_id' => ['nullable', 'integer'],
-            'desde' => ['nullable', 'date'],
-            'hasta' => ['nullable', 'date'],
-        ]);
-
+        $filtros = $this->filtrosListado($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
 
-        $entregas = EntregaUniforme::query()
-            ->whereIn('empresa_id', $idsAutorizadas)
-            ->when($empresaFiltro !== null, fn ($q) => $q->where('empresa_id', $empresaFiltro->id))
-            ->when($filtros['buscar'] ?? null, fn ($q, $b) => $q->where(fn ($s) => $s
-                ->where('folio', 'like', "%{$b}%")
-                ->orWhereHas('colaborador', fn ($c) => $c->where('nombre_completo', 'like', "%{$b}%")->orWhere('numero_empleado', 'like', "%{$b}%"))))
-            ->when($filtros['sucursal_id'] ?? null, fn ($q, $s) => $q->where('sucursal_id', $s))
-            ->when($filtros['almacen_id'] ?? null, fn ($q, $a) => $q->where('almacen_id', $a))
-            ->when($filtros['estado'] ?? null, fn ($q, $e) => $q->where('estado', $e))
-            // Servicio es el snapshot histórico de la propia entrega
-            // (`entregas_uniformes.servicio_id`); Contrato filtra por el
-            // contrato de ese mismo servicio — ninguno de los dos usa el
-            // servicio VIGENTE del colaborador, que puede ya haber cambiado.
-            ->when($filtros['servicio_id'] ?? null, fn ($q, $s) => $q->where('servicio_id', $s))
-            ->when($filtros['contrato_id'] ?? null, fn ($q, $c) => $q->whereHas('servicio', fn ($sq) => $sq->where('contrato_id', $c)))
-            ->when($filtros['desde'] ?? null, fn ($q, $d) => $q->whereDate('fecha_entrega', '>=', $d))
-            ->when($filtros['hasta'] ?? null, fn ($q, $h) => $q->whereDate('fecha_entrega', '<=', $h))
-            ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'encargado:id,name', 'servicio:id,nombre,contrato_id', 'servicio.contrato:id,nombre'])
+        $entregas = $this->consultaEntregas($request)
             ->withCount('detalles')
             ->latest()
             ->paginate($this->porPagina())
@@ -105,6 +83,123 @@ class EntregaController extends Controller
             'estados' => collect(EstadoEntrega::cases())->map(fn ($e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
             'puedeCrear' => $request->user()->can('create', EntregaUniforme::class),
         ]);
+    }
+
+    /**
+     * Excel/PDF del listado, respetando los mismos filtros/alcance que
+     * `index()` (misma consulta base, nunca una aparte) — diseño
+     * administrativo compartido (`ExportaListado`/`ListadoExport`).
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        $this->authorize('viewAny', EntregaUniforme::class);
+
+        $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        $entregas = $this->consultaEntregas($request)
+            ->withCount('detalles')
+            ->latest()
+            ->get();
+
+        $filas = $entregas->map(fn (EntregaUniforme $e): array => [
+            $e->folio,
+            $e->colaborador?->nombre_completo,
+            $e->colaborador?->numero_empleado,
+            $e->empresa?->nombre_comercial,
+            $e->sucursal?->nombre,
+            $e->servicio === null ? null : $e->servicio->contrato->nombre.' — '.$e->servicio->nombre,
+            $e->fecha_entrega->format('d/m/Y'),
+            $e->estado->etiqueta(),
+            (int) $e->detalles_count,
+            $e->encargado?->name,
+        ])->all();
+
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Estado' => ($filtros['estado'] ?? null) ? (EstadoEntrega::tryFrom($filtros['estado'])?->etiqueta() ?? $filtros['estado']) : null,
+            'Desde' => ($filtros['desde'] ?? null) ? Carbon::parse($filtros['desde'])->format('d/m/Y') : null,
+            'Hasta' => ($filtros['hasta'] ?? null) ? Carbon::parse($filtros['hasta'])->format('d/m/Y') : null,
+        ]);
+
+        $contexto = new ContextoExportacion(
+            'Entregas',
+            $empresaFiltro,
+            $filtrosHumanos,
+            $entregas->count(),
+            generadoPor: $request->user()?->name,
+            kpis: $this->kpisEntregasListado($entregas),
+        );
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Folio', 'Colaborador', 'N.º empleado', 'Empresa', 'Sucursal', 'Servicio', 'Fecha', 'Estado', 'Renglones', 'Responsable',
+        ], $contexto);
+    }
+
+    /**
+     * @param  Collection<int, EntregaUniforme>  $entregas
+     * @return array<string, string|int>
+     */
+    private function kpisEntregasListado(Collection $entregas): array
+    {
+        return [
+            'Entregas' => $entregas->count(),
+            'Renglones' => $entregas->sum('detalles_count'),
+            'Firmadas' => $entregas->filter(fn (EntregaUniforme $e): bool => $e->estado->estaFirmada())->count(),
+            'Pendientes de firma' => $entregas->filter(fn (EntregaUniforme $e): bool => $e->estado === EstadoEntrega::PendienteFirma)->count(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
+            'buscar' => ['nullable', 'string', 'max:100'],
+            'empresa_id' => ['nullable', 'integer'],
+            'sucursal_id' => ['nullable', 'integer'],
+            'almacen_id' => ['nullable', 'integer'],
+            'estado' => ['nullable', 'string'],
+            'contrato_id' => ['nullable', 'integer'],
+            'servicio_id' => ['nullable', 'integer'],
+            'desde' => ['nullable', 'date'],
+            'hasta' => ['nullable', 'date'],
+        ]);
+    }
+
+    /**
+     * Consulta filtrada compartida por `index()` (pagina + `through()`) y
+     * `exportar()` (`get()` + `map()`), acotada al alcance de empresas del
+     * usuario. Nunca pagina ni hace `withCount`/`latest` aquí: cada llamador
+     * decide eso según lo que necesite.
+     *
+     * @return Builder<EntregaUniforme>
+     */
+    private function consultaEntregas(Request $request): Builder
+    {
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+        $filtros = $this->filtrosListado($request);
+
+        return EntregaUniforme::query()
+            ->whereIn('empresa_id', $idsAutorizadas)
+            ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
+            ->when($filtros['buscar'] ?? null, fn (Builder $q, $b) => $q->where(fn (Builder $s) => $s
+                ->where('folio', 'like', "%{$b}%")
+                ->orWhereHas('colaborador', fn (Builder $c) => $c->where('nombre_completo', 'like', "%{$b}%")->orWhere('numero_empleado', 'like', "%{$b}%"))))
+            ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
+            ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $a) => $q->where('almacen_id', $a))
+            ->when($filtros['estado'] ?? null, fn (Builder $q, $e) => $q->where('estado', $e))
+            // Servicio es el snapshot histórico de la propia entrega
+            // (`entregas_uniformes.servicio_id`); Contrato filtra por el
+            // contrato de ese mismo servicio — ninguno de los dos usa el
+            // servicio VIGENTE del colaborador, que puede ya haber cambiado.
+            ->when($filtros['servicio_id'] ?? null, fn (Builder $q, $s) => $q->where('servicio_id', $s))
+            ->when($filtros['contrato_id'] ?? null, fn (Builder $q, $c) => $q->whereHas('servicio', fn (Builder $sq) => $sq->where('contrato_id', $c)))
+            ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('fecha_entrega', '>=', $d))
+            ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('fecha_entrega', '<=', $h))
+            ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'encargado:id,name', 'servicio:id,nombre,contrato_id', 'servicio.contrato:id,nombre']);
     }
 
     public function create(Request $request): Response

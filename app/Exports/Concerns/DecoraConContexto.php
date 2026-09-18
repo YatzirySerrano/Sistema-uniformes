@@ -2,6 +2,7 @@
 
 namespace App\Exports\Concerns;
 
+use App\Models\ConfiguracionSistema;
 use App\Servicios\ServicioGraficaImagen;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\KpiExportacion;
@@ -14,6 +15,7 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Color;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use Throwable;
 
@@ -45,6 +47,14 @@ use Throwable;
 trait DecoraConContexto
 {
     /**
+     * Ancho máximo (en unidades de columna de PhpSpreadsheet, ~caracteres)
+     * para una columna de texto libre en el estilo administrativo — evita
+     * que una descripción/motivo largo genere una columna gigantesca; el
+     * contenido se envuelve (`wrap text`) en vez de ensanchar más.
+     */
+    private const ANCHO_MAXIMO_COLUMNA = 45;
+
+    /**
      * @return array<string, callable>
      */
     public function registerEvents(): array
@@ -54,7 +64,16 @@ trait DecoraConContexto
                 $contexto = $this->contextoExportacion();
 
                 $this->decorarConContexto($evento->sheet->getDelegate(), $contexto, $this->totalEncabezados(), $this->totalFilas());
-                $this->construirHojaResumen($evento->sheet->getDelegate()->getParentOrThrow(), $contexto);
+
+                // Hoja "Resumen" separada SÓLO cuando aporta algo que la hoja
+                // "Datos" no tiene ya (KPIs y/o gráficas): un reporte simple
+                // sin ninguno de los dos ya trae título/empresa/filtros/
+                // generado por/total en el bloque de metadata de "Datos"
+                // (`decorarConContexto()`) — una segunda hoja repitiendo
+                // exactamente lo mismo no aporta valor, sólo confunde.
+                if ($contexto->kpis !== [] || $contexto->graficas !== []) {
+                    $this->construirHojaResumen($evento->sheet->getDelegate()->getParentOrThrow(), $contexto);
+                }
             },
         ];
     }
@@ -73,8 +92,39 @@ trait DecoraConContexto
         return count($this->headings());
     }
 
+    /**
+     * `true` (por defecto — `ListadoExport`, todos los listados
+     * administrativos): usa el estilo "ejecutivo" nuevo (banda de
+     * metadata, título destacado, columnas con ancho máximo + wrap,
+     * pie de página). `EntregasExport`/`InventarioExport` (Reportes) lo
+     * sobrescriben a `false` para conservar EXACTAMENTE su diseño anterior
+     * — Reportes tiene su propio criterio visual y no debe cambiar aquí.
+     */
+    protected function estiloAdministrativo(): bool
+    {
+        return true;
+    }
+
+    /**
+     * Color de acento reutilizado de forma segura: el mismo
+     * `ConfiguracionSistema::color_principal` que ya usa el resto del
+     * sistema (sidebar, botones, gráficas — `PaletaGraficas::principal()`).
+     * Sólo para TEXTO/bordes finos, nunca para el relleno grande del
+     * encabezado de tabla (que se queda en el azul-slate sobrio fijo,
+     * `1E293B`, para blindarse de un color de marca poco profesional que
+     * un cliente haya configurado). Con fallback seguro si el valor
+     * guardado no es un hex válido.
+     */
+    private function colorAccentoAdministrativo(): string
+    {
+        $color = ltrim((string) (ConfiguracionSistema::actual()->color_principal ?? ''), '#');
+
+        return preg_match('/^[0-9A-Fa-f]{6}$/', $color) === 1 ? Str::upper($color) : '1E293B';
+    }
+
     private function decorarConContexto(Worksheet $hoja, ContextoExportacion $contexto, int $numEncabezados, int $numFilas): void
     {
+        $administrativo = $this->estiloAdministrativo();
         $numColumnas = max($numEncabezados, 1);
         $ultimaColumna = Coordinate::stringFromColumnIndex($numColumnas);
 
@@ -91,6 +141,8 @@ trait DecoraConContexto
             ['Registros', (string) $contexto->total],
         ];
 
+        // La última fila insertada (`$numFilasMeta`) queda en blanco a
+        // propósito: es el respiro entre la banda de metadata y la tabla.
         $numFilasMeta = count($metadatos) + 1;
         $hoja->insertNewRowBefore(1, $numFilasMeta);
 
@@ -101,13 +153,29 @@ trait DecoraConContexto
             $hoja->getStyle("A{$fila}")->getFont()->setBold(true);
         }
 
+        if ($administrativo) {
+            $colorAccento = $this->colorAccentoAdministrativo();
+
+            // Título del reporte (fila 1) destacado — la banda entera se
+            // lee como una sola unidad visual, no líneas de texto sueltas.
+            $hoja->getStyle('B1')->getFont()->setBold(true)->setSize(14)->getColor()->setRGB($colorAccento);
+            $hoja->getStyle('A1')->getFont()->setBold(true)->setSize(9)->getColor()->setRGB('64748B');
+            $hoja->getRowDimension(1)->setRowHeight(24);
+
+            $rangoBanda = "A1:{$ultimaColumna}{$numFilasMeta}";
+            $hoja->getStyle($rangoBanda)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F1F5F9');
+            $hoja->getStyle("A{$numFilasMeta}:{$ultimaColumna}{$numFilasMeta}")->getBorders()->getBottom()
+                ->setBorderStyle(Border::BORDER_MEDIUM)->setColor(new Color('CBD5E1'));
+        }
+
         $filaEncabezados = $numFilasMeta + 1;
         $ultimaFila = $filaEncabezados + $numFilas;
         $rangoEncabezados = "A{$filaEncabezados}:{$ultimaColumna}{$filaEncabezados}";
 
         $hoja->getStyle($rangoEncabezados)->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
         $hoja->getStyle($rangoEncabezados)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('1E293B');
-        $hoja->getStyle($rangoEncabezados)->getAlignment()->setVertical('center');
+        $hoja->getStyle($rangoEncabezados)->getAlignment()->setVertical('center')->setHorizontal('center');
+        $hoja->getRowDimension($filaEncabezados)->setRowHeight($administrativo ? 20 : 15);
 
         if ($ultimaFila > $filaEncabezados) {
             $rangoTabla = "A{$filaEncabezados}:{$ultimaColumna}{$ultimaFila}";
@@ -122,9 +190,105 @@ trait DecoraConContexto
                         ->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
                 }
             }
+
+            // Impresión: repite la fila de encabezados en cada página y
+            // ajusta las columnas al ancho de la hoja (nunca el alto, para no
+            // comprimir filas) — para que la tabla se siga leyendo bien
+            // aunque tenga muchas filas o se imprima/exporte a PDF desde Excel.
+            $hoja->getPageSetup()
+                ->setOrientation(PageSetup::ORIENTATION_LANDSCAPE)
+                ->setFitToWidth(1)
+                ->setFitToHeight(0)
+                ->setRowsToRepeatAtTopByStartAndEnd($filaEncabezados, $filaEncabezados);
+
+            if ($administrativo) {
+                $this->ajustarColumnasYAlineacion($hoja, $numColumnas, $filaEncabezados, $ultimaFila);
+                $this->pintarPiePaginaAdministrativo($hoja, $contexto);
+            }
         }
 
         $this->dibujarLogoDeContexto($hoja, $contexto, $numColumnas);
+    }
+
+    /**
+     * Recorre las columnas de datos YA ESCRITAS (después de `FromArray`/
+     * `FromCollection`) para:
+     *   - alinear centrado lo que en TODA la columna luce como fecha
+     *     (`dd/mm/aaaa`) y a la derecha lo que es numérico — nunca adivina
+     *     por el nombre del encabezado, sólo por el contenido real;
+     *   - poner un ancho MÁXIMO razonable + `wrap text` a cualquier columna
+     *     cuyo contenido más largo sea de texto libre (descripciones,
+     *     motivos…), para que no salga una columna gigantesca — el resto de
+     *     columnas conserva el auto-ancho normal de `ShouldAutoSize`.
+     * No cambia ningún valor, sólo estilo — no se puede leer el ancho
+     * "auto" aquí (PhpSpreadsheet lo calcula hasta escribir el archivo), así
+     * que el máximo se decide por la longitud real del contenido.
+     */
+    private function ajustarColumnasYAlineacion(Worksheet $hoja, int $numColumnas, int $filaEncabezados, int $ultimaFila): void
+    {
+        $primeraFilaDatos = $filaEncabezados + 1;
+        if ($primeraFilaDatos > $ultimaFila) {
+            return;
+        }
+
+        for ($col = 1; $col <= $numColumnas; $col++) {
+            $colLetra = Coordinate::stringFromColumnIndex($col);
+            $maxLargo = 0;
+            $todasFecha = true;
+            $todasNumerico = true;
+            $hayValor = false;
+
+            for ($fila = $primeraFilaDatos; $fila <= $ultimaFila; $fila++) {
+                $valor = $hoja->getCellByColumnAndRow($col, $fila)->getValue();
+                if ($valor === null || $valor === '') {
+                    continue;
+                }
+
+                $hayValor = true;
+                $texto = (string) $valor;
+                $maxLargo = max($maxLargo, mb_strlen($texto));
+
+                if (preg_match('/^\d{2}\/\d{2}\/\d{4}$/', $texto) !== 1) {
+                    $todasFecha = false;
+                }
+                if (! is_numeric($valor)) {
+                    $todasNumerico = false;
+                }
+            }
+
+            if (! $hayValor) {
+                continue;
+            }
+
+            $rangoColumna = "{$colLetra}{$primeraFilaDatos}:{$colLetra}{$ultimaFila}";
+
+            if ($todasFecha) {
+                $hoja->getStyle($rangoColumna)->getAlignment()->setHorizontal('center');
+            } elseif ($todasNumerico) {
+                $hoja->getStyle($rangoColumna)->getAlignment()->setHorizontal('right');
+            }
+
+            if ($maxLargo > self::ANCHO_MAXIMO_COLUMNA) {
+                $hoja->getColumnDimension($colLetra)->setAutoSize(false)->setWidth(self::ANCHO_MAXIMO_COLUMNA);
+                $hoja->getStyle($rangoColumna)->getAlignment()->setWrapText(true)->setVertical('top');
+            }
+        }
+    }
+
+    /**
+     * Pie de página de IMPRESIÓN (sólo visible al imprimir/exportar a PDF
+     * desde Excel, nunca en pantalla): nombre del sistema a la izquierda,
+     * "Página X de Y" al centro, fecha/hora de generación a la derecha.
+     */
+    private function pintarPiePaginaAdministrativo(Worksheet $hoja, ContextoExportacion $contexto): void
+    {
+        // Nombre del sistema (config, controlado) y fecha ya formateada
+        // (`generadoEnLocal()`, controlada) — ninguno de los dos es texto
+        // libre de usuario, así que no requieren escapar `&`.
+        $nombreSistema = (string) config('app.name', 'Sistema');
+        $fecha = $contexto->generadoEnLocal();
+
+        $hoja->getHeaderFooter()->setOddFooter("&L&8{$nombreSistema}&C&8Página &P de &N&R&8{$fecha}");
     }
 
     /**
@@ -135,11 +299,13 @@ trait DecoraConContexto
      */
     private function construirHojaResumen(Spreadsheet $libro, ContextoExportacion $contexto): void
     {
+        $administrativo = $this->estiloAdministrativo();
         $hoja = $libro->createSheet(0);
         $hoja->setTitle('Resumen');
 
         $hoja->setCellValue('A1', $contexto->titulo);
-        $hoja->getStyle('A1')->getFont()->setBold(true)->setSize(16)->getColor()->setRGB('0F172A');
+        $hoja->getStyle('A1')->getFont()->setBold(true)->setSize(16)
+            ->getColor()->setRGB($administrativo ? $this->colorAccentoAdministrativo() : '0F172A');
         // Alto explícito para que el título de 16pt nunca se vea cortado —
         // `dibujarLogoDeContexto()` sólo lo ajusta cuando hay logo.
         $hoja->getRowDimension(1)->setRowHeight(26);
@@ -167,7 +333,7 @@ trait DecoraConContexto
         $filaCursor += 2;
 
         if ($contexto->kpis !== []) {
-            $this->pintarTarjetasKpi($hoja, $contexto->kpisResueltos(), $filaCursor);
+            $this->pintarTarjetasKpi($hoja, $contexto->kpisResueltos(), $filaCursor, $administrativo);
         }
 
         $this->dibujarLogoDeContexto($hoja, $contexto, 8);
@@ -239,7 +405,7 @@ trait DecoraConContexto
      *
      * @param  array<int, KpiExportacion>  $kpis
      */
-    private function pintarTarjetasKpi(Worksheet $hoja, array $kpis, int $filaInicio): int
+    private function pintarTarjetasKpi(Worksheet $hoja, array $kpis, int $filaInicio, bool $administrativo = false): int
     {
         // `array_any()` es de PHP 8.4; `composer.json` todavía admite ^8.3.
         $tieneDescripciones = array_filter($kpis, fn (KpiExportacion $kpi): bool => $kpi->descripcion !== null) !== [];
@@ -280,6 +446,14 @@ trait DecoraConContexto
             $rango = "{$colInicioLetra}{$fila}:{$colFinLetra}{$filaFinTarjeta}";
             $hoja->getStyle($rango)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->setColor(new Color('E2E8F0'));
             $hoja->getStyle($rango)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F8FAFC');
+
+            // Franja superior de acento (look de "tile" ejecutivo) — sólo en
+            // el estilo administrativo, para no alterar las tarjetas de
+            // Reportes.
+            if ($administrativo) {
+                $hoja->getStyle("{$colInicioLetra}{$fila}:{$colFinLetra}{$fila}")->getBorders()->getTop()
+                    ->setBorderStyle(Border::BORDER_MEDIUM)->setColor(new Color($this->colorAccentoAdministrativo()));
+            }
 
             $filaMax = max($filaMax, $fila + $altoTarjeta - 1);
         }

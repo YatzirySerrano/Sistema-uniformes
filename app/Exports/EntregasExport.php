@@ -83,4 +83,14 @@ class EntregasExport implements FromCollection, ShouldAutoSize, WithEvents, With
     {
         return (int) $this->entregas->sum(fn (EntregaUniforme $e): int => $e->detalles->count());
     }
+
+    /**
+     * Reportes conserva su diseño visual actual — el rediseño "ejecutivo"
+     * de `DecoraConContexto` es sólo para los listados administrativos
+     * genéricos (`ListadoExport`).
+     */
+    protected function estiloAdministrativo(): bool
+    {
+        return false;
+    }
 }

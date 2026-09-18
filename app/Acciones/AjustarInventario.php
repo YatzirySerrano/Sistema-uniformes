@@ -6,6 +6,7 @@ use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\MovimientoInventario;
+use App\Models\Talla;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
@@ -54,7 +55,7 @@ class AjustarInventario
             throw new ExcepcionDeNegocioSimple('Esa variante no corresponde al activo seleccionado.');
         }
 
-        return DB::transaction(function () use ($empresaId, $almacenId, $activoId, $tallaId, $existenciaObjetivo, $motivo, $realizadoPor): ?MovimientoInventario {
+        return DB::transaction(function () use ($empresaId, $almacenId, $activoId, $tallaId, $existenciaObjetivo, $motivo, $realizadoPor, $almacen, $activo): ?MovimientoInventario {
             $anterior = $this->inventario->saldoActual($empresaId, $almacenId, $activoId, $tallaId);
 
             $movimiento = $this->inventario->fijarExistencia(
@@ -67,12 +68,15 @@ class AjustarInventario
                 $realizadoPor,
             );
 
+            $variante = $tallaId !== null ? Talla::query()->whereKey($tallaId)->value('valor') : null;
+            $nombreActivo = $variante !== null ? "{$activo->nombre} · {$variante}" : $activo->nombre;
+
             $this->auditoria->registrar('inventario', 'ajuste', [
                 'tipo_entidad' => MovimientoInventario::class,
                 'entidad_id' => $movimiento?->getKey(),
                 'empresa_id' => $empresaId,
                 'motivo' => $motivo,
-                'descripcion' => "Ajuste de existencia de {$anterior} a {$existenciaObjetivo} en almacén #{$almacenId}.",
+                'descripcion' => "Ajuste de existencia de {$nombreActivo} en {$almacen->nombre} ({$almacen->codigo}): de {$anterior} a {$existenciaObjetivo}.",
                 'valores_anteriores' => ['cantidad' => $anterior],
                 'valores_nuevos' => ['cantidad' => $existenciaObjetivo],
             ]);

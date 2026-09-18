@@ -53,7 +53,7 @@ class RegistrarEntradaInventario
             ->get()
             ->keyBy('id');
 
-        return DB::transaction(function () use ($items, $empresaId, $almacenId, $motivo, $realizadoPor, $cargaInicial, $notas, $activos): array {
+        return DB::transaction(function () use ($items, $empresaId, $almacenId, $motivo, $realizadoPor, $cargaInicial, $notas, $activos, $almacen): array {
             $movimientos = [];
 
             foreach ($items as $item) {
@@ -102,9 +102,18 @@ class RegistrarEntradaInventario
                 throw new ExcepcionDeNegocioSimple('No se registró ninguna entrada. Indica cantidades mayores a cero.');
             }
 
+            $nombresActivos = collect($movimientos)
+                ->pluck('activo_id')
+                ->unique()
+                ->map(fn (int $id): ?string => $activos->get($id)?->nombre)
+                ->filter()
+                ->values();
+
+            $detalleActivos = $nombresActivos->isNotEmpty() ? ' ('.$nombresActivos->implode(', ').')' : '';
+
             $this->auditoria->registrar('inventario', $cargaInicial ? 'carga_inicial' : 'entrada', [
                 'empresa_id' => $empresaId,
-                'descripcion' => count($movimientos).' movimiento(s) de entrada en almacén #'.$almacenId.'. Motivo: '.$motivo,
+                'descripcion' => count($movimientos)." movimiento(s) de entrada{$detalleActivos} en {$almacen->nombre} ({$almacen->codigo}). Motivo: {$motivo}",
             ]);
 
             return $movimientos;

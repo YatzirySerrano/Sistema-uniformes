@@ -202,6 +202,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     // Entregas
     Route::get('entregas', [EntregaController::class, 'index'])->name('entregas.index');
+    Route::get('entregas/exportar', [EntregaController::class, 'exportar'])->name('entregas.exportar');
     Route::get('entregas/crear', [EntregaController::class, 'create'])->name('entregas.create');
     Route::get('entregas/buscar', [EntregaController::class, 'buscar'])->name('entregas.buscar');
     Route::get('entregas/disponibilidad', [EntregaController::class, 'disponibilidad'])->name('entregas.disponibilidad');

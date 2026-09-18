@@ -11,6 +11,7 @@ import {
     UserCog,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import DatePicker from '@/components/sistema/DatePicker.vue';
@@ -183,6 +184,10 @@ const vista = useVistaPreferida('entregas', 'tabla');
             descripcion="Registra la entrega de uniformes y activos a los colaboradores, con firma de recepción y comprobante."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/entregas/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="puedeCrear" as-child>
                     <Link href="/entregas/crear"
                         ><Plus class="size-4" /> Nueva entrega</Link

@@ -354,7 +354,7 @@ class ColaboradorController extends Controller
      * usuario tiene permiso) el expediente digital embebido como pestaña —
      * misma página, sin navegar a otro módulo.
      */
-    public function show(Request $request, Colaborador $colaborador, ServicioExpediente $servicioExpediente): Response
+    public function show(Request $request, Colaborador $colaborador, ServicioExpediente $servicioExpediente, ServicioCustodiaColaborador $servicioCustodia): Response
     {
         $this->authorize('view', $colaborador);
 
@@ -368,7 +368,6 @@ class ColaboradorController extends Controller
         $colaborador->loadCount([
             'entregas as entregas_count' => fn ($q) => $q->whereIn('empresa_id', $idsAutorizadas),
             'devoluciones as devoluciones_count' => fn ($q) => $q->whereIn('empresa_id', $idsAutorizadas),
-            'unidadesActivo as unidades_activo_count' => fn ($q) => $q->whereIn('empresa_id', $idsAutorizadas),
         ]);
 
         $usuario = $request->user();
@@ -402,11 +401,13 @@ class ColaboradorController extends Controller
                 'documentos' => $puedeVerExpediente ? $servicioExpediente->contarSlotsVisibles($colaborador, $usuario) : 0,
                 'entregas' => $colaborador->entregas_count,
                 'devoluciones' => $colaborador->devoluciones_count,
-                // SIEMPRE situación ACTUAL: `unidadesActivo()` filtra por
-                // `colaborador_id`, y una unidad devuelta pierde ese valor al
-                // confirmarse (`ServicioUnidadesActivo::devolver()`) — nunca
-                // incluye asignaciones históricas de una empresa anterior.
-                'activos_asignados' => $colaborador->unidades_activo_count,
+                // Piezas físicas ACTUALMENTE bajo custodia (unidades
+                // identificadas asignadas + saldo pendiente de renglones por
+                // cantidad, devoluciones parciales incluidas) — fuente única
+                // `ServicioCustodiaColaborador`, nunca sólo `UnidadActivo`.
+                // Acotado a `$idsAutorizadas` por el mismo aislamiento
+                // histórico que el resto de estos KPIs.
+                'activos_asignados' => $servicioCustodia->totalPiezasPendientes($colaborador, $idsAutorizadas->all()),
             ],
             'historicoPorEmpresa' => $historicoPorEmpresa,
             'puedeEditar' => $usuario->can('update', $colaborador),

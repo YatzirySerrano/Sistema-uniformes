@@ -1,6 +1,8 @@
 <?php
 
 use App\Acciones\RegistrarEntradaInventario;
+use App\Enums\CondicionUnidadActivo;
+use App\Enums\EstadoUnidadActivo;
 use App\Enums\RolSistema;
 use App\Models\Activo;
 use App\Models\Almacen;
@@ -8,6 +10,7 @@ use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Models\Sucursal;
+use App\Models\UnidadActivo;
 use App\Servicios\ServicioInventario;
 
 beforeEach(function () {
@@ -249,6 +252,41 @@ it('el detalle de almacén es CRUD/configuración: sin desglose de inventario, s
         );
 });
 
+it('"activos con existencia" combina cantidad y unidades identificadas, deduplicando por activo y excluyendo lo no disponible', function () {
+    $empresa = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresa)->create();
+
+    $activoCantidad = Activo::factory()->for($empresa)->create(['tipo_control' => 'cantidad']);
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        empresaId: $empresa->id,
+        almacenId: $almacen->id,
+        items: [['activo_id' => $activoCantidad->id, 'talla_id' => null, 'cantidad' => 3]],
+        motivo: 'Compra',
+        realizadoPor: null,
+    );
+
+    // Seguimiento individual: SIN saldo agregado — sólo `UnidadActivo` cuenta.
+    // Dos unidades del MISMO activo, una disponible y otra ASIGNADA: el
+    // activo debe contarse una sola vez (no dos), y la asignada no debe
+    // hacer que cuente "de más" ni sustituir a la disponible.
+    $activoIndividual = Activo::factory()->for($empresa)->seguimientoIndividual()->create();
+    UnidadActivo::factory()->for($empresa, 'empresa')->for($activoIndividual)->for($almacen)->create([
+        'estado' => EstadoUnidadActivo::EnAlmacen,
+        'condicion' => CondicionUnidadActivo::Funcionando,
+    ]);
+    UnidadActivo::factory()->asignada()->for($empresa, 'empresa')->for($activoIndividual)->for($almacen)->create();
+
+    // Otro activo individual cuya ÚNICA unidad está dada de baja: no debe
+    // contar como existencia.
+    $activoDeBaja = Activo::factory()->for($empresa)->seguimientoIndividual()->create();
+    UnidadActivo::factory()->baja()->for($empresa, 'empresa')->for($activoDeBaja)->for($almacen)->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value, [$empresa]))
+        ->get("/almacenes/{$almacen->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('resumen.activos_con_existencia', 2));
+});
+
 it('no permite quitar una empresa abastecida de un almacén si todavía tiene existencias operativas', function () {
     $empresaA = Empresa::factory()->create();
     $empresaB = Empresa::factory()->create();
@@ -272,6 +310,41 @@ it('no permite quitar una empresa abastecida de un almacén si todavía tiene ex
 
     expect($almacen->fresh()->empresas()->pluck('empresas.id')->sort()->values()->all())
         ->toBe(collect([$empresaA->id, $empresaB->id])->sort()->values()->all());
+});
+
+it('no permite quitar una empresa abastecida si tiene UNIDADES IDENTIFICADAS operativas ahí, aunque no tenga SaldoInventario', function () {
+    $empresaA = Empresa::factory()->create();
+    $empresaB = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresaA, $empresaB)->create();
+    $activoIndividual = Activo::factory()->for($empresaA)->seguimientoIndividual()->create();
+    UnidadActivo::factory()->for($empresaA, 'empresa')->for($activoIndividual)->for($almacen)->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->put("/almacenes/{$almacen->id}", [
+            'nombre' => $almacen->nombre,
+            'empresa_ids' => [$empresaB->id],
+        ])
+        ->assertSessionHasErrors('empresa_ids');
+
+    expect($almacen->fresh()->empresas()->pluck('empresas.id')->sort()->values()->all())
+        ->toBe(collect([$empresaA->id, $empresaB->id])->sort()->values()->all());
+});
+
+it('sí permite quitar una empresa cuya ÚNICA unidad identificada en ese almacén ya está dada de baja', function () {
+    $empresaA = Empresa::factory()->create();
+    $empresaB = Empresa::factory()->create();
+    $almacen = Almacen::factory()->paraEmpresa($empresaA, $empresaB)->create();
+    $activoIndividual = Activo::factory()->for($empresaA)->seguimientoIndividual()->create();
+    UnidadActivo::factory()->baja()->for($empresaA, 'empresa')->for($activoIndividual)->for($almacen)->create();
+
+    $this->actingAs(usuarioCon(RolSistema::Administrador->value))
+        ->put("/almacenes/{$almacen->id}", [
+            'nombre' => $almacen->nombre,
+            'empresa_ids' => [$empresaB->id],
+        ])
+        ->assertSessionHasNoErrors();
+
+    expect($almacen->fresh()->empresas()->pluck('empresas.id')->all())->toBe([$empresaB->id]);
 });
 
 it('sí permite quitar una empresa abastecida sin existencias operativas, conservando históricos', function () {

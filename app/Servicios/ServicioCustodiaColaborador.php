@@ -200,19 +200,46 @@ class ServicioCustodiaColaborador
     }
 
     /**
+     * KPI "Activos asignados": total de PIEZAS FÍSICAS que el colaborador
+     * tiene actualmente bajo custodia — una unidad identificada cuenta como 1
+     * pieza; un renglón de cantidad cuenta su saldo pendiente (entregado −
+     * devuelto CONFIRMADO). Es la cantidad física, no el número de renglones
+     * distintos: 3 playeras entregadas en un solo renglón cuentan como 3.
+     * Reutiliza exactamente los mismos criterios que `pendientes()`, sin
+     * volver a armar el detalle legible (evita el `with('activo')` y el join
+     * de `entregaActualDeUnidad()` por unidad, innecesarios para un total).
+     *
+     * @param  array<int, int>|null  $idsEmpresasAutorizadas  Aislamiento histórico (ver `ColaboradorController::show`): `null` = sin acotar (uso interno/negocio), un arreglo = sólo cuenta lo que esas empresas autorizan.
+     */
+    public function totalPiezasPendientes(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): int
+    {
+        $unidades = UnidadActivo::query()
+            ->where('colaborador_id', $colaborador->getKey())
+            ->where('estado', EstadoUnidadActivo::Asignada)
+            ->when($idsEmpresasAutorizadas !== null, fn (Builder $q) => $q->whereIn('empresa_id', $idsEmpresasAutorizadas))
+            ->count();
+
+        $cantidad = array_sum(array_column($this->cantidadesPendientes($colaborador, $idsEmpresasAutorizadas), 'pendiente'));
+
+        return $unidades + $cantidad;
+    }
+
+    /**
      * Renglones de cantidad con saldo pendiente de devolución de un
      * colaborador (todas sus entregas firmadas/corregidas).
      *
+     * @param  array<int, int>|null  $idsEmpresasAutorizadas  Acota a estas empresas cuando no es `null` — ver `totalPiezasPendientes()`.
      * @return list<array{activo: string, talla: string|null, pendiente: int, folio: string|null, entrega_id: int|null, detalle_entrega_id: int}>
      */
-    private function cantidadesPendientes(Colaborador $colaborador): array
+    private function cantidadesPendientes(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): array
     {
         /** @var Collection<int, DetalleEntrega> $detalles */
         $detalles = DetalleEntrega::query()
             ->whereNull('unidad_activo_id')
             ->whereHas('entrega', fn ($q) => $q
                 ->where('colaborador_id', $colaborador->getKey())
-                ->whereIn('estado', ['firmada', 'corregida']))
+                ->whereIn('estado', ['firmada', 'corregida'])
+                ->when($idsEmpresasAutorizadas !== null, fn ($q2) => $q2->whereIn('empresa_id', $idsEmpresasAutorizadas)))
             ->with('entrega:id,folio')
             ->get();
 

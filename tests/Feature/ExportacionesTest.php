@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\EstadoEntrega;
 use App\Enums\RolSistema;
 use App\Exports\ListadoExport;
 use App\Models\Activo;
@@ -8,6 +9,7 @@ use App\Models\Area;
 use App\Models\Conjunto;
 use App\Models\Devolucion;
 use App\Models\Empresa;
+use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
 use App\Models\UnidadActivo;
 use App\Models\User;
@@ -19,6 +21,9 @@ use Illuminate\Support\Str;
 use Maatwebsite\Excel\Excel as ExcelFormatos;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use Tests\TestCase;
 
 /**
@@ -30,8 +35,12 @@ use Tests\TestCase;
  * .xlsx real) — el pipeline de PDF en sí (dompdf, cabeceras, `%PDF-`) se
  * confirma aparte, sólo un par de veces, para no acumular el costo de
  * renderizar 11 PDFs reales en la misma corrida de la suite completa.
- * Empresas/Inventario (Entregas) ya tenían su propio export previo
- * (`ReporteController`) y no se tocan aquí.
+ * Empresas/Inventario ya tenían su propio export previo (`ReporteController`)
+ * y no se tocan aquí. Entregas SÍ se probó aquí junto con el resto: además
+ * del export agregado de Reportes (fuera de alcance), el listado de
+ * Entregas ahora tiene su propio `[Exportar]` con los filtros propios de esa
+ * pantalla (búsqueda/sucursal/almacén/estado/servicio/fecha), no los de
+ * Reportes.
  */
 beforeEach(function () {
     $this->datos = escenarioMultiempresa();
@@ -162,6 +171,50 @@ it('exporta Devoluciones a Excel respetando el alcance del usuario', function ()
     });
 });
 
+it('exporta Entregas a Excel respetando el alcance del usuario y los filtros de la pantalla', function () {
+    $this->supervisorA->givePermissionTo('entregas.ver');
+
+    EntregaUniforme::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->for($this->datos['colaboradorA'])->create([
+        'folio' => 'ENT-VISIBLE-A',
+        'estado' => EstadoEntrega::Firmada,
+    ]);
+    EntregaUniforme::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->for($this->datos['colaboradorA'])->create([
+        'folio' => 'ENT-FILTRADA-A',
+        'estado' => EstadoEntrega::PendienteFirma,
+    ]);
+    EntregaUniforme::factory()->for($this->datos['empresaB'])->create(['folio' => 'ENT-OCULTA-B']);
+
+    // El export debe reflejar EXACTAMENTE el filtro activo en pantalla
+    // (estado=firmada), no todo el alcance del usuario.
+    Excel::fake();
+    $this->actingAs($this->supervisorA)->get('/entregas/exportar?estado=firmada')->assertOk();
+
+    Excel::assertDownloaded('entregas-todas-las-empresas-'.now()->toDateString().'.xlsx', function (ListadoExport $export): bool {
+        $folios = array_column($export->array(), 0);
+        expect($folios)->toContain('ENT-VISIBLE-A')
+            ->not->toContain('ENT-FILTRADA-A')
+            ->not->toContain('ENT-OCULTA-B');
+
+        return true;
+    });
+});
+
+it('exporta Entregas a PDF', function () {
+    $this->supervisorA->givePermissionTo('entregas.ver');
+    EntregaUniforme::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->for($this->datos['colaboradorA'])->create();
+
+    $respuesta = $this->actingAs($this->supervisorA)->get('/entregas/exportar?formato=pdf')
+        ->assertOk()
+        ->assertHeader('content-type', 'application/pdf');
+    expect($respuesta->getContent())->toStartWith('%PDF-');
+});
+
+it('un usuario sin permiso de Entregas no puede exportarlas', function () {
+    $sinPermiso = usuarioCon(RolSistema::Colaborador->value, [$this->datos['empresaA']]);
+
+    $this->actingAs($sinPermiso)->get('/entregas/exportar')->assertForbidden();
+});
+
 it('exporta Unidades identificadas a Excel respetando el alcance del usuario', function () {
     $this->supervisorA->givePermissionTo('unidades-activo.ver');
     $activoIndividualA = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create();
@@ -211,7 +264,7 @@ it('exporta la Auditoría a Excel y PDF, respetando el alcance del usuario', fun
 | para confirmar que ese código corre sin fallar y produce lo esperado.
 */
 
-it('el Excel real incluye el bloque de metadata (reporte/empresa/filtros/registros), el logo y la hoja Resumen', function () {
+it('el Excel real de un reporte SIN KPIs usa una sola hoja "Datos" (sin "Resumen" redundante) con metadata y logo', function () {
     Storage::fake('public');
     $empresa = Empresa::factory()->create(['nombre_comercial' => 'Con Logo Real']);
     $ruta = UploadedFile::fake()->image('logo.png', 100, 100)->store("empresas/{$empresa->id}", 'public');
@@ -225,14 +278,9 @@ it('el Excel real incluye el bloque de metadata (reporte/empresa/filtros/registr
 
     $libro = IOFactory::load($temporal);
 
-    expect($libro->getSheetNames())->toBe(['Resumen', 'Datos']);
-
-    $resumen = $libro->getSheetByName('Resumen');
-    expect($resumen->getCell('A1')->getValue())->toBe('Sucursales');
-    expect($resumen->getCell('A2')->getValue())->toBe('Con Logo Real');
-    expect($resumen->getCell('A3')->getValue())->toContain('Ana Prueba');
-    // El logo se dibuja en la hoja Resumen (una sola vez, no repetido en Datos).
-    expect(count($resumen->getDrawingCollection()))->toBe(1);
+    // Sin KPIs ni gráficas, la hoja "Resumen" repetiría exactamente la misma
+    // metadata que ya trae "Datos" — una sola hoja es la mejora esperada.
+    expect($libro->getSheetNames())->toBe(['Datos']);
 
     $hoja = $libro->getSheetByName('Datos');
     expect($hoja->getCell('A1')->getValue())->toBe('Reporte:');
@@ -243,6 +291,7 @@ it('el Excel real incluye el bloque de metadata (reporte/empresa/filtros/registr
     expect($hoja->getCell('B3')->getValue())->toBe('Activas');
     expect($hoja->getCell('A8')->getValue())->toBe('Código');
     expect((int) $hoja->getCell('A9')->getValue())->toBe(1);
+    // El logo se dibuja en la única hoja que existe.
     expect(count($hoja->getDrawingCollection()))->toBe(1);
 
     @unlink($temporal);
@@ -256,12 +305,169 @@ it('el Excel real sin empresa ni filtros no falla y omite el logo', function () 
     file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
 
     $libro = IOFactory::load($temporal);
-    $resumen = $libro->getSheetByName('Resumen');
+    expect($libro->getSheetNames())->toBe(['Datos']);
     $hoja = $libro->getSheetByName('Datos');
 
-    expect($resumen->getCell('A2')->getValue())->toBe('Todas las empresas');
     expect($hoja->getCell('B2')->getValue())->toBe('Todas las empresas');
-    expect(count($resumen->getDrawingCollection()) + count($hoja->getDrawingCollection()))->toBe(0);
+    expect(count($hoja->getDrawingCollection()))->toBe(0);
+
+    @unlink($temporal);
+});
+
+it('el Excel real de un reporte CON KPIs sigue generando la hoja "Resumen" aparte con las tarjetas', function () {
+    $empresa = Empresa::factory()->create(['nombre_comercial' => 'Con KPIs']);
+    $contexto = new ContextoExportacion(
+        'Colaboradores', $empresa, [], 3, generadoPor: 'Ana Prueba',
+        kpis: ['Colaboradores activos' => 3, 'Con expediente completo' => 1],
+    );
+    $export = new ListadoExport([[1, 'Uno'], [2, 'Dos'], [3, 'Tres']], ['Código', 'Nombre'], $contexto);
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+
+    $libro = IOFactory::load($temporal);
+    expect($libro->getSheetNames())->toBe(['Resumen', 'Datos']);
+
+    $resumen = $libro->getSheetByName('Resumen');
+    expect($resumen->getCell('A1')->getValue())->toBe('Colaboradores');
+    // Tarjetas KPI: etiqueta en la fila de la tarjeta, valor en la siguiente.
+    $valores = [];
+    foreach (range(1, 20) as $fila) {
+        foreach (['A', 'B', 'C', 'D'] as $columna) {
+            $valores[] = $resumen->getCell("{$columna}{$fila}")->getValue();
+        }
+    }
+    expect($valores)->toContain('Colaboradores activos')->toContain(3);
+
+    @unlink($temporal);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Rediseño visual del Excel administrativo — QA con archivos REALES
+|--------------------------------------------------------------------------
+| `DecoraConContexto::estiloAdministrativo()` (true por defecto, false en
+| `EntregasExport`/`InventarioExport` de Reportes) separa el estilo nuevo
+| del de Reportes sin duplicar la infraestructura. Aquí se generan 3 .xlsx
+| REALES (Usuarios, Activos, Entregas — mismos encabezados que sus
+| controladores) y se inspeccionan con PhpSpreadsheet: estilos esenciales,
+| freeze pane, autofilter, configuración de impresión, ancho/wrap de
+| columna larga y presencia/ausencia correcta de la hoja "Resumen". No se
+| verifica cada color exacto — sólo lo que demuestra que el diseño
+| realmente se aplicó.
+*/
+
+it('Excel real de Usuarios (sin KPIs): una sola hoja, con el nuevo diseño de encabezado de tabla', function () {
+    $contexto = new ContextoExportacion('Usuarios', null, ['Estado' => 'Activos'], 2, generadoPor: 'Ana Prueba');
+    $export = new ListadoExport(
+        [
+            ['Ana Ramírez', 'ana@empresa.test', 'Administrador', 'Empresa A', 'Central', 'Activo', 'Sí'],
+            ['Beto López', 'beto@empresa.test', 'Encargado', 'Empresa A', 'Norte', 'Activo', 'No'],
+        ],
+        ['Nombre', 'Correo', 'Roles', 'Empresas', 'Sucursales', 'Estado', 'Correo verificado'],
+        $contexto,
+    );
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+    $libro = IOFactory::load($temporal);
+
+    expect($libro->getSheetNames())->toBe(['Datos']);
+    $hoja = $libro->getSheetByName('Datos');
+
+    // Banda de metadata: título con acento + fondo suave sobre todo el
+    // bloque (no líneas de texto sueltas).
+    expect($hoja->getStyle('B1')->getFont()->getBold())->toBeTrue();
+    expect((int) $hoja->getStyle('B1')->getFont()->getSize())->toBeGreaterThanOrEqual(14);
+    expect($hoja->getStyle('A1')->getFill()->getFillType())->toBe(Fill::FILL_SOLID);
+
+    // Encabezado de la TABLA (fila 8: 6 metadatos + Generado/Registros +
+    // fila en blanco = 7, encabezado en la 8): fondo sólido oscuro, texto
+    // blanco en negrita, centrado.
+    $filaEncabezado = 8;
+    expect($hoja->getCell("A{$filaEncabezado}")->getValue())->toBe('Nombre');
+    $estiloEncabezado = $hoja->getStyle("A{$filaEncabezado}");
+    expect($estiloEncabezado->getFont()->getBold())->toBeTrue();
+    expect($estiloEncabezado->getFont()->getColor()->getRGB())->toBe('FFFFFF');
+    expect($estiloEncabezado->getFill()->getFillType())->toBe(Fill::FILL_SOLID);
+    expect($estiloEncabezado->getFill()->getStartColor()->getRGB())->toBe('1E293B');
+    expect($estiloEncabezado->getAlignment()->getHorizontal())->toBe('center');
+
+    // Freeze pane justo debajo del encabezado + autofiltro sobre la tabla.
+    expect($hoja->getFreezePane())->toBe('A9');
+    expect($hoja->getAutoFilter()->getRange())->toBe('A8:G10');
+
+    // Impresión: horizontal, ajustada al ancho, encabezado repetido, pie
+    // de página con nombre del sistema y número de página.
+    $pageSetup = $hoja->getPageSetup();
+    expect($pageSetup->getOrientation())->toBe(PageSetup::ORIENTATION_LANDSCAPE);
+    expect($pageSetup->getFitToWidth())->toBe(1);
+    expect($pageSetup->getFitToHeight())->toBe(0);
+    expect($pageSetup->getRowsToRepeatAtTop())->toBe([(string) $filaEncabezado, (string) $filaEncabezado]);
+    expect($hoja->getHeaderFooter()->getOddFooter())->toContain('&P')->toContain('&N');
+
+    @unlink($temporal);
+});
+
+it('Excel real de Activos (sin KPIs): columna larga (Tipo) queda con ancho máximo y wrap, fechas/números alineados', function () {
+    $descripcionLarga = 'Equipo de cómputo portátil para uso administrativo en oficinas centrales y sucursales foráneas';
+    $contexto = new ContextoExportacion('Activos', null, [], 1, generadoPor: 'Ana Prueba');
+    $export = new ListadoExport(
+        [['Laptop Dell', 'ACT-0001', $descripcionLarga, 'Cómputo', 'Empresa A', 'Individual', 5, 0, 'Activo']],
+        ['Nombre', 'Código', 'Tipo', 'Categoría', 'Empresa', 'Control', 'Existencias', 'Bajo mínimo', 'Estado'],
+        $contexto,
+    );
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+    $libro = IOFactory::load($temporal);
+
+    $hoja = $libro->getSheetByName('Datos');
+    $filaEncabezado = 7; // Reporte/Empresa/Generado por/Generado/Registros (5) + blanco = 6, encabezado en 7.
+    $filaDato = $filaEncabezado + 1;
+
+    // La columna "Tipo" (C) es la más larga: ancho topado + wrap text.
+    expect($hoja->getColumnDimension('C')->getAutoSize())->toBeFalse();
+    expect((float) $hoja->getColumnDimension('C')->getWidth())->toBe(45.0);
+    expect($hoja->getStyle("C{$filaDato}")->getAlignment()->getWrapText())->toBeTrue();
+
+    // "Existencias" (G) es numérica en toda la columna → alineada a la
+    // derecha automáticamente (nunca se tocan los valores, sólo el estilo).
+    expect($hoja->getStyle("G{$filaDato}")->getAlignment()->getHorizontal())->toBe('right');
+
+    @unlink($temporal);
+});
+
+it('Excel real de Entregas (CON KPIs): sigue generando la hoja "Resumen" con tarjetas y franja de acento', function () {
+    $contexto = new ContextoExportacion(
+        'Entregas', null, ['Estado' => 'Firmada'], 1, generadoPor: 'Ana Prueba',
+        kpis: ['Entregas' => 1, 'Renglones' => 2, 'Firmadas' => 1, 'Pendientes de firma' => 0],
+    );
+    $export = new ListadoExport(
+        [['ENT-000001', 'Juan Pérez', '0001', 'Empresa A', 'Central', 'Aseo', '15/09/2026', 'Firmada', 2, 'Ana Encargada']],
+        ['Folio', 'Colaborador', 'N.º empleado', 'Empresa', 'Sucursal', 'Servicio', 'Fecha', 'Estado', 'Renglones', 'Responsable'],
+        $contexto,
+    );
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+    $libro = IOFactory::load($temporal);
+
+    expect($libro->getSheetNames())->toBe(['Resumen', 'Datos']);
+
+    $resumen = $libro->getSheetByName('Resumen');
+    expect($resumen->getCell('A1')->getValue())->toBe('Entregas');
+    // Franja superior de acento en la primera tarjeta KPI (look de "tile").
+    // Tarjetas KPI arrancan en la fila 7 (`construirHojaResumen()`:
+    // A1 título, A2 empresa, A3 generado por, A4 filtros, A5 total de
+    // registros, fila 6 de aire, tarjetas desde la 7).
+    expect($resumen->getStyle('A7')->getBorders()->getTop()->getBorderStyle())->toBe(Border::BORDER_MEDIUM);
+
+    $hoja = $libro->getSheetByName('Datos');
+    $filaEncabezado = 8; // Reporte/Empresa/Estado/Generado por/Generado/Registros + blanco = 7.
+    $filaDato = $filaEncabezado + 1;
+    // "Fecha" (columna G) es 15/09/2026 en toda la columna → centrada.
+    expect($hoja->getStyle("G{$filaDato}")->getAlignment()->getHorizontal())->toBe('center');
 
     @unlink($temporal);
 });

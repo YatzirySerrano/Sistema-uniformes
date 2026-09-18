@@ -5,6 +5,7 @@ use App\Acciones\RegistrarEntradaInventario;
 use App\Enums\RolSistema;
 use App\Excepciones\ExcepcionDeNegocio;
 use App\Models\Activo;
+use App\Models\BitacoraAuditoria;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 
@@ -44,6 +45,45 @@ it('un ajuste fija la existencia del almacén y exige motivo', function () {
         $this->datos['empresaA']->id, $this->datos['almacenA']->id,
         $this->datos['activoA']->id, $this->datos['tallaA']->id, 2, '   ', null,
     ))->toThrow(ExcepcionDeNegocio::class);
+});
+
+it('la auditoría de un ajuste de existencia nombra el almacén (nombre y código), no sólo su id', function () {
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 10]],
+        'Alta', null,
+    );
+
+    app(AjustarInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id, 3, 'Conteo físico', null,
+    );
+
+    $registro = BitacoraAuditoria::query()->where('modulo', 'inventario')->where('accion', 'ajuste')->latest('id')->first();
+
+    expect($registro)->not->toBeNull()
+        ->and($registro->descripcion)->toContain($this->datos['almacenA']->nombre)
+        ->and($registro->descripcion)->toContain($this->datos['almacenA']->codigo)
+        ->and($registro->descripcion)->toContain($this->datos['activoA']->nombre)
+        ->and($registro->descripcion)->toContain('10')
+        ->and($registro->descripcion)->toContain('3')
+        ->and($registro->descripcion)->not->toContain('almacén #');
+});
+
+it('la auditoría de una entrada de inventario nombra el almacén y los activos, no sólo el id', function () {
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 8]],
+        'Compra septiembre', null,
+    );
+
+    $registro = BitacoraAuditoria::query()->where('modulo', 'inventario')->where('accion', 'entrada')->latest('id')->first();
+
+    expect($registro)->not->toBeNull()
+        ->and($registro->descripcion)->toContain($this->datos['almacenA']->nombre)
+        ->and($registro->descripcion)->toContain($this->datos['almacenA']->codigo)
+        ->and($registro->descripcion)->toContain($this->datos['activoA']->nombre)
+        ->and($registro->descripcion)->not->toContain('almacén #');
 });
 
 it('los movimientos son append-only: cada operación agrega una fila', function () {
