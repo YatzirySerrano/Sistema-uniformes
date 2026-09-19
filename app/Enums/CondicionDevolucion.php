@@ -7,6 +7,7 @@ enum CondicionDevolucion: string
     case Reutilizable = 'reutilizable';
     case Danado = 'danado';
     case Baja = 'baja';
+    case RoboExtravio = 'robo_extravio';
 
     public function reingresaInventario(): bool
     {
@@ -19,6 +20,7 @@ enum CondicionDevolucion: string
             self::Reutilizable => 'Reutilizable',
             self::Danado => 'Dañado',
             self::Baja => 'Baja',
+            self::RoboExtravio => 'Robo / extravío',
         };
     }
 }

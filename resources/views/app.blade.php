@@ -60,6 +60,12 @@
         <link rel="icon" href="/favicon.png?v=3" type="image/png" sizes="512x512">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
 
+        {{-- Instalación como app (PWA): manifest dinámico (routes/web.php,
+        toma nombre y color de marca de la configuración del sistema) +
+        color de la barra del navegador mientras la app está instalada. --}}
+        <link rel="manifest" href="{{ route('manifest') }}">
+        <meta name="theme-color" content="{{ $temaVisual->color_principal }}">
+
         {{-- Aplicación privada autenticada, nunca un sitio de marketing:
         noindex/nofollow fijo aquí (fuera de x-inertia::head) para que
         ningún <Head> de página pueda quitarlo. Ver App\Http\Middleware\

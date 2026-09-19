@@ -112,6 +112,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::patch('activos/unidades/{unidad:public_token}/especificacion', [UnidadActivoController::class, 'actualizarEspecificacion'])->name('unidades-activo.especificacion');
     Route::post('activos/unidades/{unidad:public_token}/baja', [UnidadActivoController::class, 'darDeBaja'])->name('unidades-activo.baja');
     Route::post('activos/unidades/{unidad:public_token}/incidencia', [UnidadActivoController::class, 'marcarIncidencia'])->name('unidades-activo.incidencia');
+    Route::post('activos/unidades/{unidad:public_token}/danar', [UnidadActivoController::class, 'marcarDanada'])->name('unidades-activo.danar');
     Route::post('activos/unidades/{unidad:public_token}/recuperar', [UnidadActivoController::class, 'recuperar'])->name('unidades-activo.recuperar');
     Route::post('activos/unidades/{unidad:public_token}/restaurar-condicion', [UnidadActivoController::class, 'restaurarCondicion'])->name('unidades-activo.restaurar-condicion');
     Route::get('activos/unidades/{unidad:public_token}/imagen', [UnidadActivoController::class, 'imagen'])->name('unidades-activo.imagen');

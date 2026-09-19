@@ -375,8 +375,23 @@ it('reporta una unidad asignada como perdida vía HTTP, conserva el responsable 
     expect(MovimientoInventario::query()->where('unidad_activo_id', $unidad->id)->where('tipo', 'incidencia')->exists())->toBeTrue();
 });
 
-it('rechaza reportar incidencia de una unidad que no está asignada', function () {
+it('permite reportar robo o extravío de una unidad en almacén que nunca se asignó', function () {
     $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/incidencia", [
+            'tipo' => 'robado',
+            'motivo' => 'x',
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    expect($unidad->fresh()->condicion)->toBe(CondicionUnidadActivo::Robado)
+        ->and($unidad->fresh()->estado)->toBe(EstadoUnidadActivo::EnAlmacen);
+});
+
+it('rechaza reportar incidencia de una unidad dada de baja', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->baja()->create();
 
     $this->actingAs($this->admin)
         ->post("/activos/unidades/{$unidad->public_token}/incidencia", [
@@ -386,6 +401,73 @@ it('rechaza reportar incidencia de una unidad que no está asignada', function (
         ->assertSessionHasErrors('negocio');
 
     expect($unidad->fresh()->condicion)->toBe(CondicionUnidadActivo::Funcionando);
+});
+
+it('rechaza reportar incidencia de una unidad en almacén que ya no está funcionando', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)
+        ->conCondicion(CondicionUnidadActivo::EnReparacion)->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/incidencia", [
+            'tipo' => 'robado',
+            'motivo' => 'x',
+        ])
+        ->assertSessionHasErrors('negocio');
+
+    expect($unidad->fresh()->condicion)->toBe(CondicionUnidadActivo::EnReparacion);
+});
+
+it('marca como dañada una unidad funcionando que está en almacén', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/danar", [
+            'condicion_resultante' => 'inservible',
+            'motivo' => 'Pantalla rota',
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $unidad->refresh();
+    expect($unidad->estado)->toBe(EstadoUnidadActivo::EnAlmacen)
+        ->and($unidad->condicion)->toBe(CondicionUnidadActivo::Inservible)
+        ->and($unidad->esEntregable())->toBeFalse();
+});
+
+it('exige motivo para marcar una unidad como dañada', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/danar", [
+            'condicion_resultante' => 'en_reparacion',
+            'motivo' => '',
+        ])
+        ->assertSessionHasErrors('motivo');
+
+    expect($unidad->fresh()->condicion)->toBe(CondicionUnidadActivo::Funcionando);
+});
+
+it('rechaza marcar como dañada una unidad que ya no está funcionando', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)
+        ->conCondicion(CondicionUnidadActivo::EnReparacion)->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/danar", [
+            'condicion_resultante' => 'inservible',
+            'motivo' => 'Pantalla rota',
+        ])
+        ->assertSessionHasErrors('negocio');
+});
+
+it('rechaza marcar como dañada una unidad asignada a un colaborador', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->asignada()->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/danar", [
+            'condicion_resultante' => 'inservible',
+            'motivo' => 'Pantalla rota',
+        ])
+        ->assertSessionHasErrors('negocio');
 });
 
 it('recupera una unidad perdida hacia un almacén que abastece su empresa y la vuelve entregable', function () {

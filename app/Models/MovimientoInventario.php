@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CondicionDevolucion;
 use App\Enums\DireccionMovimiento;
 use App\Enums\TipoMovimiento;
 use App\Models\Concerns\PerteneceAEmpresa;
@@ -136,11 +137,13 @@ class MovimientoInventario extends Model
      * `Incidencia`, `Baja` y `Recuperacion` son `TipoMovimiento` compartidos
      * entre dos dominios distintos: una pérdida/robo o baja/recuperación real
      * de una `UnidadActivo`, y un cambio de condición de inventario POR
-     * CANTIDAD (Dañado/Baja/Restaurado desde el stock disponible de un
-     * almacén). Nunca se distinguen inspeccionando `motivo` (texto libre): se
-     * distinguen de forma estructural, comprobando si existe una fila en
-     * `condiciones_inventario` enlazada a este movimiento — sólo la
-     * distingue el segundo caso. Movimientos históricos de "Dañado"/"Baja"
+     * CANTIDAD (Dañado/Baja/Robo-extravío/Restaurado desde el stock
+     * disponible de un almacén — Dañado y Robo/extravío comparten a su vez
+     * `TipoMovimiento::Incidencia` entre sí). Nunca se distinguen
+     * inspeccionando `motivo` (texto libre): se distinguen de forma
+     * estructural, mirando la fila de `condiciones_inventario` enlazada a
+     * este movimiento (si existe) y su columna `condicion` — sólo el cambio
+     * de condición de inventario deja esa fila. Movimientos históricos
      * anteriores a esta distinción ya tenían esa fila desde que se creó el
      * módulo de condición de inventario, así que también se corrigen sin
      * necesidad de reescribir nada.
@@ -151,16 +154,18 @@ class MovimientoInventario extends Model
             return $this->tipo->etiqueta();
         }
 
-        $esCondicionDeInventario = $this->relationLoaded('condicionInventario')
-            ? $this->condicionInventario !== null
-            : $this->condicionInventario()->exists();
+        $condicionInventario = $this->relationLoaded('condicionInventario')
+            ? $this->condicionInventario
+            : $this->condicionInventario()->first();
 
-        if (! $esCondicionDeInventario) {
+        if ($condicionInventario === null) {
             return $this->tipo->etiqueta();
         }
 
         return match ($this->tipo) {
-            TipoMovimiento::Incidencia => 'Marcado como dañado',
+            TipoMovimiento::Incidencia => $condicionInventario->condicion === CondicionDevolucion::RoboExtravio
+                ? 'Robo / extravío'
+                : 'Marcado como dañado',
             TipoMovimiento::Baja => 'Baja',
             TipoMovimiento::Recuperacion => 'Restauración de piezas dañadas',
         };

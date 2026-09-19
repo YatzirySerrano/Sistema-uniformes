@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Acciones\DarDeBajaUnidadActivo;
 use App\Acciones\GuardarImagenUnidadActivo;
+use App\Acciones\MarcarCondicionUnidadActivo;
 use App\Acciones\MarcarUnidadIncidencia;
 use App\Acciones\QuitarImagenUnidadActivo;
 use App\Acciones\RecuperarUnidadActivo;
@@ -17,6 +18,7 @@ use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Activos\ActualizarEspecificacionUnidadRequest;
 use App\Http\Requests\Activos\DarDeBajaUnidadRequest;
 use App\Http\Requests\Activos\GuardarImagenUnidadRequest;
+use App\Http\Requests\Activos\MarcarCondicionUnidadRequest;
 use App\Http\Requests\Activos\MarcarIncidenciaUnidadRequest;
 use App\Http\Requests\Activos\RecuperarUnidadRequest;
 use App\Http\Requests\Activos\RestaurarCondicionUnidadRequest;
@@ -543,8 +545,10 @@ class UnidadActivoController extends Controller
     }
 
     /**
-     * Reporta pérdida/robo de una unidad ASIGNADA. Nunca representa una
-     * devolución física — ver `App\Acciones\MarcarUnidadIncidencia`.
+     * Reporta pérdida/robo de una unidad asignada a un colaborador, o de una
+     * que sigue en almacén (robo/extravío del propio almacén, antes de
+     * asignarse a nadie). Nunca representa una devolución física — ver
+     * `App\Acciones\MarcarUnidadIncidencia`.
      */
     public function marcarIncidencia(MarcarIncidenciaUnidadRequest $request, UnidadActivo $unidad, MarcarUnidadIncidencia $accion): RedirectResponse
     {
@@ -558,7 +562,25 @@ class UnidadActivoController extends Controller
             $request->user()?->id,
         );
 
-        return back()->with('toast', ['type' => 'success', 'message' => 'Incidencia registrada.']);
+        return back()->with('toast', ['type' => 'success', 'message' => 'Robo o extravío registrado.']);
+    }
+
+    /**
+     * Único camino explícito para marcar como dañada una unidad Funcionando
+     * que está en almacén — ver `App\Acciones\MarcarCondicionUnidadActivo`.
+     */
+    public function marcarDanada(MarcarCondicionUnidadRequest $request, UnidadActivo $unidad, MarcarCondicionUnidadActivo $accion): RedirectResponse
+    {
+        $datos = $request->validated();
+
+        $accion->ejecutar(
+            $unidad,
+            CondicionUnidadActivo::from($datos['condicion_resultante']),
+            $datos['motivo'],
+            $request->user()?->id,
+        );
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Unidad marcada como dañada.']);
     }
 
     /**

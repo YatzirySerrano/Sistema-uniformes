@@ -67,6 +67,7 @@ final class PaletaGraficas
             CondicionDevolucion::Reutilizable => '#10b981',
             CondicionDevolucion::Danado => '#f59e0b',
             CondicionDevolucion::Baja => '#9ca3af',
+            CondicionDevolucion::RoboExtravio => '#dc2626',
         };
     }
 

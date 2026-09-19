@@ -225,6 +225,24 @@ function quitarUnidad(i: number, id: number): void {
     filas[i].unidades = filas[i].unidades.filter((u) => u.id !== id);
 }
 
+// Detalle útil para identificar QUÉ equipo se está traspasando, no sólo su
+// código: computadoras/tablets muestran marca y modelo; teléfonos, modelo y
+// número telefónico. El IMEI (ya enmascarado por el servidor) se suma como
+// dato adicional cuando existe, nunca en lugar de los anteriores.
+function descripcionUnidad(u: OpcionUnidad): string {
+    const detalles = [
+        u.activo,
+        u.marca_modelo,
+        u.numero_telefonico,
+        u.imei_mascara ? `IMEI ${u.imei_mascara}` : null,
+        u.observaciones,
+    ].filter((valor): valor is string => !!valor);
+
+    return detalles.length
+        ? detalles.join(' · ')
+        : (u.estado_visible_etiqueta ?? '');
+}
+
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 function refrescarPreview(): void {
     clearTimeout(previewTimer);
@@ -811,16 +829,7 @@ function enviar(): void {
                             "
                             :etiqueta="(u) => (u as OpcionUnidad).codigo"
                             :descripcion="
-                                (u) =>
-                                    [
-                                        (u as OpcionUnidad).activo,
-                                        (u as OpcionUnidad).observaciones,
-                                    ]
-                                        .filter(Boolean)
-                                        .join(' · ') ||
-                                    ((u as OpcionUnidad)
-                                        .estado_visible_etiqueta ??
-                                        '')
+                                (u) => descripcionUnidad(u as OpcionUnidad)
                             "
                             placeholder="Agregar unidad por código o descripción…"
                             placeholder-busqueda="Buscar por código, descripción o activo"
@@ -846,12 +855,22 @@ function enviar(): void {
                                     >· {{ u.marca_modelo }}</span
                                 >
                                 <span
+                                    v-if="u.numero_telefonico"
+                                    class="text-muted-foreground"
+                                    >· {{ u.numero_telefonico }}</span
+                                >
+                                <span
                                     v-if="u.imei_mascara"
                                     class="text-muted-foreground"
                                     >· IMEI {{ u.imei_mascara }}</span
                                 >
                                 <span
-                                    v-else-if="u.observaciones"
+                                    v-if="
+                                        !u.marca_modelo &&
+                                        !u.numero_telefonico &&
+                                        !u.imei_mascara &&
+                                        u.observaciones
+                                    "
                                     class="text-muted-foreground"
                                     >· {{ u.observaciones }}</span
                                 >

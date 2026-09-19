@@ -16,17 +16,18 @@ use App\Models\Talla;
 
 /**
  * Estado ACTUAL (no histórico crudo) de un activo por CANTIDAD, agregado por
- * almacén + variante: Disponible / Asignado / Dañado / Baja. Sólo lectura —
- * nunca escribe inventario (eso sigue siendo únicamente `ServicioInventario`).
- * No aplica a activos con seguimiento individual (`UnidadActivo` ya tiene su
- * propio estado por unidad, ver `resumenUnidades` en `ActivoController`).
+ * almacén + variante: Disponible / Asignado / Dañado / Baja / Robo-extravío.
+ * Sólo lectura — nunca escribe inventario (eso sigue siendo únicamente
+ * `ServicioInventario`). No aplica a activos con seguimiento individual
+ * (`UnidadActivo` ya tiene su propio estado por unidad, ver `resumenUnidades`
+ * en `ActivoController`).
  *
  * Semántica (confirmada por auditoría de código antes de implementar, no
  * inventada):
  * - Disponible = `SaldoInventario.cantidad` (entregable ahora mismo; ya
- *   refleja cualquier pieza marcada Dañado/Baja, porque `MarcarCondicionInventario`/
- *   `RestaurarCondicionInventario` la ajustan vía `ServicioInventario::registrarMovimiento()`,
- *   nunca aparte).
+ *   refleja cualquier pieza marcada Dañado/Baja/Robo-extravío, porque
+ *   `MarcarCondicionInventario`/`RestaurarCondicionInventario` la ajustan vía
+ *   `ServicioInventario::registrarMovimiento()`, nunca aparte).
  * - Asignado = entregado (entregas firmada/corregida) − devuelto (CUALQUIER
  *   condición, devolución confirmada). Una pieza devuelta ya no está en
  *   posesión del colaborador sin importar en qué condición volvió.
@@ -37,12 +38,15 @@ use App\Models\Talla;
  *   fuera del flujo de devolución — `MarcarCondicionInventario`/
  *   `RestaurarCondicionInventario`), neto de "marcar" menos "restaurar" para
  *   Dañado (Baja es terminal, sin restauración).
+ * - Robo / extravío = SÓLO `condiciones_inventario` (nunca una devolución:
+ *   no se puede "devolver" algo reportado como robado o extraviado). Es
+ *   terminal, igual que Baja: no hay "restaurar" desde ahí.
  */
 class ServicioEstadoInventario
 {
     /**
      * @return array{
-     *     resumen: array{disponible: int, asignado: int, danado: int, baja: int},
+     *     resumen: array{disponible: int, asignado: int, danado: int, baja: int, robo_extravio: int},
      *     desglose: list<array{
      *         almacen_id: int,
      *         almacen: string,
@@ -52,14 +56,15 @@ class ServicioEstadoInventario
      *             disponible: int,
      *             asignado: int,
      *             danado: int,
-     *             baja: int
+     *             baja: int,
+     *             robo_extravio: int
      *         }>
      *     }>
      * }
      */
     public function porActivo(Activo $activo): array
     {
-        /** @var array<string, array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int}> $filas */
+        /** @var array<string, array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int, robo_extravio: int}> $filas */
         $filas = [];
 
         // --- Disponible: saldo actual (una sola fuente, ServicioInventario
@@ -126,9 +131,11 @@ class ServicioEstadoInventario
 
         // --- Condición marcada directamente desde stock (fuera del flujo de
         // devolución): neto de "marcar" (Incidencia/Baja) menos "restaurar"
-        // (Recuperacion, sólo aplica a Dañado — Baja es terminal). Se SUMA a
-        // lo que ya aportaron las devoluciones, nunca lo reemplaza: ambas
-        // fuentes son reales y distintas. ---
+        // (Recuperacion, sólo aplica a Dañado — Baja y Robo/extravío son
+        // terminales). Se SUMA a lo que ya aportaron las devoluciones, nunca
+        // lo reemplaza: ambas fuentes son reales y distintas. Dañado y
+        // Robo/extravío comparten `TipoMovimiento::Incidencia`; la columna
+        // `condicion` es lo único que los distingue aquí. ---
         foreach (
             CondicionInventario::query()
                 ->where('empresa_id', $activo->empresa_id)
@@ -136,11 +143,13 @@ class ServicioEstadoInventario
                 ->selectRaw(
                     'almacen_id, talla_id, '
                     .'SUM(CASE WHEN condicion = ? AND tipo = ? THEN cantidad WHEN condicion = ? AND tipo = ? THEN -cantidad ELSE 0 END) as danado, '
-                    .'SUM(CASE WHEN condicion = ? AND tipo = ? THEN cantidad ELSE 0 END) as baja',
+                    .'SUM(CASE WHEN condicion = ? AND tipo = ? THEN cantidad ELSE 0 END) as baja, '
+                    .'SUM(CASE WHEN condicion = ? AND tipo = ? THEN cantidad ELSE 0 END) as robo_extravio',
                     [
                         CondicionDevolucion::Danado->value, TipoMovimiento::Incidencia->value,
                         CondicionDevolucion::Danado->value, TipoMovimiento::Recuperacion->value,
                         CondicionDevolucion::Baja->value, TipoMovimiento::Baja->value,
+                        CondicionDevolucion::RoboExtravio->value, TipoMovimiento::Incidencia->value,
                     ],
                 )
                 ->groupBy('almacen_id', 'talla_id')
@@ -151,6 +160,7 @@ class ServicioEstadoInventario
             $fila = &$this->fila($filas, $almacenId, $tallaId);
             $fila['danado'] += max(0, (int) $marcado->getAttribute('danado'));
             $fila['baja'] += (int) $marcado->getAttribute('baja');
+            $fila['robo_extravio'] += (int) $marcado->getAttribute('robo_extravio');
             unset($fila);
         }
 
@@ -158,8 +168,8 @@ class ServicioEstadoInventario
     }
 
     /**
-     * @param  array<string, array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int}>  $filas
-     * @return array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int}
+     * @param  array<string, array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int, robo_extravio: int}>  $filas
+     * @return array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int, robo_extravio: int}
      */
     private function &fila(array &$filas, int $almacenId, ?int $tallaId): array
     {
@@ -177,6 +187,7 @@ class ServicioEstadoInventario
                 'asignado' => 0,
                 'danado' => 0,
                 'baja' => 0,
+                'robo_extravio' => 0,
             ];
         }
 
@@ -189,9 +200,9 @@ class ServicioEstadoInventario
     }
 
     /**
-     * @param  list<array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int}>  $filas
+     * @param  list<array{almacen_id: int, talla_id: int|null, disponible: int, asignado: int, danado: int, baja: int, robo_extravio: int}>  $filas
      * @return array{
-     *     resumen: array{disponible: int, asignado: int, danado: int, baja: int},
+     *     resumen: array{disponible: int, asignado: int, danado: int, baja: int, robo_extravio: int},
      *     desglose: list<array{
      *         almacen_id: int,
      *         almacen: string,
@@ -201,7 +212,8 @@ class ServicioEstadoInventario
      *             disponible: int,
      *             asignado: int,
      *             danado: int,
-     *             baja: int
+     *             baja: int,
+     *             robo_extravio: int
      *         }>
      *     }>
      * }
@@ -240,6 +252,7 @@ class ServicioEstadoInventario
                     'asignado' => $v['asignado'],
                     'danado' => $v['danado'],
                     'baja' => $v['baja'],
+                    'robo_extravio' => $v['robo_extravio'],
                 ];
             }
             usort($variantes, fn (array $a, array $b): int => ($a['talla'] ?? '') <=> ($b['talla'] ?? ''));
@@ -252,12 +265,13 @@ class ServicioEstadoInventario
         }
         usort($desglose, fn (array $a, array $b): int => $a['almacen'] <=> $b['almacen']);
 
-        $resumen = ['disponible' => 0, 'asignado' => 0, 'danado' => 0, 'baja' => 0];
+        $resumen = ['disponible' => 0, 'asignado' => 0, 'danado' => 0, 'baja' => 0, 'robo_extravio' => 0];
         foreach ($filas as $f) {
             $resumen['disponible'] += $f['disponible'];
             $resumen['asignado'] += $f['asignado'];
             $resumen['danado'] += $f['danado'];
             $resumen['baja'] += $f['baja'];
+            $resumen['robo_extravio'] += $f['robo_extravio'];
         }
 
         return ['resumen' => $resumen, 'desglose' => $desglose];

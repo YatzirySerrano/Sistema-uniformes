@@ -5,6 +5,7 @@ import AuthLayout from '@/layouts/AuthLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
 import { initializeFlashEtiquetas } from '@/lib/flashEtiquetas';
 import { initializeFlashToast } from '@/lib/flashToast';
+import { initializeServiceWorker } from '@/lib/pwa';
 import { initializeTemaVisual } from '@/lib/temaVisual';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Sistema de Uniformes';
@@ -39,3 +40,7 @@ initializeFlashToast();
 // This will open the QR-labels PDF (if any) flashed by the server, separate
 // from the Inertia response that created it...
 initializeFlashEtiquetas();
+
+// This will register the service worker that makes the site installable as
+// an app (PWA)...
+initializeServiceWorker();

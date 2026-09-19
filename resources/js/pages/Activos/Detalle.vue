@@ -2,6 +2,7 @@
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import {
     ArrowLeft,
+    ArrowUpRight,
     Boxes,
     Building,
     ChevronDown,
@@ -10,6 +11,7 @@ import {
     PackagePlus,
     ScrollText,
     Settings2,
+    Wrench,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import AgregarExistenciasDialog from '@/components/sistema/AgregarExistenciasDialog.vue';
@@ -47,7 +49,12 @@ type Saldo = {
     bajo_minimo: boolean;
 };
 
-type EstadoCantidad = 'disponible' | 'asignado' | 'danado' | 'baja';
+type EstadoCantidad =
+    | 'disponible'
+    | 'asignado'
+    | 'danado'
+    | 'baja'
+    | 'robo_extravio';
 
 type VarianteEstadoCantidad = Record<EstadoCantidad, number> & {
     talla_id: number | null;
@@ -199,15 +206,16 @@ function abrirRestaurar(
     dialogoRestaurar.value = true;
 }
 
-// --- Existencias por estado (Disponible/Asignado/Dañado/Baja): 4 tarjetas
-// con desglose desplegable por almacén (+ variante si el activo las usa). No
-// se muestra "Devueltos": una devolución termina en Disponible, Dañado o
-// Baja, nunca es un estado en sí mismo. ---
+// --- Existencias por estado (Disponible/Asignado/Dañado/Baja/Robo o
+// extravío): 5 tarjetas con desglose desplegable por almacén (+ variante si
+// el activo las usa). No se muestra "Devueltos": una devolución termina en
+// Disponible, Dañado o Baja, nunca es un estado en sí mismo. ---
 const tarjetasEstadoCantidad: { clave: EstadoCantidad; etiqueta: string }[] = [
     { clave: 'disponible', etiqueta: 'Disponible' },
     { clave: 'asignado', etiqueta: 'Asignado' },
     { clave: 'danado', etiqueta: 'Dañado' },
     { clave: 'baja', etiqueta: 'Baja' },
+    { clave: 'robo_extravio', etiqueta: 'Robo / extravío' },
 ];
 
 const estadoCantidadExpandido = ref<EstadoCantidad | null>(null);
@@ -519,12 +527,15 @@ function confirmarMinimoMasivo(): void {
                             size="sm"
                             @click="dialogoGestionarUnidad = true"
                         >
+                            <Wrench class="size-3.5" />
                             Gestionar unidad
                         </Button>
                         <Button variant="outline" size="sm" as-child>
                             <Link
                                 :href="`/activos/unidades?activo_id=${activo.id}`"
-                                >Ver todas las unidades</Link
+                            >
+                                <Layers class="size-3.5" />
+                                Ver todas las unidades</Link
                             >
                         </Button>
                     </div>
@@ -541,7 +552,14 @@ function confirmarMinimoMasivo(): void {
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.en_almacen }}
                         </p>
-                        <p class="text-muted-foreground text-xs">En almacén</p>
+                        <p
+                            class="text-muted-foreground flex items-center justify-center gap-1 text-xs"
+                        >
+                            En almacén
+                            <ArrowUpRight
+                                class="text-muted-foreground/70 size-3"
+                            />
+                        </p>
                     </Link>
                     <Link
                         :href="`/activos/unidades?activo_id=${activo.id}&estado=en_almacen&estado_visible=reparacion`"
@@ -550,8 +568,13 @@ function confirmarMinimoMasivo(): void {
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.no_disponibles }}
                         </p>
-                        <p class="text-muted-foreground text-xs">
+                        <p
+                            class="text-muted-foreground flex items-center justify-center gap-1 text-xs"
+                        >
                             No disponibles
+                            <ArrowUpRight
+                                class="text-muted-foreground/70 size-3"
+                            />
                         </p>
                     </Link>
                     <Link
@@ -561,7 +584,14 @@ function confirmarMinimoMasivo(): void {
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.asignada }}
                         </p>
-                        <p class="text-muted-foreground text-xs">Asignadas</p>
+                        <p
+                            class="text-muted-foreground flex items-center justify-center gap-1 text-xs"
+                        >
+                            Asignadas
+                            <ArrowUpRight
+                                class="text-muted-foreground/70 size-3"
+                            />
+                        </p>
                     </Link>
                     <Link
                         :href="`/activos/unidades?activo_id=${activo.id}&estado=baja`"
@@ -570,7 +600,14 @@ function confirmarMinimoMasivo(): void {
                         <p class="text-2xl font-semibold">
                             {{ resumenUnidades.baja }}
                         </p>
-                        <p class="text-muted-foreground text-xs">Baja</p>
+                        <p
+                            class="text-muted-foreground flex items-center justify-center gap-1 text-xs"
+                        >
+                            Baja
+                            <ArrowUpRight
+                                class="text-muted-foreground/70 size-3"
+                            />
+                        </p>
                     </Link>
                 </div>
             </section>
@@ -586,12 +623,14 @@ function confirmarMinimoMasivo(): void {
                         <Boxes class="text-muted-foreground size-4" />
                         Existencias por estado
                         <AyudaTooltip
-                            texto="Disponible: listo para entregar ahora mismo. Asignado: en posesión de colaboradores (entregado y no devuelto). Dañado: devuelto en condición no utilizable. Baja: devuelto y retirado de forma permanente. Toca una tarjeta para ver el desglose por almacén."
+                            texto="Disponible: listo para entregar ahora mismo. Asignado: en posesión de colaboradores (entregado y no devuelto). Dañado: en condición no utilizable. Baja: retirado de forma permanente. Robo / extravío: reportado como robado o extraviado directamente del almacén. Toca una tarjeta para ver el desglose por almacén."
                             etiqueta="Ayuda sobre estados de existencias"
                         />
                     </h2>
 
-                    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div
+                        class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+                    >
                         <button
                             v-for="t in tarjetasEstadoCantidad"
                             :key="t.clave"

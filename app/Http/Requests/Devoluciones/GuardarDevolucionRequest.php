@@ -66,7 +66,11 @@ class GuardarDevolucionRequest extends FormRequest
                 Rule::exists('detalles_entrega', 'id')->where(fn ($q) => $q->where('entrega_uniforme_id', $entregaId)->whereNull('unidad_activo_id')),
             ],
             'activos.*.cantidad' => ['required', 'integer', 'min:1'],
-            'activos.*.condicion' => ['required', Rule::enum(CondicionDevolucion::class)],
+            // "Robo / extravío" sólo existe para marcar condición directo
+            // desde el stock disponible de un almacén (`MarcarCondicionInventario`)
+            // — nunca aplica a una devolución (no se puede "devolver" algo
+            // que se reporta como robado o extraviado).
+            'activos.*.condicion' => ['required', Rule::enum(CondicionDevolucion::class)->except([CondicionDevolucion::RoboExtravio])],
             // Evidencia fotográfica OPCIONAL por renglón devuelto.
             'activos.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
             'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],

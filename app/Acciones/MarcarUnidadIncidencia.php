@@ -12,9 +12,11 @@ use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Reporta la pérdida o el robo de una unidad ASIGNADA. NUNCA representa una
- * devolución física: la unidad NO vuelve a almacén, NO cuenta como stock, y
- * NO se limpia `colaborador_id` — se conserva el último responsable para
+ * Reporta la pérdida o el robo de una unidad — ya sea ASIGNADA a un
+ * colaborador, o EN ALMACÉN (robo/extravío del propio almacén, antes de
+ * asignarse a nadie). NUNCA representa una devolución física: si estaba
+ * asignada, la unidad NO vuelve a almacén, NO cuenta como stock, y NO se
+ * limpia `colaborador_id` — se conserva el último responsable para
  * trazabilidad (sólo se limpia si la unidad se vuelve a asignar a otra
  * persona tras una recuperación explícita, `App\Acciones\RecuperarUnidadActivo`).
  */
@@ -38,8 +40,11 @@ class MarcarUnidadIncidencia
         return DB::transaction(function () use ($unidad, $tipo, $motivo, $observacion, $realizadoPor): UnidadActivo {
             $unidad = UnidadActivo::query()->whereKey($unidad->getKey())->lockForUpdate()->firstOrFail();
 
-            if ($unidad->estado !== EstadoUnidadActivo::Asignada) {
-                throw new ExcepcionDeNegocioSimple('Sólo se puede reportar pérdida o robo de una unidad que esté asignada a un colaborador.');
+            if ($unidad->estado === EstadoUnidadActivo::EnAlmacen && $unidad->condicion !== CondicionUnidadActivo::Funcionando) {
+                throw new ExcepcionDeNegocioSimple('Esta unidad ya no está funcionando; revisa su condición actual antes de reportar un robo o extravío.');
+            }
+            if (! in_array($unidad->estado, [EstadoUnidadActivo::Asignada, EstadoUnidadActivo::EnAlmacen], true)) {
+                throw new ExcepcionDeNegocioSimple('Sólo se puede reportar pérdida o robo de una unidad asignada o que esté en almacén.');
             }
 
             $antes = ['condicion' => $unidad->condicion->value];

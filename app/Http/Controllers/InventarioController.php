@@ -305,7 +305,7 @@ class InventarioController extends Controller
         $empresa = $this->resolverEmpresa($request);
 
         $datos = $this->validarOperacion($request, $empresa->id, [
-            'condicion' => ['required', Rule::in([CondicionDevolucion::Danado->value, CondicionDevolucion::Baja->value])],
+            'condicion' => ['required', Rule::in([CondicionDevolucion::Danado->value, CondicionDevolucion::Baja->value, CondicionDevolucion::RoboExtravio->value])],
             'cantidad' => ['required', 'integer', 'min:1', 'max:1000000'],
             'motivo' => ['required', 'string', 'max:255'],
         ]);

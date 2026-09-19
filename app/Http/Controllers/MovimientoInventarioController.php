@@ -657,7 +657,7 @@ class MovimientoInventarioController extends Controller
             ->when($filtros['tipo'] ?? null, fn (Builder $q, $t) => $q->where('tipo', $t))
             ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
             ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
-            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'sucursal:id,nombre', 'activo:id,nombre,codigo', 'talla:id,valor', 'unidadActivo:id,codigo', 'realizadoPor:id,name', 'condicionInventario:id,movimiento_inventario_id'])
+            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'sucursal:id,nombre', 'activo:id,nombre,codigo', 'talla:id,valor', 'unidadActivo:id,codigo', 'realizadoPor:id,name', 'condicionInventario:id,movimiento_inventario_id,condicion'])
             ->latest('ocurrido_en');
     }
 

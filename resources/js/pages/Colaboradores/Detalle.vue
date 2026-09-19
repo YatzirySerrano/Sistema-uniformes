@@ -3,9 +3,11 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeft,
     ArrowLeftRight,
+    ArrowUpRight,
     Boxes,
     Building2,
     Camera,
+    ChevronRight,
     FileText,
     FolderOpen,
     MapPin,
@@ -305,6 +307,10 @@ const modalEmpresa = ref(false);
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
                     <FileText class="size-3" /> Documentos
+                    <ChevronRight
+                        v-if="expediente"
+                        class="text-muted-foreground/70 ml-auto size-3.5"
+                    />
                 </p>
                 <p class="text-2xl font-semibold">{{ kpis.documentos }}</p>
             </button>
@@ -331,6 +337,10 @@ const modalEmpresa = ref(false);
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
                     <Truck class="size-3" /> Entregas
+                    <ArrowUpRight
+                        v-if="puedeVerEntregas"
+                        class="text-muted-foreground/70 ml-auto size-3.5"
+                    />
                 </p>
                 <p class="text-2xl font-semibold">{{ kpis.entregas }}</p>
             </component>
@@ -357,6 +367,10 @@ const modalEmpresa = ref(false);
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
                     <RefreshCcw class="size-3" /> Devoluciones
+                    <ArrowUpRight
+                        v-if="puedeVerDevoluciones"
+                        class="text-muted-foreground/70 ml-auto size-3.5"
+                    />
                 </p>
                 <p class="text-2xl font-semibold">{{ kpis.devoluciones }}</p>
             </component>
@@ -370,6 +384,9 @@ const modalEmpresa = ref(false);
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
                     <Package class="size-3" /> Activos asignados
+                    <ChevronRight
+                        class="text-muted-foreground/70 ml-auto size-3.5"
+                    />
                 </p>
                 <p class="text-2xl font-semibold">
                     {{ kpis.activos_asignados }}

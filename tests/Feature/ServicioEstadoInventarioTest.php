@@ -72,7 +72,7 @@ it('CASO 1: una entrada de 20 deja todo disponible, sin asignado/dañado/baja', 
 
     $resultado = $this->estado->porActivo($this->datos['activoA']);
 
-    expect($resultado['resumen'])->toBe(['disponible' => 20, 'asignado' => 0, 'danado' => 0, 'baja' => 0]);
+    expect($resultado['resumen'])->toBe(['disponible' => 20, 'asignado' => 0, 'danado' => 0, 'baja' => 0, 'robo_extravio' => 0]);
 });
 
 it('CASO 2: entregar 5 (firmada) mueve 5 de disponible a asignado', function () {
@@ -81,7 +81,7 @@ it('CASO 2: entregar 5 (firmada) mueve 5 de disponible a asignado', function () 
 
     $resultado = $this->estado->porActivo($this->datos['activoA']);
 
-    expect($resultado['resumen'])->toBe(['disponible' => 15, 'asignado' => 5, 'danado' => 0, 'baja' => 0]);
+    expect($resultado['resumen'])->toBe(['disponible' => 15, 'asignado' => 5, 'danado' => 0, 'baja' => 0, 'robo_extravio' => 0]);
 });
 
 it('CASO 3: devolver 1 reutilizable (confirmada) regresa a disponible y libera asignado', function () {
@@ -93,7 +93,7 @@ it('CASO 3: devolver 1 reutilizable (confirmada) regresa a disponible y libera a
 
     $resultado = $this->estado->porActivo($this->datos['activoA']);
 
-    expect($resultado['resumen'])->toBe(['disponible' => 16, 'asignado' => 4, 'danado' => 0, 'baja' => 0]);
+    expect($resultado['resumen'])->toBe(['disponible' => 16, 'asignado' => 4, 'danado' => 0, 'baja' => 0, 'robo_extravio' => 0]);
 });
 
 it('CASO 4: entrada 20, entregar 5, devolver 1 dañada -> disponible 15, asignado 4, dañado 1', function () {
@@ -105,7 +105,7 @@ it('CASO 4: entrada 20, entregar 5, devolver 1 dañada -> disponible 15, asignad
 
     $resultado = $this->estado->porActivo($this->datos['activoA']);
 
-    expect($resultado['resumen'])->toBe(['disponible' => 15, 'asignado' => 4, 'danado' => 1, 'baja' => 0]);
+    expect($resultado['resumen'])->toBe(['disponible' => 15, 'asignado' => 4, 'danado' => 1, 'baja' => 0, 'robo_extravio' => 0]);
 });
 
 it('CASO 5: una devolución de baja no reingresa a disponible y sí incrementa baja', function () {
@@ -117,7 +117,7 @@ it('CASO 5: una devolución de baja no reingresa a disponible y sí incrementa b
 
     $resultado = $this->estado->porActivo($this->datos['activoA']);
 
-    expect($resultado['resumen'])->toBe(['disponible' => 15, 'asignado' => 3, 'danado' => 0, 'baja' => 2]);
+    expect($resultado['resumen'])->toBe(['disponible' => 15, 'asignado' => 3, 'danado' => 0, 'baja' => 2, 'robo_extravio' => 0]);
 });
 
 it('CASO 6: operar sobre la talla S no altera la talla M', function () {
@@ -163,7 +163,7 @@ it('CASO 8: un almacén compartido por dos empresas mantiene las cantidades tota
 
     $resultado = $this->estado->porActivo($this->datos['activoA']);
 
-    expect($resultado['resumen'])->toBe(['disponible' => 20, 'asignado' => 0, 'danado' => 0, 'baja' => 0]);
+    expect($resultado['resumen'])->toBe(['disponible' => 20, 'asignado' => 0, 'danado' => 0, 'baja' => 0, 'robo_extravio' => 0]);
 });
 
 it('CASO 9: un activo sin variantes funciona con talla_id null (nunca 0)', function () {
@@ -172,7 +172,7 @@ it('CASO 9: un activo sin variantes funciona con talla_id null (nunca 0)', funct
 
     $resultado = $this->estado->porActivo($activoSinVariante);
 
-    expect($resultado['resumen'])->toBe(['disponible' => 8, 'asignado' => 0, 'danado' => 0, 'baja' => 0])
+    expect($resultado['resumen'])->toBe(['disponible' => 8, 'asignado' => 0, 'danado' => 0, 'baja' => 0, 'robo_extravio' => 0])
         ->and($resultado['desglose'][0]['variantes'][0]['talla_id'])->toBeNull();
 });
 
@@ -188,5 +188,5 @@ it('CASO 10: dos devoluciones parciales confirmadas del mismo renglón no duplic
     $resultado = $this->estado->porActivo($this->datos['activoA']);
 
     // Entregado 10; devuelto 3+2+5=10 -> asignado 0. Disponible: 20-10+3+5=18. Dañado: 2.
-    expect($resultado['resumen'])->toBe(['disponible' => 18, 'asignado' => 0, 'danado' => 2, 'baja' => 0]);
+    expect($resultado['resumen'])->toBe(['disponible' => 18, 'asignado' => 0, 'danado' => 2, 'baja' => 0, 'robo_extravio' => 0]);
 });

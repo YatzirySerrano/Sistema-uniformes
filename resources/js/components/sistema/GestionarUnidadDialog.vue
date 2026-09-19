@@ -24,13 +24,18 @@ type OpcionUnidad = {
     activo: string | null;
     almacen: string | null;
     estado: 'en_almacen' | 'asignada' | 'baja';
-    condicion: 'funcionando' | 'en_reparacion' | 'inservible' | 'perdido' | 'robado';
+    condicion:
+        | 'funcionando'
+        | 'en_reparacion'
+        | 'inservible'
+        | 'perdido'
+        | 'robado';
     estado_visible_etiqueta: string;
     condicion_etiqueta: string;
 };
 type OpcionCondicion = { valor: string; etiqueta: string };
 type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
-type Accion = 'incidencia' | 'baja' | 'recuperar' | 'restaurar';
+type Accion = 'danar' | 'incidencia' | 'baja' | 'recuperar' | 'restaurar';
 
 const props = defineProps<{
     open: boolean;
@@ -46,32 +51,79 @@ const unidadSel = ref<OpcionUnidad | null>(null);
 const accion = ref<Accion | null>(null);
 
 const esIncidencia = computed(
-    () => unidadSel.value?.condicion === 'perdido' || unidadSel.value?.condicion === 'robado',
+    () =>
+        unidadSel.value?.condicion === 'perdido' ||
+        unidadSel.value?.condicion === 'robado',
 );
 
 // Acciones que tienen sentido según el estado/condición ACTUAL de la unidad
 // elegida — sólo un hint de UX; el backend siempre revalida la transición
-// real al confirmar (`App\Acciones\{MarcarUnidadIncidencia,DarDeBajaUnidadActivo,
-// RecuperarUnidadActivo,RestaurarCondicionUnidadActivo}`, sin cambios).
-const accionesDisponibles = computed<{ valor: Accion; etiqueta: string }[]>(() => {
-    if (!unidadSel.value) return [];
-    const u = unidadSel.value;
-    const opciones: { valor: Accion; etiqueta: string }[] = [];
+// real al confirmar (`App\Acciones\{MarcarCondicionUnidadActivo,
+// MarcarUnidadIncidencia,DarDeBajaUnidadActivo,RecuperarUnidadActivo,
+// RestaurarCondicionUnidadActivo}`).
+const enAlmacenFuncionando = computed(
+    () =>
+        unidadSel.value?.estado === 'en_almacen' &&
+        unidadSel.value?.condicion === 'funcionando',
+);
 
-    if (u.estado === 'asignada') {
-        opciones.push({ valor: 'incidencia', etiqueta: 'Marcar incidencia (pérdida / robo)' });
-    }
-    if (u.estado === 'en_almacen' && u.condicion === 'funcionando') {
-        opciones.push({ valor: 'baja', etiqueta: 'Dar de baja' });
-    }
-    if (esIncidencia.value) {
-        opciones.push({ valor: 'recuperar', etiqueta: 'Recuperar unidad' });
-    }
-    if (u.estado === 'en_almacen' && (u.condicion === 'en_reparacion' || u.condicion === 'inservible')) {
-        opciones.push({ valor: 'restaurar', etiqueta: 'Restaurar condición' });
-    }
+const accionesDisponibles = computed<{ valor: Accion; etiqueta: string }[]>(
+    () => {
+        if (!unidadSel.value) return [];
+        const u = unidadSel.value;
+        const opciones: { valor: Accion; etiqueta: string }[] = [];
 
-    return opciones;
+        if (enAlmacenFuncionando.value) {
+            opciones.push({ valor: 'danar', etiqueta: 'Dañado' });
+        }
+        if (u.estado === 'asignada' || enAlmacenFuncionando.value) {
+            opciones.push({ valor: 'incidencia', etiqueta: 'Robo / extravío' });
+        }
+        if (enAlmacenFuncionando.value) {
+            opciones.push({ valor: 'baja', etiqueta: 'Dar de baja' });
+        }
+        if (esIncidencia.value) {
+            opciones.push({ valor: 'recuperar', etiqueta: 'Recuperar unidad' });
+        }
+        if (
+            u.estado === 'en_almacen' &&
+            (u.condicion === 'en_reparacion' || u.condicion === 'inservible')
+        ) {
+            opciones.push({
+                valor: 'restaurar',
+                etiqueta: 'Restaurar condición',
+            });
+        }
+
+        return opciones;
+    },
+);
+
+// Condiciones destino válidas para "Dañado": nunca "Funcionando" (no tendría
+// sentido marcar como dañada una unidad para que quede funcionando) ni
+// pérdida/robo (eso es la acción "Robo / extravío").
+const condicionesDano = computed<OpcionCondicion[]>(() =>
+    props.condicionesNoIncidencia.filter((c) => c.valor !== 'funcionando'),
+);
+
+// Explica en una línea qué implica cada acción, para que el usuario nunca
+// tenga que adivinar la diferencia entre "Dañado", "Robo / extravío" y "Dar
+// de baja".
+const descripcionAccion = computed<string | null>(() => {
+    switch (accion.value) {
+        case 'danar':
+            return 'La unidad deja de estar disponible para entregar hasta que se repare o se dé de baja.';
+        case 'incidencia':
+            return 'Repórtalo cuando la unidad se perdió o fue robada. Deja de contar como existencia disponible.';
+        case 'baja':
+            return 'La unidad se retira de forma permanente. Esta acción no se puede deshacer.';
+        case 'recuperar':
+            return 'La unidad vuelve a operar después de haberse reportado como robo o extravío.';
+        case 'restaurar':
+            return 'La unidad vuelve a una condición operativa después de haber estado en reparación o inservible.';
+        default:
+            return null;
+    }
 });
 
 const form = useForm<{
@@ -156,6 +208,7 @@ function enviar(): void {
     const token = unidadSel.value.public_token;
 
     const rutas: Record<Accion, string> = {
+        danar: `/activos/unidades/${token}/danar`,
         incidencia: `/activos/unidades/${token}/incidencia`,
         baja: `/activos/unidades/${token}/baja`,
         recuperar: `/activos/unidades/${token}/recuperar`,
@@ -222,19 +275,67 @@ function enviar(): void {
                     </p>
 
                     <div v-else class="grid gap-1.5">
-                        <Label for="gu-accion">Acción</Label>
+                        <Label for="gu-accion" class="flex items-center gap-1">
+                            Acción
+                            <span class="text-destructive">*</span>
+                        </Label>
                         <SelectSimple
                             id="gu-accion"
                             v-model="accion"
                             :opciones="accionesDisponibles"
                             placeholder="Elige una acción"
                         />
+                        <p
+                            v-if="descripcionAccion"
+                            class="text-muted-foreground text-xs"
+                        >
+                            {{ descripcionAccion }}
+                        </p>
                     </div>
 
-                    <!-- Marcar incidencia -->
-                    <template v-if="accion === 'incidencia'">
+                    <!-- Marcar como dañada -->
+                    <template v-if="accion === 'danar'">
                         <div class="grid gap-1.5">
-                            <Label for="gu-tipo">Tipo</Label>
+                            <Label
+                                for="gu-condicion-danar"
+                                class="flex items-center gap-1"
+                            >
+                                Condición
+                                <span class="text-destructive">*</span>
+                            </Label>
+                            <SelectSimple
+                                id="gu-condicion-danar"
+                                v-model="form.condicion_resultante"
+                                :opciones="condicionesDano"
+                                placeholder="En reparación o inservible"
+                            />
+                            <InputError
+                                :message="form.errors.condicion_resultante"
+                            />
+                        </div>
+                        <div class="grid gap-1.5">
+                            <Label
+                                for="gu-motivo-danar"
+                                class="flex items-center gap-1"
+                            >
+                                Motivo del daño
+                                <span class="text-destructive">*</span>
+                            </Label>
+                            <Input id="gu-motivo-danar" v-model="form.motivo" />
+                            <InputError :message="form.errors.motivo" />
+                        </div>
+                    </template>
+
+                    <!-- Marcar incidencia -->
+                    <template v-else-if="accion === 'incidencia'">
+                        <div class="grid gap-1.5">
+                            <Label
+                                for="gu-tipo"
+                                class="flex items-center gap-1"
+                            >
+                                Tipo
+                                <span class="text-destructive">*</span>
+                            </Label>
                             <SelectSimple
                                 id="gu-tipo"
                                 v-model="form.tipo"
@@ -249,7 +350,13 @@ function enviar(): void {
                             <InputError :message="form.errors.tipo" />
                         </div>
                         <div class="grid gap-1.5">
-                            <Label for="gu-motivo-inc">Motivo</Label>
+                            <Label
+                                for="gu-motivo-inc"
+                                class="flex items-center gap-1"
+                            >
+                                Motivo del robo o extravío
+                                <span class="text-destructive">*</span>
+                            </Label>
                             <Input id="gu-motivo-inc" v-model="form.motivo" />
                             <InputError :message="form.errors.motivo" />
                         </div>
@@ -268,7 +375,13 @@ function enviar(): void {
                     <!-- Dar de baja -->
                     <template v-else-if="accion === 'baja'">
                         <div class="grid gap-1.5">
-                            <Label for="gu-motivo-baja">Motivo de la baja</Label>
+                            <Label
+                                for="gu-motivo-baja"
+                                class="flex items-center gap-1"
+                            >
+                                Motivo de la baja
+                                <span class="text-destructive">*</span>
+                            </Label>
                             <Input id="gu-motivo-baja" v-model="form.motivo" />
                             <InputError :message="form.errors.motivo" />
                         </div>
@@ -277,7 +390,13 @@ function enviar(): void {
                     <!-- Recuperar (pérdida/robo -> vuelve a operar) -->
                     <template v-else-if="accion === 'recuperar'">
                         <div class="grid gap-1.5">
-                            <Label for="gu-almacen">Almacén de destino</Label>
+                            <Label
+                                for="gu-almacen"
+                                class="flex items-center gap-1"
+                            >
+                                Almacén de destino
+                                <span class="text-destructive">*</span>
+                            </Label>
                             <BuscadorAsync
                                 id="gu-almacen"
                                 :model-value="almacenSel"
@@ -299,9 +418,13 @@ function enviar(): void {
                             <InputError :message="form.errors.almacen_id" />
                         </div>
                         <div class="grid gap-1.5">
-                            <Label for="gu-condicion-rec"
-                                >Condición con la que regresa</Label
+                            <Label
+                                for="gu-condicion-rec"
+                                class="flex items-center gap-1"
                             >
+                                Condición con la que regresa
+                                <span class="text-destructive">*</span>
+                            </Label>
                             <SelectSimple
                                 id="gu-condicion-rec"
                                 v-model="form.condicion_resultante"
@@ -332,9 +455,13 @@ function enviar(): void {
                     <!-- Restaurar condición (en reparación / inservible) -->
                     <template v-else-if="accion === 'restaurar'">
                         <div class="grid gap-1.5">
-                            <Label for="gu-condicion-res"
-                                >Condición con la que queda</Label
+                            <Label
+                                for="gu-condicion-res"
+                                class="flex items-center gap-1"
                             >
+                                Condición con la que queda
+                                <span class="text-destructive">*</span>
+                            </Label>
                             <SelectSimple
                                 id="gu-condicion-res"
                                 v-model="form.condicion_resultante"

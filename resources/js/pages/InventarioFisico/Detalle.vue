@@ -790,57 +790,6 @@ onBeforeUnmount(() => {
             </div>
         </section>
 
-        <!-- Resumen: artículos por cantidad -->
-        <section
-            v-if="contadores.cantidad_renglones > 0"
-            class="space-y-2"
-            data-tour="cantidad-articulos"
-        >
-            <h2 class="text-sm font-semibold">Artículos por cantidad</h2>
-            <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                <div class="rounded-xl border p-3">
-                    <p class="text-muted-foreground text-xs">Renglones</p>
-                    <p class="text-2xl font-semibold tabular-nums">
-                        {{ contadores.cantidad_renglones }}
-                    </p>
-                </div>
-                <div class="rounded-xl border p-3">
-                    <p class="text-muted-foreground text-xs">Verificados</p>
-                    <p class="text-2xl font-semibold tabular-nums">
-                        {{ contadores.cantidad_verificados }}
-                    </p>
-                </div>
-                <div class="rounded-xl border p-3">
-                    <p class="text-muted-foreground text-xs">Pendientes</p>
-                    <p
-                        class="text-2xl font-semibold text-red-600 tabular-nums dark:text-red-400"
-                    >
-                        {{ contadores.cantidad_pendientes }}
-                    </p>
-                </div>
-                <div class="rounded-xl border p-3">
-                    <p class="text-muted-foreground text-xs">Coinciden</p>
-                    <p
-                        class="text-2xl font-semibold text-emerald-600 tabular-nums dark:text-emerald-400"
-                    >
-                        {{ contadores.cantidad_coinciden }}
-                    </p>
-                </div>
-                <div class="rounded-xl border p-3">
-                    <p class="text-muted-foreground text-xs">Con diferencia</p>
-                    <p
-                        class="text-2xl font-semibold text-amber-600 tabular-nums dark:text-amber-400"
-                    >
-                        {{ contadores.cantidad_con_diferencia }}
-                    </p>
-                </div>
-            </div>
-            <p class="text-muted-foreground text-xs">
-                Esperado total: {{ contadores.cantidad_esperada_total }} ·
-                Contado total: {{ contadores.cantidad_contada_total }}
-            </p>
-        </section>
-
         <!-- Escaneo (sólo mientras la ronda está en proceso) -->
         <div
             v-if="puedeEscanear"
@@ -1021,15 +970,6 @@ onBeforeUnmount(() => {
                         </li>
                     </ul>
                 </div>
-
-                <Button
-                    data-tour="finalizar-ronda"
-                    variant="outline"
-                    class="border-red-600/30 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                    @click="dialogoFinalizar = true"
-                >
-                    Finalizar inventario
-                </Button>
             </div>
         </div>
 
@@ -1268,6 +1208,57 @@ onBeforeUnmount(() => {
         <Paginacion :links="unidades.links" :total="unidades.total" />
 
         <!-- Artículos por cantidad (comprobación manual) -->
+        <!-- Resumen: artículos por cantidad -->
+        <section
+            v-if="contadores.cantidad_renglones > 0"
+            class="space-y-2"
+            data-tour="cantidad-articulos"
+        >
+            <h2 class="text-sm font-semibold">Artículos por cantidad</h2>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Renglones</p>
+                    <p class="text-2xl font-semibold tabular-nums">
+                        {{ contadores.cantidad_renglones }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Verificados</p>
+                    <p class="text-2xl font-semibold tabular-nums">
+                        {{ contadores.cantidad_verificados }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Pendientes</p>
+                    <p
+                        class="text-2xl font-semibold text-red-600 tabular-nums dark:text-red-400"
+                    >
+                        {{ contadores.cantidad_pendientes }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Coinciden</p>
+                    <p
+                        class="text-2xl font-semibold text-emerald-600 tabular-nums dark:text-emerald-400"
+                    >
+                        {{ contadores.cantidad_coinciden }}
+                    </p>
+                </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">Con diferencia</p>
+                    <p
+                        class="text-2xl font-semibold text-amber-600 tabular-nums dark:text-amber-400"
+                    >
+                        {{ contadores.cantidad_con_diferencia }}
+                    </p>
+                </div>
+            </div>
+            <p class="text-muted-foreground text-xs">
+                Esperado total: {{ contadores.cantidad_esperada_total }} ·
+                Contado total: {{ contadores.cantidad_contada_total }}
+            </p>
+        </section>
+
         <section
             v-if="existencias.length"
             class="space-y-3 rounded-xl border p-4"
@@ -1505,6 +1496,27 @@ onBeforeUnmount(() => {
             </div>
         </section>
 
+        <!-- Cerrar la ronda es la última acción de la pantalla, siempre al
+             final: nunca en medio del flujo de captura, para no interrumpir
+             al usuario mientras todavía está registrando conteos. -->
+        <div
+            v-if="puedeEscanear"
+            data-tour="finalizar-ronda"
+            class="flex flex-col items-start gap-2 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+            <p class="text-muted-foreground text-sm">
+                Cuando termines de capturar y revisar todo, cierra la ronda para
+                dejarla firmada y lista para aplicar sus diferencias.
+            </p>
+            <Button
+                variant="outline"
+                class="w-full border-red-600/30 text-red-700 hover:bg-red-50 sm:w-auto dark:text-red-400 dark:hover:bg-red-950/40"
+                @click="dialogoFinalizar = true"
+            >
+                Finalizar inventario
+            </Button>
+        </div>
+
         <Dialog v-model:open="dialogoFinalizar">
             <DialogContent class="max-h-[90dvh] overflow-y-auto">
                 <DialogHeader>
@@ -1578,41 +1590,41 @@ onBeforeUnmount(() => {
                     <span v-if="ronda.almacen"> · {{ ronda.almacen }}</span>
                 </p>
 
-                <div class="overflow-x-auto rounded-lg border">
-                    <table class="w-full min-w-[520px] text-sm">
-                        <thead
-                            class="bg-muted/50 text-muted-foreground text-left"
-                        >
-                            <tr>
-                                <th class="px-3 py-2 font-medium">Activo</th>
-                                <th class="px-3 py-2 font-medium">Variante</th>
-                                <th class="px-3 py-2 text-right font-medium">
+                <ul class="grid max-h-[50vh] gap-2 overflow-y-auto">
+                    <li
+                        v-for="e in diferenciasParaAplicar"
+                        :key="e.id"
+                        class="rounded-lg border p-3 text-sm"
+                    >
+                        <p class="truncate font-medium">
+                            {{ e.activo ?? '—' }}
+                        </p>
+                        <p class="text-muted-foreground text-xs">
+                            {{ e.talla ?? 'Sin variante' }}
+                        </p>
+                        <div class="mt-2 grid grid-cols-3 gap-2 text-center">
+                            <div>
+                                <p class="text-muted-foreground text-xs">
                                     Sistema
-                                </th>
-                                <th class="px-3 py-2 text-right font-medium">
-                                    Contado
-                                </th>
-                                <th class="px-3 py-2 text-right font-medium">
-                                    Cambio
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="e in diferenciasParaAplicar"
-                                :key="e.id"
-                                class="border-t"
-                            >
-                                <td class="px-3 py-2">{{ e.activo ?? '—' }}</td>
-                                <td class="px-3 py-2">{{ e.talla ?? '—' }}</td>
-                                <td class="px-3 py-2 text-right tabular-nums">
+                                </p>
+                                <p class="font-medium tabular-nums">
                                     {{ e.cantidad_esperada }}
-                                </td>
-                                <td class="px-3 py-2 text-right tabular-nums">
+                                </p>
+                            </div>
+                            <div>
+                                <p class="text-muted-foreground text-xs">
+                                    Contado
+                                </p>
+                                <p class="font-medium tabular-nums">
                                     {{ e.cantidad_contada }}
-                                </td>
-                                <td
-                                    class="px-3 py-2 text-right font-medium tabular-nums"
+                                </p>
+                            </div>
+                            <div>
+                                <p class="text-muted-foreground text-xs">
+                                    Cambio
+                                </p>
+                                <p
+                                    class="font-medium tabular-nums"
                                     :class="
                                         (e.diferencia ?? 0) < 0
                                             ? 'text-red-600 dark:text-red-400'
@@ -1624,11 +1636,11 @@ onBeforeUnmount(() => {
                                             ? `+${e.diferencia}`
                                             : e.diferencia
                                     }}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                                </p>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
 
                 <p class="text-muted-foreground text-sm">
                     Se actualizarán {{ diferenciasParaAplicar.length }}
@@ -1679,40 +1691,36 @@ onBeforeUnmount(() => {
                     </DialogDescription>
                 </DialogHeader>
 
-                <div class="overflow-x-auto rounded-lg border">
-                    <table class="w-full min-w-[420px] text-sm">
-                        <thead
-                            class="bg-muted/50 text-muted-foreground text-left"
-                        >
-                            <tr>
-                                <th class="px-3 py-2 font-medium">Activo</th>
-                                <th class="px-3 py-2 font-medium">Variante</th>
-                                <th class="px-3 py-2 text-right font-medium">
+                <ul class="grid max-h-[50vh] gap-2 overflow-y-auto">
+                    <li
+                        v-for="(c, i) in conflictosMostrados"
+                        :key="i"
+                        class="rounded-lg border p-3 text-sm"
+                    >
+                        <p class="truncate font-medium">{{ c.activo }}</p>
+                        <p class="text-muted-foreground text-xs">
+                            {{ c.talla ?? 'Sin variante' }}
+                        </p>
+                        <div class="mt-2 grid grid-cols-2 gap-2 text-center">
+                            <div>
+                                <p class="text-muted-foreground text-xs">
                                     Durante la ronda
-                                </th>
-                                <th class="px-3 py-2 text-right font-medium">
-                                    Actual
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="(c, i) in conflictosMostrados"
-                                :key="i"
-                                class="border-t"
-                            >
-                                <td class="px-3 py-2">{{ c.activo }}</td>
-                                <td class="px-3 py-2">{{ c.talla ?? '—' }}</td>
-                                <td class="px-3 py-2 text-right tabular-nums">
+                                </p>
+                                <p class="font-medium tabular-nums">
                                     {{ c.esperada }}
-                                </td>
-                                <td class="px-3 py-2 text-right tabular-nums">
+                                </p>
+                            </div>
+                            <div>
+                                <p class="text-muted-foreground text-xs">
+                                    Actual
+                                </p>
+                                <p class="font-medium tabular-nums">
                                     {{ c.actual }}
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                                </p>
+                            </div>
+                        </div>
+                    </li>
+                </ul>
 
                 <DialogFooter>
                     <Button @click="dialogoConflictos = false">

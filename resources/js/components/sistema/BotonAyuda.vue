@@ -57,7 +57,7 @@ watch(
         <PopoverTrigger as-child>
             <button
                 type="button"
-                class="bg-primary text-primary-foreground hover:bg-primary/90 fixed right-5 bottom-5 z-50 flex size-12 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95"
+                class="bg-primary text-primary-foreground hover:bg-primary/90 fixed right-5 bottom-20 z-50 flex size-12 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 md:bottom-5"
                 aria-label="Ayuda y guías del sistema"
             >
                 <span

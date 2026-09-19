@@ -273,7 +273,11 @@ class DevolucionController extends Controller
         return Inertia::render('Devoluciones/Crear', [
             'entrega' => $entrega === null ? null : $this->presentarEntrega($entrega),
             'colaboradorContexto' => $colaboradorContexto,
-            'condiciones' => collect(CondicionDevolucion::cases())->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
+            // "Robo / extravío" sólo existe para marcar condición directo
+            // desde el stock disponible de un almacén, nunca para una
+            // devolución (ver `GuardarDevolucionRequest`).
+            'condiciones' => collect(CondicionDevolucion::cases())->filter(fn ($c) => $c !== CondicionDevolucion::RoboExtravio)->values()
+                ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'condicionesUnidad' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'textoConsentimiento' => ConfirmarAcuseDevolucion::TEXTO_CONSENTIMIENTO,

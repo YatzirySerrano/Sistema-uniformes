@@ -11,6 +11,7 @@ use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Almacen;
 use App\Models\BitacoraAuditoria;
 use App\Models\CondicionInventario;
+use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
 use App\Servicios\ServicioEstadoInventario;
@@ -45,6 +46,51 @@ it('marcar piezas como dañadas resta de disponible y queda persistido y trazabl
         ->and($registro->motivo)->toBe('Se detectó humedad')
         ->and(CondicionInventario::count())->toBe(1)
         ->and($registro->movimiento_inventario_id)->not->toBeNull();
+});
+
+it('marcar robo o extravío resta de disponible, queda trazable y NO puede restaurarse', function () {
+    $registro = app(MarcarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        CondicionDevolucion::RoboExtravio, 2, 'No aparece en el conteo físico', null,
+    );
+
+    expect(SaldoInventario::query()->where('almacen_id', $this->datos['almacenA']->id)->value('cantidad'))->toBe(3)
+        ->and($registro->condicion)->toBe(CondicionDevolucion::RoboExtravio)
+        ->and($registro->tipo)->toBe(TipoMovimiento::Incidencia)
+        ->and($registro->cantidad)->toBe(2);
+
+    $estado = app(ServicioEstadoInventario::class)->porActivo($this->datos['activoA']->fresh());
+    expect($estado['resumen']['robo_extravio'])->toBe(2)
+        ->and($estado['resumen']['danado'])->toBe(0);
+
+    // Terminal, igual que Baja: no hay "restaurar" desde robo/extravío.
+    expect(fn () => app(RestaurarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        1, 'Intento inválido', null,
+    ))->toThrow(ExcepcionDeNegocio::class);
+});
+
+it('el movimiento de robo o extravío se distingue del de Dañado aunque compartan tipo', function () {
+    $registroDanado = app(MarcarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        CondicionDevolucion::Danado, 1, 'Se detectó humedad', null,
+    );
+    $registroRobo = app(MarcarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        CondicionDevolucion::RoboExtravio, 1, 'No aparece en el conteo físico', null,
+    );
+
+    $movimientoDanado = MovimientoInventario::query()->whereKey($registroDanado->movimiento_inventario_id)->firstOrFail();
+    $movimientoRobo = MovimientoInventario::query()->whereKey($registroRobo->movimiento_inventario_id)->firstOrFail();
+
+    expect($movimientoDanado->tipo)->toBe(TipoMovimiento::Incidencia)
+        ->and($movimientoRobo->tipo)->toBe(TipoMovimiento::Incidencia)
+        ->and($movimientoDanado->etiquetaEfectiva())->toBe('Marcado como dañado')
+        ->and($movimientoRobo->etiquetaEfectiva())->toBe('Robo / extravío');
 });
 
 it('dar de baja resta de disponible y NO puede restaurarse', function () {

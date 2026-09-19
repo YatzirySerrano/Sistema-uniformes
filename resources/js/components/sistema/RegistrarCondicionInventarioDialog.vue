@@ -15,7 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-type Modo = 'danado' | 'baja';
+type Modo = 'danado' | 'baja' | 'robo_extravio';
 
 // Siempre se abre desde una fila/card concreta (Existencias globales, o
 // "Existencias por almacén" del propio activo): empresa, almacén, activo y
@@ -46,6 +46,7 @@ const emit = defineEmits<{ 'update:open': [boolean] }>();
 const opcionesModo: { valor: Modo; etiqueta: string }[] = [
     { valor: 'danado', etiqueta: 'Dañado' },
     { valor: 'baja', etiqueta: 'Baja' },
+    { valor: 'robo_extravio', etiqueta: 'Robo / extravío' },
 ];
 
 const form = useForm<{

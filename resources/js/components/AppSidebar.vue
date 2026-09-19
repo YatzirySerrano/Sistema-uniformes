@@ -8,6 +8,7 @@ import {
     ClipboardList,
     Compass,
     DatabaseZap,
+    Download,
     FileBarChart2,
     FileSignature,
     History,
@@ -28,6 +29,7 @@ import {
     Warehouse,
 } from '@lucide/vue';
 import { computed } from 'vue';
+import { usePwaInstall } from '@/composables/usePwaInstall';
 import NavUser from '@/components/NavUser.vue';
 import {
     Sidebar,
@@ -46,6 +48,7 @@ import { useCurrentUrl } from '@/composables/useCurrentUrl';
 const { puede } = usePermisos();
 const { isCurrentOrParentUrl } = useCurrentUrl();
 const name = usePage().props.name;
+const { puedeInstalar, instalar } = usePwaInstall();
 
 type Enlace = {
     titulo: string;
@@ -312,6 +315,14 @@ const grupos = computed<Grupo[]>(() =>
         </SidebarContent>
 
         <SidebarFooter data-tour="menu-usuario">
+            <SidebarMenu v-if="puedeInstalar">
+                <SidebarMenuItem>
+                    <SidebarMenuButton tooltip="Instalar app" @click="instalar">
+                        <Download />
+                        <span>Instalar app</span>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            </SidebarMenu>
             <NavUser />
         </SidebarFooter>
     </Sidebar>

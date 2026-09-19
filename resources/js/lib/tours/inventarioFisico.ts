@@ -16,14 +16,14 @@ export const tourInventarioFisicoDetalle: Tour = {
             texto: 'El universo esperado se fijó al crear la ronda (unidades identificadas por QR de esa empresa/almacén). Aquí ves cuántas ya se encontraron, cuáles faltan y si apareció algo fuera de lo esperado.',
         },
         {
-            selector: '[data-tour="cantidad-articulos"]',
-            titulo: 'Activos por cantidad',
-            texto: 'Para activos que se controlan por cantidad (no por unidad individual), captura manualmente lo que cuentes físicamente; el sistema calcula la diferencia contra lo esperado.',
-        },
-        {
             selector: '[data-tour="escaneo-qr"]',
             titulo: 'Escaneo por QR',
             texto: 'Activa la cámara para leer el código de cada unidad identificada, o escribe el código manualmente si no puedes escanear. Cada lectura la marca como encontrada al instante.',
+        },
+        {
+            selector: '[data-tour="cantidad-articulos"]',
+            titulo: 'Activos por cantidad',
+            texto: 'Para activos que se controlan por cantidad (no por unidad individual), captura manualmente lo que cuentes físicamente; el sistema calcula la diferencia contra lo esperado.',
         },
         {
             selector: '[data-tour="finalizar-ronda"]',

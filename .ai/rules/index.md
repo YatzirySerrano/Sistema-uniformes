@@ -19,6 +19,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Http/Controllers/EntregaController.php,app/Models/DocumentoExpediente.php | .ai/rules/controllers-models.md |
 | app/Acciones/AjustarMinimoInventario.php,app/Http/Controllers/InventarioController.php,app/Servicios/ServicioInventario.php | .ai/rules/controllers-servicios.md |
 | app/Acciones/RegistrarTraspasoInventario.php,app/Servicios/HomologadorActivo.php,app/Http/Requests/Inventario/RegistrarTraspasoRequest.php,app/Models/TraspasoInventario.php,app/Models/TraspasoRenglon.php,app/Http/Controllers/MovimientoInventarioController.php | .ai/rules/controllers.md |
+| app/Enums/CondicionDevolucion.php,app/Http/Controllers/DevolucionController.php,app/Http/Requests/Devoluciones/GuardarDevolucionRequest.php,app/Acciones/MarcarCondicionInventario.php | .ai/rules/devoluciones-acciones.md |
 | app/Acciones/RegistrarDevolucionFirmada.php,app/Acciones/ConfirmarAcuseDevolucion.php,app/Acciones/RegistrarDevolucion.php,app/Http/Controllers/DevolucionController.php,resources/js/pages/Devoluciones/Crear.vue | .ai/rules/devoluciones.md |
 | app/Models/Conjunto.php,app/Acciones/CrearEntregaUniforme.php,app/Http/Requests/Entregas/GuardarEntregaRequest.php | .ai/rules/entregas.md |
 | app/{Enums/PerfilTecnicoUnidad.php,Soporte/ResolverPerfilTecnicoUnidad.php,Models/UnidadActivoEspecificacion.php} | .ai/rules/enums.md |

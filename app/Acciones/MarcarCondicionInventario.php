@@ -16,12 +16,19 @@ use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Marca N piezas de un activo POR CANTIDAD como Dañado o Baja, directamente
- * desde el stock disponible de un almacén (nunca desde una Devolución). Resta
- * de "Disponible" reutilizando `ServicioInventario::registrarMovimiento()`
- * (mismo candado/transacción/rechazo de negativos que cualquier otro
- * movimiento) y dej a rastro persistente en `condiciones_inventario` para que
- * "cuántas están dañadas ahora" sea trazable — nunca desaparecen del sistema.
+ * Marca N piezas de un activo POR CANTIDAD como Dañado, Baja o Robo/extravío,
+ * directamente desde el stock disponible de un almacén (nunca desde una
+ * Devolución). Resta de "Disponible" reutilizando
+ * `ServicioInventario::registrarMovimiento()` (mismo candado/transacción/
+ * rechazo de negativos que cualquier otro movimiento) y deja rastro
+ * persistente en `condiciones_inventario` para que "cuántas están en cada
+ * condición ahora" sea trazable — nunca desaparecen del sistema.
+ *
+ * "Robo / extravío" es terminal, igual que "Baja": no existe una acción de
+ * "restaurar" desde ahí (una pieza reportada como robada/extraviada que
+ * aparece de nuevo se vuelve a dar de alta como una entrada normal, nunca se
+ * "revive" un robo). Ver `App\Models\MovimientoInventario::etiquetaEfectiva()`
+ * para cómo se distingue de una pérdida/robo real de una `UnidadActivo`.
  */
 class MarcarCondicionInventario
 {
@@ -40,8 +47,8 @@ class MarcarCondicionInventario
         string $motivo,
         ?int $realizadoPor,
     ): CondicionInventario {
-        if ($condicion === CondicionDevolucion::Reutilizable) {
-            throw new ExcepcionDeNegocioSimple('La condición debe ser "Dañado" o "Baja".');
+        if (! in_array($condicion, [CondicionDevolucion::Danado, CondicionDevolucion::Baja, CondicionDevolucion::RoboExtravio], true)) {
+            throw new ExcepcionDeNegocioSimple('La condición debe ser "Dañado", "Baja" o "Robo / extravío".');
         }
         if (trim($motivo) === '') {
             throw new ExcepcionDeNegocioSimple('El motivo es obligatorio.');
@@ -67,9 +74,13 @@ class MarcarCondicionInventario
         return DB::transaction(function () use ($empresaId, $almacenId, $tallaId, $condicion, $cantidad, $motivo, $realizadoPor, $almacen, $activo): CondicionInventario {
             // Mismo motor que cualquier otro movimiento: lock pesimista sobre
             // el saldo y rechazo de negativos si no alcanza. Reutiliza los
-            // `TipoMovimiento` ya existentes (Incidencia = pasa a Dañado, Baja
-            // = pasa a Baja) — mismo vocabulario que `UnidadActivo`, ahora
-            // también para inventario por cantidad.
+            // `TipoMovimiento` ya existentes (Incidencia = pasa a Dañado o a
+            // Robo/extravío, Baja = pasa a Baja) — mismo vocabulario que
+            // `UnidadActivo`, ahora también para inventario por cantidad.
+            // Dañado y Robo/extravío comparten `TipoMovimiento::Incidencia`;
+            // `condiciones_inventario.condicion` es lo que los distingue
+            // (ver `MovimientoInventario::etiquetaEfectiva()`), nunca el
+            // texto de `motivo`.
             $movimiento = $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                 empresaId: $empresaId,
                 almacenId: $almacenId,
