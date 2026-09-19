@@ -59,6 +59,11 @@ class GuardarDevolucionRequest extends FormRequest
             'firma' => ['required', 'string', 'max:3000000'],
             'firma_operador' => ['required', 'string', 'max:3000000'],
             'aceptacion' => ['accepted'],
+            // Token del apartado temporal de custodia armado en el paso 2
+            // (ver `App\Acciones\ReservarCustodiaDevolucion`). Opcional por
+            // compatibilidad; si viene, `RegistrarDevolucion` la valida y
+            // consume — nunca reemplaza sus propias revalidaciones.
+            'reserva_token' => ['nullable', 'uuid'],
 
             'activos' => ['nullable', 'array'],
             'activos.*.detalle_entrega_id' => [

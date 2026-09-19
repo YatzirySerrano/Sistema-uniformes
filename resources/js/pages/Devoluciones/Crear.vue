@@ -4,6 +4,7 @@ import { Calendar, ChevronLeft, ChevronRight } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
 import { computed, nextTick, ref, watch } from 'vue';
 import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
+import ApartadoTemporalBanner from '@/components/sistema/ApartadoTemporalBanner.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
@@ -14,6 +15,10 @@ import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+    type RespuestaReserva,
+    useReservaBorrador,
+} from '@/composables/useReservaBorrador';
 import { fechaNegocio } from '@/lib/fecha';
 
 type OpcionEntrega = {
@@ -33,11 +38,32 @@ type Renglon = {
     talla: string | null;
     cantidad: number;
     pendiente: number | null;
+    /** Cuánto ya se devolvió CONFIRMADO hasta ahora (`cantidad - pendiente`). */
+    ya_devuelto: number | null;
     es_unidad: boolean;
     unidad_codigo: string | null;
     unidad_disponible: boolean;
     unidad_estado_visible: string | null;
     unidad_estado_visible_etiqueta: string | null;
+};
+
+/** Respuesta de `POST /devoluciones/reserva` (ver `App\Acciones\ReservarCustodiaDevolucion`). */
+type RespuestaReservaDevolucion = RespuestaReserva & {
+    lineas_cantidad: {
+        detalle_entrega_id: number;
+        activo_nombre: string | null;
+        talla_valor: string | null;
+        pendiente_real: number;
+        disponible_efectivo: number;
+        solicitado: number;
+        suficiente: boolean;
+    }[];
+    lineas_unidad: {
+        detalle_entrega_id: number;
+        unidad_activo_id: number | null;
+        ok: boolean;
+        motivo: string | null;
+    }[];
 };
 
 type Entrega = {
@@ -324,6 +350,56 @@ const hayAlgoIncluido = computed(
         filasUnidadIncluidas.value.length > 0,
 );
 
+// ------------------------------------------------------------------
+// Apartado temporal (TTL) de CUSTODIA pendiente — ver
+// `App\Acciones\ReservarCustodiaDevolucion`. NUNCA aparta stock de almacén:
+// aparta el DERECHO a devolver un renglón concreto, para que dos usuarios no
+// intenten devolver el mismo pendiente a la vez. Nunca reemplaza la
+// revalidación autoritativa de `RegistrarDevolucion` al confirmar.
+// ------------------------------------------------------------------
+const reserva = useReservaBorrador<RespuestaReservaDevolucion>({
+    reservar: '/devoluciones/reserva',
+    liberarBase: '/devoluciones/reserva',
+    extenderBase: '/devoluciones/reserva',
+});
+
+function construirPayloadReserva(): Record<string, unknown> {
+    return {
+        entrega_uniforme_id: props.entrega?.id ?? null,
+        colaborador_id: props.colaboradorContexto?.id ?? null,
+        activos: filasCantidadIncluidas.value.map((f) => ({
+            detalle_entrega_id: f.detalle_entrega_id,
+            cantidad: f.cantidad,
+        })),
+        unidades: filasUnidadIncluidas.value.map((f) => ({
+            detalle_entrega_id: f.detalle_entrega_id,
+        })),
+    };
+}
+
+watch(
+    [filasCantidad, filasUnidad],
+    () => {
+        if (!props.entrega) return;
+        reserva.reservarConRetraso(construirPayloadReserva());
+    },
+    { deep: true },
+);
+
+/** Línea de reserva de este renglón (si ya se calculó al menos una vez). */
+function lineaReservaDe(detalleEntregaId: number) {
+    return reserva.resultado.value?.lineas_cantidad.find(
+        (l) => l.detalle_entrega_id === detalleEntregaId,
+    );
+}
+
+/** Cuánto tiene apartado OTRA devolución activa de este renglón (0 si no hay conflicto o aún no se calculó). */
+function apartadoPorOtrosDe(detalleEntregaId: number): number {
+    const linea = lineaReservaDe(detalleEntregaId);
+    if (!linea) return 0;
+    return Math.max(0, linea.pendiente_real - linea.disponible_efectivo);
+}
+
 const problemasPaso2 = computed<string[]>(() => {
     const problemas: string[] = [];
     if (!hayAlgoIncluido.value) {
@@ -342,6 +418,23 @@ const problemasPaso2 = computed<string[]>(() => {
             );
         }
     });
+
+    // Apartado por OTRAS devoluciones activas (ver
+    // `App\Acciones\ReservarCustodiaDevolucion`): un renglón puede parecer
+    // disponible localmente y ya estar apartado por otro usuario.
+    const res = reserva.resultado.value;
+    if (res && !res.ok) {
+        for (const l of res.lineas_cantidad) {
+            if (l.suficiente) continue;
+            problemas.push(
+                `${l.activo_nombre ?? 'Renglón'}${l.talla_valor ? ` · ${l.talla_valor}` : ''}: solicitaste ${l.solicitado}, pero sólo hay ${l.disponible_efectivo} disponibles para devolver ahora (otra devolución ya apartó el resto).`,
+            );
+        }
+        for (const l of res.lineas_unidad) {
+            if (!l.ok && l.motivo) problemas.push(l.motivo);
+        }
+    }
+
     return problemas;
 });
 
@@ -366,6 +459,10 @@ const bloqueIdentidad = ref<InstanceType<
 
 const faltantesFirma = computed<string[]>(() => {
     const faltan: string[] = [];
+    if (reserva.vencida.value)
+        faltan.push(
+            'Tu apartado de custodia venció. Vuelve al paso anterior para actualizar los pendientes.',
+        );
     if (firmaColaboradorVacia.value)
         faltan.push('Solicita la firma de quien devuelve para continuar.');
     if (firmaOperadorVacia.value)
@@ -381,6 +478,7 @@ const puedeConfirmar = computed(
     () =>
         puedeAvanzar1.value &&
         puedeAvanzar2.value &&
+        !reserva.vencida.value &&
         faltantesFirma.value.length === 0 &&
         !form.processing,
 );
@@ -425,14 +523,31 @@ function irAlPrimerProblema(): void {
     desplazarseAResumenProblemas();
 }
 
-function irA(n: 1 | 2 | 3): void {
+function mostrarProblemasPaso2(): void {
+    if (esMovilOTablet.value) dialogoProblemasMovil.value = true;
+    else desplazarseAResumenProblemas();
+}
+
+/**
+ * Avanzar al paso 3 SIEMPRE refresca la reserva de custodia de forma
+ * síncrona y exige `ok=true` — el usuario nunca llega a firmas con una
+ * selección que otra devolución ya apartó mientras tanto.
+ */
+async function irA(n: 1 | 2 | 3): Promise<void> {
     if (n >= 2 && !puedeAvanzar1.value) return;
-    if (n === 3 && !puedeAvanzar2.value) {
-        if (puedeAvanzar1.value && problemasPaso2.value.length) {
-            if (esMovilOTablet.value) dialogoProblemasMovil.value = true;
-            else desplazarseAResumenProblemas();
+    if (n === 3) {
+        if (!puedeAvanzar2.value) {
+            if (puedeAvanzar1.value && problemasPaso2.value.length) {
+                mostrarProblemasPaso2();
+            }
+            return;
         }
-        return;
+
+        const resultado = await reserva.reservar(construirPayloadReserva());
+        if (!resultado || !resultado.ok) {
+            mostrarProblemasPaso2();
+            return;
+        }
     }
     paso.value = n;
 }
@@ -479,7 +594,10 @@ function enviar(): void {
         evidencia_origen: f.evidencia_origen,
     }));
 
-    form.post('/devoluciones', {
+    form.transform((datos) => ({
+        ...datos,
+        reserva_token: reserva.token.value,
+    })).post('/devoluciones', {
         forceFormData: true,
         preserveScroll: true,
         onError: () => irAPasoConError(),
@@ -731,6 +849,16 @@ function enviar(): void {
                         Renglones de la entrega
                     </h2>
 
+                    <ApartadoTemporalBanner
+                        v-if="hayAlgoIncluido"
+                        :minutos-segundos="reserva.minutosSegundos.value"
+                        :por-vencer="reserva.porVencer.value"
+                        :vencida="reserva.vencida.value"
+                        :cargando="reserva.cargando.value"
+                        :error="reserva.error.value"
+                        @extender="reserva.extender()"
+                    />
+
                     <p
                         v-if="erroresLaxos['items']"
                         class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-2 text-sm"
@@ -765,7 +893,7 @@ function enviar(): void {
                     <div
                         v-for="fila in filasCantidad"
                         :key="`c-${fila.detalle_entrega_id}`"
-                        class="grid grid-cols-1 items-start gap-2 rounded-lg border p-3 sm:grid-cols-[auto_1fr_110px_160px]"
+                        class="grid grid-cols-1 items-start gap-3 rounded-lg border p-3 sm:grid-cols-[auto_1fr_110px_160px]"
                     >
                         <input
                             v-model="fila.incluir"
@@ -773,37 +901,77 @@ function enviar(): void {
                             class="mt-2.5 size-4"
                             :aria-label="`Incluir ${renglonDe(fila.detalle_entrega_id)?.activo}`"
                         />
-                        <div class="text-sm">
-                            <p class="font-medium">
+                        <div
+                            class="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2"
+                        >
+                            <p class="font-medium sm:col-span-2">
                                 {{ renglonDe(fila.detalle_entrega_id)?.activo }}
-                                <span
-                                    v-if="
-                                        renglonDe(fila.detalle_entrega_id)
-                                            ?.talla
-                                    "
-                                    class="text-muted-foreground"
-                                >
-                                    ·
-                                    {{
-                                        renglonDe(fila.detalle_entrega_id)
-                                            ?.talla
-                                    }}</span
-                                >
+                            </p>
+                            <p
+                                v-if="renglonDe(fila.detalle_entrega_id)?.talla"
+                                class="text-muted-foreground text-xs"
+                            >
+                                Talla / variante:
+                                <span class="text-foreground font-medium">{{
+                                    renglonDe(fila.detalle_entrega_id)?.talla
+                                }}</span>
                             </p>
                             <p class="text-muted-foreground text-xs">
-                                Entregado:
-                                {{
+                                Entregado originalmente:
+                                <span class="text-foreground font-medium">{{
                                     renglonDe(fila.detalle_entrega_id)?.cantidad
-                                }}
-                                · Pendiente:
-                                {{
+                                }}</span>
+                            </p>
+                            <p class="text-muted-foreground text-xs">
+                                Ya devuelto:
+                                <span class="text-foreground font-medium">{{
+                                    renglonDe(fila.detalle_entrega_id)
+                                        ?.ya_devuelto ?? 0
+                                }}</span>
+                            </p>
+                            <p class="text-muted-foreground text-xs">
+                                Pendiente por devolver:
+                                <span class="text-foreground font-medium">{{
                                     renglonDe(fila.detalle_entrega_id)
                                         ?.pendiente
-                                }}
+                                }}</span>
                             </p>
+                            <template
+                                v-if="
+                                    apartadoPorOtrosDe(
+                                        fila.detalle_entrega_id,
+                                    ) > 0
+                                "
+                            >
+                                <p
+                                    class="text-xs text-amber-700 dark:text-amber-400"
+                                >
+                                    Apartado temporalmente por otra devolución:
+                                    <span class="font-medium">{{
+                                        apartadoPorOtrosDe(
+                                            fila.detalle_entrega_id,
+                                        )
+                                    }}</span>
+                                </p>
+                                <p
+                                    class="text-xs text-amber-700 dark:text-amber-400"
+                                >
+                                    Disponible para devolver ahora:
+                                    <span class="font-medium">{{
+                                        lineaReservaDe(fila.detalle_entrega_id)
+                                            ?.disponible_efectivo
+                                    }}</span>
+                                </p>
+                            </template>
                         </div>
                         <div>
+                            <Label
+                                :for="`cantidad-${fila.detalle_entrega_id}`"
+                                class="text-xs"
+                                >Cantidad a devolver</Label
+                            >
                             <Input
+                                :id="`cantidad-${fila.detalle_entrega_id}`"
                                 v-model.number="fila.cantidad"
                                 type="number"
                                 min="1"
@@ -822,16 +990,19 @@ function enviar(): void {
                                 "
                             />
                         </div>
-                        <SelectSimple
-                            v-model="fila.condicion"
-                            :opciones="
-                                condiciones.map((c) => ({
-                                    valor: c.valor,
-                                    etiqueta: c.etiqueta,
-                                }))
-                            "
-                            :disabled="!fila.incluir"
-                        />
+                        <div>
+                            <Label class="text-xs">Condición al recibir</Label>
+                            <SelectSimple
+                                v-model="fila.condicion"
+                                :opciones="
+                                    condiciones.map((c) => ({
+                                        valor: c.valor,
+                                        etiqueta: c.etiqueta,
+                                    }))
+                                "
+                                :disabled="!fila.incluir"
+                            />
+                        </div>
                         <div v-if="fila.incluir" class="sm:col-span-full">
                             <CapturaEvidencia
                                 v-model="fila.evidencia"
@@ -862,17 +1033,43 @@ function enviar(): void {
                                         ?.unidad_codigo
                                 }}
                             </p>
+                            <p
+                                v-if="
+                                    !reserva.resultado.value?.lineas_unidad.find(
+                                        (l) =>
+                                            l.detalle_entrega_id ===
+                                            fila.detalle_entrega_id,
+                                    )?.ok &&
+                                    reserva.resultado.value?.lineas_unidad.find(
+                                        (l) =>
+                                            l.detalle_entrega_id ===
+                                            fila.detalle_entrega_id,
+                                    )
+                                "
+                                class="text-destructive text-xs"
+                            >
+                                {{
+                                    reserva.resultado.value?.lineas_unidad.find(
+                                        (l) =>
+                                            l.detalle_entrega_id ===
+                                            fila.detalle_entrega_id,
+                                    )?.motivo
+                                }}
+                            </p>
                         </div>
-                        <SelectSimple
-                            v-model="fila.condicion"
-                            :opciones="
-                                condicionesUnidad.map((c) => ({
-                                    valor: c.valor,
-                                    etiqueta: c.etiqueta,
-                                }))
-                            "
-                            :disabled="!fila.incluir"
-                        />
+                        <div>
+                            <Label class="text-xs">Condición al recibir</Label>
+                            <SelectSimple
+                                v-model="fila.condicion"
+                                :opciones="
+                                    condicionesUnidad.map((c) => ({
+                                        valor: c.valor,
+                                        etiqueta: c.etiqueta,
+                                    }))
+                                "
+                                :disabled="!fila.incluir"
+                            />
+                        </div>
                         <div v-if="fila.incluir" class="sm:col-span-full">
                             <CapturaEvidencia
                                 v-model="fila.evidencia"
@@ -901,6 +1098,15 @@ function enviar(): void {
 
                 <!-- ============ PASO 3 · Revisión y firmas ============ -->
                 <div v-show="paso === 3" class="space-y-6">
+                    <ApartadoTemporalBanner
+                        :minutos-segundos="reserva.minutosSegundos.value"
+                        :por-vencer="reserva.porVencer.value"
+                        :vencida="reserva.vencida.value"
+                        :cargando="reserva.cargando.value"
+                        :error="reserva.error.value"
+                        @extender="reserva.extender()"
+                    />
+
                     <p
                         v-if="erroresLaxos['negocio']"
                         class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm font-medium"
@@ -1128,7 +1334,9 @@ function enviar(): void {
                     </Button>
 
                     <Button variant="ghost" as-child>
-                        <Link :href="hrefCancelar">Cancelar</Link>
+                        <Link :href="hrefCancelar" @click="reserva.liberar()"
+                            >Cancelar</Link
+                        >
                     </Button>
                 </div>
             </form>

@@ -4,11 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Acciones\ConfirmarAcuseDevolucion;
 use App\Acciones\RegistrarDevolucionFirmada;
+use App\Acciones\ReservarCustodiaDevolucion;
 use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoGrafica;
+use App\Enums\TipoReserva;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Devoluciones\GuardarDevolucionRequest;
@@ -22,6 +24,7 @@ use App\Models\User;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
+use App\Servicios\ServicioReservas;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\FechaHora;
 use App\Soporte\PaletaGraficas;
@@ -319,6 +322,11 @@ class DevolucionController extends Controller
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
                     'pendiente' => $d->unidad_activo_id === null ? $pendientePorDetalle[$d->id] ?? 0 : null,
+                    // Historia legible del renglón (item #19/27): cuánto ya se
+                    // devolvió CONFIRMADO hasta ahora — nunca duplica el cálculo
+                    // de `ServicioCustodiaColaborador`, sólo resta lo que ya
+                    // expone `pendiente` a la cantidad original.
+                    'ya_devuelto' => $d->unidad_activo_id === null ? $d->cantidad - ($pendientePorDetalle[$d->id] ?? 0) : null,
                     'es_unidad' => $d->unidad_activo_id !== null,
                     'unidad_codigo' => $d->unidadActivo?->codigo,
                     'unidad_disponible' => $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada,
@@ -326,6 +334,69 @@ class DevolucionController extends Controller
                     'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
                 ]),
         ];
+    }
+
+    /**
+     * Recalcula, de forma atómica, el apartado temporal de custodia de TODO
+     * el borrador de Devolución actual (ver
+     * `App\Acciones\ReservarCustodiaDevolucion`). NUNCA aparta stock de
+     * almacén — aparta el DERECHO a devolver una custodia pendiente.
+     */
+    public function reservar(Request $request, ReservarCustodiaDevolucion $accion): JsonResponse
+    {
+        $this->authorize('create', Devolucion::class);
+
+        $datos = $request->validate([
+            'token' => ['required', 'uuid'],
+            'entrega_uniforme_id' => ['required', 'integer'],
+            'colaborador_id' => ['nullable', 'integer'],
+            // Reglas LAXAS a propósito (ver EntregaController::reservar): el
+            // Accion filtra/ignora renglones a medio llenar.
+            'activos' => ['nullable', 'array'],
+            'activos.*.detalle_entrega_id' => ['present'],
+            'activos.*.cantidad' => ['present'],
+            'unidades' => ['nullable', 'array'],
+            'unidades.*.detalle_entrega_id' => ['present'],
+        ]);
+
+        $entrega = EntregaUniforme::query()->findOrFail((int) $datos['entrega_uniforme_id']);
+        abort_unless($request->user()->puedeAccederEmpresa($entrega->empresa_id), 403);
+
+        $resultado = $accion->ejecutar(
+            $datos['token'],
+            $request->user()->id,
+            $entrega->empresa_id,
+            isset($datos['colaborador_id']) ? (int) $datos['colaborador_id'] : $entrega->colaborador_id,
+            $entrega->id,
+            $datos['activos'] ?? [],
+            $datos['unidades'] ?? [],
+        );
+
+        return response()->json($resultado);
+    }
+
+    /**
+     * Libera explícitamente la reserva del borrador. No falla si ya venció
+     * o no existe.
+     */
+    public function liberarReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
+    {
+        $this->authorize('create', Devolucion::class);
+        $reservas->liberar($token, $request->user()->id);
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Extensión EXPLÍCITA de +10 minutos, pedida por el usuario desde el
+     * countdown — nunca una renovación automática en segundo plano.
+     */
+    public function extenderReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
+    {
+        $this->authorize('create', Devolucion::class);
+        $reserva = $reservas->extender($token, $request->user()->id, TipoReserva::Devolucion);
+
+        return response()->json(['token' => $reserva->token, 'expira_en' => $reserva->expira_en->toIso8601String()]);
     }
 
     public function store(GuardarDevolucionRequest $request, RegistrarDevolucionFirmada $accion, ServicioEvidencias $evidenciasSvc): RedirectResponse
@@ -376,6 +447,7 @@ class DevolucionController extends Controller
                 $request->ip(),
                 $request->userAgent(),
                 $evidencias,
+                $datos['reserva_token'] ?? null,
             );
         } catch (Throwable $e) {
             $evidenciasSvc->descartar($metasEvidencia);

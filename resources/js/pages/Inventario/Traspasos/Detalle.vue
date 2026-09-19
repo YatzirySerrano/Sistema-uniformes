@@ -89,7 +89,7 @@ function fecha(iso: string): string {
                         target="_blank"
                         rel="noopener"
                     >
-                        <Download class="size-4" /> Descargar PDF
+                        <Download class="size-4" /> Ver PDF
                     </a>
                 </Button>
                 <Button

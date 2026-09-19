@@ -57,15 +57,16 @@ class RegistrarDevolucionFirmada
         ?string $ip,
         ?string $userAgent,
         array $evidencias = [],
+        ?string $reservaToken = null,
     ): AcuseDevolucion {
         /** @var array{devolucion: Devolucion, acuse: AcuseDevolucion} $resultado */
         $resultado = DB::transaction(function () use (
             $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor,
             $motivo, $notas, $evidencias,
-            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent,
+            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken,
         ): array {
             $devolucion = $this->registrarDevolucion->crearYRegistrar(
-                $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor, $motivo, $notas, $evidencias,
+                $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor, $motivo, $notas, $evidencias, $reservaToken,
             );
 
             $acuse = $this->confirmarAcuse->confirmarEnTransaccion(

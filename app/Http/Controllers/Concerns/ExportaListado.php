@@ -51,7 +51,10 @@ trait ExportaListado
 
             return response($reporte->generatePdfContent(), 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="'.$nombreArchivo.'.pdf"',
+                // inline: el usuario ve el PDF antes de decidir si lo
+                // descarga/imprime (el navegador lo abre en una pestaña);
+                // nunca fuerza la descarga automática.
+                'Content-Disposition' => 'inline; filename="'.$nombreArchivo.'.pdf"',
             ]);
         }
 

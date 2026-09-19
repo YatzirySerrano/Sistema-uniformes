@@ -4,7 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Acciones\ConfirmarAcuseRecepcion;
 use App\Acciones\RegistrarEntregaFirmada;
+use App\Acciones\ReservarInventarioEntrega;
 use App\Enums\EstadoEntrega;
+use App\Enums\TipoReserva;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
@@ -20,6 +22,7 @@ use App\Models\User;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
+use App\Servicios\ServicioReservas;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\FechaHora;
 use Illuminate\Database\Eloquent\Builder;
@@ -236,30 +239,117 @@ class EntregaController extends Controller
     }
 
     /**
-     * Existencias por cantidad (empresa+almacén, sin variante desglosada) para
-     * mostrar un aviso de disponibilidad en el formulario. El backend siempre
-     * revalida con bloqueo al registrar; esto es sólo UX.
+     * Existencias EFECTIVAS por cantidad (empresa+almacén, sin variante
+     * desglosada): saldo real menos lo que otras reservas activas ya
+     * apartaron (la propia reserva del borrador, si se manda `token`, nunca
+     * se descuenta de sí misma). Aviso de UX; el backend siempre revalida con
+     * bloqueo al registrar/reservar.
      */
-    public function disponibilidad(Request $request): JsonResponse
+    public function disponibilidad(Request $request, ServicioReservas $reservas): JsonResponse
     {
         $this->authorize('create', EntregaUniforme::class);
 
         $datos = $request->validate([
             'empresa_id' => ['required', 'integer'],
             'almacen_id' => ['required', 'integer'],
+            'token' => ['nullable', 'uuid'],
         ]);
 
         if (! $request->user()->puedeAccederEmpresa((int) $datos['empresa_id'])) {
             return response()->json(['saldos' => []]);
         }
 
+        $token = $datos['token'] ?? null;
+
         $saldos = SaldoInventario::query()
             ->where('empresa_id', $datos['empresa_id'])
             ->where('almacen_id', $datos['almacen_id'])
             ->get(['activo_id', 'talla_id', 'cantidad'])
-            ->map(fn ($s): array => ['activo_id' => $s->activo_id, 'talla_id' => $s->talla_id, 'disponible' => (int) $s->cantidad]);
+            ->map(function ($s) use ($reservas, $datos, $token): array {
+                $reservado = $reservas->demandaCantidadDeOtros(TipoReserva::Entrega, (int) $datos['empresa_id'], (int) $datos['almacen_id'], $s->activo_id, $s->talla_id, $token);
+
+                return [
+                    'activo_id' => $s->activo_id,
+                    'talla_id' => $s->talla_id,
+                    'disponible' => max(0, (int) $s->cantidad - $reservado),
+                ];
+            });
 
         return response()->json(['saldos' => $saldos]);
+    }
+
+    /**
+     * Recalcula, de forma atómica, el apartado temporal de TODO el borrador
+     * de Entrega actual (ver `App\Acciones\ReservarInventarioEntrega`). Se
+     * llama cada vez que el usuario termina de editar una selección válida
+     * del paso 2 (debounce en el frontend) — nunca al confirmar; confirmar
+     * usa `App\Http\Controllers\EntregaController::store()` como siempre.
+     */
+    public function reservar(Request $request, ReservarInventarioEntrega $accion): JsonResponse
+    {
+        $this->authorize('create', EntregaUniforme::class);
+
+        $datos = $request->validate([
+            'token' => ['required', 'uuid'],
+            'empresa_id' => ['required', 'integer'],
+            'almacen_id' => ['required', 'integer'],
+            'colaborador_id' => ['nullable', 'integer'],
+            // Reglas LAXAS a propósito: este endpoint se llama en caliente
+            // mientras el usuario todavía está editando el paso 2 (renglones
+            // a medio llenar, con `activo_id: ''` para una fila sin elegir
+            // todavía) — el Accion filtra/ignora lo incompleto, nunca 422
+            // sólo por un renglón en blanco.
+            'activos' => ['nullable', 'array'],
+            'activos.*.activo_id' => ['present'],
+            'activos.*.talla_id' => ['nullable'],
+            'activos.*.cantidad' => ['present'],
+            'unidades' => ['nullable', 'array'],
+            'unidades.*.unidad_activo_id' => ['present'],
+            'conjuntos' => ['nullable', 'array'],
+            'conjuntos.*.conjunto_id' => ['present'],
+            'conjuntos.*.cantidad' => ['present'],
+            'conjuntos.*.variantes' => ['nullable', 'array'],
+        ]);
+
+        abort_unless($request->user()->puedeAccederEmpresa((int) $datos['empresa_id']), 403);
+
+        $resultado = $accion->ejecutar(
+            $datos['token'],
+            $request->user()->id,
+            (int) $datos['empresa_id'],
+            (int) $datos['almacen_id'],
+            isset($datos['colaborador_id']) ? (int) $datos['colaborador_id'] : null,
+            $datos['activos'] ?? [],
+            $datos['unidades'] ?? [],
+            $datos['conjuntos'] ?? [],
+        );
+
+        return response()->json($resultado);
+    }
+
+    /**
+     * Libera explícitamente la reserva del borrador (cancelar, cambiar de
+     * almacén, quitar el último renglón…). No falla si ya venció o no existe
+     * — liberar algo que ya no bloquea nada es un no-op válido.
+     */
+    public function liberarReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
+    {
+        $this->authorize('create', EntregaUniforme::class);
+        $reservas->liberar($token, $request->user()->id);
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Extensión EXPLÍCITA de +10 minutos, pedida por el usuario desde el
+     * countdown — nunca una renovación automática en segundo plano.
+     */
+    public function extenderReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
+    {
+        $this->authorize('create', EntregaUniforme::class);
+        $reserva = $reservas->extender($token, $request->user()->id, TipoReserva::Entrega);
+
+        return response()->json(['token' => $reserva->token, 'expira_en' => $reserva->expira_en->toIso8601String()]);
     }
 
     /**
@@ -378,6 +468,7 @@ class EntregaController extends Controller
                 $request->ip(),
                 $request->userAgent(),
                 $evidencias,
+                $datos['reserva_token'] ?? null,
             );
         } catch (Throwable $e) {
             // Falló: se libera la clave para permitir un reintento legítimo y se

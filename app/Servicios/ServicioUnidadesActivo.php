@@ -72,6 +72,51 @@ class ServicioUnidadesActivo
     }
 
     /**
+     * Versión SUAVE de `bloquearYVerificarEntregable()` para el apartado
+     * temporal: devuelve `null` en vez de lanzar cuando la unidad ya no es
+     * entregable — una reserva blanda reporta el problema por renglón en vez
+     * de abortar toda la operación.
+     */
+    public function bloquearYVerificarEntregableSuave(int $unidadId): ?UnidadActivo
+    {
+        $unidad = UnidadActivo::query()->whereKey($unidadId)->lockForUpdate()->first();
+
+        return $unidad instanceof UnidadActivo && $unidad->esEntregable() ? $unidad : null;
+    }
+
+    /**
+     * Versión SUAVE de `reservarDisponibles()` para el apartado temporal
+     * (`App\Acciones\ReservarInventarioEntrega`): bloquea y devuelve hasta N
+     * unidades entregables, excluyendo las ya usadas en el MISMO borrador
+     * (`$excluirIds`) y las que otra reserva activa ya apartó
+     * (`$idsApartadosPorOtros`, resuelto por el llamador vía
+     * `ServicioReservas::unidadApartadaPorOtro()` en lote). A diferencia de
+     * `reservarDisponibles()`, NUNCA lanza si no alcanza: devolver menos de
+     * `$cantidad` es una señal válida de "insuficiente" para una reserva
+     * blanda, no un fallo — el llamador decide cómo reportarlo.
+     *
+     * @param  array<int, int>  $excluirIds
+     * @return Collection<int, UnidadActivo>
+     */
+    public function candidatosParaReserva(int $activoId, int $almacenId, int $cantidad, array $excluirIds = []): Collection
+    {
+        if ($cantidad <= 0) {
+            return new Collection;
+        }
+
+        return UnidadActivo::query()
+            ->where('activo_id', $activoId)
+            ->where('almacen_id', $almacenId)
+            ->where('estado', EstadoUnidadActivo::EnAlmacen)
+            ->where('condicion', CondicionUnidadActivo::Funcionando)
+            ->when($excluirIds !== [], fn ($q) => $q->whereNotIn('id', $excluirIds))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->limit($cantidad)
+            ->get();
+    }
+
+    /**
      * Asigna la unidad a un colaborador (Entrega). El llamador ya bloqueó y
      * verificó la unidad con `bloquearYVerificarEntregable()`/`reservarDisponibles()`.
      */

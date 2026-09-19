@@ -357,12 +357,15 @@ class ConjuntoController extends Controller
             'cantidad' => ['nullable', 'integer', 'min:1'],
             'variantes' => ['nullable', 'array'],
             'variantes.*' => ['nullable', 'integer', Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('activa', true))],
+            // Token del borrador de Entrega que está consultando: descuenta lo
+            // que OTRAS reservas activas ya apartaron sin descontar la propia.
+            'token' => ['nullable', 'uuid'],
         ]);
 
         $cantidad = (int) ($datos['cantidad'] ?? 1);
         $variantes = $datos['variantes'] ?? [];
 
-        $desglose = $conjunto->desglosePorComponente((int) $datos['almacen_id'], $variantes);
+        $desglose = $conjunto->desglosePorComponente((int) $datos['almacen_id'], $variantes, considerarReservas: true, excluirToken: $datos['token'] ?? null);
 
         $componentes = array_map(function (array $c) use ($cantidad): array {
             $requeridasTotal = $c['cantidad_requerida'] * $cantidad;

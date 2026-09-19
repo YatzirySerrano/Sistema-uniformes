@@ -5,7 +5,9 @@ namespace App\Models;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
+use App\Enums\TipoReserva;
 use App\Models\Concerns\PerteneceAEmpresa;
+use App\Servicios\ServicioReservas;
 use Database\Factories\ConjuntoFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -76,9 +78,9 @@ class Conjunto extends Model
      *                                                                           selección en el mapa no puede armarse — su capacidad es 0, NUNCA
      *                                                                           se recurre al agregado de todas las variantes.
      */
-    public function disponibilidad(int $almacenId, ?array $variantesPorComponente = null): int
+    public function disponibilidad(int $almacenId, ?array $variantesPorComponente = null, bool $considerarReservas = false, ?string $excluirToken = null): int
     {
-        $desglose = $this->desglosePorComponente($almacenId, $variantesPorComponente);
+        $desglose = $this->desglosePorComponente($almacenId, $variantesPorComponente, $considerarReservas, $excluirToken);
 
         if ($desglose === []) {
             return 0;
@@ -105,10 +107,10 @@ class Conjunto extends Model
      *     capacidad: int,
      * }>
      */
-    public function desglosePorComponente(int $almacenId, ?array $variantesPorComponente = null): array
+    public function desglosePorComponente(int $almacenId, ?array $variantesPorComponente = null, bool $considerarReservas = false, ?string $excluirToken = null): array
     {
         return $this->componentes()->with('activo')->get()
-            ->map(fn (ConjuntoComponente $c): array => $this->capacidadComponente($c, $almacenId, $variantesPorComponente))
+            ->map(fn (ConjuntoComponente $c): array => $this->capacidadComponente($c, $almacenId, $variantesPorComponente, $considerarReservas, $excluirToken))
             ->values()
             ->all();
     }
@@ -122,7 +124,7 @@ class Conjunto extends Model
      *     capacidad: int,
      * }
      */
-    private function capacidadComponente(ConjuntoComponente $c, int $almacenId, ?array $variantesPorComponente): array
+    private function capacidadComponente(ConjuntoComponente $c, int $almacenId, ?array $variantesPorComponente, bool $considerarReservas = false, ?string $excluirToken = null): array
     {
         $activo = $c->activo;
         $tallaId = $c->talla_id;
@@ -162,6 +164,10 @@ class Conjunto extends Model
                 ->where('condicion', CondicionUnidadActivo::Funcionando)
                 ->count();
 
+            if ($considerarReservas) {
+                $existencia = max(0, $existencia - count(app(ServicioReservas::class)->unidadesApartadasPorOtros($activo->id, $almacenId, $excluirToken)));
+            }
+
             return [...$base, 'existencia' => $existencia, 'capacidad' => intdiv($existencia, $c->cantidad_requerida)];
         }
 
@@ -183,6 +189,17 @@ class Conjunto extends Model
                 fn (Builder $q) => $q->where('talla_id', $tallaId),
             )->value('cantidad');
 
+        // Disponibilidad EFECTIVA (modo Entrega, `considerarReservas`): se
+        // descuenta lo que OTRAS reservas activas ya apartaron de esta MISMA
+        // clave activo+talla — nunca la reserva del propio borrador
+        // (`$excluirToken`). Única forma de que el paso 2 muestre a un
+        // segundo usuario que la existencia ya fue tomada por el primero.
+        if ($considerarReservas) {
+            $existencia = max(0, $existencia - app(ServicioReservas::class)->demandaCantidadDeOtros(
+                TipoReserva::Entrega, $this->empresa_id, $almacenId, $activo->id, $tallaId, $excluirToken,
+            ));
+        }
+
         return [...$base, 'existencia' => $existencia, 'capacidad' => intdiv($existencia, $c->cantidad_requerida)];
     }
 
@@ -193,5 +210,23 @@ class Conjunto extends Model
     public function scopeActivos(Builder $query): Builder
     {
         return $query->where('activo', true);
+    }
+
+    /**
+     * Variante REAL que aplica a un componente al expandir un conjunto
+     * concreto de una Entrega (fija siempre gana; libre usa la selección del
+     * formulario; sin variante = null). Única fuente de verdad — la
+     * reutilizan `App\Acciones\CrearEntregaUniforme::expandirConjunto()` y
+     * `App\Acciones\ReservarInventarioEntrega` para no divergir.
+     *
+     * @param  array<int|string, int|string|null>  $variantesElegidas  Mapa `componente_id => talla_id|null`.
+     */
+    public static function resolverTallaComponente(ConjuntoComponente $componente, array $variantesElegidas): ?int
+    {
+        return match (true) {
+            $componente->talla_id !== null => $componente->talla_id,
+            $componente->talla_libre => isset($variantesElegidas[$componente->id]) ? (int) $variantesElegidas[$componente->id] : null,
+            default => null,
+        };
     }
 }

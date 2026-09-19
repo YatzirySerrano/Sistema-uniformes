@@ -182,33 +182,37 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
             <CardHeader>
                 <CardTitle class="text-base">Activos</CardTitle>
             </CardHeader>
-            <CardContent class="overflow-x-auto">
-                <table class="w-full text-sm">
-                    <thead class="text-muted-foreground text-left">
-                        <tr>
-                            <th class="py-1.5">Activo</th>
-                            <th class="py-1.5">Talla / unidad</th>
-                            <th class="py-1.5">Conjunto</th>
-                            <th class="py-1.5">Evidencia</th>
-                            <th class="py-1.5 text-right">Cantidad</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr
-                            v-for="(it, i) in entrega.items"
-                            :key="i"
-                            class="border-t"
-                        >
-                            <td class="py-1.5">{{ it.activo }}</td>
-                            <td class="py-1.5">
-                                <template v-if="it.unidad_codigo">
-                                    <span class="font-mono text-xs">{{
+            <CardContent>
+                <!-- Móvil: cards apiladas, nunca tabla con scroll horizontal. -->
+                <ul class="flex flex-col gap-3 sm:hidden">
+                    <li
+                        v-for="(it, i) in entrega.items"
+                        :key="i"
+                        class="rounded-lg border p-3 text-sm"
+                    >
+                        <div class="flex items-start justify-between gap-2">
+                            <p class="font-medium">{{ it.activo }}</p>
+                            <p class="text-muted-foreground shrink-0 text-xs">
+                                Cantidad
+                                <span class="text-foreground font-semibold">{{
+                                    it.cantidad
+                                }}</span>
+                            </p>
+                        </div>
+                        <dl class="mt-2 grid gap-1.5 text-xs">
+                            <div
+                                v-if="it.unidad_codigo"
+                                class="flex items-center gap-1.5"
+                            >
+                                <dt class="text-muted-foreground">Unidad:</dt>
+                                <dd class="flex items-center gap-1.5">
+                                    <span class="font-mono">{{
                                         it.unidad_codigo
                                     }}</span>
                                     <Badge
                                         v-if="it.unidad_estado_visible"
                                         variant="outline"
-                                        class="ml-1.5 text-xs"
+                                        class="text-xs"
                                         :class="
                                             claseEstadoVisibleUnidad(
                                                 it.unidad_estado_visible,
@@ -217,40 +221,116 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                                     >
                                         {{ it.unidad_estado_visible_etiqueta }}
                                     </Badge>
-                                </template>
-                                <span v-else>{{ it.talla ?? '—' }}</span>
-                            </td>
-                            <td class="text-muted-foreground py-1.5">
-                                {{ it.conjunto ?? '—' }}
-                            </td>
-                            <td class="py-1.5">
-                                <div
-                                    v-if="it.evidencias.length"
-                                    class="flex flex-wrap gap-1"
-                                >
-                                    <a
-                                        v-for="(ev, k) in it.evidencias"
-                                        :key="k"
-                                        :href="ev.url"
-                                        target="_blank"
-                                        rel="noopener"
-                                        class="block"
+                                </dd>
+                            </div>
+                            <div v-else-if="it.talla" class="flex gap-1.5">
+                                <dt class="text-muted-foreground">
+                                    Talla / variante:
+                                </dt>
+                                <dd>{{ it.talla }}</dd>
+                            </div>
+                            <div v-if="it.conjunto" class="flex gap-1.5">
+                                <dt class="text-muted-foreground">Conjunto:</dt>
+                                <dd>{{ it.conjunto }}</dd>
+                            </div>
+                        </dl>
+                        <div
+                            v-if="it.evidencias.length"
+                            class="mt-2 flex flex-wrap gap-1.5"
+                        >
+                            <a
+                                v-for="(ev, k) in it.evidencias"
+                                :key="k"
+                                :href="ev.url"
+                                target="_blank"
+                                rel="noopener"
+                                class="block"
+                            >
+                                <img
+                                    :src="ev.url"
+                                    alt="Evidencia del renglón"
+                                    class="size-12 rounded border object-cover"
+                                />
+                            </a>
+                        </div>
+                    </li>
+                </ul>
+
+                <!-- Escritorio: tabla. -->
+                <div class="hidden overflow-x-auto sm:block">
+                    <table class="w-full text-sm">
+                        <thead class="text-muted-foreground text-left">
+                            <tr>
+                                <th class="py-1.5">Activo</th>
+                                <th class="py-1.5">Talla / unidad</th>
+                                <th class="py-1.5">Conjunto</th>
+                                <th class="py-1.5">Evidencia</th>
+                                <th class="py-1.5 text-right">Cantidad</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="(it, i) in entrega.items"
+                                :key="i"
+                                class="border-t"
+                            >
+                                <td class="py-1.5">{{ it.activo }}</td>
+                                <td class="py-1.5">
+                                    <template v-if="it.unidad_codigo">
+                                        <span class="font-mono text-xs">{{
+                                            it.unidad_codigo
+                                        }}</span>
+                                        <Badge
+                                            v-if="it.unidad_estado_visible"
+                                            variant="outline"
+                                            class="ml-1.5 text-xs"
+                                            :class="
+                                                claseEstadoVisibleUnidad(
+                                                    it.unidad_estado_visible,
+                                                )
+                                            "
+                                        >
+                                            {{
+                                                it.unidad_estado_visible_etiqueta
+                                            }}
+                                        </Badge>
+                                    </template>
+                                    <span v-else>{{ it.talla ?? '—' }}</span>
+                                </td>
+                                <td class="text-muted-foreground py-1.5">
+                                    {{ it.conjunto ?? '—' }}
+                                </td>
+                                <td class="py-1.5">
+                                    <div
+                                        v-if="it.evidencias.length"
+                                        class="flex flex-wrap gap-1"
                                     >
-                                        <img
-                                            :src="ev.url"
-                                            alt="Evidencia del renglón"
-                                            class="size-10 rounded border object-cover"
-                                        />
-                                    </a>
-                                </div>
-                                <span v-else class="text-muted-foreground"
-                                    >—</span
-                                >
-                            </td>
-                            <td class="py-1.5 text-right">{{ it.cantidad }}</td>
-                        </tr>
-                    </tbody>
-                </table>
+                                        <a
+                                            v-for="(ev, k) in it.evidencias"
+                                            :key="k"
+                                            :href="ev.url"
+                                            target="_blank"
+                                            rel="noopener"
+                                            class="block"
+                                        >
+                                            <img
+                                                :src="ev.url"
+                                                alt="Evidencia del renglón"
+                                                class="size-10 rounded border object-cover"
+                                            />
+                                        </a>
+                                    </div>
+                                    <span v-else class="text-muted-foreground"
+                                        >—</span
+                                    >
+                                </td>
+                                <td class="py-1.5 text-right">
+                                    {{ it.cantidad }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </CardContent>
         </Card>
 

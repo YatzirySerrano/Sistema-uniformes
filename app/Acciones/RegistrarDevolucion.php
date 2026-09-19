@@ -6,6 +6,7 @@ use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\TipoReserva;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
@@ -17,6 +18,7 @@ use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioFolios;
+use App\Servicios\ServicioReservas;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -39,6 +41,7 @@ class RegistrarDevolucion
         private readonly ServicioAuditoria $auditoria,
         private readonly ResolverAlmacenOperativo $resolverAlmacen,
         private readonly ServicioEvidencias $evidenciasSvc,
+        private readonly ServicioReservas $reservas,
     ) {}
 
     /**
@@ -56,9 +59,10 @@ class RegistrarDevolucion
         ?string $motivo = null,
         ?string $notas = null,
         array $evidencias = [],
+        ?string $reservaToken = null,
     ): Devolucion {
         return DB::transaction(fn (): Devolucion => $this->crearYRegistrar(
-            $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor, $motivo, $notas, $evidencias,
+            $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor, $motivo, $notas, $evidencias, $reservaToken,
         ));
     }
 
@@ -84,6 +88,7 @@ class RegistrarDevolucion
         ?string $motivo = null,
         ?string $notas = null,
         array $evidencias = [],
+        ?string $reservaToken = null,
     ): Devolucion {
         $entrega = EntregaUniforme::query()->findOr($entregaId, fn () => throw new ExcepcionDeNegocioSimple('La entrega indicada no existe.'));
 
@@ -92,6 +97,14 @@ class RegistrarDevolucion
         if ($activos === [] && $unidades === []) {
             throw new ExcepcionDeNegocioSimple('Agrega al menos un renglón a devolver.');
         }
+
+        // Capa previa de UX/concurrencia: si viene token, se valida que la
+        // reserva exista, sea de este usuario y siga vigente. Nunca reemplaza
+        // los candados/recuentos de abajo (`procesarLineaCantidad`/
+        // `procesarLineaUnidad`), que son la autoridad real.
+        $reserva = $reservaToken !== null && $registradaPor !== null
+            ? $this->reservas->bloquearActivaPorToken($reservaToken, $registradaPor, TipoReserva::Devolucion)
+            : null;
 
         $devolucion = Devolucion::query()->create([
             'folio' => $this->folios->siguiente(ServicioFolios::DEVOLUCION),
@@ -120,6 +133,8 @@ class RegistrarDevolucion
                 $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $registradaPor);
             }
         }
+
+        $reserva?->update(['consumida_en' => now()]);
 
         $this->auditoria->registrar('devoluciones', 'crear', [
             'tipo_entidad' => Devolucion::class,

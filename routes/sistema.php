@@ -213,6 +213,10 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('entregas/crear', [EntregaController::class, 'create'])->name('entregas.create');
     Route::get('entregas/buscar', [EntregaController::class, 'buscar'])->name('entregas.buscar');
     Route::get('entregas/disponibilidad', [EntregaController::class, 'disponibilidad'])->name('entregas.disponibilidad');
+    // Apartado temporal (TTL) del borrador de Entrega — ver ReservarInventarioEntrega.
+    Route::post('entregas/reserva', [EntregaController::class, 'reservar'])->name('entregas.reserva');
+    Route::delete('entregas/reserva/{token}', [EntregaController::class, 'liberarReserva'])->name('entregas.reserva.liberar');
+    Route::post('entregas/reserva/{token}/extender', [EntregaController::class, 'extenderReserva'])->name('entregas.reserva.extender');
     // Consulta del documento de identidad del colaborador durante el flujo de
     // firma (autorización de mínimo privilegio, ver EntregaController).
     Route::get('entregas/documento-identidad/{colaborador}', [EntregaController::class, 'documentoIdentidad'])->name('entregas.documento-identidad');
@@ -240,6 +244,10 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('devoluciones/crear', [DevolucionController::class, 'create'])->name('devoluciones.create');
     Route::get('devoluciones/exportar', [DevolucionController::class, 'exportar'])->name('devoluciones.exportar');
     Route::get('devoluciones/evidencias/{evidencia}', [DevolucionController::class, 'verEvidencia'])->name('devoluciones.evidencias.ver');
+    // Apartado temporal (TTL) del borrador de Devolución — ver ReservarCustodiaDevolucion.
+    Route::post('devoluciones/reserva', [DevolucionController::class, 'reservar'])->name('devoluciones.reserva');
+    Route::delete('devoluciones/reserva/{token}', [DevolucionController::class, 'liberarReserva'])->name('devoluciones.reserva.liberar');
+    Route::post('devoluciones/reserva/{token}/extender', [DevolucionController::class, 'extenderReserva'])->name('devoluciones.reserva.extender');
     // Identidad del COLABORADOR QUE DEVUELVE durante el wizard de una
     // devolución nueva (todavía no existe el registro `Devolucion`, igual que
     // en Entregas: `App\Servicios\ServicioIdentidadColaborador`). Resuelta

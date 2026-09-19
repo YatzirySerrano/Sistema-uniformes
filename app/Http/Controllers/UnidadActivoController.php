@@ -29,6 +29,7 @@ use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioEtiquetasQr;
 use App\Servicios\ServicioEvidencias;
+use App\Servicios\ServicioReservas;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\PaletaGraficas;
 use App\Soporte\SerieGraficaReporte;
@@ -393,6 +394,10 @@ class UnidadActivoController extends Controller
             // unidad ya está en almacén, sólo cambia su condición.
             'condicionesRestauracion' => collect(CondicionUnidadActivo::cases())->filter(fn ($c) => ! $c->esIncidencia())->values()
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
+            // Resultado válido de "Marcar dañada" (ver `MarcarCondicionUnidadRequest`):
+            // nunca "funcionando" — eso no es un daño, es el estado de partida.
+            'condicionesDano' => collect([CondicionUnidadActivo::EnReparacion, CondicionUnidadActivo::Inservible])
+                ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'permisos' => [
                 'administrar' => $request->user()->can('administrar', $unidad),
             ],
@@ -429,7 +434,7 @@ class UnidadActivoController extends Controller
      * opcional (lista de Unidades) pero se exige efectivamente en el flujo de
      * Entregas, porque el stock sale de un almacén concreto.
      */
-    public function buscar(Request $request): JsonResponse
+    public function buscar(Request $request, ServicioReservas $reservas): JsonResponse
     {
         $this->authorize('viewAny', UnidadActivo::class);
 
@@ -447,6 +452,13 @@ class UnidadActivoController extends Controller
 
         $almacenId = $request->filled('almacen_id') ? (int) $request->query('almacen_id') : null;
         $termino = trim((string) $request->query('q', ''));
+        // Token del borrador de Entrega que consulta (opcional): las unidades
+        // que OTRA reserva activa ya apartó se marcan no entregables aquí,
+        // sin descontar la reserva del propio borrador.
+        $tokenReserva = $request->filled('token') ? (string) $request->query('token') : null;
+        $apartadasPorOtros = $almacenId !== null && $tokenReserva !== null
+            ? $reservas->unidadesApartadasPorOtros($activoId, $almacenId, $tokenReserva)
+            : [];
         // El flujo de Traspasos pide sólo unidades realmente disponibles (en
         // almacén, funcionando, sin asignar). Entregas NO manda el flag: ahí
         // se muestran también las no entregables, deshabilitadas con el motivo.
@@ -473,23 +485,28 @@ class UnidadActivoController extends Controller
             ->limit(30)
             ->with(['activo:id,nombre', 'almacen:id,nombre', 'especificacion'])
             ->get(['id', 'public_token', 'codigo', 'estado', 'condicion', 'activo_id', 'almacen_id', 'colaborador_id', 'observaciones'])
-            ->map(fn (UnidadActivo $u): array => [
-                'id' => $u->id,
-                'public_token' => $u->public_token,
-                'codigo' => $u->codigo,
-                'activo' => $u->activo?->nombre,
-                'almacen' => $u->almacen?->nombre,
-                'observaciones' => Str::limit((string) $u->observaciones, 60) ?: null,
-                'marca_modelo' => $u->especificacion?->marcaModelo(),
-                'imei_mascara' => $u->especificacion?->imeiMascara(),
-                'numero_telefonico' => $u->especificacion?->numero_telefonico,
-                'estado' => $u->estado->value,
-                'condicion' => $u->condicion->value,
-                'estado_visible_etiqueta' => $u->estadoVisible()->etiqueta(),
-                'condicion_etiqueta' => $u->condicion->etiqueta(),
-                'entregable' => $u->esEntregable(),
-                'motivo_no_entregable' => $u->esEntregable() ? null : $this->motivoNoEntregable($u),
-            ]);
+            ->map(function (UnidadActivo $u) use ($apartadasPorOtros): array {
+                $apartada = in_array($u->id, $apartadasPorOtros, true);
+                $entregable = $u->esEntregable() && ! $apartada;
+
+                return [
+                    'id' => $u->id,
+                    'public_token' => $u->public_token,
+                    'codigo' => $u->codigo,
+                    'activo' => $u->activo?->nombre,
+                    'almacen' => $u->almacen?->nombre,
+                    'observaciones' => Str::limit((string) $u->observaciones, 60) ?: null,
+                    'marca_modelo' => $u->especificacion?->marcaModelo(),
+                    'imei_mascara' => $u->especificacion?->imeiMascara(),
+                    'numero_telefonico' => $u->especificacion?->numero_telefonico,
+                    'estado' => $u->estado->value,
+                    'condicion' => $u->condicion->value,
+                    'estado_visible_etiqueta' => $u->estadoVisible()->etiqueta(),
+                    'condicion_etiqueta' => $u->condicion->etiqueta(),
+                    'entregable' => $entregable,
+                    'motivo_no_entregable' => $entregable ? null : ($apartada ? 'Esta unidad acaba de ser apartada por otra operación.' : $this->motivoNoEntregable($u)),
+                ];
+            });
 
         return response()->json(['unidades' => $unidades]);
     }

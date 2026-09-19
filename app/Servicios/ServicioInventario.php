@@ -66,6 +66,42 @@ class ServicioInventario
     }
 
     /**
+     * Bloquea (con `lockForUpdate`) y devuelve la fila de saldo de la
+     * combinación empresa+almacén+activo+talla, creándola con `cantidad => 0`
+     * si todavía no existe. Único punto de bloqueo del saldo — lo reutilizan
+     * `registrarMovimiento()` y la escritura de reservas temporales
+     * (`App\Acciones\ReservarInventarioEntrega`), que necesitan el MISMO
+     * candado para serializarse correctamente entre sí sin una tabla de
+     * bloqueo aparte. Debe llamarse siempre dentro de una transacción activa.
+     */
+    public function lockearSaldo(int $empresaId, int $almacenId, int $activoId, ?int $tallaId): SaldoInventario
+    {
+        $consulta = SaldoInventario::query()
+            ->where('empresa_id', $empresaId)
+            ->where('almacen_id', $almacenId)
+            ->where('activo_id', $activoId);
+        $this->acotarTalla($consulta, $tallaId);
+
+        $saldo = $consulta->lockForUpdate()->first();
+
+        if ($saldo === null) {
+            $saldo = new SaldoInventario([
+                'empresa_id' => $empresaId,
+                'almacen_id' => $almacenId,
+                'activo_id' => $activoId,
+                'talla_id' => $tallaId,
+                'cantidad' => 0,
+                'minimo' => 0,
+            ]);
+            $saldo->save();
+
+            $saldo = SaldoInventario::query()->whereKey($saldo->getKey())->lockForUpdate()->first();
+        }
+
+        return $saldo;
+    }
+
+    /**
      * Registra un movimiento y actualiza el saldo dentro de una transacción con
      * bloqueo pesimista sobre la fila de saldo.
      */
@@ -76,27 +112,7 @@ class ServicioInventario
         }
 
         return DB::transaction(function () use ($datos): MovimientoInventario {
-            $consulta = SaldoInventario::query()
-                ->where('empresa_id', $datos->empresaId)
-                ->where('almacen_id', $datos->almacenId)
-                ->where('activo_id', $datos->activoId);
-            $this->acotarTalla($consulta, $datos->tallaId);
-
-            $saldo = $consulta->lockForUpdate()->first();
-
-            if ($saldo === null) {
-                $saldo = new SaldoInventario([
-                    'empresa_id' => $datos->empresaId,
-                    'almacen_id' => $datos->almacenId,
-                    'activo_id' => $datos->activoId,
-                    'talla_id' => $datos->tallaId,
-                    'cantidad' => 0,
-                    'minimo' => 0,
-                ]);
-                $saldo->save();
-
-                $saldo = SaldoInventario::query()->whereKey($saldo->getKey())->lockForUpdate()->first();
-            }
+            $saldo = $this->lockearSaldo($datos->empresaId, $datos->almacenId, $datos->activoId, $datos->tallaId);
 
             $anterior = (int) $saldo->cantidad;
             $direccion = $datos->tipo->direccion();

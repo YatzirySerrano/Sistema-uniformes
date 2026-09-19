@@ -8,6 +8,7 @@ use App\Acciones\RegistrarUnidadesActivo;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
+use App\Enums\TipoReserva;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ExportaListado;
@@ -28,6 +29,7 @@ use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
 use App\Servicios\ServicioEstadoInventario;
 use App\Servicios\ServicioEvidencias;
+use App\Servicios\ServicioReservas;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\ResolverPerfilTecnicoUnidad;
 use App\Soporte\ServicioGeneradorCodigos;
@@ -327,7 +329,7 @@ class ActivoController extends Controller
      * selector de Entregas puede deshabilitar/explicar lo que no tiene
      * existencias en vez de dejarlo seleccionable a ciegas.
      */
-    public function buscar(Request $request): JsonResponse
+    public function buscar(Request $request, ServicioReservas $reservas): JsonResponse
     {
         $this->authorize('viewAny', Activo::class);
 
@@ -340,6 +342,9 @@ class ActivoController extends Controller
         $termino = trim((string) $request->query('q', ''));
         $control = $request->query('control');
         $almacenId = $request->filled('almacen_id') ? (int) $request->query('almacen_id') : null;
+        // Token del borrador de Entrega que consulta (opcional): descuenta lo
+        // que OTRAS reservas activas ya apartaron sin descontar la propia.
+        $tokenReserva = $request->filled('token') ? (string) $request->query('token') : null;
 
         $activos = Activo::query()
             ->where('empresa_id', $empresa->id)
@@ -388,7 +393,18 @@ class ActivoController extends Controller
             ->get(['activo_id', 'talla_id', 'cantidad'])
             ->groupBy('activo_id');
 
-        $resultado = $activos->map(function (Activo $a) use ($almacenId, $unidadesDisponiblesPorActivo, $saldosPorActivo): array {
+        // Reservas activas de OTROS borradores: UNA consulta agrupada para
+        // toda la página (no una por activo/talla) — mismo motivo que las dos
+        // consultas de arriba, evita un N+1 que escalaría con el resultado.
+        $idsActivosArray = $idsActivos->all();
+        $demandaReservadaPorClave = $almacenId === null ? [] : $reservas->demandaCantidadPorActivos(
+            TipoReserva::Entrega, $empresa->id, $almacenId, $idsActivosArray, $tokenReserva,
+        );
+        $unidadesApartadasPorActivo = $almacenId === null ? [] : $reservas->unidadesApartadasPorActivosEnAlmacen(
+            $idsActivosArray, $almacenId, $tokenReserva,
+        );
+
+        $resultado = $activos->map(function (Activo $a) use ($almacenId, $unidadesDisponiblesPorActivo, $saldosPorActivo, $demandaReservadaPorClave, $unidadesApartadasPorActivo): array {
             $tallas = $a->tallas
                 ->map(fn (Talla $t): array => ['id' => $t->id, 'valor' => $t->valor])
                 ->values();
@@ -413,7 +429,9 @@ class ActivoController extends Controller
             }
 
             if ($a->tipo_control === TipoControlActivo::SeguimientoIndividual) {
-                $fila['disponible'] = (int) ($unidadesDisponiblesPorActivo[$a->id] ?? 0);
+                $disponible = (int) ($unidadesDisponiblesPorActivo[$a->id] ?? 0);
+                $disponible = max(0, $disponible - ($unidadesApartadasPorActivo[$a->id] ?? 0));
+                $fila['disponible'] = $disponible;
 
                 return $fila;
             }
@@ -421,13 +439,20 @@ class ActivoController extends Controller
             $saldosPorTalla = ($saldosPorActivo->get($a->id) ?? collect())
                 ->keyBy(fn (SaldoInventario $s) => $s->talla_id ?? 0);
 
-            $fila['disponible'] = (int) $saldosPorTalla->sum('cantidad');
-            $fila['tallas'] = $tallas->map(function (array $t) use ($saldosPorTalla): array {
+            $fila['tallas'] = $tallas->map(function (array $t) use ($saldosPorTalla, $demandaReservadaPorClave, $a): array {
                 $saldo = $saldosPorTalla->get($t['id']);
-                $t['disponible'] = $saldo !== null ? (int) $saldo->cantidad : 0;
+                $bruto = $saldo !== null ? (int) $saldo->cantidad : 0;
+                $t['disponible'] = max(0, $bruto - ($demandaReservadaPorClave["{$a->id}-{$t['id']}"] ?? 0));
 
                 return $t;
             })->values();
+
+            // Sin variante (talla_id NULL): mismo descuento, clave "-0".
+            $saldoSinVariante = $saldosPorTalla->get(0);
+            $brutoSinVariante = $saldoSinVariante !== null ? (int) $saldoSinVariante->cantidad : 0;
+            $sinVarianteEfectivo = max(0, $brutoSinVariante - ($demandaReservadaPorClave["{$a->id}-0"] ?? 0));
+
+            $fila['disponible'] = (int) $fila['tallas']->sum('disponible') + $sinVarianteEfectivo;
 
             return $fila;
         });

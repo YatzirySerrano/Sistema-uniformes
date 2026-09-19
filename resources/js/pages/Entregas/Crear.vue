@@ -4,6 +4,7 @@ import { Calendar, ChevronLeft, ChevronRight, Plus, Trash2 } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
+import ApartadoTemporalBanner from '@/components/sistema/ApartadoTemporalBanner.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
@@ -14,6 +15,10 @@ import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+    type RespuestaReserva,
+    useReservaBorrador,
+} from '@/composables/useReservaBorrador';
 import { fechaNegocio } from '@/lib/fecha';
 
 type OpcionEmpresa = {
@@ -121,6 +126,30 @@ type DisponibilidadConjuntoEntrega = {
     disponible: number | null;
     requiere_seleccion_variante: boolean;
     componentes: ComponenteDisponibilidadConjunto[];
+};
+
+/** Respuesta de `POST /entregas/reserva` (ver `App\Acciones\ReservarInventarioEntrega`). */
+type RespuestaReservaEntrega = RespuestaReserva & {
+    lineas_cantidad: {
+        activo_id: number;
+        talla_id: number | null;
+        activo_nombre: string | null;
+        talla_valor: string | null;
+        disponible_efectivo: number;
+        solicitado_combinado: number;
+        suficiente: boolean;
+    }[];
+    lineas_unidad: {
+        unidad_activo_id: number;
+        ok: boolean;
+        motivo: string | null;
+    }[];
+    conjuntos: {
+        indice: number;
+        conjunto_id: number;
+        suficiente: boolean;
+        requiere_seleccion_variante: boolean;
+    }[];
 };
 
 const props = defineProps<{
@@ -251,6 +280,7 @@ function alElegirEmpresa(o: OpcionEmpresa | null): void {
     form.colaborador_id = '';
     form.almacen_id = null;
     limpiarRenglones();
+    reserva.reiniciarToken();
     form.clearErrors();
 }
 
@@ -284,6 +314,7 @@ function alElegirAlmacen(o: OpcionAlmacen | null): void {
         avisoAlmacenCambiado.value = true;
     }
 
+    reserva.reiniciarToken();
     void cargarDisponibilidad();
 }
 
@@ -362,6 +393,54 @@ const erroresLaxos = computed(
     () => form.errors as unknown as Record<string, string>,
 );
 
+// ------------------------------------------------------------------
+// Apartado temporal (TTL) de inventario del paso 2 — ver
+// `App\Acciones\ReservarInventarioEntrega`. Nunca reemplaza la validación
+// autoritativa de `CrearEntregaUniforme` al confirmar; es una capa previa de
+// UX/concurrencia para que dos usuarios no crean estar viendo el mismo stock
+// libre, y para detectar demanda combinada (artículo suelto + conjunto) antes
+// de llegar a firmas.
+// ------------------------------------------------------------------
+const reserva = useReservaBorrador<RespuestaReservaEntrega>({
+    reservar: '/entregas/reserva',
+    liberarBase: '/entregas/reserva',
+    extenderBase: '/entregas/reserva',
+});
+
+function construirPayloadReserva(): Record<string, unknown> {
+    return {
+        empresa_id: empresaId.value,
+        almacen_id: almacenSel.value?.id ?? null,
+        colaborador_id: colaboradorSel.value?.id ?? null,
+        activos: form.activos.map((f) => ({
+            activo_id: f.activo_id,
+            talla_id: f.talla_id,
+            cantidad: f.cantidad,
+        })),
+        unidades: form.unidades.map((f) => ({
+            unidad_activo_id: f.unidad_activo_id,
+        })),
+        conjuntos: form.conjuntos.map((f) => ({
+            conjunto_id: f.conjunto_id,
+            cantidad: f.cantidad,
+            variantes: f.variantes,
+        })),
+    };
+}
+
+// Recalcula el apartado cada vez que cambia algo relevante del paso 2
+// (agregar/quitar renglón, elegir activo/talla/unidad/conjunto, variante o
+// cantidad) — debounced dentro del composable para no golpear el servidor en
+// cada tecla.
+watch(
+    () => [form.activos, form.unidades, form.conjuntos],
+    () => {
+        if (empresaId.value === null || !almacenSel.value) return;
+        reserva.reservarConRetraso(construirPayloadReserva());
+    },
+    { deep: true },
+);
+
 const totalRenglones = computed(
     () =>
         form.activos.filter((f) => f.activo_id !== '').length +
@@ -376,7 +455,7 @@ async function cargarDisponibilidad(): Promise<void> {
     disponibilidad.value = {};
     if (empresaId.value === null || !almacenSel.value) return;
     const res = await fetch(
-        `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}`,
+        `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&token=${reserva.token.value}`,
         { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
     );
     if (!res.ok) return;
@@ -403,7 +482,7 @@ async function buscarActivosCantidad(
 ): Promise<OpcionActivo[]> {
     if (empresaId.value === null || !almacenSel.value) return [];
     const res = await fetch(
-        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=cantidad&q=${encodeURIComponent(q)}`,
+        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=cantidad&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -476,7 +555,7 @@ async function buscarActivosIndividual(
 ): Promise<OpcionActivo[]> {
     if (empresaId.value === null || !almacenSel.value) return [];
     const res = await fetch(
-        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=individual&q=${encodeURIComponent(q)}`,
+        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=individual&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -498,7 +577,7 @@ function buscarUnidades(i: number) {
         const activoId = unidadesUI[i].activoSel?.id;
         if (!activoId || !almacenSel.value) return [];
         const res = await fetch(
-            `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenSel.value.id}&q=${encodeURIComponent(q)}`,
+            `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenSel.value.id}&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
             {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
@@ -632,6 +711,7 @@ async function recalcularDisponibilidadConjunto(i: number): Promise<void> {
     const params = new URLSearchParams();
     params.set('almacen_id', String(almacenSel.value.id));
     params.set('cantidad', String(fila.cantidad > 0 ? fila.cantidad : 1));
+    params.set('token', reserva.token.value);
     for (const [componenteId, tallaId] of Object.entries(fila.variantes)) {
         if (tallaId !== null && tallaId !== undefined) {
             params.set(`variantes[${componenteId}]`, String(tallaId));
@@ -797,6 +877,26 @@ const problemasPaso2 = computed<string[]>(() => {
         }
     });
 
+    // Demanda COMBINADA (ver `App\Acciones\ReservarInventarioEntrega`): un
+    // artículo suelto y un conjunto (o dos conjuntos) pueden pedir la MISMA
+    // existencia sin que ninguno de los chequeos anteriores lo detecte por
+    // separado — cada uno mira sólo su propio renglón. Esto compara la suma
+    // real de TODO el borrador contra el saldo, igual que hace el servidor.
+    const res = reserva.resultado.value;
+    if (res && !res.ok) {
+        for (const l of res.lineas_cantidad) {
+            if (l.suficiente) continue;
+            const nombre = l.activo_nombre ?? 'un activo';
+            const talla = l.talla_valor ? ` ${l.talla_valor}` : '';
+            problemas.push(
+                `«${nombre}»${talla}: solicitaste ${l.solicitado_combinado} piezas combinando artículos sueltos y conjuntos, pero sólo hay ${l.disponible_efectivo} disponibles.`,
+            );
+        }
+        for (const l of res.lineas_unidad) {
+            if (!l.ok && l.motivo) problemas.push(l.motivo);
+        }
+    }
+
     return problemas;
 });
 
@@ -806,6 +906,10 @@ const puedeAvanzarPaso2 = computed(
 
 const faltantesFirma = computed<string[]>(() => {
     const faltan: string[] = [];
+    if (reserva.vencida.value)
+        faltan.push(
+            'Tu apartado de existencias venció. Vuelve al paso anterior para actualizar la disponibilidad.',
+        );
     if (firmaColaboradorVacia.value)
         faltan.push('Solicita la firma del colaborador para continuar.');
     if (firmaOperadorVacia.value)
@@ -820,6 +924,7 @@ const faltantesFirma = computed<string[]>(() => {
 const puedeConfirmar = computed(
     () =>
         totalRenglones.value > 0 &&
+        !reserva.vencida.value &&
         faltantesFirma.value.length === 0 &&
         !form.processing,
 );
@@ -852,14 +957,32 @@ function irAlPrimerProblema(): void {
     desplazarseAResumenProblemas();
 }
 
-function irA(n: 1 | 2 | 3): void {
+function mostrarProblemasPaso2(): void {
+    if (esMovilOTablet.value) dialogoProblemasMovil.value = true;
+    else desplazarseAResumenProblemas();
+}
+
+/**
+ * Avanzar al paso 3 SIEMPRE refresca la reserva de forma síncrona (no la
+ * última versión debounced) y exige `ok=true` antes de dejar pasar — así el
+ * usuario nunca llega a firmas con una selección que ya no es viable (ver
+ * item 14/29 del pedido: "no permitir pasar a firma sin reserva válida").
+ */
+async function irA(n: 1 | 2 | 3): Promise<void> {
     if (n === 2 && !puedeAvanzarPaso1.value) return;
-    if (n === 3 && (!puedeAvanzarPaso1.value || !puedeAvanzarPaso2.value)) {
-        if (puedeAvanzarPaso1.value && problemasPaso2.value.length) {
-            if (esMovilOTablet.value) dialogoProblemasMovil.value = true;
-            else desplazarseAResumenProblemas();
+    if (n === 3) {
+        if (!puedeAvanzarPaso1.value || !puedeAvanzarPaso2.value) {
+            if (puedeAvanzarPaso1.value && problemasPaso2.value.length) {
+                mostrarProblemasPaso2();
+            }
+            return;
         }
-        return;
+
+        const resultado = await reserva.reservar(construirPayloadReserva());
+        if (!resultado || !resultado.ok) {
+            mostrarProblemasPaso2();
+            return;
+        }
     }
     paso.value = n;
 }
@@ -893,6 +1016,7 @@ function enviar(): void {
 
     form.transform((datos) => ({
         ...datos,
+        reserva_token: reserva.token.value,
         activos: datos.activos.filter((fila) => fila.activo_id !== ''),
         unidades: datos.unidades.filter((fila) => fila.unidad_activo_id !== ''),
         conjuntos: datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
@@ -1125,6 +1249,16 @@ function enviar(): void {
 
             <!-- ============ PASO 2 · Elementos ============ -->
             <div v-show="paso === 2" class="space-y-6">
+                <ApartadoTemporalBanner
+                    v-if="almacenSel && totalRenglones > 0"
+                    :minutos-segundos="reserva.minutosSegundos.value"
+                    :por-vencer="reserva.porVencer.value"
+                    :vencida="reserva.vencida.value"
+                    :cargando="reserva.cargando.value"
+                    :error="reserva.error.value"
+                    @extender="reserva.extender()"
+                />
+
                 <p
                     v-if="avisoAlmacenCambiado"
                     class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
@@ -1226,7 +1360,7 @@ function enviar(): void {
                                     (activosUI[i].sel?.tallas ?? []).map(
                                         (t) => ({
                                             valor: t.id,
-                                            etiqueta: `${t.valor}${(t.disponible ?? 0) > 0 ? ` (${t.disponible})` : ' (sin existencias)'}`,
+                                            etiqueta: `Talla ${t.valor} · ${(t.disponible ?? 0) > 0 ? `${t.disponible} disponibles` : 'Sin existencias'}`,
                                             disabled: (t.disponible ?? 0) <= 0,
                                         }),
                                     )
@@ -1730,6 +1864,15 @@ function enviar(): void {
 
             <!-- ============ PASO 3 · Revisión y firmas ============ -->
             <div v-show="paso === 3" class="space-y-6">
+                <ApartadoTemporalBanner
+                    :minutos-segundos="reserva.minutosSegundos.value"
+                    :por-vencer="reserva.porVencer.value"
+                    :vencida="reserva.vencida.value"
+                    :cargando="reserva.cargando.value"
+                    :error="reserva.error.value"
+                    @extender="reserva.extender()"
+                />
+
                 <!-- Resumen -->
                 <section class="rounded-xl border p-4">
                     <h2 class="mb-3 text-sm font-semibold">
@@ -1971,7 +2114,9 @@ function enviar(): void {
                 </Button>
 
                 <Button variant="ghost" as-child>
-                    <Link href="/entregas">Cancelar</Link>
+                    <Link href="/entregas" @click="reserva.liberar()"
+                        >Cancelar</Link
+                    >
                 </Button>
             </div>
         </form>

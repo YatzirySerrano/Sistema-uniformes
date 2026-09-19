@@ -4,6 +4,7 @@ namespace App\Http\Requests\Entregas;
 
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\TipoControlActivo;
 use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\Conjunto;
@@ -70,6 +71,11 @@ class GuardarEntregaRequest extends FormRequest
             // Idempotencia opcional generada por el formulario: evita que un
             // doble submit / reintento de red registre dos entregas.
             'idempotency_key' => ['nullable', 'uuid'],
+            // Token del apartado temporal armado en el paso 2 (ver
+            // `App\Acciones\ReservarInventarioEntrega`). Opcional por
+            // compatibilidad; si viene, `CrearEntregaUniforme` la valida y
+            // consume — nunca reemplaza sus propias revalidaciones.
+            'reserva_token' => ['nullable', 'uuid'],
 
             'activos' => ['nullable', 'array'],
             'activos.*.activo_id' => [
@@ -260,6 +266,70 @@ class GuardarEntregaRequest extends FormRequest
                         "conjuntos.{$i}.cantidad",
                         "No hay suficiente disponibilidad del conjunto «{$conjunto->nombre}» en este almacén. Disponible: {$disponibleConjunto}.",
                     );
+                }
+            }
+
+            // Demanda COMBINADA por clave activo+talla: un artículo suelto y un
+            // conjunto (o dos conjuntos) pueden consumir la MISMA existencia sin
+            // que ninguno de los dos chequeos anteriores lo detecte por
+            // separado (cada uno mira su propio origen contra el saldo bruto).
+            // Aquí se suma TODA la demanda — sueltos + componentes de TODOS los
+            // conjuntos, por cantidad_requerida × cantidad del renglón — y se
+            // compara una sola vez contra el saldo real. `CrearEntregaUniforme`
+            // conserva de todas formas su propio rechazo autoritativo bajo
+            // lock; esto es para que el usuario no llegue hasta las firmas con
+            // una selección ya imposible.
+            $demandaCombinada = $solicitadoPorClave;
+            foreach ($conjuntos as $fila) {
+                $conjunto = $conjuntosCargados->get((int) ($fila['conjunto_id'] ?? 0));
+                if ($conjunto === null) {
+                    continue;
+                }
+                $cantidadConjuntos = (int) ($fila['cantidad'] ?? 0);
+                if ($cantidadConjuntos <= 0) {
+                    continue;
+                }
+                $variantesElegidas = is_array($fila['variantes'] ?? null) ? $fila['variantes'] : [];
+
+                foreach ($conjunto->componentes as $componente) {
+                    $activoComponente = Activo::query()->find($componente->activo_id);
+                    if ($activoComponente === null || $activoComponente->tipo_control !== TipoControlActivo::Cantidad) {
+                        continue;
+                    }
+                    $tallaId = Conjunto::resolverTallaComponente($componente, $variantesElegidas);
+                    $clave = $componente->activo_id.'-'.($tallaId ?? '0');
+                    $demandaCombinada[$clave] = ($demandaCombinada[$clave] ?? 0) + $componente->cantidad_requerida * $cantidadConjuntos;
+                }
+            }
+
+            if ($demandaCombinada !== [] && ! $validator->errors()->has('items')) {
+                $clavesConDemandaMixta = array_keys(array_filter(
+                    $demandaCombinada,
+                    fn (int $total, string $clave): bool => $total > 0 && $total !== ($solicitadoPorClave[$clave] ?? 0),
+                    ARRAY_FILTER_USE_BOTH,
+                ));
+
+                if ($clavesConDemandaMixta !== []) {
+                    $saldosCombinados = SaldoInventario::query()
+                        ->where('empresa_id', $empresaId)
+                        ->where('almacen_id', $almacenId)
+                        ->get()
+                        ->keyBy(fn (SaldoInventario $s): string => $s->activo_id.'-'.($s->talla_id ?? '0'));
+
+                    foreach ($clavesConDemandaMixta as $clave) {
+                        $solicitado = $demandaCombinada[$clave];
+                        $saldoCombinado = $saldosCombinados->get($clave);
+                        $disponible = $saldoCombinado === null ? 0 : (int) $saldoCombinado->cantidad;
+                        if ($solicitado <= $disponible) {
+                            continue;
+                        }
+                        [$activoId] = explode('-', $clave);
+                        $nombreActivo = Activo::query()->whereKey((int) $activoId)->value('nombre') ?? 'un activo';
+                        $validator->errors()->add(
+                            'items',
+                            "Solicitaste {$solicitado} piezas de {$nombreActivo} combinando artículos sueltos y conjuntos, pero sólo hay {$disponible} disponibles en este almacén.",
+                        );
+                    }
                 }
             }
         });

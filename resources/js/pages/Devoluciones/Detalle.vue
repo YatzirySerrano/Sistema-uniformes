@@ -92,7 +92,7 @@ defineOptions({
                     target="_blank"
                     rel="noopener"
                 >
-                    <Download class="size-4" /> Descargar comprobante PDF
+                    <Download class="size-4" /> Ver comprobante PDF
                 </a>
             </Button>
             <Button v-if="acuse && acuse.ver_firma" variant="outline" as-child>

@@ -5,6 +5,7 @@ namespace App\Acciones;
 use App\Enums\EstadoEntrega;
 use App\Enums\TipoControlActivo;
 use App\Enums\TipoMovimiento;
+use App\Enums\TipoReserva;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
@@ -22,6 +23,7 @@ use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
+use App\Servicios\ServicioReservas;
 use App\Servicios\ServicioUnidadesActivo;
 use Illuminate\Support\Facades\DB;
 
@@ -43,6 +45,7 @@ class CrearEntregaUniforme
         private readonly ServicioAuditoria $auditoria,
         private readonly ResolverAlmacenOperativo $resolverAlmacen,
         private readonly ServicioEvidencias $evidenciasSvc,
+        private readonly ServicioReservas $reservas,
     ) {}
 
     /**
@@ -62,6 +65,7 @@ class CrearEntregaUniforme
         ?string $notas = null,
         ?int $servicioId = null,
         array $evidencias = [],
+        ?string $reservaToken = null,
     ): EntregaUniforme {
         // Validación rápida (NO autoritativa): existencia + que el colaborador
         // esté activo. La empresa/sucursal definitivas se leen de la fila
@@ -84,7 +88,14 @@ class CrearEntregaUniforme
             throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
         }
 
-        return DB::transaction(function () use ($colaboradorId, $almacenId, $encargadoId, $fechaEntrega, $activosConsolidados, $activosConEvidencia, $unidades, $conjuntos, $notas, $servicioId, $evidencias): EntregaUniforme {
+        return DB::transaction(function () use ($colaboradorId, $almacenId, $encargadoId, $fechaEntrega, $activosConsolidados, $activosConEvidencia, $unidades, $conjuntos, $notas, $servicioId, $evidencias, $reservaToken): EntregaUniforme {
+            // La reserva es UNA CAPA PREVIA de UX/concurrencia: si viene un
+            // token, se valida que exista, pertenezca a este usuario y siga
+            // vigente (nunca reemplaza lo que sigue abajo). Todo lo que sigue
+            // — locks de saldo/unidad y el rechazo si ya no alcanza — se
+            // conserva exactamente igual que sin reserva.
+            $reserva = $reservaToken !== null ? $this->reservas->bloquearActivaPorToken($reservaToken, $encargadoId, TipoReserva::Entrega) : null;
+
             // Candado sobre el colaborador: mismo orden de locks
             // (Colaborador → Entrega/Inventario) que `CambiarEmpresaColaborador`.
             // Una transferencia de empresa y esta entrega se serializan: si
@@ -153,6 +164,12 @@ class CrearEntregaUniforme
             foreach ($conjuntos as $fila) {
                 $this->expandirConjunto($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, $fila, $unidadesUsadas);
             }
+
+            // Todo se registró: la reserva ya cumplió su propósito. Si algo de
+            // lo anterior hubiera lanzado, la transacción entera revierte y
+            // esta línea nunca corre — la reserva sigue intacta y vigente
+            // para que el usuario pueda corregir y reintentar sin perderla.
+            $reserva?->update(['consumida_en' => now()]);
 
             $this->auditoria->registrar('entregas', 'crear', [
                 'tipo_entidad' => EntregaUniforme::class,
@@ -273,11 +290,7 @@ class CrearEntregaUniforme
             $cantidadNecesaria = $componente->cantidad_requerida * $cantidadConjuntos;
             $activo = Activo::query()->findOrFail($componente->activo_id);
 
-            $tallaId = match (true) {
-                $componente->talla_id !== null => $componente->talla_id,
-                $componente->talla_libre => isset($variantesElegidas[$componente->id]) ? (int) $variantesElegidas[$componente->id] : null,
-                default => null,
-            };
+            $tallaId = Conjunto::resolverTallaComponente($componente, $variantesElegidas);
 
             if ($activo->tipo_control === TipoControlActivo::Cantidad) {
                 $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacenId, $encargadoId, $activo->id, $tallaId, $cantidadNecesaria, $conjunto->id, $conjunto->nombre);

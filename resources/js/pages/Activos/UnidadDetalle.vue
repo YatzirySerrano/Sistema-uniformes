@@ -10,6 +10,7 @@ import {
     RotateCcw,
     ScrollText,
     Trash2,
+    Wrench,
 } from '@lucide/vue';
 import { ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -88,6 +89,7 @@ const props = defineProps<{
     condicionesIncidencia: { valor: string; etiqueta: string }[];
     condicionesRecuperacion: { valor: string; etiqueta: string }[];
     condicionesRestauracion: { valor: string; etiqueta: string }[];
+    condicionesDano: { valor: string; etiqueta: string }[];
     permisos: { administrar: boolean };
 }>();
 
@@ -98,6 +100,27 @@ const esIncidencia = ['perdido', 'robado'].includes(props.unidad.condicion);
 const noEntregablePorCondicion =
     ['en_reparacion', 'inservible'].includes(props.unidad.condicion) &&
     props.unidad.estado === 'en_almacen';
+// Único camino válido para "Marcar dañada" (ver `MarcarCondicionUnidadRequest`):
+// misma condición que exige el backend, en_almacen + funcionando.
+const puedeMarcarDanada =
+    props.unidad.estado === 'en_almacen' &&
+    props.unidad.condicion === 'funcionando';
+
+const dialogoDanar = ref(false);
+const formDanar = useForm({
+    condicion_resultante: 'en_reparacion',
+    motivo: '',
+});
+
+function marcarDanada(): void {
+    formDanar.post(`/activos/unidades/${props.unidad.public_token}/danar`, {
+        preserveScroll: true,
+        onSuccess: () => {
+            dialogoDanar.value = false;
+            formDanar.reset();
+        },
+    });
+}
 
 const dialogoIncidencia = ref(false);
 const formIncidencia = useForm({
@@ -345,7 +368,7 @@ function guardarEquipo(): void {
                         :href="`/activos/unidades/etiquetas?ids=${unidad.id}`"
                         target="_blank"
                     >
-                        <QrCode class="size-3.5" /> Descargar etiqueta (PDF)
+                        <QrCode class="size-3.5" /> Ver etiqueta (PDF)
                     </a>
                 </Button>
                 <Button variant="ghost" size="sm" as-child>
@@ -383,6 +406,14 @@ function guardarEquipo(): void {
                     @click="dialogoRestaurar = true"
                 >
                     <RotateCcw class="size-3.5" /> Restaurar condición
+                </Button>
+                <Button
+                    v-if="permisos.administrar && puedeMarcarDanada"
+                    variant="outline"
+                    size="sm"
+                    @click="dialogoDanar = true"
+                >
+                    <Wrench class="size-3.5" /> Marcar dañada
                 </Button>
                 <Button
                     v-if="permisos.administrar && unidad.estado !== 'baja'"
@@ -882,6 +913,59 @@ function guardarEquipo(): void {
                             :disabled="formRestaurar.processing"
                         >
                             Restaurar
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
+
+        <Dialog v-model:open="dialogoDanar">
+            <DialogContent class="sm:max-w-sm">
+                <DialogHeader>
+                    <DialogTitle>Marcar unidad como dañada</DialogTitle>
+                    <DialogDescription>
+                        La unidad sigue en el mismo almacén (mismo código y QR),
+                        pero deja de ser entregable hasta que su condición
+                        vuelva a «Funcionando» mediante «Restaurar condición».
+                    </DialogDescription>
+                </DialogHeader>
+                <form class="grid gap-3" @submit.prevent="marcarDanada">
+                    <div class="grid gap-1.5">
+                        <Label for="danar-condicion">Queda como</Label>
+                        <SelectSimple
+                            id="danar-condicion"
+                            v-model="formDanar.condicion_resultante"
+                            :opciones="
+                                condicionesDano.map((c) => ({
+                                    valor: c.valor,
+                                    etiqueta: c.etiqueta,
+                                }))
+                            "
+                            :invalido="!!formDanar.errors.condicion_resultante"
+                        />
+                        <InputError
+                            :message="formDanar.errors.condicion_resultante"
+                        />
+                    </div>
+                    <div class="grid gap-1.5">
+                        <Label for="danar-motivo">Motivo</Label>
+                        <Input
+                            id="danar-motivo"
+                            v-model="formDanar.motivo"
+                            placeholder="p. ej. Pantalla rota"
+                        />
+                        <InputError :message="formDanar.errors.motivo" />
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            @click="dialogoDanar = false"
+                        >
+                            Cancelar
+                        </Button>
+                        <Button type="submit" :disabled="formDanar.processing">
+                            Marcar dañada
                         </Button>
                     </DialogFooter>
                 </form>

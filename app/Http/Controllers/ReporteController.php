@@ -153,7 +153,7 @@ class ReporteController extends Controller
 
             return response($pdf->generatePdfContent(), 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="'.$contexto->nombreArchivo().'.pdf"',
+                'Content-Disposition' => 'inline; filename="'.$contexto->nombreArchivo().'.pdf"',
             ]);
         }
 
@@ -315,7 +315,7 @@ class ReporteController extends Controller
 
             return response($pdf->generatePdfContent(), 200, [
                 'Content-Type' => 'application/pdf',
-                'Content-Disposition' => 'attachment; filename="'.$contexto->nombreArchivo().'.pdf"',
+                'Content-Disposition' => 'inline; filename="'.$contexto->nombreArchivo().'.pdf"',
             ]);
         }
 

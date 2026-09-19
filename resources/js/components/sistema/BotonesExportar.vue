@@ -10,9 +10,12 @@ import {
 
 /**
  * "Exportar" (Excel / PDF) para un listado, respetando los filtros activos:
- * navega (descarga normal del navegador, no una visita Inertia) a
- * `${endpoint}?<filtros>&formato=xlsx|pdf`. El backend resuelve esa URL con
- * la MISMA consulta filtrada que ve la pantalla — nunca una aparte.
+ * navega (no una visita Inertia) a `${endpoint}?<filtros>&formato=xlsx|pdf`.
+ * El backend resuelve esa URL con la MISMA consulta filtrada que ve la
+ * pantalla — nunca una aparte. Excel se descarga directo (`attachment`); PDF
+ * abre en una pestaña nueva como VISTA PREVIA (`Content-Disposition: inline`
+ * en `ExportaListado::respuestaExportacion()`) — el usuario decide ahí si
+ * imprime o descarga, nunca se fuerza la descarga automática.
  *
  * Un solo trigger con menú (en vez de dos botones sueltos) para no repetir
  * el mismo par de acciones en cada `EncabezadoPagina` de los 19 módulos que
@@ -70,10 +73,12 @@ function url(formato: 'xlsx' | 'pdf'): string {
             >
                 <a
                     :href="url('pdf')"
-                    aria-label="Exportar este listado a PDF"
+                    target="_blank"
+                    rel="noopener"
+                    aria-label="Ver este listado en PDF en una pestaña nueva"
                     class="flex w-full items-center"
                 >
-                    <FileText class="mr-2 size-4" /> PDF
+                    <FileText class="mr-2 size-4" /> Ver PDF
                 </a>
             </DropdownMenuItem>
         </DropdownMenuContent>
