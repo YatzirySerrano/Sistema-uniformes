@@ -55,6 +55,9 @@ class EntregaController extends Controller
 
         $filtros = $this->filtrosListado($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
+        $colaboradorFiltro = ($filtros['colaborador_id'] ?? null)
+            ? Colaborador::query()->whereKey($filtros['colaborador_id'])->first(['id', 'nombre_completo', 'numero_empleado'])
+            : null;
 
         $entregas = $this->consultaEntregas($request)
             ->withCount('detalles')
@@ -79,6 +82,11 @@ class EntregaController extends Controller
         return Inertia::render('Entregas/Index', [
             'entregas' => $entregas,
             'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
+            // Cuando se llega desde "Activos asignados"/"Entregas" del perfil
+            // de un colaborador (`?colaborador_id=`), el listado queda
+            // filtrado por su ID real (nunca por nombre) y el frontend puede
+            // mostrar de forma visible "filtrado por {colaborador}".
+            'colaboradorFiltro' => $colaboradorFiltro,
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'estados' => collect(EstadoEntrega::cases())->map(fn ($e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
             'puedeCrear' => $request->user()->can('create', EntregaUniforme::class),
@@ -160,6 +168,7 @@ class EntregaController extends Controller
             'empresa_id' => ['nullable', 'integer'],
             'sucursal_id' => ['nullable', 'integer'],
             'almacen_id' => ['nullable', 'integer'],
+            'colaborador_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'string'],
             'contrato_id' => ['nullable', 'integer'],
             'servicio_id' => ['nullable', 'integer'],
@@ -190,6 +199,10 @@ class EntregaController extends Controller
                 ->orWhereHas('colaborador', fn (Builder $c) => $c->where('nombre_completo', 'like', "%{$b}%")->orWhere('numero_empleado', 'like', "%{$b}%"))))
             ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
             ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $a) => $q->where('almacen_id', $a))
+            // Igual que `sucursal_id`: `colaborador_id` sólo puede devolver
+            // filas ya acotadas por `empresa_id` arriba — un colaborador de
+            // otra empresa nunca filtra nada ajeno.
+            ->when($filtros['colaborador_id'] ?? null, fn (Builder $q, $c) => $q->where('colaborador_id', $c))
             ->when($filtros['estado'] ?? null, fn (Builder $q, $e) => $q->where('estado', $e))
             // Servicio es el snapshot histórico de la propia entrega
             // (`entregas_uniformes.servicio_id`); Contrato filtra por el

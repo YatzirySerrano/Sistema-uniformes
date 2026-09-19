@@ -4,13 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Acciones\CambiarEmpresaColaborador;
 use App\Acciones\CambiarServicioColaborador;
+use App\Acciones\RegistrarIncidenciaCustodia;
 use App\Enums\TipoGrafica;
+use App\Enums\TipoIncidenciaCustodia;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Colaboradores\ActualizarFotoColaboradorRequest;
 use App\Http\Requests\Colaboradores\CambiarEmpresaColaboradorRequest;
 use App\Http\Requests\Colaboradores\CambiarServicioColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
+use App\Http\Requests\Colaboradores\RegistrarIncidenciaCustodiaRequest;
 use App\Models\Area;
 use App\Models\Colaborador;
 use App\Models\Devolucion;
@@ -415,6 +418,13 @@ class ColaboradorController extends Controller
             'puedeCambiarEmpresa' => $usuario->can('cambiarEmpresa', $colaborador),
             'puedeVerHistorico' => $usuario->can('verHistorico', $colaborador),
             'puedeVerExpediente' => $puedeVerExpediente,
+            // Las cards de KPI de "Entregas"/"Devoluciones" sólo se ofrecen
+            // como acceso directo cuando el usuario de verdad puede abrir
+            // esos listados — evita un 403 al hacer clic en un número que ya
+            // podía ver.
+            'puedeVerEntregas' => $usuario->can('viewAny', EntregaUniforme::class),
+            'puedeVerDevoluciones' => $usuario->can('viewAny', Devolucion::class),
+            'puedeReportarIncidenciaCustodia' => $usuario->can('reportarIncidenciaCustodia', $colaborador),
             'expediente' => $puedeVerExpediente ? [
                 'id' => $colaborador->id,
                 'nombre_completo' => $colaborador->nombre_completo,
@@ -422,7 +432,39 @@ class ColaboradorController extends Controller
                 'foto_url' => $fotoUrl,
                 ...$servicioExpediente->payload($colaborador, $usuario, (string) $request->query('estado', 'activos')),
             ] : null,
+            // Panel "Activos asignados": misma fuente que el KPI
+            // (`ServicioCustodiaColaborador`), nunca un cálculo aparte —
+            // detalle de lo pendiente (unidades + renglones por cantidad) y
+            // de los robos/pérdidas ya reportados.
+            'custodia' => [
+                'pendientes' => $servicioCustodia->pendientes($colaborador, $idsAutorizadas->all()),
+                'incidencias' => $servicioCustodia->incidenciasRegistradas($colaborador, $idsAutorizadas->all()),
+            ],
         ]);
+    }
+
+    /**
+     * Reporta robo/pérdida de un artículo POR CANTIDAD bajo custodia del
+     * colaborador (ver `App\Acciones\RegistrarIncidenciaCustodia`). Las
+     * unidades identificadas usan su propio flujo (`MarcarUnidadIncidencia`,
+     * desde la ficha de la unidad) — esta acción es sólo para renglones de
+     * cantidad, nunca las mezcla.
+     */
+    public function registrarIncidenciaCustodia(RegistrarIncidenciaCustodiaRequest $request, Colaborador $colaborador, RegistrarIncidenciaCustodia $accion): RedirectResponse
+    {
+        $datos = $request->validated();
+
+        $accion->ejecutar(
+            $colaborador,
+            (int) $datos['detalle_entrega_id'],
+            TipoIncidenciaCustodia::from($datos['tipo']),
+            (int) $datos['cantidad'],
+            $datos['motivo'],
+            $datos['observacion'] ?? null,
+            $request->user()?->id,
+        );
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Incidencia registrada.']);
     }
 
     /**

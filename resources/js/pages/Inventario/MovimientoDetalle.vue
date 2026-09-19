@@ -18,6 +18,7 @@ defineProps<{
         almacen: string | null;
         sucursal: string | null;
         activo: string | null;
+        activo_codigo: string | null;
         talla: string | null;
         unidad_codigo: string | null;
         motivo: string | null;
@@ -87,17 +88,29 @@ function fecha(iso: string): string {
                 </span>
             </div>
 
-            <p class="text-muted-foreground mt-2 text-sm">
-                {{ movimiento.activo }}
-                <span v-if="movimiento.talla">· {{ movimiento.talla }}</span>
-                <span v-if="movimiento.unidad_codigo" class="font-mono text-xs"
-                    >· {{ movimiento.unidad_codigo }}</span
-                >
-            </p>
-
             <dl
                 class="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3"
             >
+                <div class="sm:col-span-2 lg:col-span-3">
+                    <dt class="text-muted-foreground text-xs">Activo</dt>
+                    <dd class="text-base font-semibold">
+                        {{ movimiento.activo ?? '—' }}
+                    </dd>
+                </div>
+                <div v-if="movimiento.activo_codigo">
+                    <dt class="text-muted-foreground text-xs">Código</dt>
+                    <dd class="font-mono">{{ movimiento.activo_codigo }}</dd>
+                </div>
+                <div v-if="!movimiento.unidad_codigo">
+                    <dt class="text-muted-foreground text-xs">
+                        Variante / talla
+                    </dt>
+                    <dd>{{ movimiento.talla ?? 'Sin variante' }}</dd>
+                </div>
+                <div v-if="movimiento.unidad_codigo">
+                    <dt class="text-muted-foreground text-xs">Unidad</dt>
+                    <dd class="font-mono">{{ movimiento.unidad_codigo }}</dd>
+                </div>
                 <div>
                     <dt class="text-muted-foreground text-xs">Fecha y hora</dt>
                     <dd>{{ fecha(movimiento.ocurrido_en) }}</dd>

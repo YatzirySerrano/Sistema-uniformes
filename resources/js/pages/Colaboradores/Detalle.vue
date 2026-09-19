@@ -3,6 +3,7 @@ import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeft,
     ArrowLeftRight,
+    Boxes,
     Building2,
     Camera,
     FileText,
@@ -18,6 +19,7 @@ import {
 import { ref } from 'vue';
 import CambiarEmpresaDialog from '@/components/colaboradores/CambiarEmpresaDialog.vue';
 import CambiarFotoDialog from '@/components/colaboradores/CambiarFotoDialog.vue';
+import CustodiaPanel from '@/components/colaboradores/CustodiaPanel.vue';
 import DialogCambiarServicio from '@/components/colaboradores/DialogCambiarServicio.vue';
 import ExpedienteExplorer from '@/components/colaboradores/ExpedienteExplorer.vue';
 import FormularioColaborador from '@/components/colaboradores/FormularioColaborador.vue';
@@ -71,6 +73,33 @@ type HistoricoEmpresa = {
     devoluciones: number;
 };
 
+type PendienteFila = {
+    tipo: 'unidad' | 'cantidad';
+    tipo_etiqueta: string;
+    activo: string;
+    talla: string | null;
+    cantidad: number;
+    referencia: string | null;
+    entrega_id: number | null;
+    entrega_folio: string | null;
+    detalle_entrega_id: number | null;
+    unidad_activo_id: number | null;
+    unidad_public_token: string | null;
+};
+
+type IncidenciaFila = {
+    activo: string;
+    talla: string | null;
+    cantidad: number;
+    tipo: 'robado' | 'perdido';
+    tipo_etiqueta: string;
+    motivo: string;
+    observacion: string | null;
+    entrega_folio: string | null;
+    usuario: string | null;
+    ocurrido_en: string | null;
+};
+
 const props = defineProps<{
     colaborador: ColaboradorPerfil;
     kpis: {
@@ -85,7 +114,14 @@ const props = defineProps<{
     puedeCambiarEmpresa: boolean;
     puedeVerHistorico: boolean;
     puedeVerExpediente: boolean;
+    puedeVerEntregas: boolean;
+    puedeVerDevoluciones: boolean;
+    puedeReportarIncidenciaCustodia: boolean;
     expediente: ExpedientePayload | null;
+    custodia: {
+        pendientes: PendienteFila[];
+        incidencias: IncidenciaFila[];
+    };
 }>();
 
 defineOptions({
@@ -99,7 +135,7 @@ defineOptions({
 
 const { getInitials } = useInitials();
 
-const seccion = ref<'resumen' | 'expediente'>('resumen');
+const seccion = ref<'resumen' | 'expediente' | 'custodia'>('resumen');
 
 // --- Editar (modal, no navega) ---
 const modalEditar = ref(false);
@@ -256,31 +292,80 @@ const modalEmpresa = ref(false);
         </div>
 
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div class="rounded-xl border p-3">
+            <button
+                type="button"
+                :disabled="!expediente"
+                class="enabled:hover:bg-accent focus-visible:ring-ring rounded-xl border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none enabled:cursor-pointer disabled:cursor-default"
+                :aria-label="
+                    expediente ? 'Ver expediente del colaborador' : 'Documentos'
+                "
+                @click="expediente && (seccion = 'expediente')"
+            >
                 <p
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
                     <FileText class="size-3" /> Documentos
                 </p>
                 <p class="text-2xl font-semibold">{{ kpis.documentos }}</p>
-            </div>
-            <div class="rounded-xl border p-3">
+            </button>
+            <component
+                :is="puedeVerEntregas ? Link : 'div'"
+                :href="
+                    puedeVerEntregas
+                        ? `/entregas?colaborador_id=${colaborador.id}`
+                        : undefined
+                "
+                class="rounded-xl border p-3"
+                :class="
+                    puedeVerEntregas
+                        ? 'hover:bg-accent focus-visible:ring-ring block cursor-pointer transition-colors focus-visible:ring-2 focus-visible:outline-none'
+                        : ''
+                "
+                :aria-label="
+                    puedeVerEntregas
+                        ? 'Ver entregas de este colaborador'
+                        : undefined
+                "
+            >
                 <p
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
                     <Truck class="size-3" /> Entregas
                 </p>
                 <p class="text-2xl font-semibold">{{ kpis.entregas }}</p>
-            </div>
-            <div class="rounded-xl border p-3">
+            </component>
+            <component
+                :is="puedeVerDevoluciones ? Link : 'div'"
+                :href="
+                    puedeVerDevoluciones
+                        ? `/devoluciones?colaborador_id=${colaborador.id}`
+                        : undefined
+                "
+                class="rounded-xl border p-3"
+                :class="
+                    puedeVerDevoluciones
+                        ? 'hover:bg-accent focus-visible:ring-ring block cursor-pointer transition-colors focus-visible:ring-2 focus-visible:outline-none'
+                        : ''
+                "
+                :aria-label="
+                    puedeVerDevoluciones
+                        ? 'Ver devoluciones de este colaborador'
+                        : undefined
+                "
+            >
                 <p
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
                     <RefreshCcw class="size-3" /> Devoluciones
                 </p>
                 <p class="text-2xl font-semibold">{{ kpis.devoluciones }}</p>
-            </div>
-            <div class="rounded-xl border p-3">
+            </component>
+            <button
+                type="button"
+                class="hover:bg-accent focus-visible:ring-ring cursor-pointer rounded-xl border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                aria-label="Ver activos asignados / custodia actual"
+                @click="seccion = 'custodia'"
+            >
                 <p
                     class="text-muted-foreground flex items-center gap-1 text-xs"
                 >
@@ -289,7 +374,7 @@ const modalEmpresa = ref(false);
                 <p class="text-2xl font-semibold">
                     {{ kpis.activos_asignados }}
                 </p>
-            </div>
+            </button>
         </div>
 
         <div
@@ -366,6 +451,21 @@ const modalEmpresa = ref(false);
                 @click="seccion = 'expediente'"
             >
                 <FolderOpen class="size-4" /> Expediente
+            </button>
+            <button
+                type="button"
+                :aria-pressed="seccion === 'custodia'"
+                :class="
+                    cn(
+                        'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors',
+                        seccion === 'custodia'
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'hover:bg-accent text-muted-foreground hover:text-foreground',
+                    )
+                "
+                @click="seccion = 'custodia'"
+            >
+                <Boxes class="size-4" /> Custodia actual
             </button>
         </div>
 
@@ -444,7 +544,7 @@ const modalEmpresa = ref(false);
             </dl>
         </section>
 
-        <section v-else-if="expediente">
+        <section v-else-if="seccion === 'expediente' && expediente">
             <ExpedienteExplorer
                 :colaborador="{
                     id: expediente.id,
@@ -458,6 +558,15 @@ const modalEmpresa = ref(false);
                 :puede-descargar="expediente.puedeDescargar"
                 :puede-ver-eliminados="expediente.puedeVerEliminados"
                 :filtro-estado="expediente.filtroEstado"
+            />
+        </section>
+
+        <section v-else-if="seccion === 'custodia'">
+            <CustodiaPanel
+                :colaborador-id="colaborador.id"
+                :pendientes="custodia.pendientes"
+                :incidencias="custodia.incidencias"
+                :puede-reportar="puedeReportarIncidenciaCustodia"
             />
         </section>
 

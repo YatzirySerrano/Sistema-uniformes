@@ -8,6 +8,7 @@ use App\Enums\RolSistema;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocio;
 use App\Excepciones\ExistenciasInsuficientesException;
+use App\Models\Almacen;
 use App\Models\BitacoraAuditoria;
 use App\Models\CondicionInventario;
 use App\Models\SaldoInventario;
@@ -253,6 +254,98 @@ it('un ajuste de condición por HTTP registra el movimiento y responde con éxit
 
     expect(SaldoInventario::query()->where('almacen_id', $this->datos['almacenA']->id)->value('cantidad'))->toBe(3)
         ->and(CondicionInventario::count())->toBe(1);
+});
+
+it('lo dañado en una variante no afecta lo restaurable de otra variante del mismo activo', function () {
+    $tallaG = Talla::factory()->create(['valor' => 'G']);
+    $this->datos['activoA']->tallas()->attach($tallaG);
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $tallaG->id, 'cantidad' => 5]],
+        'Alta inicial variante G', null,
+    );
+
+    app(MarcarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        CondicionDevolucion::Danado, 3, 'Humedad en variante M', null,
+    );
+
+    // La variante G nunca se marcó como dañada: restaurar de ahí debe fallar.
+    expect(fn () => app(RestaurarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $tallaG->id,
+        1, 'Intento cruzado', null,
+    ))->toThrow(ExcepcionDeNegocio::class);
+
+    // La variante M sí tiene 3 dañadas, sin que la G interfiera.
+    $registro = app(RestaurarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        3, 'Se repararon todas', null,
+    );
+
+    expect($registro->cantidad)->toBe(3)
+        ->and(SaldoInventario::query()->where('almacen_id', $this->datos['almacenA']->id)->where('talla_id', $tallaG->id)->value('cantidad'))->toBe(5);
+});
+
+it('lo dañado en un almacén no afecta lo restaurable del mismo activo+variante en otro almacén', function () {
+    $almacenA2 = Almacen::factory()->paraEmpresa($this->datos['empresaA'])->create(['nombre' => 'Almacén A2']);
+    app(RegistrarEntradaInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $almacenA2->id,
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 5]],
+        'Alta inicial almacén 2', null,
+    );
+
+    app(MarcarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        CondicionDevolucion::Danado, 2, 'Humedad en almacén A', null,
+    );
+
+    // El almacén A2 nunca marcó nada como dañado: restaurar ahí debe fallar.
+    expect(fn () => app(RestaurarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $almacenA2->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        1, 'Intento cruzado', null,
+    ))->toThrow(ExcepcionDeNegocio::class);
+
+    // El almacén A original sí tiene sus 2 dañadas disponibles.
+    $registro = app(RestaurarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        2, 'Se repararon', null,
+    );
+
+    expect($registro->cantidad)->toBe(2)
+        ->and(SaldoInventario::query()->where('almacen_id', $almacenA2->id)->value('cantidad'))->toBe(5);
+});
+
+it('el ciclo completo dañar → restaurar deja "Existencias por estado" en cero, sin residuos', function () {
+    app(MarcarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        CondicionDevolucion::Danado, 2, 'Motivo', null,
+    );
+
+    $tras1 = app(ServicioEstadoInventario::class)->porActivo($this->datos['activoA']->fresh());
+    expect($tras1['resumen']['disponible'])->toBe(3)->and($tras1['resumen']['danado'])->toBe(2);
+
+    app(RestaurarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        1, 'Se reparó una', null,
+    );
+    $tras2 = app(ServicioEstadoInventario::class)->porActivo($this->datos['activoA']->fresh());
+    expect($tras2['resumen']['disponible'])->toBe(4)->and($tras2['resumen']['danado'])->toBe(1);
+
+    app(RestaurarCondicionInventario::class)->ejecutar(
+        $this->datos['empresaA']->id, $this->datos['almacenA']->id,
+        $this->datos['activoA']->id, $this->datos['tallaA']->id,
+        1, 'Se reparó la última', null,
+    );
+    $tras3 = app(ServicioEstadoInventario::class)->porActivo($this->datos['activoA']->fresh());
+    expect($tras3['resumen']['disponible'])->toBe(5)->and($tras3['resumen']['danado'])->toBe(0);
 });
 
 it('el endpoint HTTP rechaza un almacén que no abastece a la empresa', function () {

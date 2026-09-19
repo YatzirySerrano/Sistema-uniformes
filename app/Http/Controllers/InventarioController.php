@@ -10,18 +10,24 @@ use App\Acciones\RestaurarCondicionInventario;
 use App\Enums\CondicionDevolucion;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Activos\RegistrarEntradaInventarioRequest;
+use App\Models\Almacen;
 use App\Models\CategoriaActivo;
 use App\Models\SaldoInventario;
 use App\Models\TipoActivo;
 use App\Servicios\ServicioInventario;
+use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 /**
  * Inventario por EMPRESA + ALMACÉN. Un mismo almacén puede abastecer a varias
@@ -31,17 +37,123 @@ use Inertia\Response;
 class InventarioController extends Controller
 {
     use ConEmpresa;
+    use ExportaListado;
 
     public function index(Request $request): Response
     {
         abort_unless($request->user()->can('inventario.ver'), 403);
 
-        $usuario = $request->user();
-        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $filtros = $this->filtrosListado($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
-        $idsScope = $empresaFiltro !== null ? collect([$empresaFiltro->id]) : $idsAutorizadas;
 
-        $filtros = $request->validate([
+        $saldos = $this->consultaSaldos($request, $filtros)
+            ->orderBy('empresa_id')
+            ->orderBy('almacen_id')
+            ->paginate($this->porPagina())
+            ->withQueryString()
+            ->through(fn (SaldoInventario $s): array => $this->filaSaldo($s));
+
+        $usuario = $request->user();
+        $idsScope = $this->idsScopeInventario($request);
+
+        return Inertia::render('Inventario/Index', [
+            'saldos' => $saldos,
+            'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
+            'empresasAutorizadas' => $this->opcionesEmpresas($request),
+            'almacenes' => $idsScope
+                ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($usuario, $id)->all())
+                ->unique('id')
+                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo])
+                ->values(),
+            'tiposActivo' => TipoActivo::query()->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
+            'categorias' => CategoriaActivo::query()->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
+            'tiposControl' => TipoControlActivo::opciones(),
+            'permisos' => [
+                'entrada' => $request->user()->can('inventario.entrada'),
+                'ajustar' => $request->user()->can('inventario.ajustar'),
+                'minimos' => $request->user()->can('inventario.minimos'),
+            ],
+        ]);
+    }
+
+    /**
+     * Excel/PDF de "Existencias globales", respetando EXACTAMENTE los mismos
+     * filtros/alcance que `index()` (misma consulta base, nunca una aparte)
+     * — mismo patrón que el resto de listados administrativos
+     * (`ExportaListado`/`ListadoExport`). Exporta TODAS las filas filtradas,
+     * no sólo la página visible en pantalla.
+     */
+    public function exportar(Request $request): BinaryFileResponse|HttpResponse
+    {
+        abort_unless($request->user()->can('inventario.ver'), 403);
+
+        $filtros = $this->filtrosListado($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        $saldos = $this->consultaSaldos($request, $filtros)
+            ->orderBy('empresa_id')
+            ->orderBy('almacen_id')
+            ->get();
+
+        $filas = $saldos->map(function (SaldoInventario $s): array {
+            $fila = $this->filaSaldo($s);
+
+            return [
+                $fila['empresa'],
+                $fila['almacen'],
+                $fila['activo'],
+                $s->activo?->codigo,
+                $s->activo?->tipoActivo?->nombre,
+                $s->activo?->categoriaActivo?->nombre,
+                $fila['talla'] ?: 'Sin variante',
+                $s->activo?->tipo_control->etiqueta(),
+                $fila['cantidad'],
+                $fila['minimo'],
+                match (true) {
+                    $fila['cantidad'] <= 0 => 'Sin existencias',
+                    $fila['bajo_minimo'] => 'Bajo mínimo',
+                    default => 'OK',
+                },
+            ];
+        })->all();
+
+        $filtrosHumanos = array_filter([
+            'Búsqueda' => $filtros['buscar'] ?? null,
+            'Almacén' => ($filtros['almacen_id'] ?? null)
+                ? Almacen::query()->whereKey($filtros['almacen_id'])->value('nombre')
+                : null,
+            'Tipo' => ($filtros['tipo_activo_id'] ?? null)
+                ? TipoActivo::query()->whereKey($filtros['tipo_activo_id'])->value('nombre')
+                : null,
+            'Categoría' => ($filtros['categoria_id'] ?? null)
+                ? CategoriaActivo::query()->whereKey($filtros['categoria_id'])->value('nombre')
+                : null,
+            'Control' => match ($filtros['control'] ?? null) {
+                'cantidad' => 'Por cantidad',
+                'individual' => 'Seguimiento individual',
+                default => null,
+            },
+            'Estado' => match ($filtros['estado_stock'] ?? null) {
+                'bajo_minimo' => 'Bajo mínimo',
+                'sin_stock' => 'Sin stock',
+                'con_stock' => 'Con stock',
+                default => null,
+            },
+        ]);
+
+        $contexto = new ContextoExportacion('Existencias globales', $empresaFiltro, $filtrosHumanos, $saldos->count(), generadoPor: $request->user()?->name);
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
+            'Empresa', 'Almacén', 'Activo', 'Código', 'Tipo', 'Categoría', 'Variante', 'Control', 'Existencia', 'Mínimo', 'Estado',
+        ], $contexto);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function filtrosListado(Request $request): array
+    {
+        return $request->validate([
             'buscar' => ['nullable', 'string', 'max:100'],
             'almacen_id' => ['nullable', 'integer'],
             'activo_id' => ['nullable', 'integer'],
@@ -51,12 +163,37 @@ class InventarioController extends Controller
             'control' => ['nullable', Rule::in(['cantidad', 'individual'])],
             'estado_stock' => ['nullable', Rule::in(['bajo_minimo', 'sin_stock', 'con_stock'])],
         ]);
+    }
+
+    /**
+     * @return Collection<int, int>
+     */
+    private function idsScopeInventario(Request $request): Collection
+    {
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+        $empresaFiltro = $this->empresaDelFiltro($request);
+
+        return $empresaFiltro !== null ? collect([$empresaFiltro->id]) : $idsAutorizadas;
+    }
+
+    /**
+     * Consulta filtrada compartida por `index()` (pagina + `through()`) y
+     * `exportar()` (`get()` + `map()`) — misma consulta base, nunca una
+     * aparte, para que pantalla y exportación nunca diverjan.
+     *
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<SaldoInventario>
+     */
+    private function consultaSaldos(Request $request, array $filtros): Builder
+    {
+        $usuario = $request->user();
+        $idsScope = $this->idsScopeInventario($request);
 
         $almacenesVisibles = $idsScope
             ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($usuario, $id)->pluck('id')->all())
             ->unique()->values();
 
-        $saldos = SaldoInventario::query()
+        return SaldoInventario::query()
             ->whereIn('empresa_id', $idsScope)
             ->whereIn('almacen_id', $almacenesVisibles)
             ->when($filtros['buscar'] ?? null, function (Builder $q, string $texto): void {
@@ -80,45 +217,30 @@ class InventarioController extends Controller
             ->when(($filtros['estado_stock'] ?? null) === 'bajo_minimo', fn (Builder $q) => $q->bajoMinimo())
             ->when(($filtros['estado_stock'] ?? null) === 'sin_stock', fn (Builder $q) => $q->where('cantidad', '<=', 0))
             ->when(($filtros['estado_stock'] ?? null) === 'con_stock', fn (Builder $q) => $q->where('cantidad', '>', 0))
-            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'activo:id,nombre,tipo_control', 'talla:id,valor'])
-            ->orderBy('empresa_id')
-            ->orderBy('almacen_id')
-            ->paginate($this->porPagina())
-            ->withQueryString()
-            ->through(fn (SaldoInventario $s): array => [
-                'id' => $s->id,
-                'empresa_id' => $s->empresa_id,
-                'empresa' => $s->empresa?->nombre_comercial,
-                'almacen_id' => $s->almacen_id,
-                'activo_id' => $s->activo_id,
-                'talla_id' => $s->talla_id,
-                'almacen' => $s->almacen?->nombre,
-                'activo' => $s->activo?->nombre,
-                'talla' => $s->talla?->valor,
-                'control' => $s->activo?->tipo_control->value,
-                'cantidad' => $s->cantidad,
-                'minimo' => $s->minimo,
-                'bajo_minimo' => $s->estaBajoMinimo(),
-            ]);
+            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'activo:id,nombre,codigo,tipo_control', 'activo.tipoActivo:id,nombre', 'activo.categoriaActivo:id,nombre', 'talla:id,valor']);
+    }
 
-        return Inertia::render('Inventario/Index', [
-            'saldos' => $saldos,
-            'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
-            'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'almacenes' => $idsScope
-                ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($usuario, $id)->all())
-                ->unique('id')
-                ->map(fn ($a): array => ['id' => $a->id, 'nombre' => $a->nombre, 'codigo' => $a->codigo])
-                ->values(),
-            'tiposActivo' => TipoActivo::query()->where('activo', true)->orderBy('nombre')->get(['id', 'nombre']),
-            'categorias' => CategoriaActivo::query()->where('activa', true)->orderBy('nombre')->get(['id', 'nombre']),
-            'tiposControl' => TipoControlActivo::opciones(),
-            'permisos' => [
-                'entrada' => $request->user()->can('inventario.entrada'),
-                'ajustar' => $request->user()->can('inventario.ajustar'),
-                'minimos' => $request->user()->can('inventario.minimos'),
-            ],
-        ]);
+    /**
+     * @return array<string, mixed>
+     */
+    private function filaSaldo(SaldoInventario $s): array
+    {
+        return [
+            'id' => $s->id,
+            'empresa_id' => $s->empresa_id,
+            'empresa' => $s->empresa?->nombre_comercial,
+            'almacen_id' => $s->almacen_id,
+            'activo_id' => $s->activo_id,
+            'talla_id' => $s->talla_id,
+            'almacen' => $s->almacen?->nombre,
+            'activo' => $s->activo?->nombre,
+            'activo_codigo' => $s->activo?->codigo,
+            'talla' => $s->talla?->valor,
+            'control' => $s->activo?->tipo_control->value,
+            'cantidad' => $s->cantidad,
+            'minimo' => $s->minimo,
+            'bajo_minimo' => $s->estaBajoMinimo(),
+        ];
     }
 
     public function formularioEntrada(Request $request): Response

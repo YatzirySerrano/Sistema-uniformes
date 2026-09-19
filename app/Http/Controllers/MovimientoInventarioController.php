@@ -13,6 +13,7 @@ use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
+use App\Models\InventarioFisico;
 use App\Models\MovimientoInventario;
 use App\Models\TraspasoInventario;
 use App\Models\User;
@@ -56,12 +57,13 @@ class MovimientoInventarioController extends Controller
             ->withQueryString();
 
         $foliosTraspaso = $this->foliosTraspaso($paginador->getCollection());
+        $foliosInventarioFisico = $this->foliosInventarioFisico($paginador->getCollection());
 
         $movimientos = $paginador->through(fn (MovimientoInventario $m): array => [
             'id' => $m->id,
             'empresa' => $m->empresa?->nombre_comercial,
             'tipo' => $m->tipo->value,
-            'tipo_etiqueta' => $m->tipo->etiqueta(),
+            'tipo_etiqueta' => $m->etiquetaEfectiva(),
             'direccion' => $m->direccion->value,
             'cantidad' => $m->cantidad,
             'existencia_anterior' => $m->existencia_anterior,
@@ -69,10 +71,11 @@ class MovimientoInventarioController extends Controller
             'almacen' => $m->almacen?->nombre,
             'sucursal' => $m->sucursal?->nombre,
             'activo' => $m->activo?->nombre,
+            'activo_codigo' => $m->activo?->codigo,
             'talla' => $m->talla?->valor,
             'unidad_codigo' => $m->unidadActivo?->codigo,
             'motivo' => $m->motivo,
-            'referencia' => $this->referenciaLegible($m, $foliosTraspaso),
+            'referencia' => $this->referenciaLegible($m, $foliosTraspaso, $foliosInventarioFisico),
             'realizado_por' => $m->realizadoPor?->name,
             'ocurrido_en' => $m->ocurrido_en->toIso8601String(),
         ]);
@@ -302,7 +305,7 @@ class MovimientoInventarioController extends Controller
             'movimiento' => [
                 'id' => $encontrado->id,
                 'tipo' => $encontrado->tipo->value,
-                'tipo_etiqueta' => $encontrado->tipo->etiqueta(),
+                'tipo_etiqueta' => $encontrado->etiquetaEfectiva(),
                 'direccion' => $encontrado->direccion->value,
                 'cantidad' => $encontrado->cantidad,
                 'existencia_anterior' => $encontrado->existencia_anterior,
@@ -311,6 +314,7 @@ class MovimientoInventarioController extends Controller
                 'almacen' => $encontrado->almacen?->nombre,
                 'sucursal' => $encontrado->sucursal?->nombre,
                 'activo' => $encontrado->activo?->nombre,
+                'activo_codigo' => $encontrado->activo?->codigo,
                 'talla' => $encontrado->talla?->valor,
                 'unidad_codigo' => $encontrado->unidadActivo?->codigo,
                 'motivo' => $encontrado->motivo,
@@ -357,6 +361,15 @@ class MovimientoInventarioController extends Controller
             return $devolucion === null ? ['etiqueta' => null, 'url' => null] : [
                 'etiqueta' => "Devolución {$devolucion->folio}",
                 'url' => $usuario->can('view', $devolucion) ? route('devoluciones.show', $devolucion) : null,
+            ];
+        }
+
+        if ($m->referencia_tipo === InventarioFisico::class) {
+            $ronda = InventarioFisico::query()->find($m->referencia_id);
+
+            return $ronda === null ? ['etiqueta' => null, 'url' => null] : [
+                'etiqueta' => "Inventario físico {$ronda->folio}",
+                'url' => $usuario->can('view', $ronda) ? route('inventarios-fisicos.show', $ronda) : null,
             ];
         }
 
@@ -568,7 +581,7 @@ class MovimientoInventarioController extends Controller
         $filas = $movimientos->map(fn (MovimientoInventario $m): array => [
             FechaHora::local($m->ocurrido_en),
             $m->empresa?->nombre_comercial,
-            $m->tipo->etiqueta(),
+            $m->etiquetaEfectiva(),
             $m->direccion->value,
             $m->cantidad,
             $m->existencia_anterior,
@@ -644,7 +657,7 @@ class MovimientoInventarioController extends Controller
             ->when($filtros['tipo'] ?? null, fn (Builder $q, $t) => $q->where('tipo', $t))
             ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('ocurrido_en', '>=', $d))
             ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('ocurrido_en', '<=', $h))
-            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'sucursal:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'unidadActivo:id,codigo', 'realizadoPor:id,name'])
+            ->with(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'sucursal:id,nombre', 'activo:id,nombre,codigo', 'talla:id,valor', 'unidadActivo:id,codigo', 'realizadoPor:id,name', 'condicionInventario:id,movimiento_inventario_id'])
             ->latest('ocurrido_en');
     }
 
@@ -672,16 +685,46 @@ class MovimientoInventarioController extends Controller
     }
 
     /**
+     * Folios de las rondas de inventario físico referenciadas en una página
+     * de movimientos, en UNA consulta (mismo patrón que `foliosTraspaso()`).
+     *
+     * @param  Collection<int, MovimientoInventario>  $movimientos
+     * @return array<int, string>
+     */
+    private function foliosInventarioFisico(Collection $movimientos): array
+    {
+        $ids = $movimientos
+            ->where('referencia_tipo', InventarioFisico::class)
+            ->pluck('referencia_id')
+            ->filter()
+            ->unique()
+            ->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return InventarioFisico::query()->whereIn('id', $ids)->pluck('folio', 'id')->all();
+    }
+
+    /**
      * Etiqueta legible de la referencia de un movimiento para las cards.
      *
      * @param  array<int, string>  $foliosTraspaso
+     * @param  array<int, string>  $foliosInventarioFisico
      */
-    private function referenciaLegible(MovimientoInventario $m, array $foliosTraspaso): ?string
+    private function referenciaLegible(MovimientoInventario $m, array $foliosTraspaso, array $foliosInventarioFisico): ?string
     {
         if ($m->referencia_tipo === TraspasoInventario::class) {
             $folio = $foliosTraspaso[$m->referencia_id] ?? null;
 
             return $folio !== null ? "Traspaso {$folio}" : null;
+        }
+
+        if ($m->referencia_tipo === InventarioFisico::class) {
+            $folio = $foliosInventarioFisico[$m->referencia_id] ?? null;
+
+            return $folio !== null ? "Inventario físico {$folio}" : null;
         }
 
         return match ($m->referencia_tipo) {

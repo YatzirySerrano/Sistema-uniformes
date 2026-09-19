@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
 import {
+    AlertTriangle,
     Camera,
     CameraOff,
     CheckCircle2,
     CircleAlert,
+    ClipboardList,
     Keyboard,
     SwitchCamera,
     Undo2,
@@ -78,6 +80,23 @@ type FilaExistencia = {
     verificada_en: string | null;
 };
 
+type EstadoCorrecciones = 'sin_diferencias' | 'pendientes' | 'aplicadas';
+
+type Correcciones = {
+    estado: EstadoCorrecciones;
+    total_diferencias: number;
+    aplicadas_en: string | null;
+    aplicadas_por: string | null;
+    total_aplicadas: number | null;
+};
+
+type ConflictoExistencia = {
+    activo: string;
+    talla: string | null;
+    esperada: number;
+    actual: number;
+};
+
 const props = defineProps<{
     ronda: {
         id: number;
@@ -106,7 +125,13 @@ const props = defineProps<{
     };
     existencias: FilaExistencia[];
     textoAceptacion: string;
-    permisos: { administrar: boolean; finalizar: boolean };
+    correcciones: Correcciones;
+    conflictosInventarioFisico: ConflictoExistencia[] | null;
+    permisos: {
+        administrar: boolean;
+        finalizar: boolean;
+        aplicarCorrecciones: boolean;
+    };
 }>();
 
 defineOptions({
@@ -520,6 +545,60 @@ function fecha(valor: string | null): string {
     return fechaHora(valor);
 }
 
+/* ---------- Aplicar correcciones de inventario (todo o nada) ----------
+ * Sólo aparece cuando la ronda ya está finalizada y firmada: firmar NUNCA
+ * aplica el inventario por sí solo (ver `FinalizarRondaInventarioFisico`),
+ * esto es un paso posterior y explícito, nunca obligatorio. */
+const dialogoRevisarCorrecciones = ref(false);
+const aplicandoCorrecciones = ref(false);
+
+// Sólo los renglones que de verdad generarían un cambio (coincide/pendiente
+// no aplican nada) — misma regla que ya usa el backend para elegir qué
+// aplicar.
+const diferenciasParaAplicar = computed(() =>
+    props.existencias.filter(
+        (e) => e.diferencia !== null && e.diferencia !== 0,
+    ),
+);
+
+function abrirRevisionCorrecciones(): void {
+    dialogoRevisarCorrecciones.value = true;
+}
+
+function aplicarCorrecciones(): void {
+    aplicandoCorrecciones.value = true;
+    router.post(
+        `/inventarios-fisicos/${props.ronda.id}/aplicar-correcciones`,
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                aplicandoCorrecciones.value = false;
+            },
+            onSuccess: () => {
+                dialogoRevisarCorrecciones.value = false;
+            },
+        },
+    );
+}
+
+// Combinaciones que impidieron aplicar el lote en el último intento: llegan
+// desde el backend (flash de sesión) tras un conflicto de concurrencia. Se
+// muestran automáticamente apenas la página las recibe — el usuario no tiene
+// que volver a pulsar nada para verlas.
+const dialogoConflictos = ref(false);
+const conflictosMostrados = ref<ConflictoExistencia[]>([]);
+watch(
+    () => props.conflictosInventarioFisico,
+    (conflictos) => {
+        if (conflictos && conflictos.length > 0) {
+            conflictosMostrados.value = conflictos;
+            dialogoConflictos.value = true;
+        }
+    },
+    { immediate: true },
+);
+
 function claseClasificacion(c: FilaUnidad['clasificacion']): string {
     return c === 'encontrado'
         ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
@@ -601,6 +680,78 @@ onBeforeUnmount(() => {
                 Huella SHA-256 {{ ronda.firma.hash_firma }}
             </span>
         </div>
+
+        <!-- Aplicación de correcciones (sólo con ronda finalizada Y firmada):
+             estado independiente del estado de la ronda — nunca se mezclan.
+             Firmar/finalizar sólo confirma el conteo; aplicar es un paso
+             posterior, explícito y nunca obligatorio. -->
+        <div
+            v-if="ronda.firma && correcciones.estado === 'pendientes'"
+            class="flex flex-col gap-3 rounded-lg border border-amber-500/40 bg-amber-50/50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between dark:bg-amber-950/20"
+        >
+            <div class="flex items-start gap-2">
+                <AlertTriangle
+                    class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
+                />
+                <div>
+                    <p class="font-medium">
+                        {{ correcciones.total_diferencias }}
+                        {{
+                            correcciones.total_diferencias === 1
+                                ? 'diferencia pendiente de aplicar'
+                                : 'diferencias pendientes de aplicar'
+                        }}
+                    </p>
+                    <p class="text-muted-foreground mt-0.5">
+                        El conteo físico encontró diferencias con las
+                        existencias registradas. Revisa los cambios antes de
+                        actualizar el inventario.
+                    </p>
+                </div>
+            </div>
+            <Button
+                v-if="permisos.aplicarCorrecciones"
+                size="sm"
+                class="shrink-0"
+                @click="abrirRevisionCorrecciones"
+            >
+                <ClipboardList class="size-4" />
+                Revisar y aplicar correcciones
+            </Button>
+        </div>
+
+        <div
+            v-else-if="ronda.firma && correcciones.estado === 'aplicadas'"
+            class="rounded-lg border border-emerald-500/40 bg-emerald-50/50 p-4 text-sm dark:bg-emerald-950/20"
+        >
+            <p class="flex items-center gap-2 font-medium">
+                <CheckCircle2
+                    class="size-4 shrink-0 text-emerald-600 dark:text-emerald-400"
+                />
+                Correcciones aplicadas
+            </p>
+            <p class="text-muted-foreground mt-0.5">
+                {{ correcciones.total_aplicadas }}
+                {{
+                    correcciones.total_aplicadas === 1
+                        ? 'existencia fue actualizada'
+                        : 'existencias fueron actualizadas'
+                }}
+                el {{ fecha(correcciones.aplicadas_en) }}
+                <template v-if="correcciones.aplicadas_por">
+                    por <strong>{{ correcciones.aplicadas_por }}</strong>
+                </template>
+                .
+            </p>
+        </div>
+
+        <p
+            v-else-if="ronda.firma && correcciones.estado === 'sin_diferencias'"
+            class="text-muted-foreground text-sm"
+        >
+            Sin diferencias por aplicar: el conteo físico coincidió con las
+            existencias registradas.
+        </p>
 
         <!-- Resumen: unidades identificadas / QR -->
         <section class="space-y-2" data-tour="resumen-conteo">
@@ -1403,6 +1554,169 @@ onBeforeUnmount(() => {
                         @click="finalizar"
                     >
                         Finalizar y firmar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Revisar y aplicar correcciones: TODAS las diferencias elegibles o
+             ninguna — sin selección parcial en esta versión. -->
+        <Dialog v-model:open="dialogoRevisarCorrecciones">
+            <DialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
+                <DialogHeader>
+                    <DialogTitle
+                        >Revisar correcciones de inventario</DialogTitle
+                    >
+                    <DialogDescription>
+                        Se actualizarán las existencias para que coincidan con
+                        el conteo físico registrado en esta ronda.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <p class="text-muted-foreground text-sm">
+                    <strong>{{ ronda.empresa }}</strong>
+                    <span v-if="ronda.almacen"> · {{ ronda.almacen }}</span>
+                </p>
+
+                <div class="overflow-x-auto rounded-lg border">
+                    <table class="w-full min-w-[520px] text-sm">
+                        <thead
+                            class="bg-muted/50 text-muted-foreground text-left"
+                        >
+                            <tr>
+                                <th class="px-3 py-2 font-medium">Activo</th>
+                                <th class="px-3 py-2 font-medium">Variante</th>
+                                <th class="px-3 py-2 text-right font-medium">
+                                    Sistema
+                                </th>
+                                <th class="px-3 py-2 text-right font-medium">
+                                    Contado
+                                </th>
+                                <th class="px-3 py-2 text-right font-medium">
+                                    Cambio
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="e in diferenciasParaAplicar"
+                                :key="e.id"
+                                class="border-t"
+                            >
+                                <td class="px-3 py-2">{{ e.activo ?? '—' }}</td>
+                                <td class="px-3 py-2">{{ e.talla ?? '—' }}</td>
+                                <td class="px-3 py-2 text-right tabular-nums">
+                                    {{ e.cantidad_esperada }}
+                                </td>
+                                <td class="px-3 py-2 text-right tabular-nums">
+                                    {{ e.cantidad_contada }}
+                                </td>
+                                <td
+                                    class="px-3 py-2 text-right font-medium tabular-nums"
+                                    :class="
+                                        (e.diferencia ?? 0) < 0
+                                            ? 'text-red-600 dark:text-red-400'
+                                            : 'text-amber-600 dark:text-amber-400'
+                                    "
+                                >
+                                    {{
+                                        (e.diferencia ?? 0) > 0
+                                            ? `+${e.diferencia}`
+                                            : e.diferencia
+                                    }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p class="text-muted-foreground text-sm">
+                    Se actualizarán {{ diferenciasParaAplicar.length }}
+                    {{
+                        diferenciasParaAplicar.length === 1
+                            ? 'existencia'
+                            : 'existencias'
+                    }}
+                    para que coincidan con el conteo físico registrado en esta
+                    ronda. Esta acción quedará registrada.
+                </p>
+
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="aplicandoCorrecciones"
+                        @click="dialogoRevisarCorrecciones = false"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        :disabled="aplicandoCorrecciones"
+                        @click="aplicarCorrecciones"
+                    >
+                        {{
+                            aplicandoCorrecciones
+                                ? 'Aplicando…'
+                                : 'Aplicar correcciones'
+                        }}
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Conflicto: alguna existencia cambió después del snapshot de la
+             ronda. El backend ya abortó TODO el lote — aquí sólo se explica
+             por qué, nunca se reintenta automáticamente. -->
+        <Dialog v-model:open="dialogoConflictos">
+            <DialogContent class="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+                <DialogHeader>
+                    <DialogTitle
+                        >Las correcciones siguen pendientes</DialogTitle
+                    >
+                    <DialogDescription>
+                        No se aplicaron las correcciones porque algunas
+                        existencias cambiaron después de realizar esta ronda.
+                        Revísalas antes de continuar.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div class="overflow-x-auto rounded-lg border">
+                    <table class="w-full min-w-[420px] text-sm">
+                        <thead
+                            class="bg-muted/50 text-muted-foreground text-left"
+                        >
+                            <tr>
+                                <th class="px-3 py-2 font-medium">Activo</th>
+                                <th class="px-3 py-2 font-medium">Variante</th>
+                                <th class="px-3 py-2 text-right font-medium">
+                                    Durante la ronda
+                                </th>
+                                <th class="px-3 py-2 text-right font-medium">
+                                    Actual
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr
+                                v-for="(c, i) in conflictosMostrados"
+                                :key="i"
+                                class="border-t"
+                            >
+                                <td class="px-3 py-2">{{ c.activo }}</td>
+                                <td class="px-3 py-2">{{ c.talla ?? '—' }}</td>
+                                <td class="px-3 py-2 text-right tabular-nums">
+                                    {{ c.esperada }}
+                                </td>
+                                <td class="px-3 py-2 text-right tabular-nums">
+                                    {{ c.actual }}
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <DialogFooter>
+                    <Button @click="dialogoConflictos = false">
+                        Entendido
                     </Button>
                 </DialogFooter>
             </DialogContent>

@@ -9,6 +9,7 @@ import {
     Search,
     User,
     UserCog,
+    X,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
@@ -52,12 +53,18 @@ const props = defineProps<{
         empresa_id?: number | null;
         sucursal_id?: number | null;
         almacen_id?: number | null;
+        colaborador_id?: number | null;
         estado?: string;
         contrato_id?: number | null;
         servicio_id?: number | null;
         desde?: string;
         hasta?: string;
     };
+    colaboradorFiltro: {
+        id: number;
+        nombre_completo: string;
+        numero_empleado: string;
+    } | null;
     empresasAutorizadas: EmpresaAutorizada[];
     estados: { valor: string; etiqueta: string }[];
     puedeCrear: boolean;
@@ -81,6 +88,14 @@ const hasta = ref(props.filtros.hasta ?? '');
 // KPI del que se originó el enlace.
 const sucursalIdDashboard = props.filtros.sucursal_id ?? undefined;
 const almacenIdDashboard = props.filtros.almacen_id ?? undefined;
+// `colaborador_id` llega desde "Entregas" del perfil de un colaborador. A
+// diferencia de `sucursal_id`/`almacen_id`, sí es visible (chip "Filtrado
+// por…" con opción de quitarlo) porque cambia el sentido completo del
+// listado, no sólo lo acota.
+const colaboradorIdActivo = ref(props.filtros.colaborador_id ?? undefined);
+function quitarFiltroColaborador(): void {
+    colaboradorIdActivo.value = undefined;
+}
 const estado = ref(props.filtros.estado ?? '');
 // Resincroniza el filtro si el backend resuelve una empresa distinta a la
 // que ya tenía este ref local — nunca se queda con un valor obsoleto ni
@@ -151,26 +166,39 @@ async function buscarServiciosFiltro(
 }
 
 let t: ReturnType<typeof setTimeout>;
-watch([buscar, empresaId, estado, contratoId, servicioId, desde, hasta], () => {
-    clearTimeout(t);
-    t = setTimeout(() => {
-        router.get(
-            '/entregas',
-            {
-                buscar: buscar.value || undefined,
-                empresa_id: empresaId.value || undefined,
-                estado: estado.value || undefined,
-                contrato_id: contratoId.value || undefined,
-                servicio_id: servicioId.value || undefined,
-                desde: desde.value || undefined,
-                hasta: hasta.value || undefined,
-                sucursal_id: sucursalIdDashboard,
-                almacen_id: almacenIdDashboard,
-            },
-            { preserveState: true, replace: true, preserveScroll: true },
-        );
-    }, 300);
-});
+watch(
+    [
+        buscar,
+        empresaId,
+        estado,
+        contratoId,
+        servicioId,
+        desde,
+        hasta,
+        colaboradorIdActivo,
+    ],
+    () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+            router.get(
+                '/entregas',
+                {
+                    buscar: buscar.value || undefined,
+                    empresa_id: empresaId.value || undefined,
+                    estado: estado.value || undefined,
+                    contrato_id: contratoId.value || undefined,
+                    servicio_id: servicioId.value || undefined,
+                    desde: desde.value || undefined,
+                    hasta: hasta.value || undefined,
+                    sucursal_id: sucursalIdDashboard,
+                    almacen_id: almacenIdDashboard,
+                    colaborador_id: colaboradorIdActivo.value,
+                },
+                { preserveState: true, replace: true, preserveScroll: true },
+            );
+        }, 300);
+    },
+);
 
 const vista = useVistaPreferida('entregas', 'tabla');
 </script>
@@ -195,6 +223,28 @@ const vista = useVistaPreferida('entregas', 'tabla');
                 </Button>
             </template>
         </EncabezadoPagina>
+
+        <div
+            v-if="colaboradorFiltro"
+            class="bg-muted/40 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+        >
+            <User class="text-muted-foreground size-4 shrink-0" />
+            <span>
+                Filtrado por colaborador:
+                <strong>{{ colaboradorFiltro.nombre_completo }}</strong>
+                <span class="text-muted-foreground">
+                    · {{ colaboradorFiltro.numero_empleado }}</span
+                >
+            </span>
+            <Button
+                variant="ghost"
+                size="sm"
+                class="ml-auto"
+                @click="quitarFiltroColaborador"
+            >
+                <X class="size-3.5" /> Quitar filtro
+            </Button>
+        </div>
 
         <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <div class="relative flex-1 sm:min-w-[200px]">

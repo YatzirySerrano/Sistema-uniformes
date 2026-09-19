@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
 import { watch } from 'vue';
-import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,20 +14,17 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-type Modo = 'danado' | 'baja';
-
-// Siempre se abre desde una fila/card concreta (Existencias globales, o
-// "Existencias por almacén" del propio activo): empresa, almacén, activo y
-// variante ya se conocen y NUNCA se vuelven a preguntar. Sólo cubre las
-// condiciones que RESTAN de "Disponible" — "Restaurar a disponible" tiene su
-// propio diálogo (`RestaurarCondicionInventarioDialog.vue`), abierto desde el
-// desglose "Existencias por estado → Dañado": no tenía sentido ofrecerla aquí
-// (nunca se restaura algo que, en este flujo, todavía no se ha dañado).
+// Se abre SIEMPRE desde una fila del desglose "Existencias por estado →
+// Dañado" del detalle del activo: empresa, almacén, activo y variante ya se
+// conocen, igual que cuántas piezas están dañadas AHORA MISMO en esa
+// combinación exacta — el usuario sólo decide cuántas restaurar y por qué.
+// Nunca aparece para "Baja": es terminal (no se "revive" una baja).
 type ContextoFijo = {
     almacenId: number;
     almacenNombre: string;
     tallaId: number | null;
     tallaValor: string | null;
+    danadasActuales: number;
 };
 
 const props = defineProps<{
@@ -43,17 +39,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:open': [boolean] }>();
 
-const opcionesModo: { valor: Modo; etiqueta: string }[] = [
-    { valor: 'danado', etiqueta: 'Dañado' },
-    { valor: 'baja', etiqueta: 'Baja' },
-];
-
 const form = useForm<{
     empresa_id: number;
     almacen_id: number | null;
     activo_id: number;
     talla_id: number | null;
-    condicion: Modo;
     cantidad: number;
     motivo: string;
 }>({
@@ -61,24 +51,16 @@ const form = useForm<{
     almacen_id: null,
     activo_id: props.activoId,
     talla_id: null,
-    condicion: 'danado',
     cantidad: 0,
     motivo: '',
 });
 
-// Reescribe CADA campo editable de forma explícita en cada apertura — nunca
-// depende de que `form.reset()` "adivine" el estado correcto. Corrige el bug
-// real detectado en pruebas manuales: al reabrir el diálogo (misma fila u
-// otra variante) podían verse cantidad/motivo de la operación anterior. Se
-// dispara con la transición de `open`, nunca con sólo cambiar `contextoFijo`
-// (el diálogo siempre se cierra antes de reabrirse para otra fila).
 watch(
     () => props.open,
     (abierto) => {
         if (!abierto || !props.contextoFijo) return;
 
         form.clearErrors();
-        form.condicion = 'danado';
         form.cantidad = 0;
         form.motivo = '';
         form.almacen_id = props.contextoFijo.almacenId;
@@ -87,7 +69,7 @@ watch(
 );
 
 function enviar(): void {
-    form.post('/inventario/condicion', {
+    form.post('/inventario/condicion/restaurar', {
         preserveScroll: true,
         onSuccess: () => emit('update:open', false),
     });
@@ -98,10 +80,10 @@ function enviar(): void {
     <Dialog :open="open" @update:open="(v: boolean) => emit('update:open', v)">
         <DialogContent class="sm:max-w-sm">
             <DialogHeader>
-                <DialogTitle>Cambiar condición</DialogTitle>
+                <DialogTitle>Restaurar a disponible</DialogTitle>
                 <DialogDescription>
-                    Registra piezas dañadas o que ya no estarán disponibles. Se
-                    descuentan de "Disponible" y el cambio queda registrado.
+                    Regresa a "Disponible" piezas que se habían marcado como
+                    dañadas (se repararon o el conteo estaba mal).
                 </DialogDescription>
             </DialogHeader>
             <form class="grid gap-3" @submit.prevent="enviar">
@@ -133,33 +115,30 @@ function enviar(): void {
                         <dt class="text-muted-foreground text-xs">Variante</dt>
                         <dd>{{ contextoFijo.tallaValor ?? 'Sin variante' }}</dd>
                     </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Dañadas actualmente
+                        </dt>
+                        <dd class="font-medium">
+                            {{ contextoFijo.danadasActuales }}
+                        </dd>
+                    </div>
                 </dl>
 
                 <div class="grid gap-1.5">
-                    <Label for="condicion-modo" class="flex items-center gap-1">
-                        Condición
-                        <span class="text-destructive">*</span>
-                    </Label>
-                    <SelectSimple
-                        id="condicion-modo"
-                        v-model="form.condicion"
-                        :opciones="opcionesModo"
-                    />
-                </div>
-
-                <div class="grid gap-1.5">
                     <Label
-                        for="condicion-cantidad"
+                        for="restaurar-cantidad"
                         class="flex items-center gap-1"
                     >
-                        Cantidad
+                        Cantidad a restaurar
                         <span class="text-destructive">*</span>
                     </Label>
                     <Input
-                        id="condicion-cantidad"
+                        id="restaurar-cantidad"
                         v-model.number="form.cantidad"
                         type="number"
                         min="1"
+                        :max="contextoFijo?.danadasActuales ?? undefined"
                         step="1"
                     />
                     <InputError :message="form.errors.cantidad" />
@@ -167,16 +146,16 @@ function enviar(): void {
 
                 <div class="grid gap-1.5">
                     <Label
-                        for="condicion-motivo"
+                        for="restaurar-motivo"
                         class="flex items-center gap-1"
                     >
                         Motivo
                         <span class="text-destructive">*</span>
                     </Label>
                     <Input
-                        id="condicion-motivo"
+                        id="restaurar-motivo"
                         v-model="form.motivo"
-                        placeholder="p. ej. Se detectó humedad en el almacén"
+                        placeholder="p. ej. Se reparó la pieza"
                     />
                     <InputError :message="form.errors.motivo" />
                 </div>

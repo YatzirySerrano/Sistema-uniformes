@@ -71,7 +71,9 @@ class ActivoController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $filtros = $this->filtrosListado($request);
         $puedeVerEliminados = $request->user()->can('activos.administrar');
-        $existencias = $this->existenciasPorActivo($idsScope);
+        $almacenId = isset($filtros['almacen_id']) ? (int) $filtros['almacen_id'] : null;
+        $existencias = $this->existenciasPorActivo($idsScope, $almacenId);
+        $unidadesDisponibles = $almacenId !== null ? $this->unidadesDisponiblesPorActivo($idsScope, $almacenId) : collect();
 
         $activos = $this->consultaActivos($request, $filtros, $idsScope, $puedeVerEliminados)
             ->get()
@@ -87,7 +89,16 @@ class ActivoController extends Controller
                 'activo' => $a->activo,
                 'imagen_url' => $a->imagen_ruta ? Storage::disk('public')->url($a->imagen_ruta) : null,
                 'tallas' => $a->tallas->pluck('valor'),
-                'existencias' => (int) ($existencias[$a->id]->total ?? 0),
+                // Por cantidad: suma de `SaldoInventario` (de todos los
+                // almacenes autorizados, o sólo del almacén filtrado cuando
+                // hay uno). Seguimiento individual: no tiene saldo agregado,
+                // así que sólo se cuenta cuando hay un almacén filtrado
+                // (unidades entregables ahí) — sin filtro no hay una cifra
+                // "global" única y comparable, se deja en 0 y el frontend no
+                // la muestra.
+                'existencias' => $a->tipo_control === TipoControlActivo::SeguimientoIndividual
+                    ? (int) ($unidadesDisponibles[$a->id] ?? 0)
+                    : (int) ($existencias[$a->id]->total ?? 0),
                 'tallas_bajo_minimo' => (int) ($existencias[$a->id]->tallas_bajo_minimo ?? 0),
             ]);
 
@@ -141,7 +152,9 @@ class ActivoController extends Controller
         $empresaFiltro = $this->empresaDelFiltro($request);
         $filtros = $this->filtrosListado($request);
         $puedeVerEliminados = $request->user()->can('activos.administrar');
-        $existencias = $this->existenciasPorActivo($idsScope);
+        $almacenId = isset($filtros['almacen_id']) ? (int) $filtros['almacen_id'] : null;
+        $existencias = $this->existenciasPorActivo($idsScope, $almacenId);
+        $unidadesDisponibles = $almacenId !== null ? $this->unidadesDisponiblesPorActivo($idsScope, $almacenId) : collect();
 
         $activos = $this->consultaActivos($request, $filtros, $idsScope, $puedeVerEliminados)->get();
 
@@ -152,7 +165,9 @@ class ActivoController extends Controller
             $a->categoria,
             $a->empresa?->nombre_comercial,
             $a->tipo_control->etiqueta(),
-            (int) ($existencias[$a->id]->total ?? 0),
+            $a->tipo_control === TipoControlActivo::SeguimientoIndividual
+                ? (int) ($unidadesDisponibles[$a->id] ?? 0)
+                : (int) ($existencias[$a->id]->total ?? 0),
             (int) ($existencias[$a->id]->tallas_bajo_minimo ?? 0),
             $a->activo ? 'Activo' : 'Inactivo',
         ])->all();
@@ -236,7 +251,21 @@ class ActivoController extends Controller
             ->when($filtros['tipo_activo_id'] ?? null, fn (Builder $q, $v) => $q->where('tipo_activo_id', $v))
             ->when($filtros['categoria_id'] ?? null, fn (Builder $q, $v) => $q->where('categoria_id', $v))
             ->when($filtros['almacen_id'] ?? null, function (Builder $q, $almacenId): void {
-                $q->whereHas('saldos', fn (Builder $s) => $s->where('almacen_id', $almacenId)->where('cantidad', '>', 0));
+                // Un activo "tiene existencia en este almacén" por CUALQUIERA
+                // de sus dos fuentes reales — por cantidad (`SaldoInventario`)
+                // o seguimiento individual (`UnidadActivo` entregable) —,
+                // nunca sólo la primera: si sólo se mirara `saldos`, un
+                // activo de seguimiento individual jamás aparecería al
+                // filtrar por almacén aunque el resumen del Almacén sí lo
+                // cuente (mismo criterio que `AlmacenController::contarActivosConExistencia()`).
+                // `orWhereHas` es una condición EXISTS, no un join: nunca
+                // duplica la fila del activo aunque cumpla por ambas fuentes.
+                $q->where(function (Builder $sub) use ($almacenId): void {
+                    $sub->whereHas('saldos', fn (Builder $s) => $s->where('almacen_id', $almacenId)->where('cantidad', '>', 0))
+                        ->orWhereHas('unidades', fn (Builder $u) => $u->where('almacen_id', $almacenId)
+                            ->where('estado', EstadoUnidadActivo::EnAlmacen)
+                            ->where('condicion', CondicionUnidadActivo::Funcionando));
+                });
             })
             ->when($filtros['control'] ?? null, fn (Builder $q, $v) => $q->where('tipo_control', $v))
             ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
@@ -246,17 +275,44 @@ class ActivoController extends Controller
     }
 
     /**
+     * Existencia por activo (control por cantidad): suma de `SaldoInventario`
+     * en el alcance de empresas autorizadas. Cuando el listado está filtrado
+     * por `almacen_id`, la suma se acota a ESE almacén — nunca mezcla la
+     * existencia de otros almacenes con la del que el usuario está viendo.
+     *
      * @param  Collection<int, int>  $idsScope
      * @return \Illuminate\Database\Eloquent\Collection<int, SaldoInventario>
      */
-    private function existenciasPorActivo(Collection $idsScope): \Illuminate\Database\Eloquent\Collection
+    private function existenciasPorActivo(Collection $idsScope, ?int $almacenId): \Illuminate\Database\Eloquent\Collection
     {
         return SaldoInventario::query()
             ->whereIn('empresa_id', $idsScope)
+            ->when($almacenId !== null, fn (Builder $q) => $q->where('almacen_id', $almacenId))
             ->selectRaw('activo_id, SUM(cantidad) as total, SUM(CASE WHEN minimo > 0 AND cantidad <= minimo THEN 1 ELSE 0 END) as tallas_bajo_minimo')
             ->groupBy('activo_id')
             ->get()
             ->keyBy('activo_id');
+    }
+
+    /**
+     * Existencia por activo (seguimiento individual) EN UN ALMACÉN concreto:
+     * cuenta de unidades entregables (`en_almacen` + `funcionando`) — el
+     * mismo criterio que `AlmacenController::contarActivosConExistencia()` y
+     * `buscar()`. `SaldoInventario` nunca aplica a este tipo de control.
+     *
+     * @param  Collection<int, int>  $idsScope
+     * @return Collection<int, int>
+     */
+    private function unidadesDisponiblesPorActivo(Collection $idsScope, int $almacenId): Collection
+    {
+        return UnidadActivo::query()
+            ->whereIn('empresa_id', $idsScope)
+            ->where('almacen_id', $almacenId)
+            ->where('estado', EstadoUnidadActivo::EnAlmacen)
+            ->where('condicion', CondicionUnidadActivo::Funcionando)
+            ->selectRaw('activo_id, count(*) as total')
+            ->groupBy('activo_id')
+            ->pluck('total', 'activo_id');
     }
 
     /**

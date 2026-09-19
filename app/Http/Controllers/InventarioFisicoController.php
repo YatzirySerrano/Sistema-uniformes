@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Acciones\AplicarCorreccionesInventarioFisico;
 use App\Acciones\CrearRondaInventarioFisico;
 use App\Acciones\DesmarcarUnidadPresente;
 use App\Acciones\EscanearUnidadInventarioFisico;
@@ -11,6 +12,7 @@ use App\Acciones\VerificarExistenciaInventarioFisico;
 use App\Enums\EstadoInventarioFisico;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
+use App\Http\Requests\InventarioFisico\AplicarCorreccionesRequest;
 use App\Http\Requests\InventarioFisico\EscanearUnidadRequest;
 use App\Http\Requests\InventarioFisico\FinalizarRondaRequest;
 use App\Http\Requests\InventarioFisico\GuardarInventarioFisicoRequest;
@@ -19,6 +21,7 @@ use App\Models\Almacen;
 use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
+use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Servicios\ServicioResumenInventarioFisico;
 use App\Soporte\ContextoExportacion;
@@ -163,7 +166,7 @@ class InventarioFisicoController extends Controller
             ->withQueryString()
             ->through(fn (InventarioFisicoUnidad $f): array => $this->resumen->filaResumen($f));
 
-        $inventarioFisico->load(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'usuario:id,name', 'firma:id,inventario_fisico_id,nombre_firmante,hash_firma,aceptado_en']);
+        $inventarioFisico->load(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'usuario:id,name', 'firma:id,inventario_fisico_id,nombre_firmante,hash_firma,aceptado_en', 'correccionesAplicadasPor:id,name']);
 
         $contadores = $this->resumen->contadores($inventarioFisico);
 
@@ -172,6 +175,16 @@ class InventarioFisicoController extends Controller
         $existencias = $this->resumen->consultaExistencias($inventarioFisico)->get()
             ->map(fn (InventarioFisicoExistencia $e): array => $this->resumen->filaExistencia($e))
             ->values();
+
+        // Estado de la APLICACIÓN de correcciones — deliberadamente separado
+        // del estado de la ronda (`ronda.estado` sigue siendo sólo
+        // en_proceso/finalizado): "aplicadas" > "pendientes" > "sin
+        // diferencias", nunca se mezclan.
+        $estadoCorrecciones = match (true) {
+            $inventarioFisico->tieneCorreccionesAplicadas() => 'aplicadas',
+            $contadores['cantidad_con_diferencia'] === 0 => 'sin_diferencias',
+            default => 'pendientes',
+        };
 
         return Inertia::render('InventarioFisico/Detalle', [
             'ronda' => [
@@ -197,13 +210,48 @@ class InventarioFisicoController extends Controller
             'unidades' => $unidades,
             'existencias' => $existencias,
             'textoAceptacion' => FinalizarRondaInventarioFisico::TEXTO_ACEPTACION,
+            'correcciones' => [
+                'estado' => $estadoCorrecciones,
+                'total_diferencias' => $contadores['cantidad_con_diferencia'],
+                'aplicadas_en' => $inventarioFisico->correcciones_aplicadas_en?->toIso8601String(),
+                'aplicadas_por' => $inventarioFisico->correccionesAplicadasPor?->name,
+                'total_aplicadas' => $inventarioFisico->tieneCorreccionesAplicadas()
+                    ? MovimientoInventario::query()
+                        ->where('referencia_tipo', InventarioFisico::class)
+                        ->where('referencia_id', $inventarioFisico->id)
+                        ->count()
+                    : null,
+            ],
+            // Combinaciones que impidieron aplicar el lote en el último
+            // intento (si lo hubo) — se consume una sola vez, igual que
+            // `flash.toast`.
+            'conflictosInventarioFisico' => session()->pull('conflictosInventarioFisico'),
             'permisos' => [
                 'administrar' => $request->user()->can('administrar', $inventarioFisico),
                 'finalizar' => $request->user()->can('administrar', $inventarioFisico)
                     && $inventarioFisico->estaEnProceso()
                     && $contadores['cantidad_pendientes'] === 0,
+                'aplicarCorrecciones' => $request->user()->can('aplicarCorrecciones', $inventarioFisico)
+                    && $inventarioFisico->estaFinalizada()
+                    && $inventarioFisico->firma !== null
+                    && $estadoCorrecciones === 'pendientes',
             ],
         ]);
+    }
+
+    /**
+     * Aplica en UN SOLO lote, todo-o-nada, las diferencias verificadas de una
+     * ronda ya finalizada y firmada. Ver `App\Acciones\AplicarCorreccionesInventarioFisico`
+     * para las reglas de negocio (nunca se confía en lo que crea el frontend).
+     */
+    public function aplicarCorrecciones(
+        AplicarCorreccionesRequest $request,
+        InventarioFisico $inventarioFisico,
+        AplicarCorreccionesInventarioFisico $accion,
+    ): RedirectResponse {
+        $accion->ejecutar($inventarioFisico, $request->user());
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Correcciones de inventario aplicadas.']);
     }
 
     public function verificarExistencia(

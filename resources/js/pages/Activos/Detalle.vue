@@ -10,7 +10,6 @@ import {
     PackagePlus,
     ScrollText,
     Settings2,
-    Wrench,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import AgregarExistenciasDialog from '@/components/sistema/AgregarExistenciasDialog.vue';
@@ -18,8 +17,10 @@ import AjustarExistenciaDialog from '@/components/sistema/AjustarExistenciaDialo
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BotonEditar from '@/components/sistema/BotonEditar.vue';
 import GestionarUnidadDialog from '@/components/sistema/GestionarUnidadDialog.vue';
+import MenuAccionesExistencia from '@/components/sistema/MenuAccionesExistencia.vue';
 import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
 import RegistrarCondicionInventarioDialog from '@/components/sistema/RegistrarCondicionInventarioDialog.vue';
+import RestaurarCondicionInventarioDialog from '@/components/sistema/RestaurarCondicionInventarioDialog.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,12 +32,6 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -124,7 +119,85 @@ defineOptions({
 const dialogoExistencias = ref(false);
 const dialogoAjuste = ref(false);
 const dialogoCondicion = ref(false);
+const dialogoRestaurar = ref(false);
 const dialogoGestionarUnidad = ref(false);
+
+// "Corregir existencia"/"Cambiar condición" siempre se abren desde una fila
+// concreta de "Existencias por almacén" (el menú "Gestionar" de esa fila):
+// almacén, variante y existencia actual ya se conocen y se pasan como
+// contexto fijo — el diálogo nunca vuelve a preguntarlos.
+type ContextoFijo = {
+    almacenId: number;
+    almacenNombre: string;
+    tallaId: number | null;
+    tallaValor: string | null;
+    cantidadActual: number;
+};
+const filaContexto = ref<ContextoFijo | null>(null);
+
+function abrirAjuste(s: Saldo): void {
+    filaContexto.value = {
+        almacenId: s.almacen_id,
+        almacenNombre: s.almacen ?? '—',
+        tallaId: s.talla_id,
+        tallaValor: s.talla,
+        cantidadActual: s.cantidad,
+    };
+    dialogoAjuste.value = true;
+}
+
+function abrirCondicion(s: Saldo): void {
+    filaContexto.value = {
+        almacenId: s.almacen_id,
+        almacenNombre: s.almacen ?? '—',
+        tallaId: s.talla_id,
+        tallaValor: s.talla,
+        cantidadActual: s.cantidad,
+    };
+    dialogoCondicion.value = true;
+}
+
+const contextoFijoCondicion = computed(() =>
+    filaContexto.value
+        ? {
+              almacenId: filaContexto.value.almacenId,
+              almacenNombre: filaContexto.value.almacenNombre,
+              tallaId: filaContexto.value.tallaId,
+              tallaValor: filaContexto.value.tallaValor,
+          }
+        : null,
+);
+
+// "Restaurar a disponible" se abre SIEMPRE desde una fila del desglose
+// "Existencias por estado → Dañado" (nunca desde "Existencias por almacén"):
+// ahí ya se conoce cuántas piezas están dañadas ahora mismo para esa
+// combinación exacta de almacén + variante, dato que el backend vuelve a
+// validar de todos modos antes de aplicar nada.
+type ContextoRestaurar = {
+    almacenId: number;
+    almacenNombre: string;
+    tallaId: number | null;
+    tallaValor: string | null;
+    danadasActuales: number;
+};
+const filaRestaurarContexto = ref<ContextoRestaurar | null>(null);
+
+function abrirRestaurar(
+    almacenId: number,
+    almacenNombre: string,
+    tallaId: number | null,
+    tallaValor: string | null,
+    danadasActuales: number,
+): void {
+    filaRestaurarContexto.value = {
+        almacenId,
+        almacenNombre,
+        tallaId,
+        tallaValor,
+        danadasActuales,
+    };
+    dialogoRestaurar.value = true;
+}
 
 // --- Existencias por estado (Disponible/Asignado/Dañado/Baja): 4 tarjetas
 // con desglose desplegable por almacén (+ variante si el activo las usa). No
@@ -322,46 +395,17 @@ function confirmarMinimoMasivo(): void {
 
             <div class="flex flex-wrap gap-2">
                 <Button
-                    v-if="permisos.agregar_existencias"
+                    v-if="
+                        permisos.agregar_existencias &&
+                        activo.tipo_control === 'individual'
+                    "
                     variant="outline"
                     size="sm"
                     @click="dialogoExistencias = true"
                 >
                     <PackagePlus class="size-3.5" />
-                    {{
-                        activo.tipo_control === 'individual'
-                            ? 'Agregar unidades'
-                            : 'Agregar existencias'
-                    }}
+                    Agregar unidades
                 </Button>
-                <DropdownMenu
-                    v-if="
-                        activo.tipo_control === 'cantidad' &&
-                        permisos.ajustar_inventario
-                    "
-                >
-                    <DropdownMenuTrigger as-child>
-                        <Button variant="outline" size="sm">
-                            <Wrench class="size-3.5" />
-                            Gestionar inventario
-                            <ChevronDown class="size-3.5 opacity-60" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" class="w-56">
-                        <DropdownMenuItem
-                            class="cursor-pointer"
-                            @select="dialogoAjuste = true"
-                        >
-                            Ajustar existencia
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            class="cursor-pointer"
-                            @select="dialogoCondicion = true"
-                        >
-                            Registrar daño / baja / restaurar
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
                 <BotonEditar
                     v-if="permisos.editar"
                     :href="`/activos/${activo.id}/editar`"
@@ -623,9 +667,31 @@ function confirmarMinimoMasivo(): void {
                                         <span class="text-muted-foreground">{{
                                             v.talla ?? 'Sin variante'
                                         }}</span>
-                                        <span class="font-medium">{{
-                                            valorEstado(v)
-                                        }}</span>
+                                        <span class="flex items-center gap-2">
+                                            <span class="font-medium">{{
+                                                valorEstado(v)
+                                            }}</span>
+                                            <Button
+                                                v-if="
+                                                    estadoCantidadExpandido ===
+                                                        'danado' &&
+                                                    permisos.ajustar_inventario
+                                                "
+                                                variant="outline"
+                                                size="sm"
+                                                @click="
+                                                    abrirRestaurar(
+                                                        a.almacen_id,
+                                                        a.almacen,
+                                                        v.talla_id,
+                                                        v.talla,
+                                                        valorEstado(v),
+                                                    )
+                                                "
+                                            >
+                                                Restaurar a disponible
+                                            </Button>
+                                        </span>
                                     </li>
                                 </ul>
                                 <p
@@ -633,11 +699,44 @@ function confirmarMinimoMasivo(): void {
                                     class="text-muted-foreground flex items-center justify-between gap-2"
                                 >
                                     <span>Cantidad</span>
-                                    <span class="text-foreground font-medium">{{
-                                        a.variantes[0]
-                                            ? valorEstado(a.variantes[0])
-                                            : 0
-                                    }}</span>
+                                    <span class="flex items-center gap-2">
+                                        <span
+                                            class="text-foreground font-medium"
+                                            >{{
+                                                a.variantes[0]
+                                                    ? valorEstado(
+                                                          a.variantes[0],
+                                                      )
+                                                    : 0
+                                            }}</span
+                                        >
+                                        <Button
+                                            v-if="
+                                                estadoCantidadExpandido ===
+                                                    'danado' &&
+                                                permisos.ajustar_inventario
+                                            "
+                                            variant="outline"
+                                            size="sm"
+                                            @click="
+                                                abrirRestaurar(
+                                                    a.almacen_id,
+                                                    a.almacen,
+                                                    a.variantes[0]?.talla_id ??
+                                                        null,
+                                                    a.variantes[0]?.talla ??
+                                                        null,
+                                                    a.variantes[0]
+                                                        ? valorEstado(
+                                                              a.variantes[0],
+                                                          )
+                                                        : 0,
+                                                )
+                                            "
+                                        >
+                                            Restaurar a disponible
+                                        </Button>
+                                    </span>
                                 </p>
                             </li>
                         </ul>
@@ -693,11 +792,8 @@ function confirmarMinimoMasivo(): void {
                         v-if="!saldos.length"
                         class="text-muted-foreground rounded-lg border px-3 py-6 text-center text-sm"
                     >
-                        Este activo todavía no tiene existencias.
-                        <span v-if="permisos.agregar_existencias">
-                            Usa "Agregar existencias" para registrar la primera
-                            entrada.</span
-                        >
+                        Este activo todavía no tiene existencias. Regístralas
+                        desde Existencias globales → Registrar ingreso de stock.
                     </div>
 
                     <template v-else>
@@ -768,17 +864,23 @@ function confirmarMinimoMasivo(): void {
                                             >
                                         </td>
                                         <td class="px-3 py-2 text-right">
-                                            <Button
-                                                v-if="permisos.minimos"
-                                                variant="ghost"
-                                                size="sm"
-                                                @click="
+                                            <MenuAccionesExistencia
+                                                :puede-ajustar="
+                                                    permisos.ajustar_inventario
+                                                "
+                                                :puede-minimos="
+                                                    permisos.minimos
+                                                "
+                                                @corregir-existencia="
+                                                    abrirAjuste(s)
+                                                "
+                                                @cambiar-condicion="
+                                                    abrirCondicion(s)
+                                                "
+                                                @configurar-minimo="
                                                     abrirMinimoIndividual(s)
                                                 "
-                                            >
-                                                <Settings2 class="size-3.5" />
-                                                Configurar mínimo
-                                            </Button>
+                                            />
                                         </td>
                                     </tr>
                                 </tbody>
@@ -839,16 +941,15 @@ function confirmarMinimoMasivo(): void {
                                         </p>
                                     </div>
                                 </div>
-                                <Button
-                                    v-if="permisos.minimos"
-                                    variant="outline"
-                                    size="sm"
-                                    class="w-fit"
-                                    @click="abrirMinimoIndividual(s)"
-                                >
-                                    <Settings2 class="size-3.5" />
-                                    Configurar mínimo
-                                </Button>
+                                <MenuAccionesExistencia
+                                    :puede-ajustar="permisos.ajustar_inventario"
+                                    :puede-minimos="permisos.minimos"
+                                    @corregir-existencia="abrirAjuste(s)"
+                                    @cambiar-condicion="abrirCondicion(s)"
+                                    @configurar-minimo="
+                                        abrirMinimoIndividual(s)
+                                    "
+                                />
                             </div>
                         </div>
                     </template>
@@ -876,17 +977,33 @@ function confirmarMinimoMasivo(): void {
             v-if="activo.tipo_control === 'cantidad'"
             v-model:open="dialogoAjuste"
             :activo-id="activo.id"
+            :activo-nombre="activo.nombre"
+            :activo-codigo="activo.codigo"
             :empresa-id="activo.empresa.id"
-            :usa-variantes="usaVariantes"
-            :saldos="saldos"
+            :empresa-nombre="activo.empresa.nombre_comercial"
+            :contexto-fijo="filaContexto"
         />
 
         <RegistrarCondicionInventarioDialog
             v-if="activo.tipo_control === 'cantidad'"
             v-model:open="dialogoCondicion"
             :activo-id="activo.id"
+            :activo-nombre="activo.nombre"
+            :activo-codigo="activo.codigo"
             :empresa-id="activo.empresa.id"
-            :usa-variantes="usaVariantes"
+            :empresa-nombre="activo.empresa.nombre_comercial"
+            :contexto-fijo="contextoFijoCondicion"
+        />
+
+        <RestaurarCondicionInventarioDialog
+            v-if="activo.tipo_control === 'cantidad'"
+            v-model:open="dialogoRestaurar"
+            :activo-id="activo.id"
+            :activo-nombre="activo.nombre"
+            :activo-codigo="activo.codigo"
+            :empresa-id="activo.empresa.id"
+            :empresa-nombre="activo.empresa.nombre_comercial"
+            :contexto-fijo="filaRestaurarContexto"
         />
 
         <GestionarUnidadDialog

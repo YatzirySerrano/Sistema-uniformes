@@ -59,6 +59,9 @@ class DevolucionController extends Controller
 
         $empresaFiltro = $this->empresaDelFiltro($request);
         $filtros = $this->filtrosListado($request);
+        $colaboradorFiltro = ($filtros['colaborador_id'] ?? null)
+            ? Colaborador::query()->whereKey($filtros['colaborador_id'])->first(['id', 'nombre_completo', 'numero_empleado'])
+            : null;
 
         $devoluciones = $this->consultaDevoluciones($request)
             ->paginate($this->porPagina())
@@ -82,6 +85,7 @@ class DevolucionController extends Controller
         return Inertia::render('Devoluciones/Index', [
             'devoluciones' => $devoluciones,
             'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
+            'colaboradorFiltro' => $colaboradorFiltro,
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'estados' => collect(EstadoDevolucion::cases())->map(fn ($e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
             'puedeCrear' => $request->user()->can('create', Devolucion::class),
@@ -190,6 +194,7 @@ class DevolucionController extends Controller
             'buscar' => ['nullable', 'string', 'max:100'],
             'sucursal_id' => ['nullable', 'integer'],
             'almacen_id' => ['nullable', 'integer'],
+            'colaborador_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'string'],
             'desde' => ['nullable', 'date'],
             'hasta' => ['nullable', 'date'],
@@ -216,6 +221,9 @@ class DevolucionController extends Controller
             // nada ajeno, simplemente no coincide con ninguna fila visible.
             ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
             ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $a) => $q->where('almacen_id', $a))
+            // Igual que `sucursal_id`: `colaborador_id` sólo puede devolver
+            // filas ya acotadas por `empresa_id` arriba.
+            ->when($filtros['colaborador_id'] ?? null, fn (Builder $q, $c) => $q->where('colaborador_id', $c))
             ->when($filtros['estado'] ?? null, fn (Builder $q, $e) => $q->where('estado', $e))
             ->when($filtros['desde'] ?? null, fn (Builder $q, $d) => $q->whereDate('fecha', '>=', $d))
             ->when($filtros['hasta'] ?? null, fn (Builder $q, $h) => $q->whereDate('fecha', '<=', $h))

@@ -182,9 +182,9 @@ function enviar(): void {
                         código nuevo por cada una.
                     </template>
                     <template v-else>
-                        Suma existencias de este activo sin salir de su detalle.
-                        Usa exactamente las mismas reglas que "Registrar ingreso
-                        de stock": genera movimiento y auditoría.
+                        Registra nuevas piezas que ingresaron al inventario de
+                        este activo. El cambio quedará registrado en el
+                        historial.
                     </template>
                 </DialogDescription>
             </DialogHeader>

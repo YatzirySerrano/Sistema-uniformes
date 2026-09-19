@@ -14,6 +14,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/pages/**, resources/js/components/** | .ai/rules/components.md |
 | app/Acciones/{DesmarcarUnidadPresente,MarcarUnidadPresente}.php,resources/js/pages/InventarioFisico/Detalle.vue,resources/js/composables/{useCamaraFoto,useEscanerQr}.ts | .ai/rules/composables.md |
 | app/Servicios/ServicioCascadaSuspension.php,app/Servicios/ServicioOperatividad.php,app/Models/Suspension.php,app/Http/Controllers/{Empresa,Sucursal,Activo}Controller.php,app/Http/Controllers/Concerns/ReactivaSuspendidos.php | .ai/rules/concerns.md |
+| app/Models/MovimientoInventario.php,app/Http/Controllers/MovimientoInventarioController.php,app/Acciones/{MarcarCondicionInventario,RestaurarCondicionInventario,MarcarUnidadIncidencia,DarDeBajaUnidadActivo,RecuperarUnidadActivo}.php | .ai/rules/controllers-acciones.md |
 | app/Http/Controllers/EntregaController.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/controllers-js-pages-entregas.md |
 | app/Http/Controllers/EntregaController.php,app/Models/DocumentoExpediente.php | .ai/rules/controllers-models.md |
 | app/Acciones/AjustarMinimoInventario.php,app/Http/Controllers/InventarioController.php,app/Servicios/ServicioInventario.php | .ai/rules/controllers-servicios.md |

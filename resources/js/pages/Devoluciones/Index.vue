@@ -51,10 +51,16 @@ const props = defineProps<{
         buscar?: string;
         sucursal_id?: number | null;
         almacen_id?: number | null;
+        colaborador_id?: number | null;
         estado?: string;
         desde?: string;
         hasta?: string;
     };
+    colaboradorFiltro: {
+        id: number;
+        nombre_completo: string;
+        numero_empleado: string;
+    } | null;
     empresasAutorizadas: EmpresaAutorizada[];
     estados: { valor: string; etiqueta: string }[];
     puedeCrear: boolean;
@@ -88,6 +94,12 @@ watch(sucursalSeleccionada, (s) => {
 // `almacen_id` no tiene selector propio en este listado — sólo llega como
 // contexto del Dashboard — pero debe conservarse en cada refiltrado.
 const almacenIdDashboard = props.filtros.almacen_id ?? undefined;
+// `colaborador_id` llega desde "Devoluciones" del perfil de un colaborador —
+// visible (chip con opción de quitarlo), a diferencia de `almacen_id`.
+const colaboradorIdActivo = ref(props.filtros.colaborador_id ?? undefined);
+function quitarFiltroColaborador(): void {
+    colaboradorIdActivo.value = undefined;
+}
 
 async function buscarEmpresas(termino: string) {
     const t = termino.trim().toLowerCase();
@@ -144,7 +156,15 @@ const hayFiltros = computed(
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
 watch(
-    [buscar, empresaSeleccionada, sucursalIdActivo, estado, desde, hasta],
+    [
+        buscar,
+        empresaSeleccionada,
+        sucursalIdActivo,
+        estado,
+        desde,
+        hasta,
+        colaboradorIdActivo,
+    ],
     () => {
         clearTimeout(temporizador);
         temporizador = setTimeout(() => {
@@ -158,6 +178,7 @@ watch(
                     estado: estado.value || undefined,
                     desde: desde.value || undefined,
                     hasta: hasta.value || undefined,
+                    colaborador_id: colaboradorIdActivo.value,
                 },
                 { preserveState: true, replace: true, preserveScroll: true },
             );
@@ -198,6 +219,28 @@ const vista = useVistaPreferida('devoluciones', 'tabla');
                 </Button>
             </template>
         </EncabezadoPagina>
+
+        <div
+            v-if="colaboradorFiltro"
+            class="bg-muted/40 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+        >
+            <User class="text-muted-foreground size-4 shrink-0" />
+            <span>
+                Filtrado por colaborador:
+                <strong>{{ colaboradorFiltro.nombre_completo }}</strong>
+                <span class="text-muted-foreground">
+                    · {{ colaboradorFiltro.numero_empleado }}</span
+                >
+            </span>
+            <Button
+                variant="ghost"
+                size="sm"
+                class="ml-auto"
+                @click="quitarFiltroColaborador"
+            >
+                <X class="size-3.5" /> Quitar filtro
+            </Button>
+        </div>
 
         <div class="flex flex-col gap-3">
             <div class="relative w-full sm:w-[340px]">

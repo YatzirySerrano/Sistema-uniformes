@@ -92,6 +92,15 @@ defineOptions({
     layout: { breadcrumbs: [{ title: 'Activos', href: '/activos' }] },
 });
 
+// Un activo por cantidad siempre tiene una cifra de existencias comparable
+// (con o sin filtro de almacén). Uno de seguimiento individual sólo tiene una
+// cifra con sentido cuando el listado ya está acotado a UN almacén concreto
+// (unidades entregables ahí); sin ese filtro no hay un "total" único que
+// mostrar, así que la card/tabla no presume un número.
+function mostrarExistencias(a: Activo): boolean {
+    return a.tipo_control === 'cantidad' || !!props.filtros.almacen_id;
+}
+
 const buscar = ref(props.filtros.buscar);
 const empresaSeleccionada = ref<EmpresaAutorizada | null>(
     props.empresasAutorizadas.find((e) => e.id === props.filtros.empresa_id) ??
@@ -630,7 +639,7 @@ const vista = useVistaPreferida('activos');
                 </p>
 
                 <div
-                    v-if="a.tipo_control === 'cantidad'"
+                    v-if="mostrarExistencias(a)"
                     class="text-muted-foreground flex items-center gap-2 text-xs"
                 >
                     <span
@@ -707,7 +716,7 @@ const vista = useVistaPreferida('activos');
                         </td>
                         <td class="px-3 py-2">{{ a.tipo_control_etiqueta }}</td>
                         <td class="px-3 py-2">
-                            <template v-if="a.tipo_control === 'cantidad'">
+                            <template v-if="mostrarExistencias(a)">
                                 {{ a.existencias }}
                                 <span
                                     v-if="a.tallas_bajo_minimo > 0"

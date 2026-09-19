@@ -2,18 +2,20 @@
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import {
     Building2,
-    Layers,
     PackagePlus,
     Search,
     Settings2,
-    SlidersHorizontal,
     Warehouse as WarehouseIcon,
 } from '@lucide/vue';
 import { computed, reactive, ref, watch } from 'vue';
+import AjustarExistenciaDialog from '@/components/sistema/AjustarExistenciaDialog.vue';
+import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
+import MenuAccionesExistencia from '@/components/sistema/MenuAccionesExistencia.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
+import RegistrarCondicionInventarioDialog from '@/components/sistema/RegistrarCondicionInventarioDialog.vue';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
@@ -37,10 +39,11 @@ type Saldo = {
     empresa: string | null;
     almacen_id: number;
     activo_id: number;
-    talla_id: number;
+    talla_id: number | null;
     almacen: string;
     activo: string;
-    talla: string;
+    activo_codigo?: string | null;
+    talla: string | null;
     control: string;
     cantidad: number;
     minimo: number;
@@ -218,38 +221,50 @@ function limpiarFiltros() {
 // alcance más amplio, empresa+almacén completos, que tampoco existe en
 // Activo Detalle). Evita duplicar el mismo diálogo de mínimo individual en
 // dos pantallas.
-const dialogo = ref<'ajuste' | null>(null);
-const actual = ref<Saldo | null>(null);
+//
+// "Corregir existencia" y "Cambiar condición" (dentro del menú "Gestionar"
+// de cada fila) reutilizan EXACTAMENTE los mismos diálogos que usa el
+// detalle del Activo (`AjustarExistenciaDialog.vue` /
+// `RegistrarCondicionInventarioDialog.vue`) — nunca un formulario paralelo
+// aquí. Como la fila YA define empresa + almacén + activo + variante, se les
+// pasa como `contextoFijo`: el diálogo no vuelve a preguntar nada de eso, el
+// usuario sólo decide la nueva existencia/condición y el motivo.
+const dialogoAjuste = ref(false);
+const dialogoCondicion = ref(false);
+const filaActual = ref<Saldo | null>(null);
 
-const ajuste = useForm({
-    empresa_id: 0,
-    almacen_id: 0,
-    activo_id: 0,
-    talla_id: 0,
-    existencia_objetivo: 0,
-    motivo: '',
-});
-
-function abrir(tipo: 'ajuste', s: Saldo) {
-    actual.value = s;
-    dialogo.value = tipo;
-    ajuste.defaults({
-        empresa_id: s.empresa_id,
-        almacen_id: s.almacen_id,
-        activo_id: s.activo_id,
-        talla_id: s.talla_id,
-        existencia_objetivo: s.cantidad,
-        motivo: '',
-    });
-    ajuste.reset();
+function abrirAjuste(s: Saldo) {
+    filaActual.value = s;
+    dialogoAjuste.value = true;
 }
 
-function guardarAjuste() {
-    ajuste.post('/inventario/ajuste', {
-        preserveScroll: true,
-        onSuccess: () => (dialogo.value = null),
-    });
+function abrirCondicion(s: Saldo) {
+    filaActual.value = s;
+    dialogoCondicion.value = true;
 }
+
+const contextoFijoAjuste = computed(() =>
+    filaActual.value
+        ? {
+              almacenId: filaActual.value.almacen_id,
+              almacenNombre: filaActual.value.almacen ?? '—',
+              tallaId: filaActual.value.talla_id,
+              tallaValor: filaActual.value.talla,
+              cantidadActual: filaActual.value.cantidad,
+          }
+        : null,
+);
+
+const contextoFijoCondicion = computed(() =>
+    filaActual.value
+        ? {
+              almacenId: filaActual.value.almacen_id,
+              almacenNombre: filaActual.value.almacen ?? '—',
+              tallaId: filaActual.value.talla_id,
+              tallaValor: filaActual.value.talla,
+          }
+        : null,
+);
 
 // --- "Aplicar mínimo general": mismo mínimo a TODA una empresa + almacén ---
 // Sólo tiene sentido (y sólo se ofrece) cuando el listado ya está acotado a
@@ -333,6 +348,10 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
             descripcion="Consulta las existencias de todos los activos por empresa, almacén y variante, e identifica faltantes o niveles bajos. El mínimo de un activo puntual se configura desde su propio detalle."
         >
             <template #acciones>
+                <BotonesExportar
+                    endpoint="/inventario/exportar"
+                    :filtros="filtros"
+                />
                 <Button v-if="permisos.entrada" as-child>
                     <Link href="/inventario/entrada">
                         <PackagePlus class="size-4" /> Registrar ingreso de
@@ -521,33 +540,14 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
                     </div>
                 </div>
 
-                <div class="mt-auto flex flex-wrap gap-2 pt-1">
-                    <Button
-                        v-if="permisos.ajustar"
-                        variant="outline"
-                        size="sm"
-                        @click="abrir('ajuste', s)"
-                    >
-                        <SlidersHorizontal class="size-3.5" />
-                        Ajustar
-                    </Button>
-                    <Button
-                        v-if="permisos.minimos"
-                        variant="ghost"
-                        size="sm"
-                        as-child
-                    >
-                        <Link :href="`/activos/${s.activo_id}`">
-                            <Settings2 class="size-3.5" />
-                            Configurar mínimo
-                        </Link>
-                    </Button>
-                    <Button v-else variant="ghost" size="sm" as-child>
-                        <Link :href="`/activos/${s.activo_id}`">
-                            <Layers class="size-3.5" />
-                            Ver desglose
-                        </Link>
-                    </Button>
+                <div class="mt-auto pt-1">
+                    <MenuAccionesExistencia
+                        :puede-ajustar="permisos.ajustar"
+                        :puede-minimos="permisos.minimos"
+                        :activo-href="`/activos/${s.activo_id}`"
+                        @corregir-existencia="abrirAjuste(s)"
+                        @cambiar-condicion="abrirCondicion(s)"
+                    />
                 </div>
             </div>
         </div>
@@ -586,39 +586,13 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
                             {{ s.minimo }}
                         </td>
                         <td class="px-3 py-2 text-right">
-                            <div class="flex flex-wrap justify-end gap-1.5">
-                                <Button
-                                    v-if="permisos.ajustar"
-                                    variant="outline"
-                                    size="sm"
-                                    @click="abrir('ajuste', s)"
-                                >
-                                    <SlidersHorizontal class="size-3.5" />
-                                    Ajustar
-                                </Button>
-                                <Button
-                                    v-if="permisos.minimos"
-                                    variant="ghost"
-                                    size="sm"
-                                    as-child
-                                >
-                                    <Link :href="`/activos/${s.activo_id}`">
-                                        <Settings2 class="size-3.5" />
-                                        Configurar mínimo
-                                    </Link>
-                                </Button>
-                                <Button
-                                    v-else
-                                    variant="ghost"
-                                    size="sm"
-                                    as-child
-                                >
-                                    <Link :href="`/activos/${s.activo_id}`">
-                                        <Layers class="size-3.5" />
-                                        Ver desglose
-                                    </Link>
-                                </Button>
-                            </div>
+                            <MenuAccionesExistencia
+                                :puede-ajustar="permisos.ajustar"
+                                :puede-minimos="permisos.minimos"
+                                :activo-href="`/activos/${s.activo_id}`"
+                                @corregir-existencia="abrirAjuste(s)"
+                                @cambiar-condicion="abrirCondicion(s)"
+                            />
                         </td>
                     </tr>
                 </tbody>
@@ -627,88 +601,27 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
 
         <Paginacion :links="saldos.links" :total="saldos.total" />
 
-        <Dialog
-            :open="dialogo === 'ajuste'"
-            @update:open="(v: boolean) => !v && (dialogo = null)"
-        >
-            <DialogContent>
-                <DialogHeader>
-                    <DialogTitle>Ajustar existencia</DialogTitle>
-                    <DialogDescription>
-                        Corrige la existencia real de esta fila de inventario.
-                        Queda registrado en el historial de movimientos.
-                    </DialogDescription>
-                </DialogHeader>
-                <dl
-                    v-if="actual"
-                    class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm"
-                >
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Empresa</dt>
-                        <dd>{{ actual.empresa }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Almacén</dt>
-                        <dd>{{ actual.almacen }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Activo</dt>
-                        <dd>{{ actual.activo }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">Variante</dt>
-                        <dd>{{ actual.talla || 'Sin variante' }}</dd>
-                    </div>
-                    <div>
-                        <dt class="text-muted-foreground text-xs">
-                            Existencia actual
-                        </dt>
-                        <dd class="font-medium">{{ actual.cantidad }}</dd>
-                    </div>
-                </dl>
-                <div class="grid gap-3">
-                    <div class="grid gap-1.5">
-                        <Label for="ajuste-objetivo">Existencia objetivo</Label>
-                        <Input
-                            id="ajuste-objetivo"
-                            v-model.number="ajuste.existencia_objetivo"
-                            type="number"
-                            min="0"
-                        />
-                    </div>
-                    <div class="grid gap-1.5">
-                        <Label for="ajuste-motivo">Motivo (obligatorio)</Label>
-                        <Input id="ajuste-motivo" v-model="ajuste.motivo" />
-                        <p
-                            v-if="ajuste.errors.motivo"
-                            class="text-destructive text-xs"
-                        >
-                            {{ ajuste.errors.motivo }}
-                        </p>
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        :disabled="ajuste.processing"
-                        @click="dialogo = null"
-                    >
-                        Cancelar
-                    </Button>
-                    <Button
-                        :disabled="ajuste.processing"
-                        @click="guardarAjuste"
-                    >
-                        {{
-                            ajuste.processing
-                                ? 'Guardando…'
-                                : 'Registrar ajuste'
-                        }}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <AjustarExistenciaDialog
+            v-if="filaActual"
+            v-model:open="dialogoAjuste"
+            :activo-id="filaActual.activo_id"
+            :activo-nombre="filaActual.activo"
+            :activo-codigo="filaActual.activo_codigo"
+            :empresa-id="filaActual.empresa_id"
+            :empresa-nombre="filaActual.empresa"
+            :contexto-fijo="contextoFijoAjuste"
+        />
+
+        <RegistrarCondicionInventarioDialog
+            v-if="filaActual"
+            v-model:open="dialogoCondicion"
+            :activo-id="filaActual.activo_id"
+            :activo-nombre="filaActual.activo"
+            :activo-codigo="filaActual.activo_codigo"
+            :empresa-id="filaActual.empresa_id"
+            :empresa-nombre="filaActual.empresa"
+            :contexto-fijo="contextoFijoCondicion"
+        />
 
         <Dialog v-model:open="dialogoMasivo">
             <DialogContent>

@@ -9,6 +9,7 @@ use Database\Factories\MovimientoInventarioFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -113,5 +114,55 @@ class MovimientoInventario extends Model
     public function unidadActivo(): BelongsTo
     {
         return $this->belongsTo(UnidadActivo::class);
+    }
+
+    /**
+     * Sólo existe cuando ESTE movimiento vino de un cambio de condición de
+     * inventario POR CANTIDAD (`MarcarCondicionInventario` /
+     * `RestaurarCondicionInventario`) — nunca para una pérdida/robo real de
+     * `UnidadActivo` (`MarcarUnidadIncidencia`, que no crea esta fila). Es la
+     * señal estructural que usa `etiquetaEfectiva()` para no confundir ambos
+     * casos, aunque compartan `TipoMovimiento`.
+     *
+     * @return HasOne<CondicionInventario, $this>
+     */
+    public function condicionInventario(): HasOne
+    {
+        return $this->hasOne(CondicionInventario::class, 'movimiento_inventario_id');
+    }
+
+    /**
+     * Etiqueta que debe mostrarse al usuario para ESTE movimiento concreto.
+     * `Incidencia`, `Baja` y `Recuperacion` son `TipoMovimiento` compartidos
+     * entre dos dominios distintos: una pérdida/robo o baja/recuperación real
+     * de una `UnidadActivo`, y un cambio de condición de inventario POR
+     * CANTIDAD (Dañado/Baja/Restaurado desde el stock disponible de un
+     * almacén). Nunca se distinguen inspeccionando `motivo` (texto libre): se
+     * distinguen de forma estructural, comprobando si existe una fila en
+     * `condiciones_inventario` enlazada a este movimiento — sólo la
+     * distingue el segundo caso. Movimientos históricos de "Dañado"/"Baja"
+     * anteriores a esta distinción ya tenían esa fila desde que se creó el
+     * módulo de condición de inventario, así que también se corrigen sin
+     * necesidad de reescribir nada.
+     */
+    public function etiquetaEfectiva(): string
+    {
+        if (! in_array($this->tipo, [TipoMovimiento::Incidencia, TipoMovimiento::Baja, TipoMovimiento::Recuperacion], true)) {
+            return $this->tipo->etiqueta();
+        }
+
+        $esCondicionDeInventario = $this->relationLoaded('condicionInventario')
+            ? $this->condicionInventario !== null
+            : $this->condicionInventario()->exists();
+
+        if (! $esCondicionDeInventario) {
+            return $this->tipo->etiqueta();
+        }
+
+        return match ($this->tipo) {
+            TipoMovimiento::Incidencia => 'Marcado como dañado',
+            TipoMovimiento::Baja => 'Baja',
+            TipoMovimiento::Recuperacion => 'Restauración de piezas dañadas',
+        };
     }
 }

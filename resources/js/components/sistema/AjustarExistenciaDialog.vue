@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useForm } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
-import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
+import { computed, watch } from 'vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,20 +14,27 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
-type OpcionVariante = { id: number; valor: string };
-type Saldo = {
-    almacen_id: number;
-    talla_id: number | null;
-    cantidad: number;
+// Siempre se abre desde una fila/card concreta (Existencias globales, o
+// "Existencias por almacén" del propio activo): empresa, almacén, activo y
+// variante ya se conocen y NUNCA se vuelven a preguntar — sólo se muestran
+// como contexto de sólo lectura. El usuario únicamente decide la nueva
+// existencia y el motivo.
+type ContextoFijo = {
+    almacenId: number;
+    almacenNombre: string;
+    tallaId: number | null;
+    tallaValor: string | null;
+    cantidadActual: number;
 };
 
 const props = defineProps<{
     open: boolean;
     activoId: number;
+    activoNombre: string;
+    activoCodigo?: string | null;
     empresaId: number;
-    usaVariantes: boolean;
-    saldos: Saldo[];
+    empresaNombre?: string | null;
+    contextoFijo: ContextoFijo | null;
 }>();
 
 const emit = defineEmits<{ 'update:open': [boolean] }>();
@@ -49,81 +55,28 @@ const form = useForm<{
     motivo: '',
 });
 
-const almacenSel = ref<OpcionAlmacen | null>(null);
-const tallaSel = ref<OpcionVariante | null>(null);
-
-// Existencia actual de la combinación almacén + variante elegida: se lee de
-// los saldos YA cargados en el detalle del activo (no hace falta otra
-// consulta). Una combinación sin saldo todavía cuenta como 0 — "ajustar" a
-// partir de 0 es válido (establece la primera existencia formal).
-const existenciaActual = computed<number>(() => {
-    if (form.almacen_id === null) return 0;
-    const saldo = props.saldos.find(
-        (s) =>
-            s.almacen_id === form.almacen_id && s.talla_id === form.talla_id,
-    );
-    return saldo?.cantidad ?? 0;
-});
-
-// El campo "nueva existencia" arranca en la existencia actual de la
-// combinación elegida (punto de partida cómodo: el usuario sólo corrige el
-// número, no lo escribe desde cero) y se resincroniza si cambia el almacén
-// o la variante.
-watch(existenciaActual, (v) => {
-    form.existencia_objetivo = v;
-});
+const existenciaActual = computed<number>(
+    () => props.contextoFijo?.cantidadActual ?? 0,
+);
 
 const diferencia = computed<number>(
     () => form.existencia_objetivo - existenciaActual.value,
 );
 
-async function buscarAlmacenes(
-    q: string,
-    signal?: AbortSignal,
-): Promise<OpcionAlmacen[]> {
-    const res = await fetch(
-        `/almacenes/buscar?empresa_id=${props.empresaId}&q=${encodeURIComponent(q)}`,
-        {
-            headers: { Accept: 'application/json' },
-            credentials: 'same-origin',
-            signal,
-        },
-    );
-    if (!res.ok) return [];
-    return (await res.json()).almacenes ?? [];
-}
-
-async function buscarVariantes(
-    q: string,
-    signal?: AbortSignal,
-): Promise<OpcionVariante[]> {
-    const params = new URLSearchParams({ activo_id: String(props.activoId), q });
-    const res = await fetch(`/tallas/buscar?${params.toString()}`, {
-        headers: { Accept: 'application/json' },
-        credentials: 'same-origin',
-        signal,
-    });
-    if (!res.ok) return [];
-    return (await res.json()).tallas ?? [];
-}
-
 watch(
     () => props.open,
     (abierto) => {
-        if (abierto) {
-            form.reset();
-            form.clearErrors();
-            almacenSel.value = null;
-            tallaSel.value = null;
-        }
+        if (!abierto || !props.contextoFijo) return;
+
+        form.reset();
+        form.clearErrors();
+        form.almacen_id = props.contextoFijo.almacenId;
+        form.talla_id = props.contextoFijo.tallaId;
+        form.existencia_objetivo = props.contextoFijo.cantidadActual;
     },
 );
 
 function enviar(): void {
-    // `AjustarInventario` es la única lógica de ajuste (fija la existencia
-    // objetivo y genera su propio movimiento/auditoría) — este diálogo sólo
-    // envía al MISMO endpoint que ya usa el módulo de Inventario, nunca
-    // escribe el saldo directamente.
     form.post('/inventario/ajuste', {
         preserveScroll: true,
         onSuccess: () => emit('update:open', false),
@@ -135,69 +88,55 @@ function enviar(): void {
     <Dialog :open="open" @update:open="(v: boolean) => emit('update:open', v)">
         <DialogContent class="sm:max-w-sm">
             <DialogHeader>
-                <DialogTitle>Ajustar existencia</DialogTitle>
+                <DialogTitle>Corregir existencia</DialogTitle>
                 <DialogDescription>
-                    Corrige la existencia de este activo a lo que muestre un
-                    conteo físico real. Genera movimiento y auditoría —
-                    reutiliza exactamente la misma lógica que "Ajustar
-                    existencias" en Inventario.
+                    Actualiza la cantidad cuando el conteo físico no coincide
+                    con el sistema. El cambio quedará registrado en el
+                    historial.
                 </DialogDescription>
             </DialogHeader>
             <form class="grid gap-3" @submit.prevent="enviar">
-                <div class="grid gap-1.5">
-                    <Label for="ajuste-almacen">Almacén</Label>
-                    <BuscadorAsync
-                        id="ajuste-almacen"
-                        :model-value="almacenSel"
-                        :buscar="buscarAlmacenes"
-                        :etiqueta="(a) => (a as OpcionAlmacen).nombre"
-                        :descripcion="(a) => (a as OpcionAlmacen).codigo ?? ''"
-                        placeholder="Selecciona un almacén"
-                        placeholder-busqueda="Buscar almacén por nombre"
-                        :invalido="!!form.errors.almacen_id"
-                        @update:model-value="
-                            (v) => {
-                                almacenSel = v as OpcionAlmacen | null;
-                                form.almacen_id =
-                                    (v as OpcionAlmacen | null)?.id ?? null;
-                                form.clearErrors('almacen_id');
-                            }
-                        "
-                    />
-                    <InputError :message="form.errors.almacen_id" />
-                </div>
-
-                <div v-if="usaVariantes" class="grid gap-1.5">
-                    <Label for="ajuste-variante">Variante / talla</Label>
-                    <BuscadorAsync
-                        id="ajuste-variante"
-                        :model-value="tallaSel"
-                        :buscar="buscarVariantes"
-                        :etiqueta="(t) => (t as OpcionVariante).valor"
-                        placeholder="Selecciona la variante"
-                        placeholder-busqueda="Buscar variante"
-                        :invalido="!!form.errors.talla_id"
-                        @update:model-value="
-                            (v) => {
-                                tallaSel = v as OpcionVariante | null;
-                                form.talla_id =
-                                    (v as OpcionVariante | null)?.id ?? null;
-                                form.clearErrors('talla_id');
-                            }
-                        "
-                    />
-                    <InputError :message="form.errors.talla_id" />
-                </div>
-
-                <div v-if="form.almacen_id !== null" class="grid gap-1.5">
-                    <Label>Existencia actual</Label>
-                    <p class="text-lg font-semibold">
-                        {{ existenciaActual }}
-                    </p>
-                </div>
+                <dl
+                    v-if="contextoFijo"
+                    class="bg-muted/40 grid gap-1.5 rounded-lg border p-3 text-sm"
+                >
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Activo</dt>
+                        <dd class="font-medium">
+                            {{ activoNombre
+                            }}<span
+                                v-if="activoCodigo"
+                                class="text-muted-foreground font-mono"
+                            >
+                                · {{ activoCodigo }}</span
+                            >
+                        </dd>
+                    </div>
+                    <div v-if="empresaNombre">
+                        <dt class="text-muted-foreground text-xs">Empresa</dt>
+                        <dd>{{ empresaNombre }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Almacén</dt>
+                        <dd>{{ contextoFijo.almacenNombre }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">Variante</dt>
+                        <dd>{{ contextoFijo.tallaValor ?? 'Sin variante' }}</dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Existencia actual
+                        </dt>
+                        <dd class="font-medium">{{ existenciaActual }}</dd>
+                    </div>
+                </dl>
 
                 <div class="grid gap-1.5">
-                    <Label for="ajuste-nueva">Nueva existencia</Label>
+                    <Label for="ajuste-nueva" class="flex items-center gap-1">
+                        Nueva existencia
+                        <span class="text-destructive">*</span>
+                    </Label>
                     <Input
                         id="ajuste-nueva"
                         v-model.number="form.existencia_objetivo"
@@ -219,7 +158,10 @@ function enviar(): void {
                 </p>
 
                 <div class="grid gap-1.5">
-                    <Label for="ajuste-motivo">Motivo</Label>
+                    <Label for="ajuste-motivo" class="flex items-center gap-1">
+                        Motivo
+                        <span class="text-destructive">*</span>
+                    </Label>
                     <Input
                         id="ajuste-motivo"
                         v-model="form.motivo"
@@ -237,7 +179,7 @@ function enviar(): void {
                         Cancelar
                     </Button>
                     <Button type="submit" :disabled="form.processing">
-                        Ajustar
+                        Corregir
                     </Button>
                 </DialogFooter>
             </form>

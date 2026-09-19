@@ -30,6 +30,8 @@ use Illuminate\Support\Carbon;
  * @property EstadoInventarioFisico $estado
  * @property string|null $observaciones
  * @property Carbon|null $finalizado_en
+ * @property Carbon|null $correcciones_aplicadas_en
+ * @property int|null $correcciones_aplicadas_por
  * @property-read InventarioFisicoFirma|null $firma
  */
 class InventarioFisico extends Model
@@ -48,6 +50,8 @@ class InventarioFisico extends Model
         'estado',
         'observaciones',
         'finalizado_en',
+        'correcciones_aplicadas_en',
+        'correcciones_aplicadas_por',
     ];
 
     protected function casts(): array
@@ -55,6 +59,7 @@ class InventarioFisico extends Model
         return [
             'estado' => EstadoInventarioFisico::class,
             'finalizado_en' => 'datetime',
+            'correcciones_aplicadas_en' => 'datetime',
         ];
     }
 
@@ -63,12 +68,30 @@ class InventarioFisico extends Model
         return $this->estado === EstadoInventarioFisico::EnProceso;
     }
 
+    public function estaFinalizada(): bool
+    {
+        return $this->estado === EstadoInventarioFisico::Finalizado;
+    }
+
+    public function tieneCorreccionesAplicadas(): bool
+    {
+        return $this->correcciones_aplicadas_en !== null;
+    }
+
     /**
      * @return BelongsTo<User, $this>
      */
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(User::class, 'usuario_id');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function correccionesAplicadasPor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'correcciones_aplicadas_por');
     }
 
     /**

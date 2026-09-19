@@ -43,6 +43,16 @@ class ColaboradorPolicy
     }
 
     /**
+     * Reportar robo/pérdida de un artículo por cantidad bajo custodia.
+     * Reutiliza el permiso de Devoluciones (resuelve custodia pendiente
+     * igual que una devolución, sin ser una) en vez de crear uno nuevo.
+     */
+    public function reportarIncidenciaCustodia(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('devoluciones.crear') && $user->puedeAccederEmpresa($colaborador->empresa_id);
+    }
+
+    /**
      * Histórico laboral completo (todas las empresas por las que pasó el
      * colaborador). Mismo criterio que el desglose agregado que ya existe en
      * `show()`: sólo alcance global — un Supervisor/Encargado restringido

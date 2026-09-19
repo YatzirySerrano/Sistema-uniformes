@@ -8,6 +8,7 @@ use App\Models\Colaborador;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
 use App\Models\EntregaUniforme;
+use App\Models\IncidenciaCustodia;
 use App\Models\UnidadActivo;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -23,10 +24,14 @@ use Illuminate\Support\Collection;
  *
  * Regla de negocio:
  * - Artículos por CANTIDAD: por cada renglón de una entrega firmada/corregida,
- *   `pendiente = entregado − devuelto CONFIRMADO`. Una devolución todavía
- *   `pendiente_firma` NO libera custodia ni cuenta como devuelta (el
- *   colaborador sigue teniendo el artículo hasta que ambas firmas concreten
- *   la devolución).
+ *   `pendiente = entregado − devuelto CONFIRMADO − reportado como robo/pérdida`
+ *   (`App\Models\IncidenciaCustodia`, ver `pendientesPorDetalle()`). Una
+ *   devolución todavía `pendiente_firma` NO libera custodia ni cuenta como
+ *   devuelta (el colaborador sigue teniendo el artículo hasta que ambas
+ *   firmas concreten la devolución). Un robo/pérdida reportado tampoco
+ *   "libera" en el sentido de que la pieza regrese a algún lado: sólo dejó de
+ *   estar pendiente de devolución porque ya no va a devolverse — nunca se
+ *   descuenta dos veces la misma pieza entre ambas fuentes.
  * - UNIDADES identificadas: toda unidad con `colaborador_id = X` y
  *   `estado = Asignada` — cubre asignadas normales y también perdidas/robadas
  *   (`MarcarUnidadIncidencia` conserva `estado = Asignada`): una responsabilidad
@@ -63,13 +68,15 @@ class ServicioCustodiaColaborador
      * el folio — para que el frontend pueda enlazar directo sin que el
      * usuario tenga que memorizar ni volver a buscar nada.
      *
-     * @return list<array{tipo: string, tipo_etiqueta: string, activo: string, talla: string|null, cantidad: int, referencia: string|null, entrega_id: int|null, entrega_folio: string|null, detalle_entrega_id: int|null, unidad_activo_id: int|null}>
+     * @param  array<int, int>|null  $idsEmpresasAutorizadas  Aislamiento histórico (ver `totalPiezasPendientes()`): `null` = sin acotar (uso interno del wizard de transferencia, que ya exige alcance global), un arreglo = sólo lo que esas empresas autorizan (panel de custodia en el perfil del colaborador).
+     * @return list<array{tipo: string, tipo_etiqueta: string, activo: string, talla: string|null, cantidad: int, referencia: string|null, entrega_id: int|null, entrega_folio: string|null, detalle_entrega_id: int|null, unidad_activo_id: int|null, unidad_public_token: string|null}>
      */
-    public function pendientes(Colaborador $colaborador): array
+    public function pendientes(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): array
     {
         $unidades = UnidadActivo::query()
             ->where('colaborador_id', $colaborador->getKey())
             ->where('estado', EstadoUnidadActivo::Asignada)
+            ->when($idsEmpresasAutorizadas !== null, fn (Builder $q) => $q->whereIn('empresa_id', $idsEmpresasAutorizadas))
             ->with('activo:id,nombre')
             ->orderBy('codigo')
             ->get()
@@ -87,6 +94,7 @@ class ServicioCustodiaColaborador
                     'entrega_folio' => $detalle?->entrega?->folio,
                     'detalle_entrega_id' => $detalle?->id,
                     'unidad_activo_id' => $u->getKey(),
+                    'unidad_public_token' => $u->public_token,
                 ];
             })
             ->all();
@@ -102,17 +110,53 @@ class ServicioCustodiaColaborador
             'entrega_folio' => $fila['folio'],
             'detalle_entrega_id' => $fila['detalle_entrega_id'],
             'unidad_activo_id' => null,
-        ], $this->cantidadesPendientes($colaborador));
+            'unidad_public_token' => null,
+        ], $this->cantidadesPendientes($colaborador, $idsEmpresasAutorizadas));
 
         return array_merge($unidades, $cantidades);
     }
 
     /**
+     * Robos/pérdidas de artículos por cantidad ya reportados para este
+     * colaborador — lista legible para el panel de custodia del perfil.
+     * Nunca recalcula nada: son eventos ya persistidos, mismo aislamiento
+     * histórico que `pendientes()`.
+     *
+     * @param  array<int, int>|null  $idsEmpresasAutorizadas
+     * @return list<array{activo: string, talla: string|null, cantidad: int, tipo: string, tipo_etiqueta: string, motivo: string, observacion: string|null, entrega_folio: string|null, usuario: string|null, ocurrido_en: string|null}>
+     */
+    public function incidenciasRegistradas(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): array
+    {
+        $filas = IncidenciaCustodia::query()
+            ->where('colaborador_id', $colaborador->getKey())
+            ->when($idsEmpresasAutorizadas !== null, fn (Builder $q) => $q->whereIn('empresa_id', $idsEmpresasAutorizadas))
+            ->with(['entrega:id,folio', 'registradoPor:id,name'])
+            ->latest('id')
+            ->get()
+            ->map(fn (IncidenciaCustodia $i): array => [
+                'activo' => $i->activo_nombre_snapshot,
+                'talla' => $i->talla_valor_snapshot,
+                'cantidad' => $i->cantidad,
+                'tipo' => $i->tipo->value,
+                'tipo_etiqueta' => $i->tipo->etiqueta(),
+                'motivo' => $i->motivo,
+                'observacion' => $i->observacion,
+                'entrega_folio' => $i->entrega?->folio,
+                'usuario' => $i->registradoPor?->name,
+                'ocurrido_en' => $i->created_at?->toIso8601String(),
+            ])
+            ->all();
+
+        return array_values($filas);
+    }
+
+    /**
      * Pendiente real de UN renglón de entrega por cantidad: entregado menos
-     * lo devuelto en devoluciones CONFIRMADAS. Fuente única reutilizada por
-     * `RegistrarDevolucion` (validación al registrar) y `DevolucionController`
-     * (presentación del formulario) — nunca vuelvas a sumar `DetalleDevolucion`
-     * a mano fuera de aquí.
+     * lo devuelto en devoluciones CONFIRMADAS y menos lo reportado como robo/
+     * pérdida. Fuente única reutilizada por `RegistrarDevolucion` (validación
+     * al registrar), `DevolucionController` (presentación del formulario) y
+     * `RegistrarIncidenciaCustodia` (validación al reportar) — nunca vuelvas
+     * a sumar `DetalleDevolucion`/`IncidenciaCustodia` a mano fuera de aquí.
      */
     public function pendienteDeDetalle(DetalleEntrega $detalle): int
     {
@@ -139,9 +183,20 @@ class ServicioCustodiaColaborador
             ->groupBy('detalle_entrega_id')
             ->pluck('total', 'detalle_entrega_id');
 
+        $incidenciaPorDetalle = IncidenciaCustodia::query()
+            ->whereIn('detalle_entrega_id', $detalles->pluck('id'))
+            ->selectRaw('detalle_entrega_id, SUM(cantidad) as total')
+            ->groupBy('detalle_entrega_id')
+            ->pluck('total', 'detalle_entrega_id');
+
         return $detalles
             ->mapWithKeys(fn (DetalleEntrega $d): array => [
-                $d->getKey() => max((int) $d->cantidad - (int) ($devueltoPorDetalle[$d->getKey()] ?? 0), 0),
+                $d->getKey() => max(
+                    (int) $d->cantidad
+                        - (int) ($devueltoPorDetalle[$d->getKey()] ?? 0)
+                        - (int) ($incidenciaPorDetalle[$d->getKey()] ?? 0),
+                    0
+                ),
             ])
             ->all();
     }
@@ -168,6 +223,10 @@ class ServicioCustodiaColaborador
                         inner join devoluciones dv on dv.id = dd.devolucion_id
                         where dd.detalle_entrega_id = detalles_entrega.id
                         and dv.estado = ?
+                    ) + (
+                        select coalesce(sum(ic.cantidad), 0)
+                        from incidencias_custodia ic
+                        where ic.detalle_entrega_id = detalles_entrega.id
                     )', [EstadoDevolucion::Confirmada->value]);
             })->orWhereHas('detalles', function (Builder $d) {
                 $d->whereNotNull('unidad_activo_id')

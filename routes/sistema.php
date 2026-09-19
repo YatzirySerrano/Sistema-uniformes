@@ -61,6 +61,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('colaboradores/{colaborador}/estado', [ColaboradorController::class, 'toggle'])->name('colaboradores.toggle');
     Route::post('colaboradores/{colaborador}/servicio', [ColaboradorController::class, 'cambiarServicio'])->name('colaboradores.cambiar-servicio');
     Route::get('colaboradores/{colaborador}/custodia', [ColaboradorController::class, 'custodiaPendiente'])->name('colaboradores.custodia');
+    Route::post('colaboradores/{colaborador}/custodia/incidencia', [ColaboradorController::class, 'registrarIncidenciaCustodia'])->name('colaboradores.custodia.incidencia');
     Route::post('colaboradores/{colaborador}/cambiar-empresa', [ColaboradorController::class, 'cambiarEmpresa'])->name('colaboradores.cambiar-empresa');
 
     // Expediente digital del colaborador
@@ -147,6 +148,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
 
     // Inventario por almacén
     Route::get('inventario', [InventarioController::class, 'index'])->name('inventario.index');
+    Route::get('inventario/exportar', [InventarioController::class, 'exportar'])->name('inventario.exportar');
     Route::get('inventario/entrada', [InventarioController::class, 'formularioEntrada'])->name('inventario.entrada-formulario');
     Route::post('inventario/entrada', [InventarioController::class, 'entrada'])->name('inventario.entrada');
     Route::post('inventario/ajuste', [InventarioController::class, 'ajuste'])->name('inventario.ajuste');
@@ -202,6 +204,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::delete('inventarios-fisicos/{inventarioFisico}/unidades/{unidad}/presente', [InventarioFisicoController::class, 'desmarcarUnidadPresente'])->name('inventarios-fisicos.unidades.desmarcar-presente');
     Route::post('inventarios-fisicos/{inventarioFisico}/existencias/{existencia}', [InventarioFisicoController::class, 'verificarExistencia'])->name('inventarios-fisicos.existencias.verificar');
     Route::post('inventarios-fisicos/{inventarioFisico}/finalizar', [InventarioFisicoController::class, 'finalizar'])->name('inventarios-fisicos.finalizar');
+    Route::post('inventarios-fisicos/{inventarioFisico}/aplicar-correcciones', [InventarioFisicoController::class, 'aplicarCorrecciones'])->name('inventarios-fisicos.aplicar-correcciones');
 
     // Entregas
     Route::get('entregas', [EntregaController::class, 'index'])->name('entregas.index');
