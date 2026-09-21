@@ -24,17 +24,21 @@ class PlantillaColaboradoresExport implements FromArray, WithHeadings, WithTitle
         $ejemploSucursal = (string) ($this->codigosSucursal[0] ?? 'MATRIZ');
 
         return [
-            ['1001', 'Juan Pérez López', 'PELJ850101HDFRZN08', 'Operador', 'Producción', 'juan.perez@example.test', $ejemploSucursal],
-            ['1002', 'María García Ruiz', 'GARM900215MDFRZR03', 'Supervisora', 'Almacén', '', $ejemploSucursal],
+            ['Juan Pérez López', 'PELJ850101HDFRZN08', 'Operador', 'Producción', 'juan.perez@example.test', $ejemploSucursal],
+            ['María García Ruiz', 'GARM900215MDFRZR03', 'Supervisora', 'Almacén', '', $ejemploSucursal],
         ];
     }
 
     /**
+     * El número de empleado NUNCA se captura en el Excel: lo genera el
+     * backend (App\Soporte\GeneradorNumeroEmpleado), igual que en el alta
+     * manual — un valor en esa columna simplemente se ignoraría.
+     *
      * @return array<int, string>
      */
     public function headings(): array
     {
-        return ['numero_empleado', 'nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
+        return ['nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
     }
 
     public function title(): string

@@ -318,6 +318,67 @@ function prevalidarWorkbookMaestro(TestCase $test, User $usuario, array $hojas):
 }
 
 /**
+ * Encabezados de la plantilla del importador de colaboradores
+ * (`App\Servicios\ServicioImportacionColaboradores::COLUMNAS`), duplicado
+ * aquí a propósito: si alguien cambia el formato real sin actualizar esto,
+ * el test debe romperse.
+ *
+ * @return list<string>
+ */
+function encabezadosImportacionColaboradores(): array
+{
+    return ['nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
+}
+
+/**
+ * Construye un .xlsx real de una sola hoja para el importador de
+ * colaboradores. `$encabezados` es opcional (por defecto, la plantilla
+ * actual) para poder simular encabezados incompletos/viejos (p. ej. con
+ * `numero_empleado` todavía presente) en las pruebas de columnas.
+ *
+ * @param  list<array<string, mixed>>  $filas  cada fila como columna => valor
+ * @param  list<string>|null  $encabezados
+ */
+function construirExcelColaboradores(array $filas, ?array $encabezados = null): UploadedFile
+{
+    $encabezados ??= encabezadosImportacionColaboradores();
+
+    $spreadsheet = new Spreadsheet;
+    $hoja = $spreadsheet->getActiveSheet();
+    $hoja->fromArray($encabezados, null, 'A1');
+
+    foreach (array_values($filas) as $indice => $fila) {
+        $filaOrdenada = array_map(fn (string $columna) => $fila[$columna] ?? null, $encabezados);
+        $hoja->fromArray($filaOrdenada, null, 'A'.($indice + 2));
+    }
+
+    $ruta = tempnam(sys_get_temp_dir(), 'colaboradores_').'.xlsx';
+    (new Xlsx($spreadsheet))->save($ruta);
+
+    return new UploadedFile($ruta, 'colaboradores.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
+}
+
+/**
+ * Envía el archivo a `/colaboradores/importar/analizar` como el usuario dado
+ * y devuelve el prop `analisis` de la respuesta Inertia (mismo patrón que
+ * `prevalidarWorkbookMaestro`).
+ *
+ * @return array<string, mixed>
+ */
+function analizarImportacionColaboradores(TestCase $test, User $usuario, Empresa $empresa, UploadedFile $archivo): array
+{
+    $analisis = null;
+    $test->actingAs($usuario)
+        ->post('/colaboradores/importar/analizar', ['empresa_id' => $empresa->id, 'archivo' => $archivo])
+        ->assertOk()
+        ->assertInertia(function ($page) use (&$analisis): void {
+            $analisis = $page->toArray()['props']['analisis'];
+        });
+
+    return $analisis;
+}
+
+/**
  * Sube un documento de identidad (categoría `Identificacion`) al expediente
  * del colaborador, como administrador. Devuelve el `DocumentoExpediente`.
  * Compartido entre las pruebas de identidad de Entregas y Devoluciones

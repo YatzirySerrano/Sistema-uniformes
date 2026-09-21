@@ -26,11 +26,13 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/{Enums/PerfilTecnicoUnidad.php,Soporte/ResolverPerfilTecnicoUnidad.php,Models/UnidadActivoEspecificacion.php} | .ai/rules/enums.md |
 | resources/js/pages/Inventario/Traspasos/Crear.vue,app/Http/Requests/Inventario/RegistrarTraspasoRequest.php,app/Acciones/RegistrarTraspasoInventario.php,app/Excepciones/ExistenciasInsuficientesException.php | .ai/rules/excepciones.md |
 | app/Http/Controllers/ReporteController.php,app/Servicios/ServicioReportes.php | .ai/rules/http-controllers-servicios.md |
+| app/Servicios/ServicioImportacion*.php,app/Http/Controllers/Importacion*Controller.php | .ai/rules/http-controllers.md |
 | resources/js/pages/Activos/Detalle.vue,resources/js/pages/Inventario/Index.vue,resources/js/components/sistema/AgregarExistenciasDialog.vue | .ai/rules/inventario-js-components-sistema.md |
 | resources/js/composables/useVistaPreferida.ts,resources/js/components/sistema/SelectorVista.vue | .ai/rules/js-components-sistema.md |
 | resources/js/pages/auth/Login.vue,resources/js/components/PasskeyVerify.vue | .ai/rules/js-components.md |
 | app/Http/Requests/Entregas/GuardarEntregaRequest.php,app/Http/Controllers/EntregaController.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/js-pages-entregas.md |
 | app/Soporte/FechaHora.php,app/Soporte/ContextoExportacion.php,resources/views/acuses/*.blade.php,resources/views/reportes/*.blade.php,resources/js/lib/fecha.ts | .ai/rules/lib.md |
+| app/Models/Area.php,database/migrations/*areas*.php,app/Servicios/ServicioImportacionColaboradores.php | .ai/rules/migrations-servicios.md |
 | app/Acciones/CrearRondaInventarioFisico.php,app/Acciones/FinalizarRondaInventarioFisico.php,app/Acciones/VerificarExistenciaInventarioFisico.php,app/Acciones/MarcarUnidadPresente.php,app/Acciones/EscanearUnidadInventarioFisico.php,app/Http/Controllers/InventarioFisicoController.php,app/Models/InventarioFisicoExistencia.php,app/Models/InventarioFisicoFirma.php | .ai/rules/models-models.md |
 | app/Http/Controllers/InventarioFisicoController.php,app/Acciones/{CrearRondaInventarioFisico,EscanearUnidadInventarioFisico,FinalizarRondaInventarioFisico}.php,app/Servicios/ServicioResumenInventarioFisico.php,app/Models/InventarioFisico*.php,app/Soporte/ResolvedorUnidadEscaneada.php | .ai/rules/models-soporte.md |
 | app/Models/{Empresa,Sucursal,Almacen,Area,Activo,TipoActivo,CategoriaActivo,SaldoInventario,MovimientoInventario,UnidadActivo,SecuenciaCodigo,Conjunto,ConjuntoComponente}.php | .ai/rules/models.md |

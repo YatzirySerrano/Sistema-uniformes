@@ -48,6 +48,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/importar/plantilla', [ImportacionColaboradorController::class, 'plantilla'])->name('colaboradores.importar.plantilla');
     Route::post('colaboradores/importar/analizar', [ImportacionColaboradorController::class, 'analizar'])->name('colaboradores.importar.analizar');
     Route::post('colaboradores/importar/confirmar', [ImportacionColaboradorController::class, 'confirmar'])->name('colaboradores.importar.confirmar');
+    Route::post('colaboradores/importar/errores', [ImportacionColaboradorController::class, 'descargarErrores'])->name('colaboradores.importar.errores');
     Route::get('colaboradores/buscar', [ColaboradorController::class, 'buscar'])->name('colaboradores.buscar');
     Route::get('colaboradores/siguiente-numero', [ColaboradorController::class, 'siguienteNumeroEmpleado'])->name('colaboradores.siguiente-numero');
     Route::post('colaboradores/validar-curp', [ColaboradorController::class, 'validarCurp'])->name('colaboradores.validar-curp');

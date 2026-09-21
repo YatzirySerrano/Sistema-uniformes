@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\NombreNormalizado;
 use App\Models\Concerns\PerteneceAEmpresa;
 use Database\Factories\AreaFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,9 +15,16 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * Área o departamento organizacional de una empresa. Es la estructura que
  * sustituye al texto libre `colaboradores.area`.
  *
+ * `nombre_normalizado` (vía `NombreNormalizado`, mismo mecanismo que los
+ * catálogos globales de Activo) impide duplicados que sólo difieren en
+ * mayúsculas/espacios DENTRO de una empresa (índice único
+ * `empresa_id + nombre_normalizado`); dos empresas distintas sí pueden tener
+ * cada una su propia área "Compras" sin chocar.
+ *
  * @property int $id
  * @property int $empresa_id
  * @property string $nombre
+ * @property string $nombre_normalizado
  * @property string|null $codigo
  * @property string|null $descripcion
  * @property bool $activa
@@ -24,7 +32,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Area extends Model
 {
     /** @use HasFactory<AreaFactory> */
-    use HasFactory, PerteneceAEmpresa, SoftDeletes;
+    use HasFactory, NombreNormalizado, PerteneceAEmpresa, SoftDeletes;
 
     protected $table = 'areas';
 
