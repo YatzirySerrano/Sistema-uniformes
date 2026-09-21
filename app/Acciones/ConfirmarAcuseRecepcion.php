@@ -106,7 +106,12 @@ class ConfirmarAcuseRecepcion
         $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
         $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
-        $entrega->loadMissing(['detalles.evidencias', 'colaborador', 'sucursal', 'encargado', 'empresa']);
+        $entrega->loadMissing([
+            'detalles.evidencias',
+            'detalles.unidadActivo.especificacion',
+            'detalles.unidadActivo.activo.categoriaActivo.perfilTecnico',
+            'colaborador', 'sucursal', 'encargado', 'empresa',
+        ]);
 
         $snapshot = $this->construirSnapshot($entrega);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
@@ -307,6 +312,14 @@ class ConfirmarAcuseRecepcion
                 // archivo físico siga existiendo. Ausente en snapshots viejos.
                 'evidencias' => $d->evidencias->sortBy('id')->values()
                     ->map(fn (Evidencia $e): array => ['hash_sha256' => $e->hash_sha256, 'mime' => $e->mime])->all(),
+                // Sólo presente en renglones de unidad de seguimiento
+                // individual: identifica exactamente QUÉ unidad se entregó
+                // (código + datos técnicos vigentes al momento de firmar). La
+                // plantilla separa la tabla de "activos por cantidad" de la de
+                // "unidades" según la presencia de esta clave; los acuses
+                // firmados antes de este cambio nunca la tienen, así que
+                // siguen renderizando exactamente como antes.
+                'unidad' => $d->unidadActivo?->datosParaAcuse(),
             ])->all(),
             'firmado_en' => now()->toIso8601String(),
         ];

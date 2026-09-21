@@ -217,6 +217,26 @@ class UnidadActivo extends Model
     }
 
     /**
+     * Identificación de la unidad lista para congelarse en el snapshot
+     * inmutable de un acuse (entrega/devolución): código + sólo los campos
+     * técnicos del perfil que tienen valor (`datosEquipo()` filtrado). Nunca
+     * incluye campos vacíos — el PDF no debe imprimir "IMEI: —" ni etiquetas
+     * sin dato.
+     *
+     * @return array{codigo: string, datos_equipo: list<array{etiqueta: string, valor: string}>}
+     */
+    public function datosParaAcuse(): array
+    {
+        return [
+            'codigo' => $this->codigo,
+            'datos_equipo' => array_values(collect($this->datosEquipo())
+                ->filter(fn (array $d): bool => filled($d['valor']))
+                ->map(fn (array $d): array => ['etiqueta' => $d['etiqueta'], 'valor' => (string) $d['valor']])
+                ->all()),
+        ];
+    }
+
+    /**
      * Sólo una unidad en almacén, no asignada, activa y funcionando puede
      * entregarse. Backend es la fuente de verdad (nunca sólo el frontend).
      */

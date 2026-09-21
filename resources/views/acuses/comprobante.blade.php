@@ -24,6 +24,7 @@
         .evidencia-fila td { background: #f8fafc; }
         .evidencia-fila img { max-height: 90px; max-width: 130px; border: 1px solid #cbd5e1; margin: 2px 4px 2px 0; }
         .evidencia-nd { font-size: 9px; color: #94a3b8; font-style: italic; }
+        .datos-equipo { line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -79,42 +80,86 @@
         </table>
     </div>
 
-    <h2>Prendas entregadas</h2>
-    <table class="items">
-        <thead>
-            <tr><th>Prenda</th><th>Talla</th><th style="text-align:right">Cantidad</th></tr>
-        </thead>
-        <tbody>
-            @foreach ($snapshot['items'] ?? [] as $item)
-                @php($imgs = $evidenciasPorItem[$loop->index] ?? [])
+    @php($itemsCantidad = collect($snapshot['items'] ?? [])->reject(fn ($i) => isset($i['unidad'])))
+    @php($itemsUnidad = collect($snapshot['items'] ?? [])->filter(fn ($i) => isset($i['unidad'])))
+
+    @if ($itemsCantidad->isNotEmpty())
+        <h2>Activos por cantidad</h2>
+        <table class="items">
+            <thead>
+                <tr><th>Activo</th><th>Talla / Variante</th><th style="text-align:right">Cantidad</th></tr>
+            </thead>
+            <tbody>
+                @foreach ($snapshot['items'] ?? [] as $item)
+                    @continue(isset($item['unidad']))
+                    @php($imgs = $evidenciasPorItem[$loop->index] ?? [])
+                    <tr>
+                        <td>{{ $item['activo'] ?? $item['prenda'] ?? '' }}</td>
+                        <td>{{ $item['talla'] }}</td>
+                        <td style="text-align:right">{{ $item['cantidad'] }}</td>
+                    </tr>
+                    @if (!empty($imgs))
+                        <tr class="evidencia-fila">
+                            <td colspan="3">
+                                <strong style="font-size:9px; color:#64748b">Evidencia fotográfica:</strong><br>
+                                @foreach ($imgs as $img)
+                                    @if ($img)
+                                        <img src="{{ $img }}" alt="Evidencia">
+                                    @else
+                                        <span class="evidencia-nd">Evidencia no disponible.</span>
+                                    @endif
+                                @endforeach
+                            </td>
+                        </tr>
+                    @endif
+                @endforeach
+            </tbody>
+            <tfoot>
                 <tr>
-                    <td>{{ $item['activo'] ?? $item['prenda'] ?? '' }}</td>
-                    <td>{{ $item['talla'] }}</td>
-                    <td style="text-align:right">{{ $item['cantidad'] }}</td>
+                    <th colspan="2" style="text-align:right">Total de prendas</th>
+                    <th style="text-align:right">{{ $itemsCantidad->sum('cantidad') }}</th>
                 </tr>
-                @if (!empty($imgs))
-                    <tr class="evidencia-fila">
-                        <td colspan="3">
-                            <strong style="font-size:9px; color:#64748b">Evidencia fotográfica:</strong><br>
-                            @foreach ($imgs as $img)
-                                @if ($img)
-                                    <img src="{{ $img }}" alt="Evidencia">
-                                @else
-                                    <span class="evidencia-nd">Evidencia no disponible.</span>
-                                @endif
+            </tfoot>
+        </table>
+    @endif
+
+    @if ($itemsUnidad->isNotEmpty())
+        <h2>Unidades de seguimiento individual</h2>
+        <table class="items">
+            <thead>
+                <tr><th>Código</th><th>Activo</th><th>Datos técnicos</th></tr>
+            </thead>
+            <tbody>
+                @foreach ($snapshot['items'] ?? [] as $item)
+                    @continue(!isset($item['unidad']))
+                    @php($imgs = $evidenciasPorItem[$loop->index] ?? [])
+                    <tr>
+                        <td>{{ $item['unidad']['codigo'] ?? '' }}</td>
+                        <td>{{ $item['activo'] ?? '' }}</td>
+                        <td class="datos-equipo">
+                            @foreach ($item['unidad']['datos_equipo'] ?? [] as $dato)
+                                {{ $dato['etiqueta'] }}: {{ $dato['valor'] }}<br>
                             @endforeach
                         </td>
                     </tr>
-                @endif
-            @endforeach
-        </tbody>
-        <tfoot>
-            <tr>
-                <th colspan="2" style="text-align:right">Total de prendas</th>
-                <th style="text-align:right">{{ collect($snapshot['items'] ?? [])->sum('cantidad') }}</th>
-            </tr>
-        </tfoot>
-    </table>
+                    @if (!empty($imgs))
+                        <tr class="evidencia-fila">
+                            <td colspan="3">
+                                <strong style="font-size:9px; color:#64748b">Evidencia fotográfica:</strong><br>
+                                @foreach ($imgs as $img)
+                                    @if ($img)
+                                        <img src="{{ $img }}" alt="Evidencia">
+                                    @else
+                                        <span class="evidencia-nd">Evidencia no disponible.</span>
+                                    @endif
+                                @endforeach
+                            </td>
+                        </tr>
+                    @endif
+                @endforeach
+            </tbody>
+        </table>
+    @endif
 
     @if ($acuse->aceptacion_titular && $acuse->texto_aceptado_snapshot)
         <div class="caja">

@@ -10,6 +10,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | bootstrap/app.php,app/Providers/AppServiceProvider.php | .ai/rules/bootstrap-providers.md |
 | app/{Servicios/ServicioExpediente.php,Acciones/SubirVersionDocumentoExpediente.php,Http/Requests/Colaboradores/ActualizarDocumentoExpedienteRequest.php,Http/Controllers/DocumentoExpedienteController.php} | .ai/rules/colaboradores-controllers.md |
 | app/{Acciones/CambiarEmpresaColaborador.php,Servicios/ServicioCustodiaColaborador.php,Http/Requests/Colaboradores/CambiarEmpresaColaboradorRequest.php,Acciones/CrearEntregaUniforme.php} | .ai/rules/colaboradores.md |
+| resources/js/pages/auth/Login.vue,resources/js/pages/auth/ConfirmPassword.vue,resources/js/pages/settings/Security.vue,resources/js/components/PasskeyVerify.vue,resources/js/components/ManagePasskeys.vue | .ai/rules/components-js-components.md |
 | resources/js/components/sistema/SubidaArchivo.vue, resources/js/components/sistema/PadFirma.vue | .ai/rules/components-sistema.md |
 | resources/js/pages/**, resources/js/components/** | .ai/rules/components.md |
 | app/{Models/{Reserva,RenglonReserva}.php,Enums/TipoReserva.php,Servicios/ServicioReservas.php,Acciones/{ReservarInventarioEntrega,ReservarCustodiaDevolucion}.php,Console/Commands/LimpiarReservasVencidas.php},resources/js/composables/useReservaBorrador.ts,resources/js/components/sistema/ApartadoTemporalBanner.vue | .ai/rules/composables-js-components-sistema.md |

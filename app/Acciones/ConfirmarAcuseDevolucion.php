@@ -111,7 +111,12 @@ class ConfirmarAcuseDevolucion
         $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
         $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
-        $devolucion->loadMissing(['detalles.activo', 'detalles.talla', 'detalles.unidadActivo', 'detalles.evidencias', 'colaborador', 'sucursal', 'almacen', 'empresa', 'registradaPor', 'entrega:id,folio']);
+        $devolucion->loadMissing([
+            'detalles.activo', 'detalles.talla', 'detalles.evidencias',
+            'detalles.unidadActivo.especificacion',
+            'detalles.unidadActivo.activo.categoriaActivo.perfilTecnico',
+            'colaborador', 'sucursal', 'almacen', 'empresa', 'registradaPor', 'entrega:id,folio',
+        ]);
 
         $snapshot = $this->construirSnapshot($devolucion);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
@@ -364,6 +369,11 @@ class ConfirmarAcuseDevolucion
                 'condicion' => ($d->unidad_activo_id !== null ? $d->condicion_unidad : $d->condicion)?->etiqueta(),
                 'evidencias' => $d->evidencias->sortBy('id')->values()
                     ->map(fn (Evidencia $e): array => ['hash_sha256' => $e->hash_sha256, 'mime' => $e->mime])->all(),
+                // Sólo presente en renglones de unidad de seguimiento
+                // individual (ver mismo patrón en `ConfirmarAcuseRecepcion`):
+                // identifica exactamente QUÉ unidad se devolvió. Ausente en
+                // acuses firmados antes de este cambio.
+                'unidad' => $d->unidadActivo?->datosParaAcuse(),
             ])->all(),
             'firmado_en' => now()->toIso8601String(),
         ];

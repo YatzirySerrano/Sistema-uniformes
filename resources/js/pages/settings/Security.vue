@@ -7,16 +7,19 @@ import PasswordInput from '@/components/PasswordInput.vue';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { edit } from '@/routes/security';
-import type { Props as ManagePasskeysProps } from '@/components/ManagePasskeys.vue';
-import ManagePasskeys from '@/components/ManagePasskeys.vue';
 import type { Props as ManageTwoFactorProps } from '@/components/ManageTwoFactor.vue';
 import ManageTwoFactor from '@/components/ManageTwoFactor.vue';
+// Passkeys deliberadamente ocultos en este frontend (aún no se ofrecen al
+// usuario) — backend/Fortify/WebAuthn intactos, ver .ai/rules/components-js-components.md.
+// El controller sigue enviando `canManagePasskeys`/`passkeys`; para
+// reactivarlo: volver a importar `ManagePasskeys` (tipo y componente), sumar
+// `ManagePasskeysProps` a `Props` abajo y poner `<ManagePasskeys />` después
+// de `<ManageTwoFactor />`.
 
 // oxfmt-ignore
 type Props = {
     passwordRules: string;
-} & ManagePasskeysProps &
-    ManageTwoFactorProps;
+} & ManageTwoFactorProps;
 
 const props = defineProps<Props>();
 
@@ -111,10 +114,5 @@ defineOptions({
         :canManageTwoFactor="canManageTwoFactor"
         :requiresConfirmation="requiresConfirmation"
         :twoFactorEnabled="twoFactorEnabled"
-    />
-
-    <ManagePasskeys
-        :canManagePasskeys="canManagePasskeys"
-        :passkeys="passkeys"
     />
 </template>

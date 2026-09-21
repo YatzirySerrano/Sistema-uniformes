@@ -6,11 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { store } from '@/routes/password/confirm';
-import {
-    index as confirmOptions,
-    store as confirmStore,
-} from '@/actions/Laravel/Passkeys/Http/Controllers/PasskeyConfirmationController';
-import PasskeyVerify from '@/components/PasskeyVerify.vue';
+// Passkey en "Confirmar contraseña" deliberadamente oculto en frontend (aún
+// no se ofrece al usuario) — backend/Fortify/WebAuthn intactos, ver
+// .ai/rules/components-js-components.md. Para reactivarlo: descomentar este import y el
+// import de rutas de abajo, y volver a poner `<PasskeyVerify />` antes del
+// `<Form>`.
+// import {
+//     index as confirmOptions,
+//     store as confirmStore,
+// } from '@/actions/Laravel/Passkeys/Http/Controllers/PasskeyConfirmationController';
+// import PasskeyVerify from '@/components/PasskeyVerify.vue';
 
 defineOptions({
     layout: {
@@ -24,6 +29,7 @@ defineOptions({
 <template>
     <Head title="Confirmar contraseña" />
 
+    <!-- Passkey oculto en frontend, ver comentario junto al import de arriba.
     <PasskeyVerify
         :routes="{
             options: confirmOptions(),
@@ -33,6 +39,7 @@ defineOptions({
         loading-label="Confirmando..."
         separator="O confirma con tu contraseña"
     />
+    -->
 
     <Form
         v-bind="store.form()"
