@@ -74,6 +74,7 @@ const props = defineProps<{
 
 type OpcionContrato = { id: number; nombre: string };
 type OpcionServicio = { id: number; nombre: string; contrato_id: number };
+type OpcionAlmacen = { id: number; nombre: string };
 
 defineOptions({
     layout: {
@@ -112,8 +113,6 @@ watch(
         }
     },
 );
-const estado = ref(props.filtros.estado);
-const condicion = ref(props.filtros.condicion);
 const estadoVisible = ref(props.filtros.estado_visible);
 
 async function buscarEmpresas(termino: string) {
@@ -131,13 +130,34 @@ const servicioSeleccionado = ref<OpcionServicio | null>(null);
 const contratoId = computed(() => contratoSeleccionado.value?.id ?? '');
 const servicioId = computed(() => servicioSeleccionado.value?.id ?? '');
 
+// --- Filtro por Almacén — útil para monitorear unidades de un almacén en
+// concreto; dependiente de la empresa seleccionada (igual que Contrato).
+const almacenSeleccionado = ref<OpcionAlmacen | null>(null);
+const almacenId = computed(() => almacenSeleccionado.value?.id ?? '');
+
 watch(empresaId, () => {
     contratoSeleccionado.value = null;
     servicioSeleccionado.value = null;
+    almacenSeleccionado.value = null;
 });
 watch(contratoSeleccionado, () => {
     servicioSeleccionado.value = null;
 });
+
+async function buscarAlmacenesFiltro(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionAlmacen[]> {
+    const params = new URLSearchParams({ q });
+    if (empresaId.value) params.set('empresa_id', String(empresaId.value));
+    const res = await fetch(`/almacenes/buscar?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal,
+    });
+    if (!res.ok) return [];
+    return (await res.json()).almacenes ?? [];
+}
 
 async function buscarContratosFiltro(
     q: string,
@@ -177,8 +197,7 @@ const hayFiltros = computed(
     () =>
         buscar.value !== '' ||
         empresaId.value !== '' ||
-        estado.value !== '' ||
-        condicion.value !== '' ||
+        almacenId.value !== '' ||
         estadoVisible.value !== '' ||
         contratoId.value !== '' ||
         servicioId.value !== '',
@@ -186,15 +205,7 @@ const hayFiltros = computed(
 
 let temporizador: ReturnType<typeof setTimeout> | undefined;
 watch(
-    [
-        buscar,
-        empresaId,
-        estado,
-        condicion,
-        estadoVisible,
-        contratoId,
-        servicioId,
-    ],
+    [buscar, empresaId, almacenId, estadoVisible, contratoId, servicioId],
     () => {
         clearTimeout(temporizador);
         temporizador = setTimeout(() => {
@@ -203,8 +214,7 @@ watch(
                 {
                     buscar: buscar.value || undefined,
                     empresa_id: empresaId.value || undefined,
-                    estado: estado.value || undefined,
-                    condicion: condicion.value || undefined,
+                    almacen_id: almacenId.value || undefined,
                     estado_visible: estadoVisible.value || undefined,
                     contrato_id: contratoId.value || undefined,
                     servicio_id: servicioId.value || undefined,
@@ -223,8 +233,7 @@ watch(
 function limpiarFiltros(): void {
     buscar.value = '';
     empresaSeleccionada.value = null;
-    estado.value = '';
-    condicion.value = '';
+    almacenSeleccionado.value = null;
     estadoVisible.value = '';
     contratoSeleccionado.value = null;
     servicioSeleccionado.value = null;
@@ -340,6 +349,19 @@ const vista = useVistaPreferida('unidades-activo');
                 </label>
 
                 <label class="flex items-center gap-1.5 text-sm">
+                    <span class="text-muted-foreground">Almacén</span>
+                    <BuscadorAsync
+                        v-model="almacenSeleccionado"
+                        :buscar="buscarAlmacenesFiltro"
+                        :dependencia="empresaId"
+                        :etiqueta="(a) => String(a.nombre)"
+                        placeholder="Todos"
+                        placeholder-busqueda="Buscar almacén…"
+                        class="w-52"
+                    />
+                </label>
+
+                <label class="flex items-center gap-1.5 text-sm">
                     <span class="text-muted-foreground">Estado</span>
                     <div class="w-40">
                         <SelectSimple
@@ -347,47 +369,6 @@ const vista = useVistaPreferida('unidades-activo');
                             :opciones="[
                                 { valor: '', etiqueta: 'Todos' },
                                 ...estadosVisibles,
-                            ]"
-                        />
-                    </div>
-                </label>
-
-                <label class="flex items-center gap-1.5 text-sm">
-                    <span class="text-muted-foreground">Posesión</span>
-                    <div class="w-40">
-                        <SelectSimple
-                            v-model="estado"
-                            :opciones="[
-                                { valor: '', etiqueta: 'Todas' },
-                                { valor: 'en_almacen', etiqueta: 'En almacén' },
-                                { valor: 'asignada', etiqueta: 'Asignada' },
-                                { valor: 'baja', etiqueta: 'Baja' },
-                            ]"
-                        />
-                    </div>
-                </label>
-
-                <label class="flex items-center gap-1.5 text-sm">
-                    <span class="text-muted-foreground">Condición</span>
-                    <div class="w-44">
-                        <SelectSimple
-                            v-model="condicion"
-                            :opciones="[
-                                { valor: '', etiqueta: 'Todas' },
-                                {
-                                    valor: 'funcionando',
-                                    etiqueta: 'Funcionando',
-                                },
-                                {
-                                    valor: 'en_reparacion',
-                                    etiqueta: 'En reparación',
-                                },
-                                {
-                                    valor: 'inservible',
-                                    etiqueta: 'Inservible',
-                                },
-                                { valor: 'perdido', etiqueta: 'Perdido' },
-                                { valor: 'robado', etiqueta: 'Robado' },
                             ]"
                         />
                     </div>
@@ -419,55 +400,61 @@ const vista = useVistaPreferida('unidades-activo');
 
         <div
             v-else-if="vista === 'cards'"
-            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            class="grid grid-cols-[repeat(auto-fit,minmax(17rem,1fr))] gap-3"
         >
             <div
                 v-for="u in unidades.data"
                 :key="u.id"
-                class="flex flex-col gap-2 rounded-xl border p-3"
+                class="flex min-w-0 flex-col gap-2 rounded-xl border p-3"
             >
-                <div class="flex items-start justify-between gap-2">
-                    <label class="flex items-start gap-2">
-                        <input
-                            type="checkbox"
-                            class="mt-1 size-4"
-                            :aria-label="`Seleccionar unidad ${u.codigo}`"
-                            :checked="idsSeleccionados.includes(u.id)"
-                            @change="alternarSeleccion(u.id)"
-                        />
-                        <img
-                            v-if="u.imagen_url"
-                            :src="u.imagen_url"
-                            alt=""
-                            class="size-10 shrink-0 rounded-md border object-cover"
-                        />
-                        <div
-                            v-else
-                            class="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-md border"
+                <label class="flex min-w-0 items-start gap-2">
+                    <input
+                        type="checkbox"
+                        class="mt-1 size-4 shrink-0"
+                        :aria-label="`Seleccionar unidad ${u.codigo}`"
+                        :checked="idsSeleccionados.includes(u.id)"
+                        @change="alternarSeleccion(u.id)"
+                    />
+                    <img
+                        v-if="u.imagen_url"
+                        :src="u.imagen_url"
+                        alt=""
+                        class="size-10 shrink-0 rounded-md border object-cover"
+                    />
+                    <div
+                        v-else
+                        class="bg-muted text-muted-foreground flex size-10 shrink-0 items-center justify-center rounded-md border"
+                    >
+                        <ImageOff class="size-4" />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p
+                            class="font-mono text-sm leading-snug font-medium break-words"
+                            :title="u.codigo"
                         >
-                            <ImageOff class="size-4" />
-                        </div>
-                        <div class="min-w-0">
-                            <p class="truncate font-mono text-sm font-medium">
-                                {{ u.codigo }}
-                            </p>
-                            <p class="text-muted-foreground truncate text-xs">
-                                {{ u.activo ?? '—' }}
-                            </p>
-                            <p
-                                v-if="u.marca_modelo || u.imei_mascara"
-                                class="text-muted-foreground truncate text-xs"
-                            >
-                                {{ u.marca_modelo
-                                }}<span v-if="u.marca_modelo && u.imei_mascara">
-                                    · </span
-                                ><span v-if="u.imei_mascara"
-                                    >IMEI {{ u.imei_mascara }}</span
-                                >
-                            </p>
-                        </div>
-                    </label>
-                </div>
+                            {{ u.codigo }}
+                        </p>
+                        <p
+                            class="text-muted-foreground truncate text-xs"
+                            :title="u.activo ?? undefined"
+                        >
+                            {{ u.activo ?? '—' }}
+                        </p>
+                        <p
+                            v-if="u.marca_modelo"
+                            class="text-muted-foreground truncate text-xs"
+                            :title="u.marca_modelo"
+                        >
+                            {{ u.marca_modelo }}
+                        </p>
+                        <p
+                            v-if="u.imei_mascara"
+                            class="text-muted-foreground truncate text-xs"
+                        >
+                            IMEI {{ u.imei_mascara }}
+                        </p>
+                    </div>
+                </label>
 
                 <div class="flex flex-wrap gap-1.5">
                     <Badge
@@ -486,30 +473,39 @@ const vista = useVistaPreferida('unidades-activo');
                     </Badge>
                 </div>
 
-                <p class="text-muted-foreground text-xs">
+                <p class="text-muted-foreground text-xs break-words">
                     <span v-if="empresasAutorizadas.length > 1 && u.empresa"
                         >{{ u.empresa }} · </span
                     >{{ u.almacen ?? 'Sin almacén' }}
                 </p>
-                <p v-if="u.colaborador" class="text-muted-foreground text-xs">
+                <p
+                    v-if="u.colaborador"
+                    class="text-muted-foreground text-xs break-words"
+                >
                     Con: {{ u.colaborador
                     }}<span v-if="u.numero_empleado">
                         (N.º {{ u.numero_empleado }})</span
                     >
                     · {{ ubicacionServicioTexto(u.ubicacion_operativa) }}
                 </p>
-                <p v-if="u.folio_origen" class="text-muted-foreground text-xs">
+                <p
+                    v-if="u.folio_origen"
+                    class="text-muted-foreground text-xs break-words"
+                >
                     Entrega origen: {{ u.folio_origen }}
                     <span v-if="u.fecha_asignacion"
                         >· {{ u.fecha_asignacion }}</span
                     >
                 </p>
-                <p v-if="u.observaciones" class="text-muted-foreground text-xs">
+                <p
+                    v-if="u.observaciones"
+                    class="text-muted-foreground text-xs break-words"
+                >
                     {{ u.observaciones }}
                 </p>
                 <p
                     v-if="u.estado === 'baja'"
-                    class="text-muted-foreground text-xs"
+                    class="text-muted-foreground text-xs break-words"
                 >
                     Baja: {{ u.dado_de_baja_en ?? '—'
                     }}<span v-if="u.motivo_baja"> · {{ u.motivo_baja }}</span>
