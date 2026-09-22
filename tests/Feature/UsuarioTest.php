@@ -212,6 +212,29 @@ it('rechaza crear un usuario si la confirmación de contraseña no coincide (el 
     Notification::assertNothingSent();
 });
 
+it('crear un usuario Administrador guarda EXACTAMENTE las empresas enviadas, nunca todas las disponibles por backend (la autoselección es sólo UX de frontend)', function () {
+    Notification::fake();
+    $empresaB = Empresa::factory()->create();
+    $empresaC = Empresa::factory()->create();
+
+    // Aunque el rol sea Administrador, el backend nunca debe "completar" el
+    // conjunto de empresas: guarda exactamente lo que llegó en la solicitud.
+    $this->actingAs($this->admin)->post('/usuarios', [
+        'name' => 'Admin Parcial',
+        'email' => 'admin.parcial@empresa.test',
+        'password' => 'Password123',
+        'password_confirmation' => 'Password123',
+        'roles' => [RolSistema::Administrador->value],
+        'empresas' => [$this->empresa->id, $empresaB->id],
+    ])->assertRedirect('/usuarios')->assertSessionHasNoErrors();
+
+    $usuario = User::query()->where('email', 'admin.parcial@empresa.test')->firstOrFail();
+
+    expect($usuario->empresas->pluck('id')->sort()->values()->all())
+        ->toBe(collect([$this->empresa->id, $empresaB->id])->sort()->values()->all())
+        ->and($usuario->empresas->pluck('id'))->not->toContain($empresaC->id);
+});
+
 it('al editar un usuario, dejar la contraseña en blanco no la cambia', function () {
     $objetivo = usuarioCon(RolSistema::Encargado->value, [$this->empresa]);
     $hashOriginal = $objetivo->password;

@@ -44,14 +44,15 @@ const form = useForm<{
     almacen_id: number | null;
     activo_id: number;
     talla_id: number | null;
-    cantidad: number;
+    cantidad: number | '';
     motivo: string;
 }>({
     empresa_id: props.empresaId,
     almacen_id: null,
     activo_id: props.activoId,
     talla_id: null,
-    cantidad: 0,
+    // Vacío a propósito: la cantidad debe ser capturada por el usuario.
+    cantidad: '',
     motivo: '',
 });
 
@@ -61,7 +62,7 @@ watch(
         if (!abierto || !props.contextoFijo) return;
 
         form.clearErrors();
-        form.cantidad = 0;
+        form.cantidad = '';
         form.motivo = '';
         form.almacen_id = props.contextoFijo.almacenId;
         form.talla_id = props.contextoFijo.tallaId;

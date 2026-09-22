@@ -79,6 +79,28 @@ watch([() => form.password, () => form.password_confirmation], () => {
     }
 });
 
+// 'administrador' es el `name` real del rol en Spatie (= RolSistema::Administrador->value,
+// nunca la etiqueta visible "Administrador"): mismo valor que ya llega en `roles[].name`.
+const ROL_ADMINISTRADOR = 'administrador';
+
+// Ayuda de UX SÓLO al CREAR: cuando el rol pasa a incluir Administrador
+// (transición, no un watcher continuo), autoselecciona todas las empresas
+// disponibles una vez, para no obligar a marcarlas una por una. El usuario
+// sigue pudiendo desmarcar cualquiera después — esto nunca vuelve a forzarlas,
+// ni tampoco actúa al pasar de Administrador a otro rol (las selecciones
+// existentes se conservan tal cual). En edición no se toca: las empresas ya
+// asignadas deben seguir cargándose exactamente como llegan del backend.
+if (!esEdicion) {
+    watch(
+        () => form.roles.includes(ROL_ADMINISTRADOR),
+        (esAdministradorAhora, eraAdministradorAntes) => {
+            if (esAdministradorAhora && !eraAdministradorAntes) {
+                form.empresas = props.empresas.map((e) => e.id);
+            }
+        },
+    );
+}
+
 function enviar() {
     if (esEdicion) form.put(`/usuarios/${props.usuario!.id}`);
     else form.post('/usuarios');

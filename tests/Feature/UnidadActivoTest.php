@@ -364,6 +364,22 @@ it('agrega más unidades a un activo de seguimiento individual ya existente desd
     expect(UnidadActivo::query()->where('activo_id', $this->activo->id)->count())->toBe(5);
 });
 
+it('"Agregar existencias" rechaza cantidad vacía, cero, negativa o decimal — nunca crea unidades parciales', function (mixed $cantidadInvalida) {
+    $this->actingAs($this->admin)
+        ->post("/activos/{$this->activo->id}/existencias", [
+            'almacen_id' => $this->almacen->id,
+            'cantidad' => $cantidadInvalida,
+        ])
+        ->assertSessionHasErrors('cantidad');
+
+    expect(UnidadActivo::query()->where('activo_id', $this->activo->id)->count())->toBe(0);
+})->with([
+    'vacía' => [''],
+    'cero' => [0],
+    'negativa' => [-1],
+    'decimal' => [1.5],
+]);
+
 it('agregar existencias con "abrir_etiquetas" deja la URL de etiquetas en flash, sin devolver el PDF en el POST', function () {
     $respuesta = $this->actingAs($this->admin)
         ->post("/activos/{$this->activo->id}/existencias", [
@@ -481,6 +497,32 @@ it('exige motivo para marcar una unidad como dañada', function () {
             'motivo' => '',
         ])
         ->assertSessionHasErrors('motivo');
+
+    expect($unidad->fresh()->condicion)->toBe(CondicionUnidadActivo::Funcionando);
+});
+
+it('rechaza un motivo de sólo espacios al marcar como dañada (nunca lo trata como "presente")', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/danar", [
+            'condicion_resultante' => 'en_reparacion',
+            'motivo' => '   ',
+        ])
+        ->assertSessionHasErrors('motivo');
+
+    expect($unidad->fresh()->condicion)->toBe(CondicionUnidadActivo::Funcionando);
+});
+
+it('exige la condición destino ("Queda como") para marcar una unidad como dañada', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+
+    $this->actingAs($this->admin)
+        ->post("/activos/unidades/{$unidad->public_token}/danar", [
+            'condicion_resultante' => '',
+            'motivo' => 'Pantalla rota',
+        ])
+        ->assertSessionHasErrors('condicion_resultante');
 
     expect($unidad->fresh()->condicion)->toBe(CondicionUnidadActivo::Funcionando);
 });

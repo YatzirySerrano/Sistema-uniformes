@@ -44,7 +44,7 @@ const emit = defineEmits<{ 'update:open': [boolean] }>();
 const form = useForm<{
     almacen_id: number | null;
     talla_id: number | null;
-    cantidad: number;
+    cantidad: number | '';
     motivo: string;
     abrir_etiquetas: boolean;
     especificaciones: EspecificacionUnidad[];
@@ -53,7 +53,9 @@ const form = useForm<{
 }>({
     almacen_id: null,
     talla_id: null,
-    cantidad: 1,
+    // Vacío a propósito: la cantidad debe ser capturada por el usuario, no
+    // asumida — nunca precargar 1 como si fuera un valor ya elegido.
+    cantidad: '',
     motivo: '',
     abrir_etiquetas: false,
     especificaciones: [],
@@ -61,10 +63,17 @@ const form = useForm<{
     imagenes_origen: [],
 });
 
+// `form.cantidad` admite '' mientras el usuario no ha capturado nada
+// todavía (nunca precargado en 1); esta es la única lectura numérica segura
+// para dimensionar los arreglos de abajo.
+const cantidadNumerica = computed(() =>
+    typeof form.cantidad === 'number' ? form.cantidad : 0,
+);
+
 // Gate del bloque "Unidad N": aplica a cualquier alta de unidades, tenga o
 // no perfil técnico — la foto nunca depende de eso.
 const mostrarUnidades = computed(
-    () => props.esSeguimientoIndividual && form.cantidad > 0,
+    () => props.esSeguimientoIndividual && cantidadNumerica.value > 0,
 );
 const mostrarEspecificaciones = computed(
     () => mostrarUnidades.value && !!props.perfilTecnico,
@@ -92,16 +101,16 @@ watch(
         }
         form.especificaciones = mostrarEspecificaciones.value
             ? Array.from(
-                  { length: form.cantidad },
+                  { length: cantidadNumerica.value },
                   (_, i) => form.especificaciones[i] ?? especificacionVacia(),
               )
             : [];
         form.imagenes = Array.from(
-            { length: form.cantidad },
+            { length: cantidadNumerica.value },
             (_, i) => form.imagenes[i] ?? null,
         );
         form.imagenes_origen = Array.from(
-            { length: form.cantidad },
+            { length: cantidadNumerica.value },
             (_, i) => form.imagenes_origen[i] ?? null,
         );
     },

@@ -114,6 +114,17 @@ const formDanar = useForm({
     condicion_resultante: 'en_reparacion',
     motivo: '',
 });
+// El error de un campo debe desaparecer en cuanto el usuario lo corrige —
+// nunca quedarse visible con el valor ya cambiado (patrón ya usado en el
+// resto de diálogos vía `clearErrors()` al editar/reintentar).
+watch(
+    () => formDanar.condicion_resultante,
+    () => formDanar.clearErrors('condicion_resultante'),
+);
+watch(
+    () => formDanar.motivo,
+    () => formDanar.clearErrors('motivo'),
+);
 
 function marcarDanada(): void {
     formDanar.post(`/activos/unidades/${props.unidad.public_token}/danar`, {
@@ -941,7 +952,13 @@ function guardarEquipo(): void {
                 </DialogHeader>
                 <form class="grid gap-3" @submit.prevent="marcarDanada">
                     <div class="grid gap-1.5">
-                        <Label for="danar-condicion">Queda como</Label>
+                        <Label
+                            for="danar-condicion"
+                            class="flex items-center gap-1"
+                        >
+                            Queda como
+                            <span class="text-destructive">*</span>
+                        </Label>
                         <SelectSimple
                             id="danar-condicion"
                             v-model="formDanar.condicion_resultante"
@@ -958,7 +975,13 @@ function guardarEquipo(): void {
                         />
                     </div>
                     <div class="grid gap-1.5">
-                        <Label for="danar-motivo">Motivo</Label>
+                        <Label
+                            for="danar-motivo"
+                            class="flex items-center gap-1"
+                        >
+                            Motivo
+                            <span class="text-destructive">*</span>
+                        </Label>
                         <Input
                             id="danar-motivo"
                             v-model="formDanar.motivo"
