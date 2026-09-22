@@ -37,13 +37,21 @@ it('en reparación es Reparación sin importar el estado de posesión', function
         ->toBe(EstadoVisibleUnidad::Reparacion);
 });
 
-it('inservible se agrupa como Reparación pero NO se convierte en Baja', function () {
+it('inservible es su PROPIO estado visible (NO se agrupa como Reparación) y no se convierte en Baja', function () {
     $unidad = unidadDePrueba(EstadoUnidadActivo::EnAlmacen, CondicionUnidadActivo::Inservible);
 
-    expect($unidad->estadoVisible())->toBe(EstadoVisibleUnidad::Reparacion)
+    expect($unidad->estadoVisible())->toBe(EstadoVisibleUnidad::Inservible)
+        ->and($unidad->estadoVisible())->not->toBe(EstadoVisibleUnidad::Reparacion)
         ->and($unidad->estado)->toBe(EstadoUnidadActivo::EnAlmacen)
         ->and($unidad->condicion)->toBe(CondicionUnidadActivo::Inservible)
         ->and($unidad->esEntregable())->toBeFalse();
+});
+
+it('en reparación (EnReparacion) es Reparación, e Inservible ya NO cuenta en ese mismo bucket', function () {
+    expect(unidadDePrueba(EstadoUnidadActivo::EnAlmacen, CondicionUnidadActivo::EnReparacion)->estadoVisible())
+        ->toBe(EstadoVisibleUnidad::Reparacion)
+        ->and(unidadDePrueba(EstadoUnidadActivo::EnAlmacen, CondicionUnidadActivo::Inservible)->estadoVisible())
+        ->not->toBe(EstadoVisibleUnidad::Reparacion);
 });
 
 it('perdido es Perdido sin importar el estado de posesión', function () {

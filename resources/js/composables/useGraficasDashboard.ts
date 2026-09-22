@@ -99,6 +99,7 @@ const COLORES_ESTADO_UNIDAD: Record<string, string> = {
     disponible: '#10b981', // emerald-500
     asignado: '#3b82f6', // blue-500
     reparacion: '#f59e0b', // amber-500
+    inservible: '#f97316', // orange-500
     perdido: '#f87171', // red-400
     robado: '#dc2626', // red-600
     baja: '#9ca3af', // gray-400 (≈ muted-foreground)

@@ -3,17 +3,24 @@
 use App\Acciones\DarDeBajaUnidadActivo;
 use App\Acciones\RegistrarUnidadesActivo;
 use App\Enums\CondicionUnidadActivo;
+use App\Enums\DireccionMovimiento;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\RolSistema;
+use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\Devolucion;
 use App\Models\Empresa;
+use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioEtiquetasQr;
+use App\Servicios\ServicioUnidadesActivo;
 use App\Soporte\ServicioGeneradorCodigos;
+use Illuminate\Support\Carbon;
+use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
     sembrarRolesPermisos();
@@ -242,10 +249,14 @@ it('el listado expone el estado visible consolidado y permite filtrar por él', 
             ->where('unidades.data.0.estado_visible', 'baja')
         );
 
-    // "Inservible" se agrupa como Reparación en el filtro visible, sin tocar
-    // la columna `condicion` real.
+    // "Inservible" tiene su PROPIO estado visible: ya NO se agrupa como
+    // "Reparación" (que exige condición EnReparacion exacta).
     $this->actingAs($this->admin)
         ->get('/activos/unidades?estado_visible=reparacion')
+        ->assertInertia(fn ($page) => $page->has('unidades.data', 0));
+
+    $this->actingAs($this->admin)
+        ->get('/activos/unidades?estado_visible=inservible')
         ->assertInertia(fn ($page) => $page
             ->has('unidades.data', 1)
             ->where('unidades.data.0.condicion', 'inservible')
@@ -254,6 +265,33 @@ it('el listado expone el estado visible consolidado y permite filtrar por él', 
     $this->actingAs($this->admin)
         ->get('/activos/unidades?estado_visible=disponible')
         ->assertInertia(fn ($page) => $page->has('unidades.data', 1));
+});
+
+it('una devolución que deja la unidad Inservible muestra en el detalle el badge y la descripción de Inservible, NUNCA los de Reparación', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)
+        ->asignada()->create();
+
+    app(ServicioUnidadesActivo::class)->devolver(
+        $unidad, CondicionUnidadActivo::Inservible, $this->almacen->id, $this->admin->id,
+        'App\\Models\\Devolucion', 0,
+    );
+
+    $this->actingAs($this->admin)
+        ->get("/activos/unidades/{$unidad->public_token}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Activos/UnidadDetalle')
+            // La devolución guardó correctamente condicion=Inservible: eso
+            // NO se toca.
+            ->where('unidad.condicion', 'inservible')
+            ->where('unidad.condicion_etiqueta', 'Inservible')
+            // El estado visible (badge + descripción) ya NO es Reparación.
+            ->where('unidad.estado_visible', 'inservible')
+            ->where('unidad.estado_visible_etiqueta', 'Inservible')
+            ->where(
+                'unidad.estado_visible_descripcion',
+                'Fuera de operación y no disponible para uso.',
+            ));
 });
 
 it('genera un PDF de etiquetas para las unidades seleccionadas, con las cabeceras y el contenido correctos', function () {
@@ -625,4 +663,106 @@ it('el alta de unidades sin "abrir_etiquetas" sigue creando las unidades con su 
 
     expect($unidades)->toHaveCount(2)
         ->and($unidades->pluck('public_token')->filter()->unique())->toHaveCount(2);
+});
+
+it('el historial de movimientos de una unidad manda "ocurrido_en" en ISO8601 con offset explícito, para entrega y devolución (nunca una cadena naive)', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+
+    // `config('app.timezone')` es UTC: estas dos instancias representan lo
+    // mismo que guardaría la BD para una entrega y una devolución reales.
+    $entregaEn = Carbon::create(2026, 9, 21, 18, 28, 2, 'UTC');
+    $devolucionEn = Carbon::create(2026, 9, 21, 18, 34, 36, 'UTC');
+
+    MovimientoInventario::factory()->create([
+        'empresa_id' => $this->empresa->id, 'almacen_id' => $this->almacen->id, 'activo_id' => $this->activo->id,
+        'unidad_activo_id' => $unidad->id, 'tipo' => TipoMovimiento::Entrega, 'direccion' => DireccionMovimiento::Salida,
+        'motivo' => 'Entrega ENT-2026-000005', 'ocurrido_en' => $entregaEn,
+    ]);
+    MovimientoInventario::factory()->create([
+        'empresa_id' => $this->empresa->id, 'almacen_id' => $this->almacen->id, 'activo_id' => $this->activo->id,
+        'unidad_activo_id' => $unidad->id, 'tipo' => TipoMovimiento::Devolucion, 'direccion' => DireccionMovimiento::Entrada,
+        'motivo' => 'Devolución DEV-2026-000003 confirmada', 'ocurrido_en' => $devolucionEn,
+    ]);
+
+    // orderByDesc('ocurrido_en'): la devolución (más reciente) va primero.
+    $this->actingAs($this->admin)
+        ->get("/activos/unidades/{$unidad->public_token}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('movimientos.0.ocurrido_en', $devolucionEn->toIso8601String())
+            ->where('movimientos.1.ocurrido_en', $entregaEn->toIso8601String()));
+
+    // La cadena SIEMPRE trae offset (nunca naive): un `new Date(iso)` en el
+    // navegador la interpreta sin ambigüedad como el instante UTC real, en
+    // vez de leerla como si ya fuera hora local (el bug original).
+    expect($devolucionEn->toIso8601String())->toMatch('/[+-]\d{2}:\d{2}$/')
+        ->and($entregaEn->toIso8601String())->toMatch('/[+-]\d{2}:\d{2}$/');
+
+    // Y la conversión real a la zona de presentación desplaza la hora — es
+    // justo lo que `resources/js/lib/fecha.ts::fechaHora()` hace en el
+    // navegador con esa misma cadena: 18:34 UTC -> 12:34 en
+    // America/Mexico_City (UTC-6).
+    expect($devolucionEn->copy()->tz('America/Mexico_City')->format('H:i'))->toBe('12:34')
+        ->and($entregaEn->copy()->tz('America/Mexico_City')->format('H:i'))->toBe('12:28');
+});
+
+it('el historial de movimientos incluye una referencia navegable a la Entrega y a la Devolución relacionadas, pero no a la carga inicial', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+    $entrega = EntregaUniforme::factory()->for($this->empresa)->create();
+    $devolucion = Devolucion::factory()->for($this->empresa)->create();
+
+    // `ocurrido_en` explícito y creciente: el orden esperado (`orderByDesc`)
+    // no debe depender de la precisión de `now()` entre creaciones.
+    MovimientoInventario::factory()->create([
+        'empresa_id' => $this->empresa->id, 'almacen_id' => $this->almacen->id, 'activo_id' => $this->activo->id,
+        'unidad_activo_id' => $unidad->id, 'tipo' => TipoMovimiento::Inicial, 'direccion' => DireccionMovimiento::Entrada,
+        'referencia_tipo' => 'alta_unidad', 'referencia_id' => null, 'motivo' => 'Alta inicial del activo',
+        'ocurrido_en' => Carbon::create(2026, 9, 17, 21, 39, 0, 'UTC'),
+    ]);
+    MovimientoInventario::factory()->create([
+        'empresa_id' => $this->empresa->id, 'almacen_id' => $this->almacen->id, 'activo_id' => $this->activo->id,
+        'unidad_activo_id' => $unidad->id, 'tipo' => TipoMovimiento::Entrega, 'direccion' => DireccionMovimiento::Salida,
+        'referencia_tipo' => EntregaUniforme::class, 'referencia_id' => $entrega->id, 'motivo' => "Entrega {$entrega->folio}",
+        'ocurrido_en' => Carbon::create(2026, 9, 21, 18, 28, 0, 'UTC'),
+    ]);
+    MovimientoInventario::factory()->create([
+        'empresa_id' => $this->empresa->id, 'almacen_id' => $this->almacen->id, 'activo_id' => $this->activo->id,
+        'unidad_activo_id' => $unidad->id, 'tipo' => TipoMovimiento::Devolucion, 'direccion' => DireccionMovimiento::Entrada,
+        'referencia_tipo' => Devolucion::class, 'referencia_id' => $devolucion->id, 'motivo' => "Devolución {$devolucion->folio} confirmada",
+        'ocurrido_en' => Carbon::create(2026, 9, 21, 18, 34, 0, 'UTC'),
+    ]);
+
+    $this->actingAs($this->admin)
+        ->get("/activos/unidades/{$unidad->public_token}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('movimientos.0.referencia.tipo', 'devolucion')
+            ->where('movimientos.0.referencia.etiqueta', "Devolución {$devolucion->folio}")
+            ->where('movimientos.0.referencia.url', route('devoluciones.show', $devolucion))
+            ->where('movimientos.1.referencia.tipo', 'entrega')
+            ->where('movimientos.1.referencia.etiqueta', "Entrega {$entrega->folio}")
+            ->where('movimientos.1.referencia.url', route('entregas.show', $entrega))
+            ->where('movimientos.2.referencia', null));
+});
+
+it('la referencia navegable es null si el usuario no tiene permiso para ver la entrega/devolución referida (nunca expone un link no autorizado)', function () {
+    $unidad = UnidadActivo::factory()->for($this->empresa)->for($this->activo)->for($this->almacen)->create();
+    $entrega = EntregaUniforme::factory()->for($this->empresa)->create();
+
+    MovimientoInventario::factory()->create([
+        'empresa_id' => $this->empresa->id, 'almacen_id' => $this->almacen->id, 'activo_id' => $this->activo->id,
+        'unidad_activo_id' => $unidad->id, 'tipo' => TipoMovimiento::Entrega, 'direccion' => DireccionMovimiento::Salida,
+        'referencia_tipo' => EntregaUniforme::class, 'referencia_id' => $entrega->id, 'motivo' => "Entrega {$entrega->folio}",
+    ]);
+
+    // Rol a medida con acceso a la unidad (unidades-activo.ver) pero SIN
+    // entregas.ver: puede ver el historial, pero no el destino del link.
+    Role::findOrCreate('qa_sin_entregas', 'web')
+        ->syncPermissions(['unidades-activo.ver']);
+    $usuarioSinEntregas = usuarioCon('qa_sin_entregas', [$this->empresa]);
+
+    $this->actingAs($usuarioSinEntregas)
+        ->get("/activos/unidades/{$unidad->public_token}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('movimientos.0.referencia', null));
 });

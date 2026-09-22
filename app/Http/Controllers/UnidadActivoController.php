@@ -24,8 +24,11 @@ use App\Http\Requests\Activos\RecuperarUnidadRequest;
 use App\Http\Requests\Activos\RestaurarCondicionUnidadRequest;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\Devolucion;
+use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
 use App\Models\UnidadActivo;
+use App\Models\User;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioEtiquetasQr;
 use App\Servicios\ServicioEvidencias;
@@ -115,6 +118,7 @@ class UnidadActivoController extends Controller
                 'estado_visible' => $filtros['estado_visible'] ?? '',
                 'contrato_id' => $filtros['contrato_id'] ?? null,
                 'servicio_id' => $filtros['servicio_id'] ?? null,
+                'no_disponible' => (bool) ($filtros['no_disponible'] ?? false),
             ],
             'estadosVisibles' => collect(EstadoVisibleUnidad::cases())
                 ->map(fn (EstadoVisibleUnidad $e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()]),
@@ -219,7 +223,7 @@ class UnidadActivoController extends Controller
 
         $porVisible = $unidades->countBy(fn (UnidadActivo $u): string => $u->estadoVisible()->value);
 
-        // Recorre SIEMPRE los 6 casos del enum (orden estable) en vez de las
+        // Recorre SIEMPRE los 7 casos del enum (orden estable) en vez de las
         // claves presentes en `$porVisible` — así la dona no reordena sus
         // colores entre exportaciones cuando falta algún estado.
         $estados = collect(EstadoVisibleUnidad::cases())->filter(
@@ -251,6 +255,11 @@ class UnidadActivoController extends Controller
             'estado_visible' => ['nullable', Rule::enum(EstadoVisibleUnidad::class)],
             'contrato_id' => ['nullable', 'integer'],
             'servicio_id' => ['nullable', 'integer'],
+            // Filtro autocontenido para el KPI "No disponibles" del detalle
+            // del Activo: MISMA definición exacta que su contador
+            // (`ActivoController::show()`) — evita que la cifra y el
+            // listado que abre el KPI muestren conjuntos distintos.
+            'no_disponible' => ['nullable', 'boolean'],
         ]);
     }
 
@@ -290,6 +299,13 @@ class UnidadActivoController extends Controller
             ->when($filtros['estado'] ?? null, fn (Builder $q, $v) => $q->where('estado', $v))
             ->when($filtros['condicion'] ?? null, fn (Builder $q, $v) => $q->where('condicion', $v))
             ->when($filtros['estado_visible'] ?? null, fn (Builder $q, $v) => $this->aplicarFiltroEstadoVisible($q, $v))
+            // "En almacén, condición distinta de Funcionando" — MISMAS dos
+            // condiciones que `ActivoController::show()` usa para contar el
+            // KPI "No disponibles", para que la cifra y este listado nunca
+            // se desalineen.
+            ->when($filtros['no_disponible'] ?? false, fn (Builder $q) => $q
+                ->where('estado', EstadoUnidadActivo::EnAlmacen)
+                ->where('condicion', '!=', CondicionUnidadActivo::Funcionando))
             // Filtra por la ubicación operativa VIGENTE del colaborador
             // asignado (nunca por un dato propio de la unidad — no existe).
             ->when($filtros['servicio_id'] ?? null, fn (Builder $q, $v) => $q->whereHas('colaborador', fn (Builder $c) => $c->where('servicio_actual_id', $v)))
@@ -314,7 +330,9 @@ class UnidadActivoController extends Controller
             EstadoVisibleUnidad::Perdido => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
                 ->where('condicion', CondicionUnidadActivo::Perdido),
             EstadoVisibleUnidad::Reparacion => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
-                ->whereIn('condicion', [CondicionUnidadActivo::EnReparacion, CondicionUnidadActivo::Inservible]),
+                ->where('condicion', CondicionUnidadActivo::EnReparacion),
+            EstadoVisibleUnidad::Inservible => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->where('condicion', CondicionUnidadActivo::Inservible),
             EstadoVisibleUnidad::Asignado => $q->where('estado', EstadoUnidadActivo::Asignada)
                 ->where('condicion', CondicionUnidadActivo::Funcionando),
             EstadoVisibleUnidad::Disponible => $q->where('estado', EstadoUnidadActivo::EnAlmacen)
@@ -340,15 +358,36 @@ class UnidadActivoController extends Controller
 
         $perfil = $unidad->perfilTecnico();
 
-        $movimientos = MovimientoInventario::query()
+        $movimientosUnidad = MovimientoInventario::query()
             ->where('unidad_activo_id', $unidad->id)
             ->orderByDesc('ocurrido_en')
-            ->get()
-            ->map(fn (MovimientoInventario $m): array => [
-                'tipo' => $m->tipo->etiqueta(),
-                'motivo' => $m->motivo,
-                'ocurrido_en' => $m->ocurrido_en->toDateTimeString(),
-            ]);
+            ->get();
+
+        // Precarga en 2 consultas (nunca una por movimiento dentro del
+        // ->map() de abajo) las entregas/devoluciones referidas por el
+        // historial, para resolver la referencia navegable sin N+1.
+        $entregasReferidas = EntregaUniforme::query()
+            ->whereIn('id', $movimientosUnidad->where('referencia_tipo', EntregaUniforme::class)->pluck('referencia_id'))
+            ->get()->keyBy('id');
+        $devolucionesReferidas = Devolucion::query()
+            ->whereIn('id', $movimientosUnidad->where('referencia_tipo', Devolucion::class)->pluck('referencia_id'))
+            ->get()->keyBy('id');
+
+        $usuarioActual = $request->user();
+
+        $movimientos = $movimientosUnidad->map(fn (MovimientoInventario $m): array => [
+            'tipo' => $m->tipo->etiqueta(),
+            'motivo' => $m->motivo,
+            // ISO8601 con offset (nunca `toDateTimeString()`, que da una
+            // cadena naive sin zona): el frontend la interpreta con
+            // `fechaHora()` en la zona de presentación (`zonaHoraria`).
+            'ocurrido_en' => $m->ocurrido_en->toIso8601String(),
+            // Referencia navegable (Entrega/Devolución) para el botón "Ver"
+            // del historial. Null cuando el movimiento no viene de una de
+            // esas dos operaciones (p. ej. alta inicial) o cuando el usuario
+            // no tiene permiso para ver ese recurso concreto.
+            'referencia' => $this->referenciaNavegable($m, $usuarioActual, $entregasReferidas, $devolucionesReferidas),
+        ]);
 
         return Inertia::render('Activos/UnidadDetalle', [
             'unidad' => [
@@ -402,6 +441,51 @@ class UnidadActivoController extends Controller
                 'administrar' => $request->user()->can('administrar', $unidad),
             ],
         ]);
+    }
+
+    /**
+     * Referencia navegable del movimiento (Entrega/Devolución) para el botón
+     * "Ver" del historial — mismo patrón que
+     * `MovimientoInventarioController::referenciaDetalle()`, acotado aquí a
+     * los dos tipos que el historial de una unidad puede mostrar con botón.
+     * Nunca se arma navegando por texto/folio: usa `referencia_tipo`/
+     * `referencia_id` del movimiento (IDs reales) contra colecciones YA
+     * precargadas (ver `show()`, evita N+1). Devuelve `null` si el
+     * movimiento no viene de una entrega/devolución (p. ej. alta inicial) o
+     * si el usuario no tiene permiso para ver ese recurso concreto — en ese
+     * caso el frontend simplemente no pinta el botón.
+     *
+     * @param  Collection<int, EntregaUniforme>  $entregasReferidas
+     * @param  Collection<int, Devolucion>  $devolucionesReferidas
+     * @return array{tipo: string, etiqueta: string, url: string}|null
+     */
+    private function referenciaNavegable(
+        MovimientoInventario $m,
+        User $usuario,
+        Collection $entregasReferidas,
+        Collection $devolucionesReferidas,
+    ): ?array {
+        if ($m->referencia_tipo === EntregaUniforme::class) {
+            $entrega = $entregasReferidas->get($m->referencia_id);
+
+            if ($entrega === null || ! $usuario->can('view', $entrega)) {
+                return null;
+            }
+
+            return ['tipo' => 'entrega', 'etiqueta' => "Entrega {$entrega->folio}", 'url' => route('entregas.show', $entrega)];
+        }
+
+        if ($m->referencia_tipo === Devolucion::class) {
+            $devolucion = $devolucionesReferidas->get($m->referencia_id);
+
+            if ($devolucion === null || ! $usuario->can('view', $devolucion)) {
+                return null;
+            }
+
+            return ['tipo' => 'devolucion', 'etiqueta' => "Devolución {$devolucion->folio}", 'url' => route('devoluciones.show', $devolucion)];
+        }
+
+        return null;
     }
 
     /**

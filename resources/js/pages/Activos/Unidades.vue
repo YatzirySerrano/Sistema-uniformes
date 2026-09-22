@@ -68,6 +68,7 @@ const props = defineProps<{
         estado_visible: string;
         contrato_id: number | null;
         servicio_id: number | null;
+        no_disponible: boolean;
     };
     permisos: { administrar: boolean };
 }>();

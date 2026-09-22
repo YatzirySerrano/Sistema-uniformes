@@ -255,7 +255,7 @@ function alternarEstado(c: Colaborador): void {
                 />
                 <Input
                     v-model="buscar"
-                    placeholder="Buscar por nombre o número de empleado"
+                    placeholder="Buscar por nombre, número de empleado o CURP"
                     class="pl-8"
                 />
             </div>

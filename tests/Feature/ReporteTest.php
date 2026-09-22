@@ -530,6 +530,7 @@ it('Reportes > Inventario sólo muestra 5 KPIs — el desglose completo de unida
             ->missing('kpis.Unidades perdidas')
             ->missing('kpis.Unidades robadas')
             ->missing('kpis.Unidades en baja')
-            // La gráfica "Unidades por estado" sí sigue trayendo el desglose completo.
-            ->has('graficas.unidades_por_estado', 6));
+            // La gráfica "Unidades por estado" sí sigue trayendo el desglose
+            // completo (7: Reparación e Inservible son estados separados).
+            ->has('graficas.unidades_por_estado', 7));
 });

@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { varianteBadgeEstadoEntrega } from '@/lib/estadoEntrega';
-import { fechaHora } from '@/lib/fecha';
+import { fechaHora, fechaNegocio } from '@/lib/fecha';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 
 const props = defineProps<{
@@ -165,7 +165,13 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                 </p>
                 <p>
                     <span class="text-muted-foreground">Fecha de entrega:</span>
-                    {{ entrega.fecha_entrega }}
+                    {{ fechaNegocio(entrega.fecha_entrega) }}
+                </p>
+                <p v-if="acuse">
+                    <span class="text-muted-foreground"
+                        >Fecha y hora de firma:</span
+                    >
+                    {{ fechaHora(acuse.firmado_en) }}
                 </p>
                 <p v-if="acuse">
                     <span class="text-muted-foreground">Acuse:</span>

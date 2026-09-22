@@ -710,10 +710,20 @@ class ActivoController extends Controller
                 $fila->estado->value => (int) $fila->getAttribute('total'),
             ]);
 
-        // "En almacén" = presencia física (incluye unidades no entregables);
-        // "no_disponibles" desglosa cuántas de esas NO pueden asignarse ahora
-        // (condición distinta de Funcionando) — nunca se resta de "en_almacen",
-        // sólo aclara la cifra. Misma regla central que `esEntregable()`.
+        // "En almacén" y "no_disponibles" son MUTUAMENTE EXCLUYENTES: una
+        // misma unidad física nunca cuenta en ambas a la vez (antes "en
+        // almacén" sumaba TODA la presencia física, incluidas las no
+        // disponibles, y el usuario lo leía como doble conteo). "En almacén"
+        // = disponible de verdad para entrega (misma regla que
+        // `esEntregable()`/`EstadoVisibleUnidad::Disponible`: estado EnAlmacen
+        // + condición Funcionando). "no_disponibles" = el resto de las
+        // unidades en almacén (condición distinta de Funcionando: en
+        // reparación, inservible, perdida o robada sin haberse asignado).
+        $enAlmacenDisponibles = ! $esIndividual ? 0 : $activo->unidades()
+            ->where('estado', EstadoUnidadActivo::EnAlmacen)
+            ->where('condicion', CondicionUnidadActivo::Funcionando)
+            ->count();
+
         $noDisponiblesEnAlmacen = ! $esIndividual ? 0 : $activo->unidades()
             ->where('estado', EstadoUnidadActivo::EnAlmacen)
             ->where('condicion', '!=', CondicionUnidadActivo::Funcionando)
@@ -738,7 +748,7 @@ class ActivoController extends Controller
             'resumenCantidades' => $estadoCantidades['resumen'] ?? null,
             'desgloseCantidades' => $estadoCantidades['desglose'] ?? null,
             'resumenUnidades' => $resumenUnidades === null ? null : [
-                'en_almacen' => (int) ($resumenUnidades['en_almacen'] ?? 0),
+                'en_almacen' => $enAlmacenDisponibles,
                 'no_disponibles' => $noDisponiblesEnAlmacen,
                 'asignada' => (int) ($resumenUnidades['asignada'] ?? 0),
                 'baja' => (int) ($resumenUnidades['baja'] ?? 0),

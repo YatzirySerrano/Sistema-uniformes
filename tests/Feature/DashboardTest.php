@@ -115,20 +115,23 @@ it('calcula los KPIs, series y alertas del dashboard para la empresa filtrada', 
             ->has('resumen.series.entregas_por_periodo', 30)
             ->has('resumen.series.devoluciones_por_periodo', 30)
             ->has('resumen.series.movimientos_por_periodo', 30)
-            // Las 6 categorías de EstadoVisibleUnidad, en el mismo orden.
-            ->has('resumen.series.unidades_por_estado', 6)
+            // Las 7 categorías de EstadoVisibleUnidad, en el mismo orden
+            // (Reparación e Inservible son estados separados).
+            ->has('resumen.series.unidades_por_estado', 7)
             ->where('resumen.series.unidades_por_estado.0.estado', 'disponible')
             ->where('resumen.series.unidades_por_estado.0.total', 1)
             ->where('resumen.series.unidades_por_estado.1.estado', 'asignado')
             ->where('resumen.series.unidades_por_estado.1.total', 1)
             ->where('resumen.series.unidades_por_estado.2.estado', 'reparacion')
             ->where('resumen.series.unidades_por_estado.2.total', 1)
-            ->where('resumen.series.unidades_por_estado.3.estado', 'perdido')
-            ->where('resumen.series.unidades_por_estado.3.total', 1)
-            ->where('resumen.series.unidades_por_estado.4.estado', 'robado')
+            ->where('resumen.series.unidades_por_estado.3.estado', 'inservible')
+            ->where('resumen.series.unidades_por_estado.3.total', 0)
+            ->where('resumen.series.unidades_por_estado.4.estado', 'perdido')
             ->where('resumen.series.unidades_por_estado.4.total', 1)
-            ->where('resumen.series.unidades_por_estado.5.estado', 'baja')
-            ->where('resumen.series.unidades_por_estado.5.total', 0)
+            ->where('resumen.series.unidades_por_estado.5.estado', 'robado')
+            ->where('resumen.series.unidades_por_estado.5.total', 1)
+            ->where('resumen.series.unidades_por_estado.6.estado', 'baja')
+            ->where('resumen.series.unidades_por_estado.6.total', 0)
             ->has('resumen.stock_bajo_detalle', 1)
             ->has('resumen.entregas_recientes', 1),
         );

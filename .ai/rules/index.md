@@ -31,6 +31,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/pages/Activos/Detalle.vue,resources/js/pages/Inventario/Index.vue,resources/js/components/sistema/AgregarExistenciasDialog.vue | .ai/rules/inventario-js-components-sistema.md |
 | resources/js/composables/useVistaPreferida.ts,resources/js/components/sistema/SelectorVista.vue | .ai/rules/js-components-sistema.md |
 | resources/js/pages/auth/Login.vue,resources/js/components/PasskeyVerify.vue | .ai/rules/js-components.md |
+| app/Enums/EstadoVisibleUnidad.php,app/Http/Controllers/UnidadActivoController.php,app/Soporte/PaletaGraficas.php,resources/js/lib/estadoVisibleUnidad.ts,resources/js/composables/useGraficasDashboard.ts | .ai/rules/js-composables.md |
 | app/Http/Requests/Entregas/GuardarEntregaRequest.php,app/Http/Controllers/EntregaController.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/js-pages-entregas.md |
 | app/Soporte/FechaHora.php,app/Soporte/ContextoExportacion.php,resources/views/acuses/*.blade.php,resources/views/reportes/*.blade.php,resources/js/lib/fecha.ts | .ai/rules/lib.md |
 | app/Models/Area.php,database/migrations/*areas*.php,app/Servicios/ServicioImportacionColaboradores.php | .ai/rules/migrations-servicios.md |

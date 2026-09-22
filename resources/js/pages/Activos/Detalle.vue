@@ -516,7 +516,7 @@ function confirmarMinimoMasivo(): void {
                         <Boxes class="text-muted-foreground size-4" />
                         Unidades
                         <AyudaTooltip
-                            texto="Cada unidad de este activo tiene su propio código generado por el sistema y su propio QR. «En almacén» cuenta presencia física (incluye unidades no disponibles); «No disponibles» son las que están en almacén pero no pueden asignarse (en reparación / inservibles). El estado de posesión y la condición física se gestionan por unidad."
+                            texto="Cada unidad de este activo tiene su propio código generado por el sistema y su propio QR. «En almacén» son las que están físicamente en el almacén y disponibles para entrega; «No disponibles» están en el almacén pero no pueden asignarse ahora (en reparación, inservibles, perdidas o robadas sin haberse asignado). Ninguna unidad cuenta en ambas a la vez. El estado de posesión y la condición física se gestionan por unidad."
                             etiqueta="Ayuda sobre unidades"
                         />
                     </h2>
@@ -546,7 +546,7 @@ function confirmarMinimoMasivo(): void {
                     class="grid grid-cols-2 gap-3 text-center sm:grid-cols-4"
                 >
                     <Link
-                        :href="`/activos/unidades?activo_id=${activo.id}&estado=en_almacen`"
+                        :href="`/activos/unidades?activo_id=${activo.id}&estado_visible=disponible`"
                         class="bg-muted/40 hover:bg-muted focus-visible:ring-ring rounded-lg p-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                     >
                         <p class="text-2xl font-semibold">
@@ -562,7 +562,7 @@ function confirmarMinimoMasivo(): void {
                         </p>
                     </Link>
                     <Link
-                        :href="`/activos/unidades?activo_id=${activo.id}&estado=en_almacen&estado_visible=reparacion`"
+                        :href="`/activos/unidades?activo_id=${activo.id}&no_disponible=1`"
                         class="bg-muted/40 hover:bg-muted focus-visible:ring-ring rounded-lg p-3 transition-colors focus-visible:ring-2 focus-visible:outline-none"
                     >
                         <p class="text-2xl font-semibold">

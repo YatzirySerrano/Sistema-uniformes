@@ -55,6 +55,7 @@ final class PaletaGraficas
             EstadoVisibleUnidad::Disponible => '#10b981',
             EstadoVisibleUnidad::Asignado => '#3b82f6',
             EstadoVisibleUnidad::Reparacion => '#f59e0b',
+            EstadoVisibleUnidad::Inservible => '#f97316',
             EstadoVisibleUnidad::Perdido => '#f87171',
             EstadoVisibleUnidad::Robado => '#dc2626',
             EstadoVisibleUnidad::Baja => '#9ca3af',

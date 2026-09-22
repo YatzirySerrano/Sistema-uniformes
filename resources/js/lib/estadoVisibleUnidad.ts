@@ -8,6 +8,7 @@ export type EstadoVisibleUnidadValor =
     | 'disponible'
     | 'asignado'
     | 'reparacion'
+    | 'inservible'
     | 'perdido'
     | 'robado'
     | 'baja';
@@ -19,6 +20,8 @@ const CLASES: Record<EstadoVisibleUnidadValor, string> = {
         'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900',
     reparacion:
         'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900',
+    inservible:
+        'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900',
     perdido:
         'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300 dark:border-red-900',
     robado: 'bg-red-600 text-white border-red-700 dark:bg-red-700 dark:border-red-800',
@@ -37,6 +40,7 @@ const CLASES_RELLENO: Record<EstadoVisibleUnidadValor, string> = {
     disponible: 'bg-emerald-500',
     asignado: 'bg-blue-500',
     reparacion: 'bg-amber-500',
+    inservible: 'bg-orange-500',
     perdido: 'bg-red-400',
     robado: 'bg-red-600',
     baja: 'bg-muted-foreground/40',

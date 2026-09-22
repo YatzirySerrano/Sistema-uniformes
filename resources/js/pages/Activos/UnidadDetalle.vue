@@ -13,6 +13,7 @@ import {
     Wrench,
 } from '@lucide/vue';
 import { ref, watch } from 'vue';
+import BotonVer from '@/components/sistema/BotonVer.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import InputError from '@/components/InputError.vue';
@@ -30,6 +31,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { fechaHora } from '@/lib/fecha';
 
 type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
 
@@ -85,6 +87,7 @@ const props = defineProps<{
         tipo: string;
         motivo: string | null;
         ocurrido_en: string;
+        referencia: { tipo: string; etiqueta: string; url: string } | null;
     }[];
     condicionesIncidencia: { valor: string; etiqueta: string }[];
     condicionesRecuperacion: { valor: string; etiqueta: string }[];
@@ -627,13 +630,20 @@ function guardarEquipo(): void {
                     <li
                         v-for="(m, i) in movimientos"
                         :key="i"
-                        class="border-t pt-2 first:border-t-0 first:pt-0"
+                        class="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-t pt-2 first:border-t-0 first:pt-0"
                     >
-                        <p class="font-medium">{{ m.tipo }}</p>
-                        <p class="text-muted-foreground text-xs">
-                            {{ m.ocurrido_en }}
-                            <span v-if="m.motivo"> · {{ m.motivo }}</span>
-                        </p>
+                        <div class="min-w-0">
+                            <p class="font-medium">{{ m.tipo }}</p>
+                            <p class="text-muted-foreground text-xs">
+                                {{ fechaHora(m.ocurrido_en) }}
+                                <span v-if="m.motivo"> · {{ m.motivo }}</span>
+                            </p>
+                        </div>
+                        <BotonVer
+                            v-if="m.referencia"
+                            :href="m.referencia.url"
+                            class="shrink-0"
+                        />
                     </li>
                 </ul>
             </section>
