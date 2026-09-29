@@ -2,7 +2,7 @@
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Calendar, ChevronLeft, ChevronRight, Plus, Trash2 } from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
-import { computed, nextTick, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
 import ApartadoTemporalBanner from '@/components/sistema/ApartadoTemporalBanner.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
@@ -58,6 +58,34 @@ type CustodiaPropia = {
  * custodia (no descuenta stock). Lo decide el backend por permisos.
  */
 type OrigenEntrega = 'almacen' | 'custodia';
+
+/**
+ * Redistribución en nombre de un colaborador dentro de la revisión de su
+ * cambio de servicio: la custodia es la de ÉL (`custodio`), no la del usuario.
+ */
+type ContextoCambioServicio = {
+    id: number;
+    custodio: CustodiaPropia;
+    destinatario:
+        | (OpcionColaborador & { sucursal: OpcionSucursal | null })
+        | null;
+};
+
+/** Conjunto recibido que sigue (completo o no) en la custodia. */
+type OpcionConjuntoCustodia = {
+    id: number;
+    conjunto_id: number;
+    nombre: string;
+    completos: number;
+    componentes: {
+        activo_id: number;
+        activo: string;
+        talla: string | null;
+        requerido: number;
+        disponible: number;
+        individual: boolean;
+    }[];
+};
 
 type OpcionActivo = {
     id: number;
@@ -171,8 +199,11 @@ const props = defineProps<{
     encargado: { name: string; email: string };
     /** Vías habilitadas por los permisos efectivos del usuario. */
     origenes: { almacen: boolean; custodia: boolean };
-    /** Empresas donde el usuario tiene custodia propia (modo `custodia`). */
-    custodias: CustodiaPropia[];
+    /** Ficha de colaborador vinculada a la cuenta ("mi custodia"), si hay. */
+    custodiaPropia: CustodiaPropia | null;
+    /** Tiene `entregas.redistribuir` pero su cuenta no representa a ninguna ficha. */
+    redistribuirSinVinculo: boolean;
+    contextoCambioServicio: ContextoCambioServicio | null;
     textoConsentimiento: string;
     /**
      * Fecha de negocio "de hoy" ("Y-m-d"), calculada en el servidor con la
@@ -212,9 +243,20 @@ const paso = ref<1 | 2 | 3>(1);
 // ------------------------------------------------------------------
 // Empresa → Sucursal → Colaborador → Almacén de origen
 // ------------------------------------------------------------------
-const empresaSel = ref<OpcionEmpresa | null>(null);
-const sucursalSel = ref<OpcionSucursal | null>(null);
-const colaboradorSel = ref<OpcionColaborador | null>(null);
+// En modo custodia la empresa es la del custodio (1:1) y el destinatario
+// puede venir sugerido por la revisión de cambio de servicio.
+const custodioEfectivo: CustodiaPropia | null =
+    props.contextoCambioServicio?.custodio ?? props.custodiaPropia;
+const inicioEnCustodia = !props.origenes.almacen && props.origenes.custodia;
+const destinatarioSugerido = props.contextoCambioServicio?.destinatario ?? null;
+
+const empresaSel = ref<OpcionEmpresa | null>(
+    inicioEnCustodia ? (custodioEfectivo?.empresa ?? null) : null,
+);
+const sucursalSel = ref<OpcionSucursal | null>(
+    destinatarioSugerido?.sucursal ?? null,
+);
+const colaboradorSel = ref<OpcionColaborador | null>(destinatarioSugerido);
 const almacenSel = ref<OpcionAlmacen | null>(null);
 const empresaId = computed(() => empresaSel.value?.id ?? null);
 const sucursalId = computed(() => sucursalSel.value?.id ?? null);
@@ -227,12 +269,27 @@ const ambosOrigenes = computed(
     () => props.origenes.almacen && props.origenes.custodia,
 );
 
-// Custodia propia en la empresa elegida (su registro de colaborador). En modo
-// custodia es el ÚNICO origen posible de los bienes; el backend lo vuelve a
-// resolver por su cuenta — nunca confía en esto.
-const custodioActual = computed<CustodiaPropia | null>(
-    () => props.custodias.find((c) => c.empresa.id === empresaId.value) ?? null,
+// Sin ninguna vía posible (p. ej. puede redistribuir pero su cuenta no está
+// vinculada a una ficha y no puede entregar desde almacén).
+const sinOrigen = !props.origenes.almacen && !props.origenes.custodia;
+
+// Custodia de la que salen los bienes en la empresa elegida. En modo custodia
+// es el ÚNICO origen posible; el backend lo vuelve a resolver por su cuenta —
+// nunca confía en esto.
+const custodioActual = computed<CustodiaPropia | null>(() =>
+    custodioEfectivo !== null && custodioEfectivo.empresa.id === empresaId.value
+        ? custodioEfectivo
+        : null,
 );
+
+/** Parámetro extra de los buscadores de custodia (revisión de servicio). */
+const paramContexto = props.contextoCambioServicio
+    ? `&cambio_servicio_id=${props.contextoCambioServicio.id}`
+    : '';
+
+// Estado vacío: vinculado pero sin nada disponible — nunca se ofrece el
+// inventario del almacén como sustituto.
+const custodiaVacia = ref(false);
 
 // ¿Ya hay de dónde tomar bienes? (almacén elegido, o custodia propia).
 const origenListo = computed(() =>
@@ -249,7 +306,9 @@ function cambiarModo(m: OrigenEntrega): void {
     if (modo.value === m) return;
     modo.value = m;
     form.origen = m;
-    alElegirEmpresa(null);
+    alElegirEmpresa(
+        m === 'custodia' ? (custodioEfectivo?.empresa ?? null) : null,
+    );
 }
 
 // --- Servicio operativo de destino de ESTA entrega (snapshot histórico) ---
@@ -265,15 +324,14 @@ async function buscarEmpresas(
     signal?: AbortSignal,
 ): Promise<OpcionEmpresa[]> {
     if (esCustodia.value) {
-        // Filtro local: sólo empresas donde el usuario tiene custodia propia.
+        // La custodia es de UNA ficha (1:1): sólo su empresa.
         const termino = q.trim().toLowerCase();
-        return props.custodias
-            .map((c) => c.empresa)
-            .filter((e) =>
+        return (custodioEfectivo ? [custodioEfectivo.empresa] : []).filter(
+            (e) =>
                 `${e.nombre_comercial} ${e.codigo ?? ''}`
                     .toLowerCase()
                     .includes(termino),
-            );
+        );
     }
     const res = await fetch(`/empresas/buscar?q=${encodeURIComponent(q)}`, {
         headers: { Accept: 'application/json' },
@@ -397,6 +455,7 @@ function limpiarRenglones(): void {
     activosUI.splice(0, activosUI.length);
     unidadesUI.splice(0, unidadesUI.length);
     conjuntosUI.splice(0, conjuntosUI.length);
+    conjuntosCustodiaUI.splice(0, conjuntosCustodiaUI.length);
     disponibilidad.value = {};
     limpiarDisponibilidadConjuntos();
 }
@@ -431,6 +490,7 @@ type FilaConjunto = {
 
 const form = useForm<{
     origen: OrigenEntrega;
+    cambio_servicio_id: number | null;
     colaborador_id: number | '';
     almacen_id: number | null;
     fecha_entrega: string;
@@ -444,7 +504,8 @@ const form = useForm<{
     idempotency_key: string;
 }>({
     origen: modo.value,
-    colaborador_id: '',
+    cambio_servicio_id: props.contextoCambioServicio?.id ?? null,
+    colaborador_id: destinatarioSugerido?.id ?? '',
     almacen_id: null,
     fecha_entrega: hoy,
     notas: '',
@@ -531,7 +592,7 @@ async function cargarDisponibilidad(): Promise<void> {
     disponibilidad.value = {};
     if (empresaId.value === null || !origenListo.value) return;
     const url = esCustodia.value
-        ? `/entregas/custodia/disponibilidad?empresa_id=${empresaId.value}`
+        ? `/entregas/custodia/disponibilidad?empresa_id=${empresaId.value}${paramContexto}`
         : `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&token=${reserva.token.value}`;
     const res = await fetch(url, {
         headers: { Accept: 'application/json' },
@@ -544,7 +605,12 @@ async function cargarDisponibilidad(): Promise<void> {
             talla_id: number | null;
             disponible: number;
         }[];
+        total_unidades?: number;
     };
+    if (esCustodia.value) {
+        custodiaVacia.value =
+            json.saldos.length === 0 && (json.total_unidades ?? 0) === 0;
+    }
     const mapa: Record<string, number> = {};
     for (const s of json.saldos) {
         mapa[`${s.activo_id}-${s.talla_id ?? '0'}`] = s.disponible;
@@ -562,7 +628,7 @@ async function buscarActivosCantidad(
     if (empresaId.value === null || !origenListo.value) return [];
     const res = await fetch(
         esCustodia.value
-            ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=cantidad&q=${encodeURIComponent(q)}`
+            ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=cantidad&q=${encodeURIComponent(q)}${paramContexto}`
             : `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&control=cantidad&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
@@ -646,7 +712,7 @@ async function buscarActivosIndividual(
     if (empresaId.value === null || !origenListo.value) return [];
     const res = await fetch(
         esCustodia.value
-            ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=individual&q=${encodeURIComponent(q)}`
+            ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=individual&q=${encodeURIComponent(q)}${paramContexto}`
             : `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&control=individual&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
@@ -672,7 +738,7 @@ function buscarUnidades(i: number) {
         if (!activoId || !origenListo.value) return [];
         const res = await fetch(
             esCustodia.value
-                ? `/entregas/custodia/unidades?empresa_id=${empresaId.value}&activo_id=${activoId}&q=${encodeURIComponent(q)}`
+                ? `/entregas/custodia/unidades?empresa_id=${empresaId.value}&activo_id=${activoId}&q=${encodeURIComponent(q)}${paramContexto}`
                 : `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenSel.value?.id}&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
             {
                 headers: { Accept: 'application/json' },
@@ -876,6 +942,59 @@ function alElegirVarianteComponenteConjunto(
     void recalcularDisponibilidadConjunto(i);
 }
 
+// --- Conjuntos desde custodia -----------------------------------------
+// Sólo los conjuntos que el custodio recibió como tal; se entregan completos
+// (sus componentes reales). Uno incompleto se muestra con su desglose para
+// que sus piezas se entreguen por separado — nunca se inventan cantidades.
+const conjuntosCustodiaUI = reactive<{ sel: OpcionConjuntoCustodia | null }[]>(
+    [],
+);
+
+async function buscarConjuntosCustodia(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionConjuntoCustodia[]> {
+    if (empresaId.value === null || !origenListo.value) return [];
+    const res = await fetch(
+        `/entregas/custodia/conjuntos?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}${paramContexto}`,
+        {
+            headers: { Accept: 'application/json' },
+            credentials: 'same-origin',
+            signal,
+        },
+    );
+    if (!res.ok) return [];
+    return (await res.json()).conjuntos ?? [];
+}
+
+function conjuntoCustodiaIncompleto(
+    item: OpcionConjuntoCustodia,
+): string | false {
+    return item.completos > 0
+        ? false
+        : 'Incompleto en tu custodia: entrega sus piezas por separado';
+}
+
+function agregarConjuntoCustodia(): void {
+    form.conjuntos.push({ conjunto_id: '', cantidad: 1, variantes: {} });
+    conjuntosCustodiaUI.push({ sel: null });
+}
+
+function quitarConjuntoCustodia(i: number): void {
+    form.conjuntos.splice(i, 1);
+    conjuntosCustodiaUI.splice(i, 1);
+}
+
+function alElegirConjuntoCustodia(
+    i: number,
+    o: OpcionConjuntoCustodia | null,
+): void {
+    conjuntosCustodiaUI[i].sel = o;
+    form.conjuntos[i].conjunto_id = o?.conjunto_id ?? '';
+    form.conjuntos[i].cantidad = 1;
+    form.clearErrors(`conjuntos.${i}.conjunto_id`, `conjuntos.${i}.cantidad`);
+}
+
 // ------------------------------------------------------------------
 // Paso 3 — Documento de identidad + firmas
 // ------------------------------------------------------------------
@@ -948,8 +1067,20 @@ const problemasPaso2 = computed<string[]>(() => {
         }
     });
 
+    if (esCustodia.value) {
+        form.conjuntos.forEach((fila, i) => {
+            const sel = conjuntosCustodiaUI[i]?.sel;
+            if (fila.conjunto_id === '' || !sel) return;
+            if (fila.cantidad < 1 || fila.cantidad > sel.completos) {
+                problemas.push(
+                    `Conjunto «${sel.nombre}»: en tu custodia hay ${sel.completos} completo(s).`,
+                );
+            }
+        });
+    }
+
     form.conjuntos.forEach((fila, i) => {
-        if (fila.conjunto_id === '') return;
+        if (esCustodia.value || fila.conjunto_id === '') return;
         const nombre = conjuntosUI[i]?.sel?.nombre ?? 'Conjunto';
 
         if (fila.cantidad < 1) {
@@ -1123,17 +1254,23 @@ function enviar(): void {
         origen: modo.value,
         reserva_token: esCustodia.value ? null : reserva.token.value,
         almacen_id: esCustodia.value ? null : datos.almacen_id,
+        cambio_servicio_id: esCustodia.value ? datos.cambio_servicio_id : null,
         activos: datos.activos.filter((fila) => fila.activo_id !== ''),
         unidades: datos.unidades.filter((fila) => fila.unidad_activo_id !== ''),
-        // Los conjuntos son plantillas de salida de almacén.
-        conjuntos: esCustodia.value
-            ? []
-            : datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
+        conjuntos: datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
     })).post('/entregas', {
         preserveScroll: true,
         onError: () => irAPasoConError(),
     });
 }
+
+// Modo custodia con la empresa ya fijada (la del custodio): se consulta de
+// inmediato qué hay disponible para mostrar el estado vacío si no hay nada.
+onMounted(() => {
+    if (esCustodia.value && empresaSel.value !== null) {
+        void cargarDisponibilidad();
+    }
+});
 </script>
 
 <template>
@@ -1197,7 +1334,26 @@ function enviar(): void {
             </div>
         </section>
 
-        <p v-if="esCustodia" class="bg-muted/40 rounded-lg border p-3 text-sm">
+        <p
+            v-if="contextoCambioServicio"
+            class="bg-muted/40 rounded-lg border p-3 text-sm"
+        >
+            Estás redistribuyendo la custodia de
+            <span class="font-medium">{{
+                contextoCambioServicio.custodio.nombre_completo
+            }}</span>
+            como parte de la revisión de su cambio de servicio. Al firmar
+            volverás a esa revisión.
+            <Link
+                :href="`/cambios-servicio/${contextoCambioServicio.id}`"
+                class="ml-1 underline underline-offset-2"
+                >Volver a la revisión</Link
+            >
+        </p>
+        <p
+            v-else-if="esCustodia && !sinOrigen"
+            class="bg-muted/40 rounded-lg border p-3 text-sm"
+        >
             Estás
             <span class="font-medium"
                 >redistribuyendo activos bajo tu custodia</span
@@ -1205,13 +1361,17 @@ function enviar(): void {
             reduce tu custodia y queda registrada a nombre del colaborador que
             la recibe.
         </p>
+
+        <!-- Puede redistribuir pero su cuenta no representa a ninguna ficha -->
         <p
-            v-if="esCustodia && custodias.length === 0"
+            v-if="redistribuirSinVinculo"
             class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
         >
-            Tu cuenta no está ligada a un registro de colaborador, así que no
-            tienes activos bajo custodia que redistribuir. Pide a un
-            administrador que vincule tu usuario con tu ficha de colaborador.
+            Tu cuenta no está vinculada a una ficha de colaborador, así que no
+            puedes entregar desde tu custodia{{
+                origenes.almacen ? ' (sí desde un almacén)' : ''
+            }}. Pide a un administrador que vincule tu cuenta desde la ficha del
+            colaborador.
         </p>
 
         <!-- Indicador de pasos -->
@@ -1252,7 +1412,7 @@ function enviar(): void {
             </li>
         </ol>
 
-        <form class="space-y-6" @submit.prevent="enviar">
+        <form v-if="!sinOrigen" class="space-y-6" @submit.prevent="enviar">
             <!-- ============ PASO 1 · Datos ============ -->
             <section
                 v-show="paso === 1"
@@ -1264,6 +1424,7 @@ function enviar(): void {
                         id="empresa"
                         :model-value="empresaSel"
                         :buscar="buscarEmpresas"
+                        :disabled="esCustodia"
                         :etiqueta="(e) => (e as OpcionEmpresa).nombre_comercial"
                         :descripcion="(e) => (e as OpcionEmpresa).codigo ?? ''"
                         placeholder="Selecciona una empresa"
@@ -1486,6 +1647,13 @@ function enviar(): void {
                     <p class="text-muted-foreground text-sm">
                         No aparecen los que ya entregaste, devolviste o
                         reportaste: sólo lo que hoy sigue a tu cargo.
+                    </p>
+                    <p
+                        v-if="custodiaVacia"
+                        class="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+                    >
+                        Actualmente no tienes activos bajo custodia disponibles
+                        para entregar.
                     </p>
                 </div>
 
@@ -2084,6 +2252,130 @@ function enviar(): void {
                                 {{ c.faltantes ?? c.requeridas_total }}
                             </p>
                         </div>
+                    </div>
+                    <p
+                        v-if="origenListo && !form.conjuntos.length"
+                        class="text-muted-foreground text-sm"
+                    >
+                        Sin conjuntos agregados.
+                    </p>
+                </section>
+                <!-- Conjuntos recibidos que siguen en la custodia -->
+                <section
+                    v-if="esCustodia"
+                    class="space-y-3 rounded-xl border p-4"
+                >
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <h2 class="text-sm font-semibold">
+                                Conjuntos en tu custodia
+                            </h2>
+                            <p class="text-muted-foreground mt-0.5 text-xs">
+                                Entrega conjuntos que recibiste completos: se
+                                transfieren sus piezas y unidades reales. Si a
+                                un conjunto le falta algo, entrega sus piezas
+                                por separado arriba.
+                            </p>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            class="shrink-0"
+                            :disabled="!origenListo"
+                            @click="agregarConjuntoCustodia"
+                        >
+                            <Plus class="size-4" /> Agregar conjunto
+                        </Button>
+                    </div>
+
+                    <div
+                        v-for="(fila, i) in form.conjuntos"
+                        :key="i"
+                        class="grid grid-cols-1 gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_110px_auto] sm:items-start"
+                    >
+                        <div class="min-w-0">
+                            <BuscadorAsync
+                                :model-value="conjuntosCustodiaUI[i]?.sel"
+                                :buscar="buscarConjuntosCustodia"
+                                :dependencia="claveOrigen"
+                                :deshabilitar-opcion="
+                                    (c) =>
+                                        conjuntoCustodiaIncompleto(
+                                            c as OpcionConjuntoCustodia,
+                                        )
+                                "
+                                :etiqueta="
+                                    (c) => (c as OpcionConjuntoCustodia).nombre
+                                "
+                                :descripcion="
+                                    (c) =>
+                                        `Completos en tu custodia: ${(c as OpcionConjuntoCustodia).completos}`
+                                "
+                                placeholder="Conjunto…"
+                                placeholder-busqueda="Buscar conjunto"
+                                sin-resultados="No tienes conjuntos recibidos en tu custodia."
+                                :invalido="
+                                    !!erroresLaxos[`conjuntos.${i}.conjunto_id`]
+                                "
+                                @update:model-value="
+                                    (v) =>
+                                        alElegirConjuntoCustodia(
+                                            i,
+                                            v as OpcionConjuntoCustodia | null,
+                                        )
+                                "
+                            />
+                            <InputError
+                                :message="
+                                    erroresLaxos[`conjuntos.${i}.conjunto_id`]
+                                "
+                            />
+                            <ul
+                                v-if="conjuntosCustodiaUI[i]?.sel"
+                                class="text-muted-foreground mt-2 space-y-0.5 text-xs"
+                            >
+                                <li
+                                    v-for="c in conjuntosCustodiaUI[i]?.sel
+                                        ?.componentes ?? []"
+                                    :key="`${c.activo_id}-${c.talla ?? ''}`"
+                                    :class="
+                                        c.disponible < c.requerido
+                                            ? 'text-destructive'
+                                            : ''
+                                    "
+                                >
+                                    {{ c.activo
+                                    }}{{ c.talla ? ` ${c.talla}` : '' }}:
+                                    {{ c.disponible }}/{{ c.requerido }} por
+                                    conjunto
+                                </li>
+                            </ul>
+                        </div>
+                        <div>
+                            <Input
+                                v-model.number="fila.cantidad"
+                                type="number"
+                                min="1"
+                                :max="conjuntosCustodiaUI[i]?.sel?.completos"
+                                class="h-9"
+                                aria-label="Cantidad de conjuntos"
+                            />
+                            <InputError
+                                :message="
+                                    erroresLaxos[`conjuntos.${i}.cantidad`]
+                                "
+                            />
+                        </div>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Quitar conjunto"
+                            @click="quitarConjuntoCustodia(i)"
+                        >
+                            <Trash2 class="size-4" />
+                        </Button>
                     </div>
                     <p
                         v-if="origenListo && !form.conjuntos.length"

@@ -21,6 +21,7 @@ import {
 import { ref } from 'vue';
 import CambiarEmpresaDialog from '@/components/colaboradores/CambiarEmpresaDialog.vue';
 import CambiarFotoDialog from '@/components/colaboradores/CambiarFotoDialog.vue';
+import CuentaAccesoPanel from '@/components/colaboradores/CuentaAccesoPanel.vue';
 import CustodiaPanel from '@/components/colaboradores/CustodiaPanel.vue';
 import DialogCambiarServicio from '@/components/colaboradores/DialogCambiarServicio.vue';
 import ExpedienteExplorer from '@/components/colaboradores/ExpedienteExplorer.vue';
@@ -119,11 +120,19 @@ const props = defineProps<{
     puedeVerEntregas: boolean;
     puedeVerDevoluciones: boolean;
     puedeReportarIncidenciaCustodia: boolean;
+    puedeRegistrarDevoluciones: boolean;
     expediente: ExpedientePayload | null;
     custodia: {
         pendientes: PendienteFila[];
         incidencias: IncidenciaFila[];
     };
+    /** Sólo llega si el usuario puede ver la cuenta asociada. */
+    cuenta: {
+        usuario: { id: number; name: string; email: string } | null;
+        puede_administrar: boolean;
+    } | null;
+    /** Revisión de custodia de un cambio de servicio todavía abierta. */
+    cambioServicioEnCurso: number | null;
 }>();
 
 defineOptions({
@@ -486,6 +495,26 @@ const modalEmpresa = ref(false);
             </button>
         </div>
 
+        <p
+            v-if="cambioServicioEnCurso"
+            class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+        >
+            Hay un cambio de servicio en curso: falta resolver su custodia antes
+            de completarlo.
+            <Link
+                :href="`/cambios-servicio/${cambioServicioEnCurso}`"
+                class="ml-1 font-medium underline underline-offset-2"
+                >Continuar la revisión</Link
+            >
+        </p>
+
+        <CuentaAccesoPanel
+            v-if="seccion === 'resumen' && cuenta"
+            :colaborador-id="colaborador.id"
+            :usuario="cuenta.usuario"
+            :puede-administrar="cuenta.puede_administrar"
+        />
+
         <section v-if="seccion === 'resumen'" class="rounded-xl border p-4">
             <h2 class="mb-3 flex items-center gap-2 text-sm font-semibold">
                 <ScrollText class="text-muted-foreground size-4" />
@@ -645,6 +674,7 @@ const modalEmpresa = ref(false);
             :colaborador-id="colaborador.id"
             :empresa-id="colaborador.empresa_id"
             :servicio-actual="colaborador.servicio_actual"
+            :puede-registrar-devoluciones="puedeRegistrarDevoluciones"
         />
 
         <CambiarEmpresaDialog

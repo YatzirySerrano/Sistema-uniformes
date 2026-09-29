@@ -12,6 +12,7 @@ use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Entregas\GuardarEntregaRequest;
 use App\Http\Requests\Entregas\GuardarIdentidadEntregaRequest;
+use App\Models\CambioServicioColaborador;
 use App\Models\Colaborador;
 use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
@@ -225,29 +226,61 @@ class EntregaController extends Controller
         $this->authorize('create', EntregaUniforme::class);
 
         $usuario = $request->user();
+        $puedeRedistribuir = $usuario->can('redistribuir', EntregaUniforme::class);
+
+        // Redistribución en nombre de un colaborador dentro de la revisión de
+        // su cambio de servicio (`?cambio_servicio=`): la custodia es la de
+        // ÉL, no la del usuario, y sólo con permiso efectivo para hacerlo.
+        $contexto = null;
+        if ($request->filled('cambio_servicio')) {
+            $cambio = CambioServicioColaborador::query()
+                ->with(['colaborador.empresa:id,codigo,nombre_comercial', 'colaborador.sucursal:id,nombre'])
+                ->findOrFail($request->integer('cambio_servicio'));
+            $this->authorize('redistribuirCustodia', $cambio);
+
+            $destinatario = $request->filled('destinatario')
+                ? Colaborador::query()
+                    ->where('empresa_id', $cambio->empresa_id)
+                    ->where('activo', true)
+                    ->with(['sucursal:id,nombre', 'servicioActual:id,nombre,contrato_id', 'servicioActual.contrato:id,nombre'])
+                    ->find($request->integer('destinatario'))
+                : null;
+
+            $contexto = [
+                'id' => $cambio->id,
+                'custodio' => $this->opcionCustodio($cambio->colaborador),
+                'destinatario' => $destinatario === null ? null : [
+                    'id' => $destinatario->id,
+                    'nombre_completo' => $destinatario->nombre_completo,
+                    'numero_empleado' => $destinatario->numero_empleado,
+                    'empresa_id' => $destinatario->empresa_id,
+                    'sucursal_id' => $destinatario->sucursal_id,
+                    'sucursal' => $destinatario->sucursal === null ? null : ['id' => $destinatario->sucursal->id, 'nombre' => $destinatario->sucursal->nombre],
+                    'servicio_actual' => $destinatario->servicioActual === null ? null : [
+                        'id' => $destinatario->servicioActual->id,
+                        'nombre' => $destinatario->servicioActual->nombre,
+                        'contrato' => ['id' => $destinatario->servicioActual->contrato->id, 'nombre' => $destinatario->servicioActual->contrato->nombre],
+                    ],
+                ],
+            ];
+        }
+
+        // "Mi custodia" = la ficha de colaborador vinculada a esta cuenta.
+        // Sin vínculo no se ofrece como origen válido (nunca se adivina).
+        $vinculado = $puedeRedistribuir ? $custodia->colaboradorVinculado($usuario) : null;
 
         return Inertia::render('Entregas/Crear', [
-            // Vías disponibles para ESTE usuario según sus permisos efectivos:
-            // salida de almacén y/o redistribución de su propia custodia.
+            // Vías disponibles para ESTE usuario según sus permisos efectivos
+            // y su vínculo con una ficha de colaborador — nunca por rol.
             'origenes' => [
-                'almacen' => $usuario->can('entregarDesdeAlmacen', EntregaUniforme::class),
-                'custodia' => $usuario->can('redistribuir', EntregaUniforme::class),
+                'almacen' => $contexto === null && $usuario->can('entregarDesdeAlmacen', EntregaUniforme::class),
+                'custodia' => $contexto !== null || $vinculado !== null,
             ],
-            // Empresas donde el usuario TIENE custodia propia (su registro de
-            // colaborador): el selector de empresa del modo "custodia" sólo
-            // ofrece éstas. Sin registro ligado, la lista viene vacía y la
-            // pantalla lo explica — nunca se inventa una custodia.
-            'custodias' => $usuario->can('redistribuir', EntregaUniforme::class)
-                ? $custodia->custodiosDeUsuario($usuario)->map(fn (Colaborador $c): array => [
-                    'colaborador_id' => $c->id,
-                    'nombre_completo' => $c->nombre_completo,
-                    'empresa' => [
-                        'id' => $c->empresa_id,
-                        'codigo' => $c->empresa?->codigo,
-                        'nombre_comercial' => $c->empresa?->nombre_comercial,
-                    ],
-                ])->values()->all()
-                : [],
+            // Tiene el permiso de redistribuir pero su cuenta no representa a
+            // ninguna ficha: la pantalla lo explica en vez de ofrecerlo.
+            'redistribuirSinVinculo' => $contexto === null && $puedeRedistribuir && $vinculado === null,
+            'custodiaPropia' => $vinculado === null ? null : $this->opcionCustodio($vinculado),
+            'contextoCambioServicio' => $contexto,
             // El flujo único termina SIEMPRE en la firma dentro de la misma
             // pantalla; el encargado que firma es el usuario autenticado.
             'encargado' => [
@@ -508,7 +541,37 @@ class EntregaController extends Controller
         return response()->json([
             'saldos' => $saldos,
             'custodio' => ['id' => $custodio->id, 'nombre_completo' => $custodio->nombre_completo],
+            // Para el estado vacío: sin piezas NI unidades no hay nada que
+            // entregar (nunca se cae al inventario del almacén).
+            'total_unidades' => $custodia->unidadesRedistribuibles($custodio)->count(),
         ]);
+    }
+
+    /**
+     * Conjuntos recibidos que el usuario (o el colaborador revisado) todavía
+     * tiene, con el desglose real por componente y cuántos están completos.
+     */
+    public function custodiaConjuntos(Request $request, ServicioCustodiaColaborador $custodia): JsonResponse
+    {
+        $this->authorize('redistribuir', EntregaUniforme::class);
+
+        $custodio = $this->custodioDesdeRequest($request, $custodia);
+
+        if ($custodio === null) {
+            return response()->json(['conjuntos' => []]);
+        }
+
+        $termino = Str::lower(trim((string) $request->query('q', '')));
+
+        $conjuntos = array_values(array_map(
+            fn (array $f): array => ['id' => $f['conjunto_id'], ...$f],
+            array_filter(
+                $custodia->conjuntosRedistribuibles($custodio),
+                fn (array $f): bool => $termino === '' || str_contains(Str::lower($f['nombre']), $termino),
+            ),
+        ));
+
+        return response()->json(['conjuntos' => $conjuntos]);
     }
 
     /**
@@ -520,7 +583,35 @@ class EntregaController extends Controller
     {
         $empresaId = (int) $request->query('empresa_id', 0);
 
+        if ($request->filled('cambio_servicio_id')) {
+            $cambio = CambioServicioColaborador::query()->with('colaborador.sucursal')->find($request->integer('cambio_servicio_id'));
+
+            return $cambio !== null
+                && $request->user()->can('redistribuirCustodia', $cambio)
+                && $cambio->empresa_id === $empresaId
+                    ? $cambio->colaborador
+                    : null;
+        }
+
         return $empresaId > 0 ? $custodia->custodioDeUsuario($request->user(), $empresaId) : null;
+    }
+
+    /**
+     * @return array{colaborador_id: int, nombre_completo: string, empresa: array{id: int, codigo: string|null, nombre_comercial: string|null}}
+     */
+    private function opcionCustodio(Colaborador $colaborador): array
+    {
+        $colaborador->loadMissing('empresa:id,codigo,nombre_comercial');
+
+        return [
+            'colaborador_id' => $colaborador->id,
+            'nombre_completo' => $colaborador->nombre_completo,
+            'empresa' => [
+                'id' => $colaborador->empresa_id,
+                'codigo' => $colaborador->empresa?->codigo,
+                'nombre_comercial' => $colaborador->empresa?->nombre_comercial,
+            ],
+        ];
     }
 
     /**
@@ -580,6 +671,7 @@ class EntregaController extends Controller
         // ligado al usuario autenticado (resuelta en el backend); nunca un
         // custodio que venga del formulario.
         $custodioOrigenId = $request->esRedistribucion() ? $request->custodio()?->getKey() : null;
+        $cambioServicio = $request->esRedistribucion() ? $request->cambioServicio() : null;
 
         // Idempotencia: un doble submit o un reintento de red no debe registrar
         // dos entregas. La clave la genera el formulario (una por intento).
@@ -659,6 +751,13 @@ class EntregaController extends Controller
         }
 
         $entrega = $acuse->entrega;
+
+        if ($cambioServicio !== null) {
+            return to_route('cambios-servicio.show', $cambioServicio)->with('toast', [
+                'type' => 'success',
+                'message' => "Redistribución {$entrega->folio} firmada. Revisa el estado de la custodia pendiente.",
+            ]);
+        }
 
         return to_route('entregas.show', $entrega)->with('toast', [
             'type' => 'success',

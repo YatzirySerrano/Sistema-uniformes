@@ -29,6 +29,8 @@ const props = defineProps<{
         nombre: string;
         contrato: { id: number; nombre: string };
     } | null;
+    /** `devoluciones.crear` (misma Policy que la pantalla de Devoluciones). */
+    puedeRegistrarDevoluciones: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -42,23 +44,19 @@ const contratoSel = ref<ContratoOpcion | null>(
 const servicioSel = ref<ServicioOpcion | null>(null);
 const dejarSinServicio = ref(false);
 
-// Custodia pendiente: mientras el colaborador conserve bienes asignados, NO
-// puede salir de su servicio actual (la ubicación de esos bienes se deriva
-// del servicio). Misma fuente que el cambio de empresa
-// (`GET colaboradores/{id}/custodia`); el backend lo vuelve a verificar bajo
-// candado al confirmar.
+// Custodia: si el colaborador tiene bienes asignados, el cambio NO se aplica
+// directo — se abre una revisión donde se decide bien por bien qué se
+// mantiene con él, qué se devuelve y qué se redistribuye. Misma fuente que el
+// cambio de empresa (`GET colaboradores/{id}/custodia`); el backend decide
+// de nuevo al confirmar.
 const revisandoCustodia = ref(false);
 const errorCustodia = ref<string | null>(null);
 const resumenCustodia = ref<string[]>([]);
-const bloqueadoPorCustodia = computed(
-    () => props.servicioActual !== null && resumenCustodia.value.length > 0,
-);
+const requiereRevision = computed(() => resumenCustodia.value.length > 0);
 
 async function revisarCustodia(): Promise<void> {
     resumenCustodia.value = [];
     errorCustodia.value = null;
-    // Sin servicio actual no hay ubicación de la que "salgan" los bienes.
-    if (props.servicioActual === null) return;
 
     revisandoCustodia.value = true;
     try {
@@ -153,7 +151,6 @@ async function buscarServicios(termino: string, signal?: AbortSignal) {
 
 const puedeGuardar = computed(
     () =>
-        !bloqueadoPorCustodia.value &&
         !revisandoCustodia.value &&
         errorCustodia.value === null &&
         (dejarSinServicio.value || servicioSel.value !== null),
@@ -167,7 +164,7 @@ const errorNegocio = computed(
 function enviar(): void {
     if (!puedeGuardar.value) return;
 
-    form.post(`/colaboradores/${props.colaboradorId}/servicio`, {
+    form.post(`/colaboradores/${props.colaboradorId}/cambios-servicio`, {
         preserveScroll: true,
         onSuccess: () => {
             emit('guardado');
@@ -184,10 +181,10 @@ function enviar(): void {
                 <DialogTitle>Cambiar servicio</DialogTitle>
                 <DialogDescription>
                     Actualiza únicamente la ubicación operativa vigente del
-                    colaborador. No crea ni modifica entregas, devoluciones ni
-                    asignaciones de activos. Si tiene bienes bajo custodia,
-                    primero hay que devolverlos o entregarlos a quien quede como
-                    responsable.
+                    colaborador. Si tiene bienes bajo custodia, antes de
+                    completar el cambio revisarás cuáles se mantienen con él,
+                    cuáles se devuelven al almacén y cuáles se entregan a quien
+                    quede como responsable.
                 </DialogDescription>
             </DialogHeader>
 
@@ -223,28 +220,33 @@ function enviar(): void {
                     {{ errorCustodia }}
                 </p>
                 <div
-                    v-else-if="bloqueadoPorCustodia"
-                    class="space-y-2 rounded-lg border border-red-500/40 bg-red-50/60 p-3 text-sm dark:bg-red-950/30"
-                    role="alert"
+                    v-else-if="requiereRevision"
+                    class="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+                    role="status"
                 >
                     <p
-                        class="flex items-start gap-2 font-medium text-red-700 dark:text-red-400"
+                        class="flex items-start gap-2 font-medium text-amber-700 dark:text-amber-400"
                     >
                         <CircleAlert class="mt-0.5 size-4 shrink-0" />
-                        No es posible cambiar el servicio mientras el
-                        colaborador tenga bienes bajo custodia.
+                        El colaborador tiene bienes bajo custodia. Al continuar
+                        decidirás qué pasa con cada uno antes de completar el
+                        cambio.
                     </p>
                     <ul class="list-disc space-y-0.5 pl-6">
                         <li v-for="linea in resumenCustodia" :key="linea">
                             {{ linea }}
                         </li>
                     </ul>
-                    <p class="text-muted-foreground text-xs">
-                        Resuélvelo con una devolución al almacén o entregándolos
-                        a quien quede como responsable (redistribución). Después
-                        podrás cambiar el servicio.
-                    </p>
-                    <Button as-child variant="outline" size="sm">
+                    <!-- Atajo opcional (mismo destino que "Transferir a otra
+                         empresa"): registrar ya las devoluciones que se sepa
+                         que regresan al almacén. No es obligatorio: la
+                         revisión de custodia sigue disponible. -->
+                    <Button
+                        v-if="puedeRegistrarDevoluciones"
+                        as-child
+                        variant="outline"
+                        size="sm"
+                    >
                         <Link
                             :href="`/devoluciones/crear?colaborador_id=${props.colaboradorId}`"
                             >Ir a Devoluciones</Link
@@ -338,7 +340,11 @@ function enviar(): void {
                         type="submit"
                         :disabled="form.processing || !puedeGuardar"
                     >
-                        Confirmar cambio
+                        {{
+                            requiereRevision
+                                ? 'Revisar custodia y continuar'
+                                : 'Confirmar cambio'
+                        }}
                     </Button>
                 </DialogFooter>
             </form>

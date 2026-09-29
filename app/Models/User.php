@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -77,11 +77,16 @@ class User extends Authenticatable implements MustVerifyEmailContract, PasskeyUs
     }
 
     /**
-     * @return HasMany<Colaborador, $this>
+     * Ficha de colaborador que esta cuenta REPRESENTA (1:1, índice único en
+     * `colaboradores.usuario_id`). Da significado inequívoco a "mi custodia"
+     * al redistribuir. Se administra desde la ficha del colaborador
+     * ("Cuenta de acceso asociada"); nunca se infiere por nombre o correo.
+     *
+     * @return HasOne<Colaborador, $this>
      */
-    public function colaboradores(): HasMany
+    public function colaborador(): HasOne
     {
-        return $this->hasMany(Colaborador::class, 'usuario_id');
+        return $this->hasOne(Colaborador::class, 'usuario_id');
     }
 
     public function esSuperadministrador(): bool

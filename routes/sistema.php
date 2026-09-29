@@ -7,6 +7,7 @@ use App\Http\Controllers\AcuseTraspasoController;
 use App\Http\Controllers\AlmacenController;
 use App\Http\Controllers\AreaController;
 use App\Http\Controllers\BitacoraController;
+use App\Http\Controllers\CambioServicioController;
 use App\Http\Controllers\CatalogoActivoController;
 use App\Http\Controllers\CategoriaActivoController;
 use App\Http\Controllers\ColaboradorController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\ConfiguracionController;
 use App\Http\Controllers\ConjuntoController;
 use App\Http\Controllers\ContratoController;
 use App\Http\Controllers\CorreccionEntregaController;
+use App\Http\Controllers\CuentaColaboradorController;
 use App\Http\Controllers\DevolucionController;
 use App\Http\Controllers\DocumentoExpedienteController;
 use App\Http\Controllers\EmpresaController;
@@ -64,6 +66,19 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/{colaborador}/custodia', [ColaboradorController::class, 'custodiaPendiente'])->name('colaboradores.custodia');
     Route::post('colaboradores/{colaborador}/custodia/incidencia', [ColaboradorController::class, 'registrarIncidenciaCustodia'])->name('colaboradores.custodia.incidencia');
     Route::post('colaboradores/{colaborador}/cambiar-empresa', [ColaboradorController::class, 'cambiarEmpresa'])->name('colaboradores.cambiar-empresa');
+
+    // Cambio de servicio con revisión de custodia (mantener / devolver /
+    // redistribuir, bien por bien) — ver App\Http\Controllers\CambioServicioController.
+    Route::post('colaboradores/{colaborador}/cambios-servicio', [CambioServicioController::class, 'store'])->name('cambios-servicio.store');
+    Route::get('cambios-servicio/{cambio}', [CambioServicioController::class, 'show'])->name('cambios-servicio.show');
+    Route::put('cambios-servicio/{cambio}/decisiones', [CambioServicioController::class, 'guardar'])->name('cambios-servicio.decisiones');
+    Route::post('cambios-servicio/{cambio}/actualizar', [CambioServicioController::class, 'actualizar'])->name('cambios-servicio.actualizar');
+    Route::post('cambios-servicio/{cambio}/completar', [CambioServicioController::class, 'completar'])->name('cambios-servicio.completar');
+    Route::post('cambios-servicio/{cambio}/cancelar', [CambioServicioController::class, 'cancelar'])->name('cambios-servicio.cancelar');
+
+    // Cuenta de acceso asociada al colaborador (define "mi custodia").
+    Route::get('colaboradores/{colaborador}/cuentas-disponibles', [CuentaColaboradorController::class, 'disponibles'])->name('colaboradores.cuenta.disponibles');
+    Route::put('colaboradores/{colaborador}/cuenta', [CuentaColaboradorController::class, 'actualizar'])->name('colaboradores.cuenta.actualizar');
 
     // Expediente digital del colaborador
     Route::get('colaboradores/{colaborador}/expediente', [DocumentoExpedienteController::class, 'index'])->name('colaboradores.expediente.index');
@@ -219,6 +234,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('entregas/custodia/activos', [EntregaController::class, 'custodiaActivos'])->name('entregas.custodia.activos');
     Route::get('entregas/custodia/unidades', [EntregaController::class, 'custodiaUnidades'])->name('entregas.custodia.unidades');
     Route::get('entregas/custodia/disponibilidad', [EntregaController::class, 'custodiaDisponibilidad'])->name('entregas.custodia.disponibilidad');
+    Route::get('entregas/custodia/conjuntos', [EntregaController::class, 'custodiaConjuntos'])->name('entregas.custodia.conjuntos');
     // Apartado temporal (TTL) del borrador de Entrega — ver ReservarInventarioEntrega.
     Route::post('entregas/reserva', [EntregaController::class, 'reservar'])->name('entregas.reserva');
     Route::delete('entregas/reserva/{token}', [EntregaController::class, 'liberarReserva'])->name('entregas.reserva.liberar');

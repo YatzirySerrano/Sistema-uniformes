@@ -51,6 +51,25 @@ class ColaboradorPolicy
     }
 
     /**
+     * Ver QUÉ cuenta de acceso representa a este colaborador (nombre y
+     * correo). Es información de acceso al sistema, no laboral: tener
+     * `colaboradores.ver`/`editar` no la concede.
+     */
+    public function verCuenta(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('colaboradores.usuario-ver') && $this->view($user, $colaborador);
+    }
+
+    /**
+     * Vincular, cambiar o desvincular esa cuenta. Exige además poder verla
+     * (nadie administra a ciegas un dato que no puede consultar).
+     */
+    public function administrarCuenta(User $user, Colaborador $colaborador): bool
+    {
+        return $user->can('colaboradores.usuario-administrar') && $this->verCuenta($user, $colaborador);
+    }
+
+    /**
      * Consultar la custodia pendiente del colaborador antes de moverlo:
      * la necesita tanto quien lo transfiere de empresa como quien le cambia
      * el servicio (misma fuente, `ServicioCustodiaColaborador`).

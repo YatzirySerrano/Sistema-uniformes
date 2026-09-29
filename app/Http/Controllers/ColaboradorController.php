@@ -15,6 +15,7 @@ use App\Http\Requests\Colaboradores\CambiarServicioColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Http\Requests\Colaboradores\RegistrarIncidenciaCustodiaRequest;
 use App\Models\Area;
+use App\Models\CambioServicioColaborador;
 use App\Models\Colaborador;
 use App\Models\Devolucion;
 use App\Models\Empresa;
@@ -413,6 +414,20 @@ class ColaboradorController extends Controller
                 'activos_asignados' => $servicioCustodia->totalPiezasPendientes($colaborador, $idsAutorizadas->all()),
             ],
             'historicoPorEmpresa' => $historicoPorEmpresa,
+            // Cuenta de acceso asociada: SÓLO viaja si el usuario puede verla
+            // (`colaboradores.usuario-ver`); sin permiso, ni el id ni el correo
+            // de la cuenta salen del backend. Nombre y correo, nada más.
+            'cuenta' => $usuario->can('verCuenta', $colaborador) ? [
+                'usuario' => $colaborador->usuario === null ? null : $colaborador->usuario->only(['id', 'name', 'email']),
+                'puede_administrar' => $usuario->can('administrarCuenta', $colaborador),
+            ] : null,
+            // Revisión de custodia de un cambio de servicio todavía abierta.
+            'cambioServicioEnCurso' => $usuario->can('update', $colaborador)
+                ? CambioServicioColaborador::query()
+                    ->where('colaborador_id', $colaborador->id)
+                    ->where('estado', CambioServicioColaborador::PENDIENTE)
+                    ->value('id')
+                : null,
             'puedeEditar' => $usuario->can('update', $colaborador),
             'puedeEliminar' => $usuario->can('desactivar', $colaborador),
             'puedeCambiarEmpresa' => $usuario->can('cambiarEmpresa', $colaborador),
@@ -425,6 +440,10 @@ class ColaboradorController extends Controller
             'puedeVerEntregas' => $usuario->can('viewAny', EntregaUniforme::class),
             'puedeVerDevoluciones' => $usuario->can('viewAny', Devolucion::class),
             'puedeReportarIncidenciaCustodia' => $usuario->can('reportarIncidenciaCustodia', $colaborador),
+            // Acceso directo "Ir a Devoluciones" del diálogo de cambio de
+            // servicio: mismo criterio que la pantalla destino
+            // (`DevolucionController::create` → `DevolucionPolicy::create`).
+            'puedeRegistrarDevoluciones' => $usuario->can('create', Devolucion::class),
             'expediente' => $puedeVerExpediente ? [
                 'id' => $colaborador->id,
                 'nombre_completo' => $colaborador->nombre_completo,

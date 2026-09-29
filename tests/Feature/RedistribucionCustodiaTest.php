@@ -22,6 +22,7 @@ use App\Servicios\ServicioInventario;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Spatie\Permission\Models\Role;
 
 /**
  * Redistribución de custodia: un usuario con `entregas.crear` entrega desde
@@ -49,8 +50,20 @@ beforeEach(function () {
     $this->celular = Activo::factory()->for($this->datos['empresaA'])->seguimientoIndividual()->create(['nombre' => 'Celular']);
     $this->unidad = UnidadActivo::factory()->for($this->datos['empresaA'], 'empresa')->for($this->celular)->for($this->datos['almacenA'])->create();
 
-    // Supervisor: su cuenta está ligada a su ficha de colaborador (custodio).
-    $this->supervisor = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaA']]);
+    // Cuentas construidas SÓLO con permisos efectivos (rol personalizado),
+    // nunca asumiendo lo que "debería" poder un Supervisor o un Encargado.
+    $this->usuarioConPermisos = function (array $permisos): User {
+        $rol = Role::create(['name' => 'rol-'.Str::lower(Str::random(8)), 'guard_name' => 'web']);
+        $rol->syncPermissions($permisos);
+
+        return tap(User::factory()->create(), function (User $u) use ($rol): void {
+            $u->assignRole($rol);
+            $u->empresas()->sync([$this->datos['empresaA']->id]);
+        });
+    };
+
+    // Redistribuidor: su cuenta está VINCULADA a su ficha (custodio).
+    $this->supervisor = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.redistribuir']);
     $this->yatziri = Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])
         ->create(['nombre_completo' => 'Yatziri Custodia', 'usuario_id' => $this->supervisor->id]);
     $this->juan = $this->datos['colaboradorA'];
@@ -120,7 +133,7 @@ it('el supervisor sólo ve en el selector lo que tiene bajo su custodia', functi
 });
 
 it('el supervisor no ve lo que sigue en el almacén ni la custodia de otro supervisor', function () {
-    $otroSupervisor = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaA']]);
+    $otroSupervisor = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.redistribuir']);
     Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create(['usuario_id' => $otroSupervisor->id]);
 
     ($this->entregarDesdeAlmacen)($this->yatziri, ($this->camisas)(10), [['unidad_activo_id' => $this->unidad->id]]);
@@ -238,22 +251,22 @@ it('las devoluciones reducen la custodia y sólo la del almacén reingresa stock
 });
 
 it('un usuario sin ficha de colaborador no tiene custodia que redistribuir', function () {
-    $sinFicha = usuarioCon(RolSistema::Supervisor->value, [$this->datos['empresaA']]);
+    $sinFicha = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.redistribuir']);
 
     ($this->redistribuir)($sinFicha, $this->juan, ($this->camisas)(1))
-        ->assertSessionHasErrors(['origen' => 'Tu cuenta no está ligada a un colaborador de esta empresa, así que no tienes activos bajo custodia que redistribuir.']);
+        ->assertSessionHasErrors(['origen' => 'Tu cuenta no está vinculada a una ficha de colaborador de esta empresa, así que no tienes activos bajo custodia que redistribuir.']);
 
     expect(EntregaUniforme::count())->toBe(0);
 });
 
 it('cada vía de entrega exige su propio permiso efectivo', function () {
-    // Supervisor (sólo `entregas.redistribuir`) no puede hacer salidas de almacén.
+    // Sólo `entregas.redistribuir`: no puede hacer salidas de almacén.
     $this->actingAs($this->supervisor)
         ->post('/entregas', ($this->payload)($this->juan, ($this->camisas)(1), [], ['almacen_id' => $this->datos['almacenA']->id]))
         ->assertForbidden();
 
-    // Encargado (sólo `entregas.crear`) no puede redistribuir.
-    $encargado = usuarioCon(RolSistema::Encargado->value, [$this->datos['empresaA']]);
+    // Sólo `entregas.crear`: no puede redistribuir.
+    $encargado = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.crear']);
     ($this->redistribuir)($encargado, $this->juan, ($this->camisas)(1))->assertForbidden();
     $this->actingAs($encargado)
         ->getJson("/entregas/custodia/activos?empresa_id={$this->datos['empresaA']->id}")
@@ -267,7 +280,7 @@ it('respeta el alcance de empresa del destinatario', function () {
     ($this->entregarDesdeAlmacen)($this->yatziri, ($this->camisas)(10));
 
     ($this->redistribuir)($this->supervisor, $ajeno, ($this->camisas)(1))
-        ->assertSessionHasErrors('colaborador_id');
+        ->assertForbidden();
 
     expect(($this->custodiaCamisas)($this->yatziri))->toBe(10);
 });
@@ -317,10 +330,52 @@ it('audita la redistribución con origen, destinatario y renglones legibles', fu
         ->and($registro->valores_nuevos['renglones'])->toBe([['activo' => 'Camisa', 'talla' => 'M', 'cantidad' => 3]]);
 });
 
-it('el formulario ofrece al supervisor sólo la vía de custodia y su propia ficha', function () {
+it('sólo con entregas.crear el único origen es el almacén', function () {
+    $almacenista = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.crear']);
+
+    $this->actingAs($almacenista)->get('/entregas/crear')
+        ->assertInertia(fn ($page) => $page
+            ->where('origenes', ['almacen' => true, 'custodia' => false])
+            ->where('redistribuirSinVinculo', false)
+            ->where('custodiaPropia', null));
+});
+
+it('sólo con entregas.redistribuir y ficha vinculada el único origen es su custodia', function () {
     $this->actingAs($this->supervisor)->get('/entregas/crear')
         ->assertInertia(fn ($page) => $page
             ->where('origenes', ['almacen' => false, 'custodia' => true])
-            ->where('custodias.0.colaborador_id', $this->yatziri->id)
-            ->count('custodias', 1));
+            ->where('custodiaPropia.colaborador_id', $this->yatziri->id));
+});
+
+it('con ambos permisos y ficha vinculada puede elegir el origen', function () {
+    $ambos = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.crear', 'entregas.redistribuir']);
+    $this->yatziri->update(['usuario_id' => null]);
+    $this->yatziri->update(['usuario_id' => $ambos->id]);
+
+    $this->actingAs($ambos)->get('/entregas/crear')
+        ->assertInertia(fn ($page) => $page->where('origenes', ['almacen' => true, 'custodia' => true]));
+});
+
+it('con ambos permisos pero sin ficha vinculada sólo opera desde almacén y se le explica por qué', function () {
+    $ambos = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.crear', 'entregas.redistribuir']);
+
+    $this->actingAs($ambos)->get('/entregas/crear')
+        ->assertInertia(fn ($page) => $page
+            ->where('origenes', ['almacen' => true, 'custodia' => false])
+            ->where('redistribuirSinVinculo', true));
+
+    ($this->entregarDesdeAlmacen)($this->juan, ($this->camisas)(1));
+    $this->actingAs($ambos)
+        ->post('/entregas', ($this->payload)($this->juan, ($this->camisas)(1), [], ['almacen_id' => $this->datos['almacenA']->id]))
+        ->assertSessionHasNoErrors();
+
+    expect(($this->stock)())->toBe(98);
+});
+
+it('vinculado pero sin custodia obtiene un estado vacío, nunca el inventario del almacén', function () {
+    $this->actingAs($this->supervisor)
+        ->getJson("/entregas/custodia/disponibilidad?empresa_id={$this->datos['empresaA']->id}")
+        ->assertOk()
+        ->assertJsonPath('saldos', [])
+        ->assertJsonPath('total_unidades', 0);
 });

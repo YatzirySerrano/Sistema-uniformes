@@ -9,6 +9,7 @@ use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Models\Activo;
 use App\Models\Colaborador;
+use App\Models\Conjunto;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
 use App\Models\EntregaUniforme;
@@ -106,45 +107,114 @@ class ServicioCustodiaColaborador
     }
 
     /**
-     * Registro de colaborador (activo) ligado a la cuenta del usuario dentro
-     * de una empresa: es quien POSEE la custodia cuando ese usuario
-     * redistribuye. El usuario autenticado no es el custodio — el custodio es
-     * su `Colaborador` (`colaboradores.usuario_id`). Sin registro ligado en
-     * esa empresa no hay custodia que redistribuir (nunca se inventa una).
+     * Ficha de colaborador que la cuenta REPRESENTA (vínculo explícito 1:1,
+     * `colaboradores.usuario_id` con índice único): es quien POSEE "mi
+     * custodia" cuando ese usuario redistribuye. El usuario autenticado no es
+     * el custodio — lo es su colaborador. Sin vínculo (o con la ficha o su
+     * empresa inactivas, o fuera del alcance del usuario) no hay custodia que
+     * redistribuir: nunca se infiere por nombre, correo o rol.
      */
-    public function custodioDeUsuario(User $usuario, int $empresaId): ?Colaborador
+    public function colaboradorVinculado(User $usuario): ?Colaborador
     {
-        if (! $usuario->puedeAccederEmpresa($empresaId)) {
-            return null;
-        }
-
-        return Colaborador::query()
-            ->where('usuario_id', $usuario->getKey())
-            ->where('empresa_id', $empresaId)
-            ->where('activo', true)
-            ->orderBy('id')
-            ->first();
-    }
-
-    /**
-     * Custodios ligados al usuario en sus empresas autorizadas y activas
-     * (normalmente uno): alimentan el selector de empresa del modo
-     * "redistribuir mi custodia".
-     *
-     * @return Collection<int, Colaborador>
-     */
-    public function custodiosDeUsuario(User $usuario): Collection
-    {
-        return Colaborador::query()
+        $colaborador = Colaborador::query()
             ->where('usuario_id', $usuario->getKey())
             ->where('activo', true)
             ->whereHas('empresa', fn (Builder $q) => $q->where('activa', true))
             ->with('empresa:id,codigo,nombre_comercial')
-            ->orderBy('id')
-            ->get()
-            ->filter(fn (Colaborador $c): bool => $usuario->puedeAccederEmpresa($c->empresa_id))
-            ->unique('empresa_id')
-            ->values();
+            ->first();
+
+        return $colaborador !== null && $usuario->puedeAccederEmpresa($colaborador->empresa_id) ? $colaborador : null;
+    }
+
+    /**
+     * El colaborador vinculado, sólo si pertenece a la empresa indicada (la
+     * del destinatario: la custodia nunca cruza de empresa).
+     */
+    public function custodioDeUsuario(User $usuario, int $empresaId): ?Colaborador
+    {
+        $colaborador = $this->colaboradorVinculado($usuario);
+
+        return $colaborador?->empresa_id === $empresaId ? $colaborador : null;
+    }
+
+    /**
+     * Conjuntos que el custodio recibió (renglones con `conjunto_id`) y que
+     * todavía conserva, con el desglose REAL por componente: cuántas piezas /
+     * unidades de ese conjunto siguen bajo su custodia contra las que pide la
+     * plantilla. `completos` = cuántos conjuntos enteros podría entregar; si es
+     * 0 el conjunto está incompleto (nunca se inventan cantidades). El
+     * conjunto es sólo contexto: la custodia real sigue siendo de componentes.
+     *
+     * @return list<array{conjunto_id: int, nombre: string, completos: int, componentes: list<array{activo_id: int, activo: string, talla: string|null, requerido: int, disponible: int, individual: bool}>}>
+     */
+    public function conjuntosRedistribuibles(Colaborador $custodio): array
+    {
+        $porConjunto = [];
+
+        foreach ($this->cantidadesPendientes($custodio, [$custodio->empresa_id]) as $fila) {
+            if ($fila['conjunto_id'] === null) {
+                continue;
+            }
+            $porConjunto[$fila['conjunto_id']]['cantidad'][$fila['activo_id']][$fila['talla_id'] ?? 0] =
+                ($porConjunto[$fila['conjunto_id']]['cantidad'][$fila['activo_id']][$fila['talla_id'] ?? 0] ?? 0) + $fila['pendiente'];
+        }
+
+        foreach ($this->unidadesRedistribuibles($custodio)->get() as $unidad) {
+            $conjuntoId = $this->entregaActualDeUnidad($unidad)?->conjunto_id;
+            if ($conjuntoId === null) {
+                continue;
+            }
+            $porConjunto[$conjuntoId]['unidades'][$unidad->activo_id] = ($porConjunto[$conjuntoId]['unidades'][$unidad->activo_id] ?? 0) + 1;
+        }
+
+        if ($porConjunto === []) {
+            return [];
+        }
+
+        $conjuntos = Conjunto::query()
+            ->whereIn('id', array_keys($porConjunto))
+            ->where('empresa_id', $custodio->empresa_id)
+            ->with(['componentes.activo:id,nombre,tipo_control', 'componentes.talla:id,valor'])
+            ->orderBy('nombre')
+            ->get();
+
+        $resultado = [];
+
+        foreach ($conjuntos as $conjunto) {
+            $tenencia = $porConjunto[$conjunto->id];
+            $componentes = [];
+            $completos = PHP_INT_MAX;
+
+            foreach ($conjunto->componentes as $componente) {
+                $individual = $componente->activo?->tipo_control === TipoControlActivo::SeguimientoIndividual;
+                $disponible = $individual
+                    ? ($tenencia['unidades'][$componente->activo_id] ?? 0)
+                    : ($componente->talla_id !== null
+                        ? ($tenencia['cantidad'][$componente->activo_id][$componente->talla_id] ?? 0)
+                        : array_sum($tenencia['cantidad'][$componente->activo_id] ?? []));
+
+                $requerido = max((int) $componente->cantidad_requerida, 1);
+                $completos = min($completos, intdiv($disponible, $requerido));
+
+                $componentes[] = [
+                    'activo_id' => $componente->activo_id,
+                    'activo' => (string) $componente->activo?->nombre,
+                    'talla' => $componente->talla?->valor,
+                    'requerido' => $requerido,
+                    'disponible' => $disponible,
+                    'individual' => $individual,
+                ];
+            }
+
+            $resultado[] = [
+                'conjunto_id' => $conjunto->id,
+                'nombre' => $conjunto->nombre,
+                'completos' => $componentes === [] ? 0 : $completos,
+                'componentes' => $componentes,
+            ];
+        }
+
+        return $resultado;
     }
 
     /**
@@ -481,7 +551,7 @@ class ServicioCustodiaColaborador
      * colaborador (todas sus entregas firmadas/corregidas).
      *
      * @param  array<int, int>|null  $idsEmpresasAutorizadas  Acota a estas empresas cuando no es `null` — ver `totalPiezasPendientes()`.
-     * @return list<array{activo: string, talla: string|null, pendiente: int, folio: string|null, entrega_id: int|null, detalle_entrega_id: int, activo_id: int, talla_id: int|null}>
+     * @return list<array{activo: string, talla: string|null, pendiente: int, folio: string|null, entrega_id: int|null, detalle_entrega_id: int, activo_id: int, talla_id: int|null, conjunto_id: int|null}>
      */
     private function cantidadesPendientes(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): array
     {
@@ -519,6 +589,7 @@ class ServicioCustodiaColaborador
                 'detalle_entrega_id' => $detalle->id,
                 'activo_id' => $detalle->activo_id,
                 'talla_id' => $detalle->talla_id,
+                'conjunto_id' => $detalle->conjunto_id,
             ];
         }
 

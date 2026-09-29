@@ -10,6 +10,7 @@ use App\Enums\TipoControlActivo;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
 use App\Models\Colaborador;
+use App\Models\Conjunto;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
 use App\Models\EntregaUniforme;
@@ -59,6 +60,7 @@ class RedistribuirCustodia
      * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string}>  $activos
      * @param  array<int, array{unidad_activo_id: int|string}>  $unidades
      * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias  claves "activo:{i}" / "unidad:{i}"
+     * @param  array<int, array{conjunto_id: int|string, cantidad: int|string}>  $conjuntos  conjuntos COMPLETOS recibidos como tal y todavía bajo custodia
      */
     public function ejecutar(
         int $custodioId,
@@ -70,6 +72,7 @@ class RedistribuirCustodia
         ?string $notas = null,
         ?int $servicioId = null,
         array $evidencias = [],
+        array $conjuntos = [],
     ): EntregaUniforme {
         if ($custodioId === $colaboradorId) {
             throw new ExcepcionDeNegocioSimple('No puedes entregarte a ti mismo activos de tu propia custodia.');
@@ -77,11 +80,13 @@ class RedistribuirCustodia
 
         $lineasCantidad = array_filter($activos, fn (array $fila): bool => (int) $fila['cantidad'] > 0);
 
-        if ($lineasCantidad === [] && $unidades === []) {
-            throw new ExcepcionDeNegocioSimple('Agrega al menos un activo o unidad de tu custodia a la entrega.');
+        $conjuntos = array_filter($conjuntos, fn (array $fila): bool => (int) $fila['cantidad'] > 0);
+
+        if ($lineasCantidad === [] && $unidades === [] && $conjuntos === []) {
+            throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad o conjunto de tu custodia a la entrega.');
         }
 
-        return DB::transaction(function () use ($custodioId, $colaboradorId, $encargadoId, $fechaEntrega, $lineasCantidad, $unidades, $notas, $servicioId, $evidencias): EntregaUniforme {
+        return DB::transaction(function () use ($custodioId, $colaboradorId, $encargadoId, $fechaEntrega, $lineasCantidad, $unidades, $conjuntos, $notas, $servicioId, $evidencias): EntregaUniforme {
             // Candados en orden estable (id ascendente) para que dos
             // redistribuciones cruzadas (A→B y B→A) no se bloqueen entre sí.
             $bloqueados = Colaborador::query()
@@ -159,6 +164,12 @@ class RedistribuirCustodia
                 ];
             }
 
+            foreach ($conjuntos as $fila) {
+                foreach ($this->redistribuirConjunto($entrega, $custodio, $destinatario, (int) $fila['conjunto_id'], (int) $fila['cantidad'], $unidadesVistas) as $renglon) {
+                    $renglonesAuditoria[] = $renglon;
+                }
+            }
+
             $destinatario->loadMissing(['empresa:id,nombre_comercial', 'servicioActual:id,nombre']);
 
             $this->auditoria->registrar('entregas', 'redistribuir', [
@@ -217,10 +228,8 @@ class RedistribuirCustodia
             ->lockForUpdate()
             ->get();
 
-        $pendientes = $this->custodia->pendientesPorDetalle($origenes);
-        $disponible = array_sum($pendientes);
-
         $tallaValor = $tallaId === null ? null : Talla::query()->whereKey($tallaId)->value('valor');
+        $disponible = array_sum($this->custodia->pendientesPorDetalle($origenes));
 
         if ($cantidad > $disponible) {
             throw new ExcepcionDeNegocioSimple(sprintf(
@@ -232,6 +241,21 @@ class RedistribuirCustodia
             ));
         }
 
+        return $this->tomarDeOrigenes($entrega, $activo, $origenes, $cantidad);
+    }
+
+    /**
+     * Toma `$cantidad` piezas de los renglones de origen YA BLOQUEADOS (más
+     * antiguos primero), recalculando su pendiente bajo el lock, y crea los
+     * renglones hijos (cada uno apunta a su `detalle_origen_id` y conserva la
+     * variante que tenía la pieza). El llamador ya validó que alcanza.
+     *
+     * @param  Collection<int, DetalleEntrega>  $origenes
+     * @return non-empty-list<DetalleEntrega>
+     */
+    private function tomarDeOrigenes(EntregaUniforme $entrega, Activo $activo, Collection $origenes, int $cantidad, ?Conjunto $conjunto = null): array
+    {
+        $pendientes = $this->custodia->pendientesPorDetalle($origenes);
         $restante = $cantidad;
         $creados = [];
 
@@ -243,11 +267,13 @@ class RedistribuirCustodia
 
             $creados[] = $entrega->detalles()->create([
                 'activo_id' => $activo->id,
-                'talla_id' => $tallaId,
+                'talla_id' => $origen->talla_id,
                 'cantidad' => $tomar,
                 'detalle_origen_id' => $origen->getKey(),
                 'activo_nombre_snapshot' => $activo->nombre,
-                'talla_valor_snapshot' => $tallaValor ?? $origen->talla_valor_snapshot,
+                'talla_valor_snapshot' => $origen->talla_valor_snapshot,
+                'conjunto_id' => $conjunto?->id,
+                'conjunto_nombre_snapshot' => $conjunto?->nombre,
             ]);
 
             $restante -= $tomar;
@@ -261,12 +287,88 @@ class RedistribuirCustodia
     }
 
     /**
+     * Redistribuye `$cantidad` conjuntos COMPLETOS que el custodio recibió
+     * como tal: cada componente sale SÓLO de los renglones (o unidades) de su
+     * custodia que llegaron con ese conjunto, y los renglones nuevos
+     * conservan el conjunto como contexto. Si falta cualquier componente el
+     * conjunto está incompleto y se rechaza — sus piezas sueltas pueden
+     * redistribuirse como artículos o unidades individuales.
+     *
+     * @param  array<int, int>  $unidadesVistas
+     * @return list<array{activo: string, talla?: string|null, unidad?: string|null, cantidad: int, conjunto: string}>
+     */
+    private function redistribuirConjunto(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $conjuntoId, int $cantidad, array &$unidadesVistas): array
+    {
+        $conjunto = Conjunto::query()
+            ->where('empresa_id', $custodio->empresa_id)
+            ->with('componentes.activo')
+            ->findOr($conjuntoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los conjuntos seleccionados no pertenece a esta empresa.'));
+
+        $incompleto = fn (string $activo): ExcepcionDeNegocioSimple => new ExcepcionDeNegocioSimple(
+            "El conjunto «{$conjunto->nombre}» está incompleto en tu custodia (falta {$activo} para {$cantidad} conjunto(s)). Entrega sus piezas por separado."
+        );
+
+        $renglones = [];
+
+        foreach ($conjunto->componentes as $componente) {
+            $activo = $componente->activo;
+            $necesarias = max((int) $componente->cantidad_requerida, 1) * $cantidad;
+
+            if ($activo->tipo_control === TipoControlActivo::SeguimientoIndividual) {
+                $candidatas = $this->custodia->unidadesRedistribuibles($custodio)
+                    ->where('activo_id', $activo->id)
+                    ->whereNotIn('id', $unidadesVistas)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->get()
+                    ->filter(fn (UnidadActivo $u): bool => $this->custodia->entregaActualDeUnidad($u)?->conjunto_id === $conjunto->id)
+                    ->take($necesarias);
+
+                if ($candidatas->count() < $necesarias) {
+                    throw $incompleto($activo->nombre);
+                }
+
+                foreach ($candidatas as $unidad) {
+                    $unidadesVistas[] = $unidad->id;
+                    $detalle = $this->redistribuirUnidad($entrega, $custodio, $destinatario, $unidad->id, $conjunto);
+                    $renglones[] = ['activo' => $detalle->activo_nombre_snapshot, 'unidad' => $unidad->codigo, 'cantidad' => 1, 'conjunto' => $conjunto->nombre];
+                }
+
+                continue;
+            }
+
+            /** @var Collection<int, DetalleEntrega> $origenes */
+            $origenes = DetalleEntrega::query()
+                ->whereNull('unidad_activo_id')
+                ->where('activo_id', $activo->id)
+                ->where('conjunto_id', $conjunto->id)
+                ->when($componente->talla_id !== null, fn ($q) => $q->where('talla_id', $componente->talla_id))
+                ->whereHas('entrega', fn ($q) => $q
+                    ->where('colaborador_id', $custodio->getKey())
+                    ->whereIn('estado', [EstadoEntrega::Firmada, EstadoEntrega::Corregida]))
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
+
+            if (array_sum($this->custodia->pendientesPorDetalle($origenes)) < $necesarias) {
+                throw $incompleto($activo->nombre);
+            }
+
+            foreach ($this->tomarDeOrigenes($entrega, $activo, $origenes, $necesarias, $conjunto) as $creado) {
+                $renglones[] = ['activo' => $creado->activo_nombre_snapshot, 'talla' => $creado->talla_valor_snapshot, 'cantidad' => (int) $creado->cantidad, 'conjunto' => $conjunto->nombre];
+            }
+        }
+
+        return $renglones;
+    }
+
+    /**
      * Reasigna una unidad identificada del custodio al destinatario. La
      * unidad se bloquea y se revalida en el momento exacto de la
      * transacción: si ya no es del custodio (otra pestaña la entregó
      * primero), se rechaza.
      */
-    private function redistribuirUnidad(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $unidadId): DetalleEntrega
+    private function redistribuirUnidad(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $unidadId, ?Conjunto $conjunto = null): DetalleEntrega
     {
         $unidad = UnidadActivo::query()->whereKey($unidadId)->lockForUpdate()->first();
 
@@ -302,6 +404,8 @@ class RedistribuirCustodia
             'cantidad' => 1,
             'activo_nombre_snapshot' => $unidad->activo->nombre,
             'talla_valor_snapshot' => null,
+            'conjunto_id' => $conjunto?->id,
+            'conjunto_nombre_snapshot' => $conjunto?->nombre,
         ]);
 
         // Sólo cambia QUIÉN la tiene. Sigue `Asignada` y conserva su almacén

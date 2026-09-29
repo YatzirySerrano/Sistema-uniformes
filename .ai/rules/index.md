@@ -4,6 +4,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 
 | Applies to | Rule file |
 | --- | --- |
+| app/{Acciones/{IniciarCambioServicio,GuardarDecisionesCambioServicio,CompletarCambioServicio,CancelarCambioServicio,CambiarServicioColaborador}.php,Servicios/ServicioCambioServicio.php,Models/CambioServicio*.php,Http/Controllers/CambioServicioController.php} | .ai/rules/acciones-controllers.md |
 | resources/js/pages/Inventario/Movimientos.vue,resources/js/pages/Entregas/Crear.vue,app/Policies/EntregaUniformePolicy.php,app/Acciones/CorregirEntrega.php | .ai/rules/acciones.md |
 | app/Servicios/ServicioEvidencias.php,app/Servicios/ServicioAcusePdf.php,app/Servicios/ServicioAcuseDevolucionPdf.php,resources/views/acuses/comprobante.blade.php,resources/views/acuses/comprobante-devolucion.blade.php | .ai/rules/acuses.md |
 | resources/js/components/almacenes/FormularioAlmacen.vue | .ai/rules/almacenes.md |
@@ -38,6 +39,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Servicios/ServicioDashboard.php,app/Http/Controllers/PanelController.php,app/Enums/SeccionDashboard.php,resources/js/pages/Panel.vue | .ai/rules/js-pages.md |
 | app/Soporte/FechaHora.php,app/Soporte/ContextoExportacion.php,resources/views/acuses/*.blade.php,resources/views/reportes/*.blade.php,resources/js/lib/fecha.ts | .ai/rules/lib.md |
 | app/Models/Area.php,database/migrations/*areas*.php,app/Servicios/ServicioImportacionColaboradores.php | .ai/rules/migrations-servicios.md |
+| app/{Servicios/ServicioCuentaColaborador.php,Http/Controllers/CuentaColaboradorController.php,Models/User.php,Models/Colaborador.php},database/migrations/*permisos*.php,app/Soporte/Permisos.php | .ai/rules/migrations-soporte.md |
 | app/Acciones/CrearRondaInventarioFisico.php,app/Acciones/FinalizarRondaInventarioFisico.php,app/Acciones/VerificarExistenciaInventarioFisico.php,app/Acciones/MarcarUnidadPresente.php,app/Acciones/EscanearUnidadInventarioFisico.php,app/Http/Controllers/InventarioFisicoController.php,app/Models/InventarioFisicoExistencia.php,app/Models/InventarioFisicoFirma.php | .ai/rules/models-models.md |
 | app/Http/Controllers/InventarioFisicoController.php,app/Acciones/{CrearRondaInventarioFisico,EscanearUnidadInventarioFisico,FinalizarRondaInventarioFisico}.php,app/Servicios/ServicioResumenInventarioFisico.php,app/Models/InventarioFisico*.php,app/Soporte/ResolvedorUnidadEscaneada.php | .ai/rules/models-soporte.md |
 | app/Models/{Empresa,Sucursal,Almacen,Area,Activo,TipoActivo,CategoriaActivo,SaldoInventario,MovimientoInventario,UnidadActivo,SecuenciaCodigo,Conjunto,ConjuntoComponente}.php | .ai/rules/models.md |

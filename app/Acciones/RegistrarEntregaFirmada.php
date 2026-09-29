@@ -73,10 +73,6 @@ class RegistrarEntregaFirmada
             $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId,
         ): array {
             if ($custodioOrigenId !== null) {
-                if ($conjuntos !== []) {
-                    throw new ExcepcionDeNegocioSimple('Los conjuntos sólo se entregan desde almacén. Al redistribuir tu custodia agrega sus artículos o unidades por separado.');
-                }
-
                 $entrega = $this->redistribuir->ejecutar(
                     $custodioOrigenId,
                     $colaboradorId,
@@ -87,6 +83,7 @@ class RegistrarEntregaFirmada
                     $notas,
                     $servicioId,
                     $evidencias,
+                    array_map(fn (array $c): array => ['conjunto_id' => $c['conjunto_id'], 'cantidad' => $c['cantidad']], $conjuntos),
                 );
             } elseif ($almacenId === null) {
                 throw new ExcepcionDeNegocioSimple('Selecciona el almacén de origen.');

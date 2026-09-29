@@ -76,6 +76,8 @@ final class Permisos
                 'colaboradores.crear' => 'Crear colaboradores',
                 'colaboradores.editar' => 'Editar colaboradores',
                 'colaboradores.cambiar-empresa' => 'Transferir un colaborador a otra empresa / razón social',
+                'colaboradores.usuario-ver' => 'Ver la cuenta de acceso asociada al colaborador',
+                'colaboradores.usuario-administrar' => 'Vincular, cambiar o desvincular la cuenta de acceso del colaborador',
                 'colaboradores.desactivar' => 'Activar / desactivar colaboradores',
                 'colaboradores.importar' => 'Importar colaboradores desde Excel',
                 'colaboradores.expediente-ver' => 'Ver el expediente digital del colaborador',
@@ -153,7 +155,7 @@ final class Permisos
             'permisos' => [
                 'entregas.ver' => 'Ver entregas',
                 'entregas.crear' => 'Registrar entregas desde almacén',
-                'entregas.redistribuir' => 'Redistribuir a otros colaboradores los activos bajo su propia custodia',
+                'entregas.redistribuir' => 'Redistribuir activos bajo custodia (la propia, o la de un colaborador al revisar su cambio de servicio)',
                 'entregas.corregir' => 'Corregir entregas firmadas',
             ],
         ],
@@ -271,11 +273,11 @@ final class Permisos
                 'unidades-activo.ver', 'unidades-activo.administrar', 'unidades-activo.condicion',
                 'inventario-fisico.ver', 'inventario-fisico.administrar',
                 'conjuntos.ver', 'conjuntos.crear', 'conjuntos.editar',
-                // El Supervisor recibe activos del almacén (vía un usuario con
-                // `entregas.crear`) y los REDISTRIBUYE desde su custodia: por
-                // defecto no hace salidas libres de almacén. Es sólo el valor
-                // inicial del rol base; la matriz de Roles y permisos manda.
-                'entregas.ver', 'entregas.redistribuir',
+                // Valor inicial histórico del rol base (sólo para instalaciones
+                // nuevas). `entregas.redistribuir` y los permisos de cuenta
+                // asociada NO se asignan por nombre de rol: los concede el
+                // Administrador desde "Roles y permisos".
+                'entregas.ver', 'entregas.crear',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf', 'acuses.ver-firma',
                 'devoluciones.ver', 'devoluciones.crear', 'devoluciones.confirmar', 'devoluciones.ver-pdf', 'devoluciones.ver-firma',
                 'reportes.ver', 'reportes.exportar',

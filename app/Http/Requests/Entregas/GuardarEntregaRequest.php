@@ -6,6 +6,7 @@ use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Models\Activo;
+use App\Models\CambioServicioColaborador;
 use App\Models\Colaborador;
 use App\Models\Conjunto;
 use App\Models\EntregaUniforme;
@@ -66,9 +67,25 @@ class GuardarEntregaRequest extends FormRequest
     }
 
     /**
-     * Colaborador (ligado al usuario autenticado) cuya custodia se
-     * redistribuye, en la empresa del destinatario. `null` si la entrega es
-     * desde almacén o si el usuario no tiene registro de colaborador ahí.
+     * Revisión de cambio de servicio en cuyo nombre se redistribuye (la
+     * custodia es del colaborador revisado, no del usuario), si viene.
+     */
+    public function cambioServicio(): ?CambioServicioColaborador
+    {
+        return $this->filled('cambio_servicio_id')
+            ? CambioServicioColaborador::query()->with('colaborador.sucursal')->find($this->integer('cambio_servicio_id'))
+            : null;
+    }
+
+    /**
+     * Colaborador cuya custodia se redistribuye. Lo resuelve SIEMPRE el
+     * backend, nunca un id del formulario:
+     * - normal: la ficha vinculada a la cuenta autenticada ("mi custodia");
+     * - dentro de una revisión de cambio de servicio: el colaborador revisado,
+     *   sólo si el usuario puede redistribuir su custodia
+     *   (`CambioServicioColaboradorPolicy::redistribuirCustodia`).
+     * `null` si no aplica o si no hay custodia válida en la empresa del
+     * destinatario.
      */
     public function custodio(): ?Colaborador
     {
@@ -82,6 +99,16 @@ class GuardarEntregaRequest extends FormRequest
 
         if (! $this->esRedistribucion() || $destinatario === null || $usuario === null) {
             return null;
+        }
+
+        if ($this->filled('cambio_servicio_id')) {
+            $cambio = $this->cambioServicio();
+
+            return $this->custodioResuelto = $cambio !== null
+                && $usuario->can('redistribuirCustodia', $cambio)
+                && $cambio->colaborador->empresa_id === $destinatario->empresa_id
+                    ? $cambio->colaborador
+                    : null;
         }
 
         return $this->custodioResuelto = app(ServicioCustodiaColaborador::class)->custodioDeUsuario($usuario, $destinatario->empresa_id);
@@ -194,7 +221,16 @@ class GuardarEntregaRequest extends FormRequest
         $custodioId = $this->custodio()?->getKey() ?? 0;
 
         return [
-            'conjuntos' => ['prohibited'],
+            'cambio_servicio_id' => ['nullable', 'integer'],
+
+            // Conjuntos que el custodio recibió como tal: sólo contexto, se
+            // expanden a los componentes REALES de su custodia.
+            'conjuntos' => ['nullable', 'array'],
+            'conjuntos.*.conjunto_id' => [
+                'required', 'integer',
+                Rule::exists('conjuntos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+            ],
+            'conjuntos.*.cantidad' => ['required', 'integer', 'min:1', 'max:100'],
 
             'activos' => ['nullable', 'array'],
             'activos.*.activo_id' => [
@@ -228,13 +264,16 @@ class GuardarEntregaRequest extends FormRequest
      * la autoridad final es `RedistribuirCustodia` bajo lock.
      *
      * @param  array<int|string, mixed>  $activos
+     * @param  array<int|string, mixed>  $conjuntos
      */
-    private function validarContraCustodia(Validator $validator, Colaborador $destinatario, array $activos): void
+    private function validarContraCustodia(Validator $validator, Colaborador $destinatario, array $activos, array $conjuntos = []): void
     {
         $custodio = $this->custodio();
 
         if ($custodio === null) {
-            $validator->errors()->add('origen', 'Tu cuenta no está ligada a un colaborador de esta empresa, así que no tienes activos bajo custodia que redistribuir.');
+            $validator->errors()->add('origen', $this->filled('cambio_servicio_id')
+                ? 'No puedes redistribuir la custodia de ese colaborador (la revisión ya terminó, es de otra empresa o no tienes permiso).'
+                : 'Tu cuenta no está vinculada a una ficha de colaborador de esta empresa, así que no tienes activos bajo custodia que redistribuir.');
 
             return;
         }
@@ -279,6 +318,31 @@ class GuardarEntregaRequest extends FormRequest
                 );
             }
         }
+
+        if ($conjuntos === []) {
+            return;
+        }
+
+        $completos = collect(app(ServicioCustodiaColaborador::class)->conjuntosRedistribuibles($custodio))
+            ->keyBy('conjunto_id');
+
+        foreach ($conjuntos as $i => $fila) {
+            if (! is_array($fila) || $validator->errors()->has("conjuntos.{$i}.conjunto_id")) {
+                continue;
+            }
+
+            $enCustodia = $completos->get((int) ($fila['conjunto_id'] ?? 0));
+            $disponibles = $enCustodia['completos'] ?? 0;
+
+            if ((int) ($fila['cantidad'] ?? 0) > $disponibles) {
+                $validator->errors()->add(
+                    "conjuntos.{$i}.cantidad",
+                    $disponibles === 0
+                        ? 'Ese conjunto no está completo en tu custodia. Entrega sus piezas por separado.'
+                        : "En tu custodia sólo hay {$disponibles} conjunto(s) completo(s).",
+                );
+            }
+        }
     }
 
     /**
@@ -306,10 +370,16 @@ class GuardarEntregaRequest extends FormRequest
                 return;
             }
 
-            // Alcance de SUCURSAL del destinatario (además del de empresa, que
-            // ya acotó `rules()`): un usuario restringido a ciertas sucursales
-            // no entrega a colaboradores de otras.
-            if ($colaborador->sucursal !== null && ! ($this->user()?->puedeAccederSucursal($colaborador->sucursal) ?? false)) {
+            // Sin acceso a la EMPRESA del destinatario no se valida nada más:
+            // el controlador responde 403 (no se revela nada de esa empresa).
+            $usuario = $this->user();
+            if ($usuario === null || ! $usuario->puedeAccederEmpresa($colaborador->empresa_id)) {
+                return;
+            }
+
+            // Alcance de SUCURSAL del destinatario: un usuario restringido a
+            // ciertas sucursales no entrega a colaboradores de otras.
+            if ($colaborador->sucursal !== null && ! $usuario->puedeAccederSucursal($colaborador->sucursal)) {
                 $validator->errors()->add('colaborador_id', 'No tienes acceso a la sucursal de ese colaborador.');
 
                 return;
@@ -332,7 +402,7 @@ class GuardarEntregaRequest extends FormRequest
             }
 
             if ($this->esRedistribucion()) {
-                $this->validarContraCustodia($validator, $colaborador, $activos);
+                $this->validarContraCustodia($validator, $colaborador, $activos, $conjuntos);
 
                 return;
             }
@@ -534,7 +604,6 @@ class GuardarEntregaRequest extends FormRequest
             'firma_operador.required' => 'Falta la firma del encargado que realiza la entrega.',
             'aceptacion.accepted' => 'Debes confirmar la aceptación antes de finalizar la entrega.',
             'colaborador_id.exists' => 'El colaborador seleccionado no es válido o no tienes acceso a su empresa.',
-            'conjuntos.prohibited' => 'Los conjuntos sólo se entregan desde almacén. Al redistribuir tu custodia agrega sus artículos o unidades por separado.',
             'activos.*.activo_id.required' => 'Selecciona un activo.',
             'activos.*.cantidad.required' => 'Indica la cantidad.',
             'activos.*.cantidad.min' => 'La cantidad debe ser mayor a cero.',
