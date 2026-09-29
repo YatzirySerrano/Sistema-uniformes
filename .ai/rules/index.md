@@ -33,6 +33,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/pages/auth/Login.vue,resources/js/components/PasskeyVerify.vue | .ai/rules/js-components.md |
 | app/Enums/EstadoVisibleUnidad.php,app/Http/Controllers/UnidadActivoController.php,app/Soporte/PaletaGraficas.php,resources/js/lib/estadoVisibleUnidad.ts,resources/js/composables/useGraficasDashboard.ts | .ai/rules/js-composables.md |
 | app/Http/Requests/Entregas/GuardarEntregaRequest.php,app/Http/Controllers/EntregaController.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/js-pages-entregas.md |
+| app/Servicios/ServicioDashboard.php,app/Http/Controllers/PanelController.php,app/Enums/SeccionDashboard.php,resources/js/pages/Panel.vue | .ai/rules/js-pages.md |
 | app/Soporte/FechaHora.php,app/Soporte/ContextoExportacion.php,resources/views/acuses/*.blade.php,resources/views/reportes/*.blade.php,resources/js/lib/fecha.ts | .ai/rules/lib.md |
 | app/Models/Area.php,database/migrations/*areas*.php,app/Servicios/ServicioImportacionColaboradores.php | .ai/rules/migrations-servicios.md |
 | app/Acciones/CrearRondaInventarioFisico.php,app/Acciones/FinalizarRondaInventarioFisico.php,app/Acciones/VerificarExistenciaInventarioFisico.php,app/Acciones/MarcarUnidadPresente.php,app/Acciones/EscanearUnidadInventarioFisico.php,app/Http/Controllers/InventarioFisicoController.php,app/Models/InventarioFisicoExistencia.php,app/Models/InventarioFisicoFirma.php | .ai/rules/models-models.md |
@@ -46,8 +47,10 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Acciones/RegistrarUnidadesActivo.php,app/Soporte/NormalizadorNombre.php,resources/views/reportes/etiquetas_unidades.blade.php | .ai/rules/reportes.md |
 | app/Servicios/ServicioEvidencias.php,app/Models/Evidencia.php,app/Acciones/CrearEntregaUniforme.php,app/Acciones/RegistrarDevolucion.php,app/Http/Requests/Entregas/GuardarIdentidadEntregaRequest.php | .ai/rules/requests-entregas.md |
 | app/Http/Controllers/ServicioController.php,app/Acciones/AsignarColaboradoresServicio.php,app/Http/Requests/Servicios/AsignarColaboradoresServicioRequest.php | .ai/rules/requests-servicios.md |
+| app/Models/BitacoraAuditoria.php,app/Servicios/ServicioAuditoria.php,app/Http/Controllers/BitacoraController.php | .ai/rules/servicios-http-controllers.md |
 | resources/js/pages/Activos/Formulario.vue,app/Http/Requests/Activos/{GuardarActivoRequest,AgregarExistenciasRequest}.php,app/Servicios/ServicioEtiquetasQr.php | .ai/rules/servicios.md |
 | app/Http/Controllers/Concerns/ExportaListado.php,app/Exports/ListadoExport.php,resources/views/reportes/listado-generico.blade.php,resources/js/components/sistema/BotonesExportar.vue | .ai/rules/sistema.md |
 | app/Http/Controllers/{Almacen,TipoActivo,Sucursal,Area,Activo}Controller.php,app/Soporte/ServicioGeneradorCodigos*.php | .ai/rules/soporte.md |
 | tests/** | .ai/rules/tests.md |
 | resources/js/pages/**, resources/js/components/**, resources/js/components/AppLogoIcon.vue,public/favicon.svg,public/favicon.ico,public/apple-touch-icon.png | .ai/rules/ux.md |
+| app/Http/Controllers/InventarioFisicoController.php,app/Servicios/ServicioResumenInventarioFisico.php,resources/views/reportes/inventario-fisico-acta.blade.php | .ai/rules/views-reportes.md |

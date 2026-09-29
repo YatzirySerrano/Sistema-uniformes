@@ -3,6 +3,7 @@
 namespace App\Servicios;
 
 use App\Models\BitacoraAuditoria;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -39,6 +40,10 @@ class ServicioAuditoria
         return BitacoraAuditoria::query()->create([
             'usuario_id' => $usuario?->getKey(),
             'nombre_usuario_snapshot' => $usuario?->name,
+            // Snapshot histórico: congela si el actor era Superadministrador
+            // EN ESTE MOMENTO, para que su privacidad no dependa de su rol
+            // futuro (ver `BitacoraAuditoria::scopeVisiblePara()`).
+            'realizada_por_superadministrador' => $usuario instanceof User && $usuario->esSuperadministrador(),
             'empresa_id' => $opciones['empresa_id'] ?? null,
             'sucursal_id' => $opciones['sucursal_id'] ?? null,
             'modulo' => $modulo,

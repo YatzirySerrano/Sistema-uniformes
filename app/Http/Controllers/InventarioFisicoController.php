@@ -21,7 +21,6 @@ use App\Models\Almacen;
 use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
-use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Servicios\ServicioResumenInventarioFisico;
 use App\Soporte\ContextoExportacion;
@@ -35,6 +34,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use Spatie\LaravelPdf\Enums\Format;
+use Spatie\LaravelPdf\Facades\Pdf;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
@@ -176,15 +177,7 @@ class InventarioFisicoController extends Controller
             ->map(fn (InventarioFisicoExistencia $e): array => $this->resumen->filaExistencia($e))
             ->values();
 
-        // Estado de la APLICACIÓN de correcciones — deliberadamente separado
-        // del estado de la ronda (`ronda.estado` sigue siendo sólo
-        // en_proceso/finalizado): "aplicadas" > "pendientes" > "sin
-        // diferencias", nunca se mezclan.
-        $estadoCorrecciones = match (true) {
-            $inventarioFisico->tieneCorreccionesAplicadas() => 'aplicadas',
-            $contadores['cantidad_con_diferencia'] === 0 => 'sin_diferencias',
-            default => 'pendientes',
-        };
+        $correcciones = $this->resumen->resumenCorrecciones($inventarioFisico, $contadores);
 
         return Inertia::render('InventarioFisico/Detalle', [
             'ronda' => [
@@ -210,18 +203,7 @@ class InventarioFisicoController extends Controller
             'unidades' => $unidades,
             'existencias' => $existencias,
             'textoAceptacion' => FinalizarRondaInventarioFisico::TEXTO_ACEPTACION,
-            'correcciones' => [
-                'estado' => $estadoCorrecciones,
-                'total_diferencias' => $contadores['cantidad_con_diferencia'],
-                'aplicadas_en' => $inventarioFisico->correcciones_aplicadas_en?->toIso8601String(),
-                'aplicadas_por' => $inventarioFisico->correccionesAplicadasPor?->name,
-                'total_aplicadas' => $inventarioFisico->tieneCorreccionesAplicadas()
-                    ? MovimientoInventario::query()
-                        ->where('referencia_tipo', InventarioFisico::class)
-                        ->where('referencia_id', $inventarioFisico->id)
-                        ->count()
-                    : null,
-            ],
+            'correcciones' => $correcciones,
             // Combinaciones que impidieron aplicar el lote en el último
             // intento (si lo hubo) — se consume una sola vez, igual que
             // `flash.toast`.
@@ -234,7 +216,7 @@ class InventarioFisicoController extends Controller
                 'aplicarCorrecciones' => $request->user()->can('aplicarCorrecciones', $inventarioFisico)
                     && $inventarioFisico->estaFinalizada()
                     && $inventarioFisico->firma !== null
-                    && $estadoCorrecciones === 'pendientes',
+                    && $correcciones['estado'] === 'pendientes',
             ],
         ]);
     }
@@ -393,17 +375,29 @@ class InventarioFisicoController extends Controller
     }
 
     /**
-     * Excel / PDF del resumen de una ronda. `?tipo=unidades` (por defecto) =
-     * unidades identificadas, respetando el filtro de sección
-     * (`todos`/`encontrados`/`faltantes`/`no_esperados`). `?tipo=cantidad` =
-     * artículos por cantidad (esperado / contado / diferencia / resultado). Sin
-     * `->paginate()`: exporta la sección COMPLETA. Mismo permiso que `show()`.
+     * Exportación de una ronda. Mismo permiso que `show()` (Policy `view`:
+     * `inventario-fisico.ver` + acceso a la empresa de la ronda).
+     *
+     * - PDF (`?formato=pdf`): el ACTA completa de la ronda — cabecera,
+     *   contadores, TODAS las unidades y TODOS los renglones por cantidad,
+     *   firma y correcciones (`acta()`). Antes el PDF era la tabla genérica
+     *   de UNA sección de unidades (la del detalle, por defecto
+     *   `faltantes`) e ignoraba las existencias por cantidad, así que una
+     *   ronda sólo por cantidad, o sin faltantes, salía vacía.
+     * - Excel: una hoja plana por tipo. `?tipo=unidades` (por defecto) =
+     *   unidades identificadas, respetando la sección
+     *   (`todos`/`encontrados`/`faltantes`/`no_esperados`); `?tipo=cantidad`
+     *   = artículos por cantidad. Sin `->paginate()`: exporta completo.
      */
     public function exportar(Request $request, InventarioFisico $inventarioFisico): BinaryFileResponse|HttpResponse
     {
         $this->authorize('view', $inventarioFisico);
 
         $inventarioFisico->loadMissing('empresa:id,nombre_comercial,logo_ruta');
+
+        if ($request->input('formato') === 'pdf') {
+            return $this->acta($request, $inventarioFisico);
+        }
 
         if ($request->input('tipo') === 'cantidad') {
             return $this->exportarCantidad($request, $inventarioFisico);
@@ -443,6 +437,38 @@ class InventarioFisicoController extends Controller
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Clasificación', 'Código', 'Activo', 'Marca / Modelo', 'Almacén', 'Asignada a', 'Estado actual', 'Escaneada en', 'Escaneada por',
         ], $contexto);
+    }
+
+    /**
+     * Acta PDF de la ronda (Browsershot, identidad visual compartida de los
+     * reportes). Los datos salen íntegramente de `datosActa()`: snapshot y
+     * registros propios de la ronda, nunca el estado actual del inventario.
+     */
+    private function acta(Request $request, InventarioFisico $inventarioFisico): HttpResponse
+    {
+        $datos = $this->resumen->datosActa($inventarioFisico);
+
+        $contexto = new ContextoExportacion(
+            'Inventario físico '.$inventarioFisico->folio,
+            $inventarioFisico->empresa,
+            [],
+            count($datos['unidades']) + count($datos['existencias']),
+            generadoPor: $request->user()?->name,
+        );
+
+        $pdf = Pdf::view('reportes.inventario-fisico-acta', [
+            'contexto' => $contexto,
+            ...$datos,
+        ])
+            ->format(Format::Letter)
+            ->portrait()
+            ->margins(10, 10, 16, 10)
+            ->footerView('reportes._pie');
+
+        return response($pdf->generatePdfContent(), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="'.$contexto->nombreArchivo().'.pdf"',
+        ]);
     }
 
     private function exportarCantidad(Request $request, InventarioFisico $inventarioFisico): BinaryFileResponse|HttpResponse

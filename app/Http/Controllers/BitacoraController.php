@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\RolSistema;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Models\BitacoraAuditoria;
@@ -56,7 +55,10 @@ class BitacoraController extends Controller
             'registros' => $registros,
             'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
-            'modulos' => BitacoraAuditoria::query()->distinct()->orderBy('modulo')->pluck('modulo'),
+            // Sólo los módulos de registros que este usuario PUEDE ver: un
+            // módulo que sólo aparece en acciones de un Superadministrador
+            // (p. ej. la importación maestra) delataría su existencia.
+            'modulos' => $this->consultaVisible($request)->distinct()->orderBy('modulo')->pluck('modulo'),
             'categorias' => collect(DescripcionAuditoria::CATEGORIAS)
                 ->map(fn (string $etiqueta, string $valor): array => ['valor' => $valor, 'etiqueta' => $etiqueta])
                 ->values(),
@@ -129,11 +131,32 @@ class BitacoraController extends Controller
      *
      * @return array<int, string>
      */
-    private function accionesDeCategoria(string $categoria): array
+    private function accionesDeCategoria(Request $request, string $categoria): array
     {
-        return BitacoraAuditoria::query()->distinct()->pluck('accion')
+        return $this->consultaVisible($request)->distinct()->pluck('accion')
             ->filter(fn (string $accion): bool => $this->descripcionAuditoria->categoria($accion, null, null) === $categoria)
             ->values()->all();
+    }
+
+    /**
+     * Universo de registros que el usuario puede recibir, ANTES de cualquier
+     * filtro de pantalla: alcance multiempresa + privacidad del
+     * Superadministrador (`BitacoraAuditoria::scopeVisiblePara()`). Todo lo
+     * que sale de este controller — listado, paginación, conteos, búsqueda,
+     * exportaciones y catálogos auxiliares del filtro — parte de aquí, así
+     * que ningún filtro manipulado puede recuperar lo que este universo ya
+     * excluyó.
+     *
+     * @return Builder<BitacoraAuditoria>
+     */
+    private function consultaVisible(Request $request): Builder
+    {
+        $usuario = $request->user();
+        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
+
+        return BitacoraAuditoria::query()
+            ->visiblePara($usuario)
+            ->when(! $usuario->esSuperadministrador(), fn (Builder $q) => $q->where(fn (Builder $s) => $s->whereIn('empresa_id', $idsAutorizadas)->orWhereNull('empresa_id')));
     }
 
     /**
@@ -143,31 +166,21 @@ class BitacoraController extends Controller
     private function consultaBitacora(Request $request, array $filtros): Builder
     {
         $empresaFiltro = $this->empresaDelFiltro($request);
-        $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
-        $superadmin = $request->user()->esSuperadministrador();
 
-        return BitacoraAuditoria::query()
+        return $this->consultaVisible($request)
             ->with(['empresa:id,nombre_comercial', 'sucursal:id,nombre'])
-            ->when(! $superadmin, fn (Builder $q) => $q->where(fn (Builder $s) => $s->whereIn('empresa_id', $idsAutorizadas)->orWhereNull('empresa_id')))
-            // El Superadministrador es exclusivo del equipo técnico: ningún
-            // otro rol debe ver ni saber que sus acciones existen, en
-            // listado, exportación ni conteo — se filtra en la query, nunca
-            // sólo en la vista. Un superadministrador sí ve todo, incluidas
-            // acciones de otros superadministradores (Gate::before ya lo
-            // exime de la condición `! $superadmin`).
-            ->when(! $superadmin, fn (Builder $q) => $q->whereDoesntHave(
-                'usuario',
-                fn (Builder $u) => $u->whereHas('roles', fn (Builder $r) => $r->where('name', RolSistema::Superadministrador->value)),
-            ))
             ->when($empresaFiltro !== null, fn (Builder $q) => $q->where('empresa_id', $empresaFiltro->id))
             ->when($filtros['modulo'] ?? null, fn (Builder $q, $v) => $q->where('modulo', $v))
             ->when($filtros['accion'] ?? null, fn (Builder $q, $v) => $q->where('accion', $v))
-            ->when($filtros['categoria'] ?? null, fn (Builder $q, string $v) => $q->whereIn('accion', $this->accionesDeCategoria($v)))
+            ->when($filtros['categoria'] ?? null, fn (Builder $q, string $v) => $q->whereIn('accion', $this->accionesDeCategoria($request, $v)))
             ->when($filtros['buscar'] ?? null, fn (Builder $q, $v) => $q->where(fn (Builder $s) => $s
                 ->where('descripcion', 'like', "%{$v}%")
                 ->orWhere('nombre_usuario_snapshot', 'like', "%{$v}%")))
             ->when($filtros['desde'] ?? null, fn (Builder $q, $v) => $q->whereDate('created_at', '>=', $v))
             ->when($filtros['hasta'] ?? null, fn (Builder $q, $v) => $q->whereDate('created_at', '<=', $v))
-            ->latest();
+            // Desempate por id: varios eventos en el mismo segundo conservan
+            // un orden estable entre páginas (append-only ⇒ id creciente).
+            ->latest()
+            ->orderByDesc('id');
     }
 }

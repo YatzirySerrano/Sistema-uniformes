@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\SeccionDashboard;
 use App\Http\Controllers\Concerns\ConEmpresa;
+use App\Models\Almacen;
+use App\Models\Sucursal;
 use App\Servicios\ServicioDashboard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -31,6 +34,25 @@ class PanelController extends Controller
             'hasta' => ['nullable', 'date'],
         ]);
 
+        $usuario = $request->user();
+
+        // Bloques del Dashboard que el usuario puede consultar, resueltos
+        // contra sus permisos EFECTIVOS (Spatie) en cada petición — nunca por
+        // nombre de rol. El servicio sólo consulta y devuelve esos bloques.
+        $secciones = SeccionDashboard::autorizadasPara($usuario);
+
+        // Un filtro sólo tiene sentido si algún bloque visible depende de él,
+        // y su combobox sólo puede ofrecerse si el usuario puede usar el
+        // buscador de ese catálogo (`sucursales/buscar` / `almacenes/buscar`
+        // exigen `viewAny`). Si no está disponible, el parámetro se ignora.
+        $filtrosDisponibles = [
+            'sucursal' => $usuario->can('viewAny', Sucursal::class)
+                && collect($secciones)->contains(fn (SeccionDashboard $s): bool => $s->usaSucursal()),
+            'almacen' => $usuario->can('viewAny', Almacen::class)
+                && collect($secciones)->contains(fn (SeccionDashboard $s): bool => $s->usaAlmacen()),
+            'fechas' => collect($secciones)->contains(fn (SeccionDashboard $s): bool => $s->usaRangoFechas()),
+        ];
+
         // Sin "empresa activa": el filtro de empresa es opcional. Sin él, el
         // Dashboard agrega TODAS las empresas autorizadas del usuario — nunca
         // "la primera" ni obliga a elegir una para poder ver algo.
@@ -40,16 +62,22 @@ class PanelController extends Controller
 
         [$desde, $hasta] = $this->resolverRango($datos['desde'] ?? null, $datos['hasta'] ?? null);
 
-        $sucursal = $empresaFiltrada !== null
-            ? $this->acceso()->sucursalesAutorizadas($request->user(), $empresaFiltrada)->firstWhere('id', $datos['sucursal_id'] ?? null)
-            : $this->acceso()->sucursalesAutorizadasGlobal($request->user())->firstWhere('id', $datos['sucursal_id'] ?? null);
+        $sucursal = null;
+        if ($filtrosDisponibles['sucursal'] && ($datos['sucursal_id'] ?? null) !== null) {
+            $sucursal = $empresaFiltrada !== null
+                ? $this->acceso()->sucursalesAutorizadas($usuario, $empresaFiltrada)->firstWhere('id', $datos['sucursal_id'])
+                : $this->acceso()->sucursalesAutorizadasGlobal($usuario)->firstWhere('id', $datos['sucursal_id']);
+        }
 
-        $almacen = $empresaFiltrada !== null
-            ? $this->acceso()->almacenesAutorizados($request->user(), $empresaFiltrada)->firstWhere('id', $datos['almacen_id'] ?? null)
-            : $this->acceso()->almacenesAutorizadosGlobal($request->user())->firstWhere('id', $datos['almacen_id'] ?? null);
+        $almacen = null;
+        if ($filtrosDisponibles['almacen'] && ($datos['almacen_id'] ?? null) !== null) {
+            $almacen = $empresaFiltrada !== null
+                ? $this->acceso()->almacenesAutorizados($usuario, $empresaFiltrada)->firstWhere('id', $datos['almacen_id'])
+                : $this->acceso()->almacenesAutorizadosGlobal($usuario)->firstWhere('id', $datos['almacen_id']);
+        }
 
         return Inertia::render('Panel', [
-            'resumen' => $dashboard->resumen($empresaIds, $desde, $hasta, $sucursal?->id, $almacen?->id),
+            'resumen' => $dashboard->resumen($secciones, $empresaIds, $desde, $hasta, $sucursal?->id, $almacen?->id),
             'filtros' => [
                 'empresa_id' => $empresaFiltrada?->id,
                 'sucursal_id' => $sucursal?->id,
@@ -57,6 +85,7 @@ class PanelController extends Controller
                 'desde' => $desde->toDateString(),
                 'hasta' => $hasta->toDateString(),
             ],
+            'filtrosDisponibles' => $filtrosDisponibles,
             'sucursalSeleccionada' => $sucursal === null ? null : ['id' => $sucursal->id, 'nombre' => $sucursal->nombre],
             'almacenSeleccionado' => $almacen === null ? null : ['id' => $almacen->id, 'nombre' => $almacen->nombre],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),

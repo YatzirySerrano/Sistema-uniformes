@@ -3,13 +3,16 @@
 namespace App\Servicios;
 
 use App\Enums\DireccionMovimiento;
+use App\Enums\EstadoInventarioFisico;
 use App\Enums\EstadoVisibleUnidad;
+use App\Enums\SeccionDashboard;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\CategoriaActivo;
 use App\Models\Colaborador;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
+use App\Models\InventarioFisico;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\UnidadActivo;
@@ -28,95 +31,156 @@ use Illuminate\Support\Collection;
  * existencias, stock bajo, unidades, almacenes activos) nunca se acotan por
  * `desde`/`hasta` — falsearían la foto del momento. Sólo las métricas
  * TRANSACCIONALES (entregas, devoluciones, movimientos) respetan el rango.
+ *
+ * Qué se calcula lo deciden las `SeccionDashboard` autorizadas del usuario
+ * (permisos efectivos, nunca su rol): ver `resumen()`.
  */
 class ServicioDashboard
 {
     /**
+     * Sólo se EJECUTAN las consultas de las secciones recibidas (ya
+     * autorizadas por `SeccionDashboard::autorizadasPara()`), y sólo sus
+     * claves viajan en el resultado: una sección no autorizada no se consulta
+     * ni se envía a Inertia — no es un `v-if` en Vue que oculta datos ya
+     * calculados.
+     *
+     * @param  list<SeccionDashboard>  $secciones
      * @param  array<int, int>  $empresaIds
-     * @return array<string, mixed>
+     * @return array{
+     *     secciones: list<string>,
+     *     kpis: array<string, int>,
+     *     series: array<string, array<int, array<string, int|string>>>,
+     *     entregas_recientes?: array<int, array<string, mixed>>,
+     *     stock_bajo_detalle?: array<int, array<string, mixed>>,
+     * }
      */
-    public function resumen(array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
+    public function resumen(array $secciones, array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
     {
-        // Se calcula una sola vez: KPIs y la serie "Unidades por estado" antes
-        // colapsaban el mismo GROUP BY de `unidades_activo` por separado.
-        $unidadesAgrupadas = $this->unidadesAgrupadas($empresaIds, $almacenId);
+        $tiene = fn (SeccionDashboard $seccion): bool => in_array($seccion, $secciones, true);
 
-        return [
-            'kpis' => [
-                'colaboradores_activos' => Colaborador::query()
-                    ->whereIn('empresa_id', $empresaIds)->where('activo', true)
-                    ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
-                    ->count(),
-                'activos_activos' => Activo::query()
-                    ->whereIn('empresa_id', $empresaIds)->where('activo', true)->count(),
-                'existencias_disponibles' => (int) SaldoInventario::query()
-                    ->whereIn('empresa_id', $empresaIds)
-                    ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
-                    ->sum('cantidad'),
-                'entregas_periodo' => $this->consultaEntregas($empresaIds, $desde, $hasta, $sucursalId, $almacenId)->count(),
-                'devoluciones_periodo' => $this->consultaDevoluciones($empresaIds, $desde, $hasta, $sucursalId, $almacenId)->count(),
-                'activos_stock_bajo' => SaldoInventario::query()
-                    ->whereIn('empresa_id', $empresaIds)
-                    ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
-                    ->bajoMinimo()
-                    ->count(),
-                'almacenes_activos' => Almacen::query()->activos()->paraEmpresas($empresaIds)->count(),
-                ...$this->kpisUnidades($unidadesAgrupadas),
-            ],
-            'series' => [
-                'entregas_por_periodo' => $this->serieDiaria(
-                    $this->consultaEntregas($empresaIds, $desde, $hasta, $sucursalId, $almacenId),
-                    'fecha_entrega', $desde, $hasta,
-                ),
-                'devoluciones_por_periodo' => $this->serieDiaria(
-                    $this->consultaDevoluciones($empresaIds, $desde, $hasta, $sucursalId, $almacenId),
-                    'fecha', $desde, $hasta,
-                ),
-                'movimientos_por_periodo' => $this->movimientosPorPeriodo($empresaIds, $desde, $hasta, $sucursalId, $almacenId),
-                'unidades_por_estado' => $this->unidadesPorEstado($unidadesAgrupadas),
-                'existencias_por_almacen' => $this->existenciasPorAlmacen($empresaIds, $almacenId),
-                'stock_por_categoria' => $this->stockPorCategoria($empresaIds, $almacenId),
-            ],
-            'entregas_recientes' => EntregaUniforme::query()
-                ->whereIn('empresa_id', $empresaIds)
+        $resumen = [
+            'secciones' => array_map(fn (SeccionDashboard $s): string => $s->value, $secciones),
+            'kpis' => [],
+            'series' => [],
+        ];
+
+        if ($tiene(SeccionDashboard::Colaboradores)) {
+            $resumen['kpis']['colaboradores_activos'] = Colaborador::query()
+                ->whereIn('empresa_id', $empresaIds)->where('activo', true)
                 ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
+                ->count();
+        }
+
+        if ($tiene(SeccionDashboard::Activos)) {
+            $resumen['kpis']['activos_activos'] = Activo::query()
+                ->whereIn('empresa_id', $empresaIds)->where('activo', true)->count();
+        }
+
+        if ($tiene(SeccionDashboard::Inventario)) {
+            $resumen['kpis']['existencias_disponibles'] = (int) SaldoInventario::query()
+                ->whereIn('empresa_id', $empresaIds)
                 ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
-                ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial'])
-                ->latest()
-                ->limit(6)
-                ->get()
-                ->map(fn (EntregaUniforme $e): array => [
-                    'id' => $e->id,
-                    'folio' => $e->folio,
-                    'colaborador' => $e->colaborador?->nombre_completo,
-                    'sucursal' => $e->sucursal?->nombre,
-                    'empresa' => $e->empresa?->nombre_comercial,
-                    'estado' => $e->estado->value,
-                    'estado_etiqueta' => $e->estado->etiqueta(),
-                    'fecha_entrega' => $e->fecha_entrega->toDateString(),
-                ])->all(),
-            'stock_bajo_detalle' => SaldoInventario::query()
+                ->sum('cantidad');
+            $resumen['kpis']['activos_stock_bajo'] = SaldoInventario::query()
                 ->whereIn('empresa_id', $empresaIds)
                 ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
                 ->bajoMinimo()
-                ->with(['activo:id,nombre', 'talla:id,valor', 'almacen:id,nombre', 'empresa:id,nombre_comercial'])
-                // `minimo` es UNSIGNED; `cantidad - minimo` puede dar negativo y
-                // desborda BIGINT UNSIGNED en MariaDB (SQLSTATE[22003]).
-                // `bajoMinimo()` ya garantiza cantidad <= minimo, así que
-                // `minimo - cantidad` es siempre >= 0 y ordena igual (mayor
-                // faltante primero).
-                ->orderByRaw('(minimo - cantidad) DESC')
-                ->limit(8)
-                ->get()
-                ->map(fn (SaldoInventario $s): array => [
-                    'activo' => $s->activo?->nombre,
-                    'talla' => $s->talla?->valor,
-                    'almacen' => $s->almacen?->nombre,
-                    'empresa' => $s->empresa?->nombre_comercial,
-                    'cantidad' => $s->cantidad,
-                    'minimo' => $s->minimo,
-                ])->all(),
-        ];
+                ->count();
+            $resumen['series']['movimientos_por_periodo'] = $this->movimientosPorPeriodo($empresaIds, $desde, $hasta, $sucursalId, $almacenId);
+            $resumen['series']['existencias_por_almacen'] = $this->existenciasPorAlmacen($empresaIds, $almacenId);
+            $resumen['series']['stock_por_categoria'] = $this->stockPorCategoria($empresaIds, $almacenId);
+            $resumen['stock_bajo_detalle'] = $this->stockBajoDetalle($empresaIds, $almacenId);
+        }
+
+        if ($tiene(SeccionDashboard::Entregas)) {
+            $consulta = $this->consultaEntregas($empresaIds, $desde, $hasta, $sucursalId, $almacenId);
+            $resumen['kpis']['entregas_periodo'] = (clone $consulta)->count();
+            $resumen['series']['entregas_por_periodo'] = $this->serieDiaria($consulta, 'fecha_entrega', $desde, $hasta);
+            $resumen['entregas_recientes'] = $this->entregasRecientes($empresaIds, $sucursalId, $almacenId);
+        }
+
+        if ($tiene(SeccionDashboard::Devoluciones)) {
+            $consulta = $this->consultaDevoluciones($empresaIds, $desde, $hasta, $sucursalId, $almacenId);
+            $resumen['kpis']['devoluciones_periodo'] = (clone $consulta)->count();
+            $resumen['series']['devoluciones_por_periodo'] = $this->serieDiaria($consulta, 'fecha', $desde, $hasta);
+        }
+
+        if ($tiene(SeccionDashboard::Almacenes)) {
+            $resumen['kpis']['almacenes_activos'] = Almacen::query()->activos()->paraEmpresas($empresaIds)->count();
+        }
+
+        if ($tiene(SeccionDashboard::Unidades)) {
+            // Un solo GROUP BY de `unidades_activo` alimenta KPIs y la serie.
+            $unidadesAgrupadas = $this->unidadesAgrupadas($empresaIds, $almacenId);
+            $resumen['kpis'] = [...$resumen['kpis'], ...$this->kpisUnidades($unidadesAgrupadas)];
+            $resumen['series']['unidades_por_estado'] = $this->unidadesPorEstado($unidadesAgrupadas);
+        }
+
+        if ($tiene(SeccionDashboard::InventarioFisico)) {
+            // Estado actual (no se acota por fechas ni por almacén: el listado
+            // destino tampoco filtra por almacén, y la cifra debe coincidir).
+            $resumen['kpis']['rondas_inventario_fisico_en_proceso'] = InventarioFisico::query()
+                ->whereIn('empresa_id', $empresaIds)
+                ->where('estado', EstadoInventarioFisico::EnProceso)
+                ->count();
+        }
+
+        return $resumen;
+    }
+
+    /**
+     * @param  array<int, int>  $empresaIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function entregasRecientes(array $empresaIds, ?int $sucursalId, ?int $almacenId): array
+    {
+        return EntregaUniforme::query()
+            ->whereIn('empresa_id', $empresaIds)
+            ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
+            ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
+            ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial'])
+            ->latest()
+            ->limit(6)
+            ->get()
+            ->map(fn (EntregaUniforme $e): array => [
+                'id' => $e->id,
+                'folio' => $e->folio,
+                'colaborador' => $e->colaborador?->nombre_completo,
+                'sucursal' => $e->sucursal?->nombre,
+                'empresa' => $e->empresa?->nombre_comercial,
+                'estado' => $e->estado->value,
+                'estado_etiqueta' => $e->estado->etiqueta(),
+                'fecha_entrega' => $e->fecha_entrega->toDateString(),
+            ])->all();
+    }
+
+    /**
+     * @param  array<int, int>  $empresaIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function stockBajoDetalle(array $empresaIds, ?int $almacenId): array
+    {
+        return SaldoInventario::query()
+            ->whereIn('empresa_id', $empresaIds)
+            ->when($almacenId, fn (Builder $q, int $v) => $q->where('almacen_id', $v))
+            ->bajoMinimo()
+            ->with(['activo:id,nombre', 'talla:id,valor', 'almacen:id,nombre', 'empresa:id,nombre_comercial'])
+            // `minimo` es UNSIGNED; `cantidad - minimo` puede dar negativo y
+            // desborda BIGINT UNSIGNED en MariaDB (SQLSTATE[22003]).
+            // `bajoMinimo()` ya garantiza cantidad <= minimo, así que
+            // `minimo - cantidad` es siempre >= 0 y ordena igual (mayor
+            // faltante primero).
+            ->orderByRaw('(minimo - cantidad) DESC')
+            ->limit(8)
+            ->get()
+            ->map(fn (SaldoInventario $s): array => [
+                'activo' => $s->activo?->nombre,
+                'talla' => $s->talla?->valor,
+                'almacen' => $s->almacen?->nombre,
+                'empresa' => $s->empresa?->nombre_comercial,
+                'cantidad' => $s->cantidad,
+                'minimo' => $s->minimo,
+            ])->all();
     }
 
     /**
