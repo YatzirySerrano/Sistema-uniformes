@@ -25,6 +25,12 @@ const props = defineProps<{
             nombre_completo: string;
             numero_empleado: string;
         } | null;
+        /** Redistribución: custodia de la que salieron los bienes. */
+        origen_custodia: {
+            id: number;
+            nombre_completo: string;
+            numero_empleado: string;
+        } | null;
         sucursal: string;
         encargado: string;
         items: {
@@ -36,6 +42,17 @@ const props = defineProps<{
             unidad_estado_visible: string | null;
             unidad_estado_visible_etiqueta: string | null;
             conjunto: string | null;
+            recibido_de: {
+                entrega_id: number;
+                folio: string;
+                colaborador: string | null;
+            } | null;
+            redistribuido_a: {
+                entrega_id: number;
+                folio: string;
+                colaborador: string | null;
+                cantidad: number;
+            }[];
         }[];
         correcciones: {
             id: number;
@@ -69,6 +86,12 @@ defineOptions({
 });
 
 const pendiente = props.entrega.estado === 'pendiente_firma';
+
+// Cadena de custodia visible sólo si algún renglón vino de otra custodia o
+// se redistribuyó después (Almacén → custodio → destinatario).
+const itemsConTrazabilidad = props.entrega.items.filter(
+    (it) => it.recibido_de !== null || it.redistribuido_a.length > 0,
+);
 </script>
 
 <template>
@@ -145,7 +168,14 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                     <span class="text-muted-foreground">Responsable:</span>
                     {{ entrega.encargado }}
                 </p>
-                <p>
+                <p v-if="entrega.origen_custodia">
+                    <span class="text-muted-foreground">Origen:</span>
+                    Redistribución desde la custodia de
+                    {{ entrega.origen_custodia.nombre_completo }} ({{
+                        entrega.origen_custodia.numero_empleado
+                    }})
+                </p>
+                <p v-else>
                     <span class="text-muted-foreground"
                         >Almacén de origen:</span
                     >
@@ -337,6 +367,70 @@ const pendiente = props.entrega.estado === 'pendiente_firma';
                         </tbody>
                     </table>
                 </div>
+            </CardContent>
+        </Card>
+
+        <Card v-if="itemsConTrazabilidad.length">
+            <CardHeader>
+                <CardTitle class="text-base"
+                    >Trazabilidad de custodia</CardTitle
+                >
+                <p class="text-muted-foreground text-sm">
+                    De qué entrega anterior salió cada renglón y a quién se
+                    redistribuyó después. Cada paso es una entrega firmada
+                    distinta; ninguna modifica a la anterior.
+                </p>
+            </CardHeader>
+            <CardContent>
+                <ul class="flex flex-col gap-3 text-sm">
+                    <li
+                        v-for="(it, i) in itemsConTrazabilidad"
+                        :key="i"
+                        class="rounded-lg border p-3"
+                    >
+                        <p class="font-medium">
+                            {{ it.activo
+                            }}<template v-if="it.unidad_codigo">
+                                ·
+                                <span class="font-mono">{{
+                                    it.unidad_codigo
+                                }}</span></template
+                            ><template v-else-if="it.talla">
+                                · {{ it.talla }}</template
+                            >
+                        </p>
+                        <p v-if="it.recibido_de" class="mt-1">
+                            <span class="text-muted-foreground"
+                                >Recibido de la custodia de:</span
+                            >
+                            {{ it.recibido_de.colaborador ?? '—' }} ·
+                            <Link
+                                :href="`/entregas/${it.recibido_de.entrega_id}`"
+                                class="underline underline-offset-2"
+                                >{{ it.recibido_de.folio }}</Link
+                            >
+                        </p>
+                        <div v-if="it.redistribuido_a.length" class="mt-1">
+                            <p class="text-muted-foreground">
+                                Redistribuido después a:
+                            </p>
+                            <ul class="mt-0.5 flex flex-col gap-0.5">
+                                <li
+                                    v-for="r in it.redistribuido_a"
+                                    :key="`${r.entrega_id}-${r.cantidad}`"
+                                >
+                                    {{ r.colaborador ?? '—' }} ·
+                                    {{ r.cantidad }} ·
+                                    <Link
+                                        :href="`/entregas/${r.entrega_id}`"
+                                        class="underline underline-offset-2"
+                                        >{{ r.folio }}</Link
+                                    >
+                                </li>
+                            </ul>
+                        </div>
+                    </li>
+                </ul>
             </CardContent>
         </Card>
 

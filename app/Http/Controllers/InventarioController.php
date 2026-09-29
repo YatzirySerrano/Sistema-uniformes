@@ -71,6 +71,7 @@ class InventarioController extends Controller
             'permisos' => [
                 'entrada' => $request->user()->can('inventario.entrada'),
                 'ajustar' => $request->user()->can('inventario.ajustar'),
+                'condicion' => $request->user()->can('activos.condicion'),
                 'minimos' => $request->user()->can('inventario.minimos'),
             ],
         ]);
@@ -296,12 +297,13 @@ class InventarioController extends Controller
     /**
      * Marca N piezas de un activo por CANTIDAD como Dañado o Baja,
      * directamente desde el stock disponible (nunca desde una devolución).
-     * Mismo permiso que "Ajustar existencias": conceptualmente es también
-     * una corrección del inventario físico frente al conteo real.
+     * Permiso PROPIO (`activos.condicion`): la condición física es del
+     * activo, no una corrección de stock — quitar `inventario.ajustar` no la
+     * retira, y concederla no permite corregir existencias.
      */
     public function marcarCondicion(Request $request, MarcarCondicionInventario $accion): RedirectResponse
     {
-        abort_unless($request->user()->can('inventario.ajustar'), 403);
+        abort_unless($request->user()->can('activos.condicion'), 403);
         $empresa = $this->resolverEmpresa($request);
 
         $datos = $this->validarOperacion($request, $empresa->id, [
@@ -330,7 +332,7 @@ class InventarioController extends Controller
      */
     public function restaurarCondicion(Request $request, RestaurarCondicionInventario $accion): RedirectResponse
     {
-        abort_unless($request->user()->can('inventario.ajustar'), 403);
+        abort_unless($request->user()->can('activos.condicion'), 403);
         $empresa = $this->resolverEmpresa($request);
 
         $datos = $this->validarOperacion($request, $empresa->id, [

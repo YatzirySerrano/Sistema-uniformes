@@ -3,6 +3,7 @@ import { initializeTheme } from '@/composables/useAppearance';
 import AppLayout from '@/layouts/AppLayout.vue';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import SettingsLayout from '@/layouts/settings/Layout.vue';
+import { initializeAvisoSinPermiso } from '@/lib/avisoSinPermiso';
 import { initializeFlashEtiquetas } from '@/lib/flashEtiquetas';
 import { initializeFlashToast } from '@/lib/flashToast';
 import { initializeServiceWorker } from '@/lib/pwa';
@@ -36,6 +37,10 @@ initializeTemaVisual();
 
 // This will listen for flash toast data from the server...
 initializeFlashToast();
+
+// This will turn 403 responses of actions / fetch calls into a friendly toast
+// (navigations get the `Errores/SinPermiso` page from the server)...
+initializeAvisoSinPermiso();
 
 // This will open the QR-labels PDF (if any) flashed by the server, separate
 // from the Inertia response that created it...

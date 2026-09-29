@@ -102,7 +102,9 @@ const props = defineProps<{
         agregar_existencias: boolean;
         minimos: boolean;
         ajustar_inventario: boolean;
+        condicion_inventario: boolean;
         gestionar_unidades: boolean;
+        condicion_unidades: boolean;
     };
     suspendidos: {
         id: number;
@@ -522,7 +524,10 @@ function confirmarMinimoMasivo(): void {
                     </h2>
                     <div class="flex flex-wrap gap-2">
                         <Button
-                            v-if="permisos.gestionar_unidades"
+                            v-if="
+                                permisos.gestionar_unidades ||
+                                permisos.condicion_unidades
+                            "
                             variant="outline"
                             size="sm"
                             @click="dialogoGestionarUnidad = true"
@@ -714,7 +719,7 @@ function confirmarMinimoMasivo(): void {
                                                 v-if="
                                                     estadoCantidadExpandido ===
                                                         'danado' &&
-                                                    permisos.ajustar_inventario
+                                                    permisos.condicion_inventario
                                                 "
                                                 variant="outline"
                                                 size="sm"
@@ -753,7 +758,7 @@ function confirmarMinimoMasivo(): void {
                                             v-if="
                                                 estadoCantidadExpandido ===
                                                     'danado' &&
-                                                permisos.ajustar_inventario
+                                                permisos.condicion_inventario
                                             "
                                             variant="outline"
                                             size="sm"
@@ -907,6 +912,9 @@ function confirmarMinimoMasivo(): void {
                                                 :puede-ajustar="
                                                     permisos.ajustar_inventario
                                                 "
+                                                :puede-condicion="
+                                                    permisos.condicion_inventario
+                                                "
                                                 :puede-minimos="
                                                     permisos.minimos
                                                 "
@@ -982,6 +990,9 @@ function confirmarMinimoMasivo(): void {
                                 </div>
                                 <MenuAccionesExistencia
                                     :puede-ajustar="permisos.ajustar_inventario"
+                                    :puede-condicion="
+                                        permisos.condicion_inventario
+                                    "
                                     :puede-minimos="permisos.minimos"
                                     @corregir-existencia="abrirAjuste(s)"
                                     @cambiar-condicion="abrirCondicion(s)"
@@ -1052,6 +1063,8 @@ function confirmarMinimoMasivo(): void {
             :empresa-id="activo.empresa.id"
             :condiciones-incidencia="condicionesIncidencia ?? []"
             :condiciones-no-incidencia="condicionesNoIncidencia ?? []"
+            :puede-administrar="permisos.gestionar_unidades"
+            :puede-condicion="permisos.condicion_unidades"
         />
 
         <Dialog v-model:open="dialogoMinimo">

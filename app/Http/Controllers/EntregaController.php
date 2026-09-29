@@ -18,6 +18,7 @@ use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Models\SaldoInventario;
+use App\Models\UnidadActivo;
 use App\Models\User;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
@@ -33,6 +34,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -218,11 +220,34 @@ class EntregaController extends Controller
             ->with(['colaborador:id,nombre_completo,numero_empleado', 'sucursal:id,nombre', 'empresa:id,nombre_comercial', 'encargado:id,name', 'servicio:id,nombre,contrato_id', 'servicio.contrato:id,nombre']);
     }
 
-    public function create(Request $request): Response
+    public function create(Request $request, ServicioCustodiaColaborador $custodia): Response
     {
         $this->authorize('create', EntregaUniforme::class);
 
+        $usuario = $request->user();
+
         return Inertia::render('Entregas/Crear', [
+            // Vías disponibles para ESTE usuario según sus permisos efectivos:
+            // salida de almacén y/o redistribución de su propia custodia.
+            'origenes' => [
+                'almacen' => $usuario->can('entregarDesdeAlmacen', EntregaUniforme::class),
+                'custodia' => $usuario->can('redistribuir', EntregaUniforme::class),
+            ],
+            // Empresas donde el usuario TIENE custodia propia (su registro de
+            // colaborador): el selector de empresa del modo "custodia" sólo
+            // ofrece éstas. Sin registro ligado, la lista viene vacía y la
+            // pantalla lo explica — nunca se inventa una custodia.
+            'custodias' => $usuario->can('redistribuir', EntregaUniforme::class)
+                ? $custodia->custodiosDeUsuario($usuario)->map(fn (Colaborador $c): array => [
+                    'colaborador_id' => $c->id,
+                    'nombre_completo' => $c->nombre_completo,
+                    'empresa' => [
+                        'id' => $c->empresa_id,
+                        'codigo' => $c->empresa?->codigo,
+                        'nombre_comercial' => $c->empresa?->nombre_comercial,
+                    ],
+                ])->values()->all()
+                : [],
             // El flujo único termina SIEMPRE en la firma dentro de la misma
             // pantalla; el encargado que firma es el usuario autenticado.
             'encargado' => [
@@ -247,7 +272,7 @@ class EntregaController extends Controller
      */
     public function disponibilidad(Request $request, ServicioReservas $reservas): JsonResponse
     {
-        $this->authorize('create', EntregaUniforme::class);
+        $this->authorize('entregarDesdeAlmacen', EntregaUniforme::class);
 
         $datos = $request->validate([
             'empresa_id' => ['required', 'integer'],
@@ -287,7 +312,7 @@ class EntregaController extends Controller
      */
     public function reservar(Request $request, ReservarInventarioEntrega $accion): JsonResponse
     {
-        $this->authorize('create', EntregaUniforme::class);
+        $this->authorize('entregarDesdeAlmacen', EntregaUniforme::class);
 
         $datos = $request->validate([
             'token' => ['required', 'uuid'],
@@ -334,7 +359,7 @@ class EntregaController extends Controller
      */
     public function liberarReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
     {
-        $this->authorize('create', EntregaUniforme::class);
+        $this->authorize('entregarDesdeAlmacen', EntregaUniforme::class);
         $reservas->liberar($token, $request->user()->id);
 
         return response()->json(['ok' => true]);
@@ -346,10 +371,156 @@ class EntregaController extends Controller
      */
     public function extenderReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
     {
-        $this->authorize('create', EntregaUniforme::class);
+        $this->authorize('entregarDesdeAlmacen', EntregaUniforme::class);
         $reserva = $reservas->extender($token, $request->user()->id, TipoReserva::Entrega);
 
         return response()->json(['token' => $reserva->token, 'expira_en' => $reserva->expira_en->toIso8601String()]);
+    }
+
+    /**
+     * Activos por cantidad o de seguimiento individual que el usuario tiene
+     * HOY bajo su custodia en la empresa indicada — con el mismo formato que
+     * `activos/buscar` para reutilizar el paso 2 del wizard. La consulta ya
+     * sale acotada a la custodia (nunca "traer todo y filtrar en Vue").
+     */
+    public function custodiaActivos(Request $request, ServicioCustodiaColaborador $custodia): JsonResponse
+    {
+        $this->authorize('redistribuir', EntregaUniforme::class);
+
+        $custodio = $this->custodioDesdeRequest($request, $custodia);
+        if ($custodio === null) {
+            return response()->json(['activos' => []]);
+        }
+
+        $termino = Str::lower(trim((string) $request->query('q', '')));
+        $control = $request->query('control') === 'individual' ? 'individual' : 'cantidad';
+
+        if ($control === 'individual') {
+            $activos = $custodia->unidadesRedistribuibles($custodio)
+                ->with('activo:id,nombre,codigo')
+                ->get()
+                ->groupBy('activo_id')
+                ->map(fn (Collection $grupo): array => [
+                    'id' => (int) $grupo->first()->activo_id,
+                    'nombre' => $grupo->first()->activo->nombre,
+                    'codigo' => $grupo->first()->activo->codigo,
+                    'tipo' => null,
+                    'categoria' => null,
+                    'control' => 'individual',
+                    'usa_variantes' => false,
+                    'tallas' => [],
+                    'disponible' => $grupo->count(),
+                ]);
+        } else {
+            $activos = collect($custodia->cantidadesRedistribuibles($custodio))
+                ->groupBy('activo_id')
+                ->map(function (Collection $grupo): array {
+                    $conVariante = $grupo->filter(fn (array $f): bool => $f['talla_id'] !== null);
+                    $sinVariante = $grupo->first(fn (array $f): bool => $f['talla_id'] === null);
+
+                    return [
+                        'id' => (int) $grupo->first()['activo_id'],
+                        'nombre' => $grupo->first()['activo'],
+                        'codigo' => null,
+                        'tipo' => null,
+                        'categoria' => null,
+                        'control' => 'cantidad',
+                        'usa_variantes' => $conVariante->isNotEmpty(),
+                        'tallas' => $conVariante->map(fn (array $f): array => [
+                            'id' => (int) $f['talla_id'],
+                            'valor' => (string) $f['talla'],
+                            'disponible' => $f['disponible'],
+                        ])->values()->all(),
+                        'disponible' => $sinVariante['disponible'] ?? 0,
+                    ];
+                });
+        }
+
+        $resultado = $activos
+            ->when($termino !== '', fn (Collection $c) => $c->filter(fn (array $a): bool => str_contains(Str::lower($a['nombre'].' '.($a['codigo'] ?? '')), $termino)))
+            ->sortBy('nombre')
+            ->take(30)
+            ->values();
+
+        return response()->json(['activos' => $resultado]);
+    }
+
+    /**
+     * Unidades identificadas de un activo que están HOY bajo la custodia del
+     * usuario (mismo formato que `activos/unidades/buscar`).
+     */
+    public function custodiaUnidades(Request $request, ServicioCustodiaColaborador $custodia): JsonResponse
+    {
+        $this->authorize('redistribuir', EntregaUniforme::class);
+
+        $custodio = $this->custodioDesdeRequest($request, $custodia);
+        $activoId = (int) $request->query('activo_id', 0);
+
+        if ($custodio === null || $activoId <= 0) {
+            return response()->json(['unidades' => []]);
+        }
+
+        $termino = trim((string) $request->query('q', ''));
+
+        $unidades = $custodia->unidadesRedistribuibles($custodio)
+            ->where('activo_id', $activoId)
+            ->when($termino !== '', fn (Builder $q) => $q->where('codigo', 'like', "%{$termino}%"))
+            ->with(['activo:id,nombre', 'especificacion'])
+            ->orderBy('codigo')
+            ->limit(30)
+            ->get()
+            ->map(fn (UnidadActivo $u): array => [
+                'id' => $u->id,
+                'codigo' => $u->codigo,
+                'activo' => $u->activo?->nombre,
+                'marca_modelo' => $u->especificacion?->marcaModelo(),
+                'imei_mascara' => $u->especificacion?->imeiMascara(),
+                'numero_telefonico' => $u->especificacion?->numero_telefonico,
+                'entregable' => true,
+                'motivo_no_entregable' => null,
+            ]);
+
+        return response()->json(['unidades' => $unidades]);
+    }
+
+    /**
+     * Disponible EN CUSTODIA por activo + variante (mismo formato que
+     * `entregas/disponibilidad`), para los avisos del paso 2.
+     */
+    public function custodiaDisponibilidad(Request $request, ServicioCustodiaColaborador $custodia): JsonResponse
+    {
+        $this->authorize('redistribuir', EntregaUniforme::class);
+
+        $custodio = $this->custodioDesdeRequest($request, $custodia);
+
+        if ($custodio === null) {
+            return response()->json(['saldos' => [], 'custodio' => null]);
+        }
+
+        $saldos = collect($custodia->cantidadesRedistribuibles($custodio))
+            ->map(fn (array $f): array => [
+                'activo_id' => $f['activo_id'],
+                'talla_id' => $f['talla_id'],
+                'disponible' => $f['disponible'],
+            ])
+            ->values();
+
+        return response()->json([
+            'saldos' => $saldos,
+            'custodio' => ['id' => $custodio->id, 'nombre_completo' => $custodio->nombre_completo],
+        ]);
+    }
+
+    /**
+     * Custodio del usuario autenticado en la empresa `?empresa_id=` (su
+     * propio registro de colaborador). Nunca se acepta un colaborador
+     * arbitrario desde el request.
+     */
+    private function custodioDesdeRequest(Request $request, ServicioCustodiaColaborador $custodia): ?Colaborador
+    {
+        $empresaId = (int) $request->query('empresa_id', 0);
+
+        return $empresaId > 0 ? $custodia->custodioDeUsuario($request->user(), $empresaId) : null;
     }
 
     /**
@@ -405,6 +576,11 @@ class EntregaController extends Controller
 
         $datos = $request->validated();
 
+        // Redistribución: el origen es SIEMPRE la custodia del colaborador
+        // ligado al usuario autenticado (resuelta en el backend); nunca un
+        // custodio que venga del formulario.
+        $custodioOrigenId = $request->esRedistribucion() ? $request->custodio()?->getKey() : null;
+
         // Idempotencia: un doble submit o un reintento de red no debe registrar
         // dos entregas. La clave la genera el formulario (una por intento).
         $clave = $datos['idempotency_key'] ?? null;
@@ -446,7 +622,7 @@ class EntregaController extends Controller
         try {
             $acuse = $accion->ejecutar(
                 $colaborador->id,
-                (int) $datos['almacen_id'],
+                $custodioOrigenId === null ? (int) $datos['almacen_id'] : null,
                 $request->user()->id,
                 // Fecha AUTORITATIVA: siempre "hoy" del servidor, nunca lo que
                 // mande el cliente — una entrega nueva no puede fecharse en el
@@ -468,7 +644,8 @@ class EntregaController extends Controller
                 $request->ip(),
                 $request->userAgent(),
                 $evidencias,
-                $datos['reserva_token'] ?? null,
+                $custodioOrigenId === null ? ($datos['reserva_token'] ?? null) : null,
+                $custodioOrigenId,
             );
         } catch (Throwable $e) {
             // Falló: se libera la clave para permitir un reintento legítimo y se
@@ -553,6 +730,11 @@ class EntregaController extends Controller
             'encargado:id,name',
             'acuse',
             'correcciones.corregidaPor:id,name',
+            'colaboradorOrigen:id,nombre_completo,numero_empleado',
+            'detalles.detalleOrigen.entrega:id,folio,colaborador_id,colaborador_origen_id',
+            'detalles.detalleOrigen.entrega.colaborador:id,nombre_completo',
+            'detalles.redistribuciones.entrega:id,folio,colaborador_id,estado',
+            'detalles.redistribuciones.entrega.colaborador:id,nombre_completo',
         ]);
 
         return Inertia::render('Entregas/Detalle', [
@@ -574,6 +756,9 @@ class EntregaController extends Controller
                     'contrato' => $entrega->servicio->contrato->nombre,
                 ],
                 'colaborador' => $entrega->colaborador?->only(['id', 'nombre_completo', 'numero_empleado']),
+                // Redistribución de custodia: de quién salieron los bienes
+                // (null = salida de almacén, ver `almacen`).
+                'origen_custodia' => $entrega->colaboradorOrigen?->only(['id', 'nombre_completo', 'numero_empleado']),
                 'sucursal' => $entrega->sucursal?->nombre,
                 'encargado' => $entrega->encargado?->name,
                 'items' => $entrega->detalles->map(fn ($d): array => [
@@ -588,6 +773,21 @@ class EntregaController extends Controller
                     'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
                     'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
                     'conjunto' => $d->conjunto_nombre_snapshot,
+                    // Cadena de custodia del renglón: de qué entrega anterior
+                    // salió (redistribución) y a quién se redistribuyó después.
+                    'recibido_de' => $d->detalleOrigen?->entrega === null ? null : [
+                        'entrega_id' => $d->detalleOrigen->entrega->id,
+                        'folio' => $d->detalleOrigen->entrega->folio,
+                        'colaborador' => $d->detalleOrigen->entrega->colaborador?->nombre_completo,
+                    ],
+                    'redistribuido_a' => $d->redistribuciones
+                        ->filter(fn (DetalleEntrega $hijo): bool => $hijo->entrega !== null && $hijo->entrega->estado !== EstadoEntrega::Anulada)
+                        ->map(fn (DetalleEntrega $hijo): array => [
+                            'entrega_id' => $hijo->entrega->id,
+                            'folio' => $hijo->entrega->folio,
+                            'colaborador' => $hijo->entrega->colaborador?->nombre_completo,
+                            'cantidad' => (int) $hijo->cantidad,
+                        ])->values()->all(),
                 ]),
                 'correcciones' => $entrega->correcciones->map(fn ($c): array => [
                     'id' => $c->id,

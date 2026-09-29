@@ -12,6 +12,17 @@ class AlmacenPolicy
         return $user->can('almacenes.ver');
     }
 
+    /**
+     * Usar almacenes como SELECTOR de origen/destino dentro de una operación
+     * (entrega desde almacén, devolución), sin navegar el módulo Almacenes.
+     */
+    public function seleccionarEnOperacion(User $user): bool
+    {
+        return $this->viewAny($user)
+            || $user->can('entregas.crear')
+            || $user->can('devoluciones.crear');
+    }
+
     public function view(User $user, Almacen $almacen): bool
     {
         return $user->can('almacenes.ver') && $this->accedeAAlgunaEmpresa($user, $almacen);

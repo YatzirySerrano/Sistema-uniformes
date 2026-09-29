@@ -1,6 +1,8 @@
 <?php
 
 use App\Acciones\CambiarServicioColaborador;
+use App\Acciones\RegistrarDevolucionFirmada;
+use App\Enums\CondicionDevolucion;
 use App\Enums\RolSistema;
 use App\Enums\TipoMovimiento;
 use App\Models\Contrato;
@@ -133,6 +135,24 @@ it('CASO 2: cambiar el servicio del colaborador después NO altera una entrega y
     $this->actingAs($this->admin)->post('/entregas', ($this->payload)());
     $entrega = EntregaUniforme::query()->where('colaborador_id', $this->datos['colaboradorA']->id)->firstOrFail();
     expect($entrega->servicio_id)->toBe($this->servicio->id);
+
+    // Con custodia pendiente el cambio de servicio se bloquea; primero se
+    // devuelve lo entregado (devolución firmada real) y después se cambia.
+    app(RegistrarDevolucionFirmada::class)->ejecutar(
+        $entrega->id,
+        $this->datos['almacenA']->id,
+        now()->toDateString(),
+        [['detalle_entrega_id' => $entrega->detalles()->value('id'), 'cantidad' => 2, 'condicion' => CondicionDevolucion::Reutilizable->value]],
+        [],
+        $this->admin->id,
+        'Cambio de servicio',
+        null,
+        firmaDemoBase64(),
+        firmaDemoBase64(),
+        true,
+        null,
+        null,
+    );
 
     $otroServicio = Servicio::factory()->for($this->contrato)->for($this->datos['sucursalA'])->create(['nombre' => 'Polab Cuernavaca']);
     app(CambiarServicioColaborador::class)->ejecutar($this->datos['colaboradorA'], $otroServicio->id);

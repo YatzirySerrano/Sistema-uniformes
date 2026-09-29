@@ -45,6 +45,20 @@ type OpcionColaborador = {
 
 type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
 
+/** Registro de colaborador del propio usuario, dueño de la custodia a redistribuir. */
+type CustodiaPropia = {
+    colaborador_id: number;
+    nombre_completo: string;
+    empresa: OpcionEmpresa;
+};
+
+/**
+ * De dónde salen los bienes: `almacen` = salida de inventario del almacén;
+ * `custodia` = redistribución de lo que el usuario tiene HOY bajo su
+ * custodia (no descuenta stock). Lo decide el backend por permisos.
+ */
+type OrigenEntrega = 'almacen' | 'custodia';
+
 type OpcionActivo = {
     id: number;
     nombre: string;
@@ -77,6 +91,7 @@ type OpcionUnidad = {
  */
 function descripcionUnidad(u: OpcionUnidad): string {
     return [
+        esCustodia.value ? 'Bajo tu custodia' : null,
         u.marca_modelo,
         u.imei_mascara ? `IMEI ${u.imei_mascara}` : null,
         u.numero_telefonico ? `Tel. ${u.numero_telefonico}` : null,
@@ -154,6 +169,10 @@ type RespuestaReservaEntrega = RespuestaReserva & {
 
 const props = defineProps<{
     encargado: { name: string; email: string };
+    /** Vías habilitadas por los permisos efectivos del usuario. */
+    origenes: { almacen: boolean; custodia: boolean };
+    /** Empresas donde el usuario tiene custodia propia (modo `custodia`). */
+    custodias: CustodiaPropia[];
     textoConsentimiento: string;
     /**
      * Fecha de negocio "de hoy" ("Y-m-d"), calculada en el servidor con la
@@ -200,6 +219,39 @@ const almacenSel = ref<OpcionAlmacen | null>(null);
 const empresaId = computed(() => empresaSel.value?.id ?? null);
 const sucursalId = computed(() => sucursalSel.value?.id ?? null);
 
+const modo = ref<OrigenEntrega>(
+    props.origenes.almacen ? 'almacen' : 'custodia',
+);
+const esCustodia = computed(() => modo.value === 'custodia');
+const ambosOrigenes = computed(
+    () => props.origenes.almacen && props.origenes.custodia,
+);
+
+// Custodia propia en la empresa elegida (su registro de colaborador). En modo
+// custodia es el ÚNICO origen posible de los bienes; el backend lo vuelve a
+// resolver por su cuenta — nunca confía en esto.
+const custodioActual = computed<CustodiaPropia | null>(
+    () => props.custodias.find((c) => c.empresa.id === empresaId.value) ?? null,
+);
+
+// ¿Ya hay de dónde tomar bienes? (almacén elegido, o custodia propia).
+const origenListo = computed(() =>
+    esCustodia.value ? custodioActual.value !== null : !!almacenSel.value,
+);
+// Clave para descartar respuestas de buscadores al cambiar de origen.
+const claveOrigen = computed(() =>
+    esCustodia.value
+        ? `custodia-${empresaId.value ?? ''}`
+        : `${empresaId.value ?? ''}-${almacenSel.value?.id ?? ''}`,
+);
+
+function cambiarModo(m: OrigenEntrega): void {
+    if (modo.value === m) return;
+    modo.value = m;
+    form.origen = m;
+    alElegirEmpresa(null);
+}
+
 // --- Servicio operativo de destino de ESTA entrega (snapshot histórico) ---
 // NO es una elección del formulario: se toma automáticamente del servicio
 // operativo VIGENTE del colaborador y el backend lo vuelve a resolver al
@@ -212,6 +264,17 @@ async function buscarEmpresas(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionEmpresa[]> {
+    if (esCustodia.value) {
+        // Filtro local: sólo empresas donde el usuario tiene custodia propia.
+        const termino = q.trim().toLowerCase();
+        return props.custodias
+            .map((c) => c.empresa)
+            .filter((e) =>
+                `${e.nombre_comercial} ${e.codigo ?? ''}`
+                    .toLowerCase()
+                    .includes(termino),
+            );
+    }
     const res = await fetch(`/empresas/buscar?q=${encodeURIComponent(q)}`, {
         headers: { Accept: 'application/json' },
         credentials: 'same-origin',
@@ -282,6 +345,9 @@ function alElegirEmpresa(o: OpcionEmpresa | null): void {
     limpiarRenglones();
     reserva.reiniciarToken();
     form.clearErrors();
+    if (esCustodia.value && o !== null) {
+        void cargarDisponibilidad();
+    }
 }
 
 function alElegirSucursal(o: OpcionSucursal | null): void {
@@ -289,6 +355,12 @@ function alElegirSucursal(o: OpcionSucursal | null): void {
     colaboradorSel.value = null;
     form.colaborador_id = '';
     form.clearErrors('colaborador_id');
+}
+
+function colaboradorEsElCustodio(c: OpcionColaborador): string | false {
+    return esCustodia.value && c.id === custodioActual.value?.colaborador_id
+        ? 'Eres tú: no puedes entregarte tu propia custodia'
+        : false;
 }
 
 function alElegirColaborador(o: OpcionColaborador | null): void {
@@ -358,6 +430,7 @@ type FilaConjunto = {
 };
 
 const form = useForm<{
+    origen: OrigenEntrega;
     colaborador_id: number | '';
     almacen_id: number | null;
     fecha_entrega: string;
@@ -370,6 +443,7 @@ const form = useForm<{
     aceptacion: boolean;
     idempotency_key: string;
 }>({
+    origen: modo.value,
     colaborador_id: '',
     almacen_id: null,
     fecha_entrega: hoy,
@@ -435,6 +509,8 @@ function construirPayloadReserva(): Record<string, unknown> {
 watch(
     () => [form.activos, form.unidades, form.conjuntos],
     () => {
+        // La redistribución no aparta inventario de almacén: no hay reserva.
+        if (esCustodia.value) return;
         if (empresaId.value === null || !almacenSel.value) return;
         reserva.reservarConRetraso(construirPayloadReserva());
     },
@@ -453,11 +529,14 @@ const disponibilidad = ref<Record<string, number>>({});
 
 async function cargarDisponibilidad(): Promise<void> {
     disponibilidad.value = {};
-    if (empresaId.value === null || !almacenSel.value) return;
-    const res = await fetch(
-        `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&token=${reserva.token.value}`,
-        { headers: { Accept: 'application/json' }, credentials: 'same-origin' },
-    );
+    if (empresaId.value === null || !origenListo.value) return;
+    const url = esCustodia.value
+        ? `/entregas/custodia/disponibilidad?empresa_id=${empresaId.value}`
+        : `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&token=${reserva.token.value}`;
+    const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+    });
     if (!res.ok) return;
     const json = (await res.json()) as {
         saldos: {
@@ -480,9 +559,11 @@ async function buscarActivosCantidad(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionActivo[]> {
-    if (empresaId.value === null || !almacenSel.value) return [];
+    if (empresaId.value === null || !origenListo.value) return [];
     const res = await fetch(
-        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=cantidad&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
+        esCustodia.value
+            ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=cantidad&q=${encodeURIComponent(q)}`
+            : `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&control=cantidad&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -493,18 +574,27 @@ async function buscarActivosCantidad(
     return (await res.json()).activos ?? [];
 }
 
+function textoSinExistencias(): string {
+    return esCustodia.value
+        ? 'Ya no queda en tu custodia'
+        : `Sin existencias en ${almacenSel.value?.nombre ?? 'este almacén'}`;
+}
+
 function activoSinExistencias(item: OpcionActivo): string | false {
     if (item.usa_variantes) {
         const algunaConStock = item.tallas.some((t) => (t.disponible ?? 0) > 0);
 
-        return algunaConStock
-            ? false
-            : `Sin existencias en ${almacenSel.value?.nombre ?? 'este almacén'}`;
+        return algunaConStock ? false : textoSinExistencias();
     }
 
-    return (item.disponible ?? 0) > 0
-        ? false
-        : `Sin existencias en ${almacenSel.value?.nombre ?? 'este almacén'}`;
+    return (item.disponible ?? 0) > 0 ? false : textoSinExistencias();
+}
+
+/** "Disponible: N" o, al redistribuir, "Disponible en tu custodia: N". */
+function textoDisponible(n: number): string {
+    return esCustodia.value
+        ? `Disponible en tu custodia: ${n}`
+        : `Disponible: ${n}`;
 }
 
 function agregarActivo(): void {
@@ -553,9 +643,11 @@ async function buscarActivosIndividual(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionActivo[]> {
-    if (empresaId.value === null || !almacenSel.value) return [];
+    if (empresaId.value === null || !origenListo.value) return [];
     const res = await fetch(
-        `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&control=individual&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
+        esCustodia.value
+            ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=individual&q=${encodeURIComponent(q)}`
+            : `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&control=individual&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -567,17 +659,21 @@ async function buscarActivosIndividual(
 }
 
 function activoIndividualSinExistencias(item: OpcionActivo): string | false {
-    return (item.disponible ?? 0) > 0
-        ? false
+    if ((item.disponible ?? 0) > 0) return false;
+
+    return esCustodia.value
+        ? 'Ya no tienes unidades de este activo en tu custodia'
         : `Sin unidades disponibles en ${almacenSel.value?.nombre ?? 'este almacén'}`;
 }
 
 function buscarUnidades(i: number) {
     return async (q: string, signal?: AbortSignal): Promise<OpcionUnidad[]> => {
         const activoId = unidadesUI[i].activoSel?.id;
-        if (!activoId || !almacenSel.value) return [];
+        if (!activoId || !origenListo.value) return [];
         const res = await fetch(
-            `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenSel.value.id}&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
+            esCustodia.value
+                ? `/entregas/custodia/unidades?empresa_id=${empresaId.value}&activo_id=${activoId}&q=${encodeURIComponent(q)}`
+                : `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenSel.value?.id}&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
             {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
@@ -815,7 +911,11 @@ watch(paso, (p) => {
 // Navegación entre pasos + envío
 // ------------------------------------------------------------------
 const puedeAvanzarPaso1 = computed(
-    () => form.colaborador_id !== '' && form.almacen_id !== null,
+    () =>
+        form.colaborador_id !== '' &&
+        (esCustodia.value
+            ? custodioActual.value !== null
+            : form.almacen_id !== null),
 );
 
 // Bloqueo del paso 2 con MENSAJE (no sólo botón deshabilitado): cada frase
@@ -906,7 +1006,7 @@ const puedeAvanzarPaso2 = computed(
 
 const faltantesFirma = computed<string[]>(() => {
     const faltan: string[] = [];
-    if (reserva.vencida.value)
+    if (!esCustodia.value && reserva.vencida.value)
         faltan.push(
             'Tu apartado de existencias venció. Vuelve al paso anterior para actualizar la disponibilidad.',
         );
@@ -924,7 +1024,7 @@ const faltantesFirma = computed<string[]>(() => {
 const puedeConfirmar = computed(
     () =>
         totalRenglones.value > 0 &&
-        !reserva.vencida.value &&
+        (esCustodia.value || !reserva.vencida.value) &&
         faltantesFirma.value.length === 0 &&
         !form.processing,
 );
@@ -978,10 +1078,14 @@ async function irA(n: 1 | 2 | 3): Promise<void> {
             return;
         }
 
-        const resultado = await reserva.reservar(construirPayloadReserva());
-        if (!resultado || !resultado.ok) {
-            mostrarProblemasPaso2();
-            return;
+        // Redistribución: no hay apartado de almacén; el backend valida la
+        // custodia (y la revalida bajo candado al confirmar).
+        if (!esCustodia.value) {
+            const resultado = await reserva.reservar(construirPayloadReserva());
+            if (!resultado || !resultado.ok) {
+                mostrarProblemasPaso2();
+                return;
+            }
         }
     }
     paso.value = n;
@@ -1016,10 +1120,15 @@ function enviar(): void {
 
     form.transform((datos) => ({
         ...datos,
-        reserva_token: reserva.token.value,
+        origen: modo.value,
+        reserva_token: esCustodia.value ? null : reserva.token.value,
+        almacen_id: esCustodia.value ? null : datos.almacen_id,
         activos: datos.activos.filter((fila) => fila.activo_id !== ''),
         unidades: datos.unidades.filter((fila) => fila.unidad_activo_id !== ''),
-        conjuntos: datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
+        // Los conjuntos son plantillas de salida de almacén.
+        conjuntos: esCustodia.value
+            ? []
+            : datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
     })).post('/entregas', {
         preserveScroll: true,
         onError: () => irAPasoConError(),
@@ -1035,6 +1144,75 @@ function enviar(): void {
             titulo="Registrar entrega"
             descripcion="Registrar y firmar son un solo proceso: la entrega no queda concluida hasta que el colaborador y el encargado firman la recepción."
         />
+
+        <!-- Origen de los bienes (según permisos efectivos del usuario) -->
+        <section
+            v-if="ambosOrigenes"
+            class="rounded-xl border p-4"
+            aria-labelledby="titulo-origen"
+        >
+            <h2 id="titulo-origen" class="text-sm font-semibold">
+                ¿De dónde salen los bienes?
+            </h2>
+            <div
+                class="mt-2 grid gap-2 sm:grid-cols-2"
+                role="radiogroup"
+                aria-label="Origen de los bienes"
+            >
+                <button
+                    type="button"
+                    role="radio"
+                    :aria-checked="modo === 'almacen'"
+                    class="rounded-lg border p-3 text-left text-sm transition-colors"
+                    :class="
+                        modo === 'almacen'
+                            ? 'border-primary bg-primary/5'
+                            : 'hover:bg-muted/50'
+                    "
+                    @click="cambiarModo('almacen')"
+                >
+                    <span class="font-medium">Desde un almacén</span>
+                    <span class="text-muted-foreground mt-0.5 block text-xs">
+                        Salida de inventario: se descuenta del almacén elegido.
+                    </span>
+                </button>
+                <button
+                    type="button"
+                    role="radio"
+                    :aria-checked="modo === 'custodia'"
+                    class="rounded-lg border p-3 text-left text-sm transition-colors"
+                    :class="
+                        modo === 'custodia'
+                            ? 'border-primary bg-primary/5'
+                            : 'hover:bg-muted/50'
+                    "
+                    @click="cambiarModo('custodia')"
+                >
+                    <span class="font-medium">Desde mi custodia</span>
+                    <span class="text-muted-foreground mt-0.5 block text-xs">
+                        Redistribuyes a otro colaborador lo que hoy tienes a tu
+                        cargo. No se descuenta del almacén.
+                    </span>
+                </button>
+            </div>
+        </section>
+
+        <p v-if="esCustodia" class="bg-muted/40 rounded-lg border p-3 text-sm">
+            Estás
+            <span class="font-medium"
+                >redistribuyendo activos bajo tu custodia</span
+            >: sólo puedes entregar lo que hoy tienes a tu cargo. Cada entrega
+            reduce tu custodia y queda registrada a nombre del colaborador que
+            la recibe.
+        </p>
+        <p
+            v-if="esCustodia && custodias.length === 0"
+            class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+        >
+            Tu cuenta no está ligada a un registro de colaborador, así que no
+            tienes activos bajo custodia que redistribuir. Pide a un
+            administrador que vincule tu usuario con tu ficha de colaborador.
+        </p>
 
         <!-- Indicador de pasos -->
         <ol class="flex flex-wrap items-center gap-2 text-sm">
@@ -1090,7 +1268,11 @@ function enviar(): void {
                         :descripcion="(e) => (e as OpcionEmpresa).codigo ?? ''"
                         placeholder="Selecciona una empresa"
                         placeholder-busqueda="Buscar por nombre o código"
-                        sin-resultados="No tienes empresas activas autorizadas."
+                        :sin-resultados="
+                            esCustodia
+                                ? 'No tienes custodia propia en ninguna empresa activa.'
+                                : 'No tienes empresas activas autorizadas.'
+                        "
                         @update:model-value="
                             (v) => alElegirEmpresa(v as OpcionEmpresa | null)
                         "
@@ -1140,6 +1322,10 @@ function enviar(): void {
                         placeholder-busqueda="Buscar por nombre o número de empleado"
                         sugerencia-busqueda="Escribe para buscar entre todos los colaboradores de esta sucursal."
                         sin-resultados="No hay colaboradores activos en esta sucursal."
+                        :deshabilitar-opcion="
+                            (c) =>
+                                colaboradorEsElCustodio(c as OpcionColaborador)
+                        "
                         :invalido="!!form.errors.colaborador_id"
                         @update:model-value="
                             (v) =>
@@ -1209,7 +1395,30 @@ function enviar(): void {
                     <InputError :message="form.errors.fecha_entrega" />
                 </div>
 
-                <div class="grid gap-1.5">
+                <div v-if="esCustodia" class="grid gap-1.5">
+                    <Label>Origen de los bienes</Label>
+                    <div
+                        class="bg-muted/40 rounded-md border px-3 py-2 text-sm"
+                        aria-live="polite"
+                    >
+                        <template v-if="custodioActual">
+                            <p class="font-medium">
+                                Tu custodia ·
+                                {{ custodioActual.nombre_completo }}
+                            </p>
+                            <p class="text-muted-foreground mt-0.5 text-xs">
+                                Sólo se ofrecen los activos que hoy tienes a tu
+                                cargo en esta empresa.
+                            </p>
+                        </template>
+                        <span v-else class="text-muted-foreground">
+                            Selecciona la empresa de tu custodia.
+                        </span>
+                    </div>
+                    <InputError :message="erroresLaxos['origen']" />
+                </div>
+
+                <div v-else class="grid gap-1.5">
                     <Label for="almacen">Almacén de origen</Label>
                     <BuscadorAsync
                         id="almacen"
@@ -1250,7 +1459,7 @@ function enviar(): void {
             <!-- ============ PASO 2 · Elementos ============ -->
             <div v-show="paso === 2" class="space-y-6">
                 <ApartadoTemporalBanner
-                    v-if="almacenSel && totalRenglones > 0"
+                    v-if="!esCustodia && almacenSel && totalRenglones > 0"
                     :minutos-segundos="reserva.minutosSegundos.value"
                     :por-vencer="reserva.porVencer.value"
                     :vencida="reserva.vencida.value"
@@ -1269,6 +1478,16 @@ function enviar(): void {
                 </p>
 
                 <InputError :message="erroresLaxos['items']" />
+
+                <div v-if="esCustodia" class="space-y-0.5">
+                    <h2 class="text-base font-semibold">
+                        Activos bajo tu custodia disponibles para entrega
+                    </h2>
+                    <p class="text-muted-foreground text-sm">
+                        No aparecen los que ya entregaste, devolviste o
+                        reportaste: sólo lo que hoy sigue a tu cargo.
+                    </p>
+                </div>
 
                 <div
                     v-if="problemasPaso2.length"
@@ -1303,14 +1522,21 @@ function enviar(): void {
                             variant="outline"
                             size="sm"
                             class="shrink-0"
-                            :disabled="!almacenSel"
+                            :disabled="!origenListo"
                             @click="agregarActivo"
                         >
                             <Plus class="size-4" /> Agregar artículo
                         </Button>
                     </div>
-                    <p v-if="!almacenSel" class="text-muted-foreground text-sm">
-                        Selecciona empresa y almacén para consultar existencias.
+                    <p
+                        v-if="!origenListo"
+                        class="text-muted-foreground text-sm"
+                    >
+                        {{
+                            esCustodia
+                                ? 'Selecciona la empresa de tu custodia para ver lo que puedes entregar.'
+                                : 'Selecciona empresa y almacén para consultar existencias.'
+                        }}
                     </p>
 
                     <div
@@ -1322,7 +1548,7 @@ function enviar(): void {
                             <BuscadorAsync
                                 :model-value="activosUI[i].sel"
                                 :buscar="buscarActivosCantidad"
-                                :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                                :dependencia="claveOrigen"
                                 :deshabilitar-opcion="
                                     (a) =>
                                         activoSinExistencias(a as OpcionActivo)
@@ -1332,7 +1558,10 @@ function enviar(): void {
                                     (a) =>
                                         (a as OpcionActivo).usa_variantes
                                             ? ((a as OpcionActivo).codigo ?? '')
-                                            : `Disponible: ${(a as OpcionActivo).disponible ?? 0}`
+                                            : textoDisponible(
+                                                  (a as OpcionActivo)
+                                                      .disponible ?? 0,
+                                              )
                                 "
                                 placeholder="Buscar activo…"
                                 placeholder-busqueda="Buscar por nombre o código"
@@ -1483,7 +1712,7 @@ function enviar(): void {
                         </div>
                     </div>
                     <p
-                        v-if="almacenSel && !form.activos.length"
+                        v-if="origenListo && !form.activos.length"
                         class="text-muted-foreground text-sm"
                     >
                         Sin artículos por cantidad agregados.
@@ -1509,7 +1738,7 @@ function enviar(): void {
                             variant="outline"
                             size="sm"
                             class="shrink-0"
-                            :disabled="!almacenSel"
+                            :disabled="!origenListo"
                             @click="agregarUnidad"
                         >
                             <Plus class="size-4" /> Agregar unidad
@@ -1525,7 +1754,7 @@ function enviar(): void {
                             <BuscadorAsync
                                 :model-value="unidadesUI[i].activoSel"
                                 :buscar="buscarActivosIndividual"
-                                :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                                :dependencia="claveOrigen"
                                 :deshabilitar-opcion="
                                     (a) =>
                                         activoIndividualSinExistencias(
@@ -1551,7 +1780,7 @@ function enviar(): void {
                             <BuscadorAsync
                                 :model-value="unidadesUI[i].unidadSel"
                                 :buscar="buscarUnidades(i)"
-                                :dependencia="`${unidadesUI[i].activoSel?.id ?? ''}-${almacenSel?.id ?? ''}`"
+                                :dependencia="`${unidadesUI[i].activoSel?.id ?? ''}-${claveOrigen}`"
                                 :disabled="!unidadesUI[i].activoSel"
                                 :deshabilitar-opcion="
                                     (u) => unidadNoEntregable(u as OpcionUnidad)
@@ -1605,15 +1834,18 @@ function enviar(): void {
                         </div>
                     </div>
                     <p
-                        v-if="almacenSel && !form.unidades.length"
+                        v-if="origenListo && !form.unidades.length"
                         class="text-muted-foreground text-sm"
                     >
                         Sin unidades identificadas agregadas.
                     </p>
                 </section>
 
-                <!-- Conjuntos -->
-                <section class="space-y-3 rounded-xl border p-4">
+                <!-- Conjuntos (sólo salida de almacén: son plantillas de stock) -->
+                <section
+                    v-if="!esCustodia"
+                    class="space-y-3 rounded-xl border p-4"
+                >
                     <div class="flex items-start justify-between gap-2">
                         <div class="min-w-0">
                             <h2 class="text-sm font-semibold">Conjuntos</h2>
@@ -1628,7 +1860,7 @@ function enviar(): void {
                             variant="outline"
                             size="sm"
                             class="shrink-0"
-                            :disabled="!almacenSel"
+                            :disabled="!origenListo"
                             @click="agregarConjunto"
                         >
                             <Plus class="size-4" /> Agregar conjunto
@@ -1647,7 +1879,7 @@ function enviar(): void {
                                 <BuscadorAsync
                                     :model-value="conjuntosUI[i].sel"
                                     :buscar="buscarConjuntos"
-                                    :dependencia="`${empresaId ?? ''}-${almacenSel?.id ?? ''}`"
+                                    :dependencia="claveOrigen"
                                     :deshabilitar-opcion="
                                         (c) =>
                                             conjuntoSinDisponibilidad(
@@ -1854,7 +2086,7 @@ function enviar(): void {
                         </div>
                     </div>
                     <p
-                        v-if="almacenSel && !form.conjuntos.length"
+                        v-if="origenListo && !form.conjuntos.length"
                         class="text-muted-foreground text-sm"
                     >
                         Sin conjuntos agregados.
@@ -1865,6 +2097,7 @@ function enviar(): void {
             <!-- ============ PASO 3 · Revisión y firmas ============ -->
             <div v-show="paso === 3" class="space-y-6">
                 <ApartadoTemporalBanner
+                    v-if="!esCustodia"
                     :minutos-segundos="reserva.minutosSegundos.value"
                     :por-vencer="reserva.porVencer.value"
                     :vencida="reserva.vencida.value"
@@ -1909,9 +2142,17 @@ function enviar(): void {
                         </div>
                         <div>
                             <dt class="text-muted-foreground text-xs">
-                                Almacén de origen
+                                {{
+                                    esCustodia
+                                        ? 'Origen de los bienes'
+                                        : 'Almacén de origen'
+                                }}
                             </dt>
-                            <dd>{{ almacenSel?.nombre ?? '—' }}</dd>
+                            <dd v-if="esCustodia">
+                                Tu custodia ·
+                                {{ custodioActual?.nombre_completo ?? '—' }}
+                            </dd>
+                            <dd v-else>{{ almacenSel?.nombre ?? '—' }}</dd>
                         </div>
                         <div>
                             <dt class="text-muted-foreground text-xs">

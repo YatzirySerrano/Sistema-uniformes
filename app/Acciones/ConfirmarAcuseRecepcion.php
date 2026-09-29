@@ -110,7 +110,7 @@ class ConfirmarAcuseRecepcion
             'detalles.evidencias',
             'detalles.unidadActivo.especificacion',
             'detalles.unidadActivo.activo.categoriaActivo.perfilTecnico',
-            'colaborador', 'sucursal', 'encargado', 'empresa',
+            'colaborador', 'colaboradorOrigen', 'sucursal', 'encargado', 'empresa',
         ]);
 
         $snapshot = $this->construirSnapshot($entrega);
@@ -264,7 +264,19 @@ class ConfirmarAcuseRecepcion
      */
     private function construirSnapshot(EntregaUniforme $entrega): array
     {
+        // Sólo en redistribuciones: de qué custodia salieron los bienes. Las
+        // entregas desde almacén conservan exactamente el snapshot de siempre.
+        $origen = $entrega->colaboradorOrigen === null ? [] : [
+            'origen' => [
+                'tipo' => 'custodia',
+                'colaborador_id' => $entrega->colaboradorOrigen->id,
+                'nombre_completo' => $entrega->colaboradorOrigen->nombre_completo,
+                'numero_empleado' => $entrega->colaboradorOrigen->numero_empleado,
+            ],
+        ];
+
         return [
+            ...$origen,
             'version' => 1,
             'empresa' => [
                 'id' => $entrega->empresa->id,

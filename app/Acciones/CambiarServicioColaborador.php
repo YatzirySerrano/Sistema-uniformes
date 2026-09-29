@@ -2,9 +2,11 @@
 
 namespace App\Acciones;
 
+use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Colaborador;
 use App\Models\Servicio;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioCustodiaColaborador;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -12,20 +14,44 @@ use Illuminate\Support\Facades\DB;
  * (`servicio_actual_id`). Es una acción independiente y deliberadamente
  * mínima: NO crea ni modifica entregas, NO crea devoluciones, NO toca
  * inventario/stock/almacén, NO cambia asignaciones de activos ni unidades.
- * Los activos que el colaborador ya tiene asignados reflejan la nueva
- * ubicación automáticamente porque su "ubicación operativa" siempre se
- * deriva en vivo de `colaborador->servicioActual` — no hay nada más que
- * sincronizar.
+ *
+ * La ubicación operativa de lo que el colaborador tiene asignado se deriva en
+ * vivo de `colaborador->servicioActual`. Por eso, si el colaborador SALE de
+ * un servicio (a otro o a "sin servicio") mientras conserva custodia
+ * pendiente, el cambio se RECHAZA: de lo contrario el microondas que recibió
+ * en Palmira "aparecería" en Cuernavaca sin que nadie lo moviera. Primero se
+ * resuelve la custodia con operaciones reales (devolución al almacén o
+ * redistribución a quien quede responsable) y después se cambia el servicio.
+ * Asignar un servicio a quien no tenía ninguno no mueve nada de un servicio
+ * a otro y no se bloquea. La regla de "¿tiene custodia pendiente?" es la
+ * misma fuente que usa el cambio de empresa (`ServicioCustodiaColaborador`).
  */
 class CambiarServicioColaborador
 {
-    public function __construct(private readonly ServicioAuditoria $auditoria) {}
+    public function __construct(
+        private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioCustodiaColaborador $custodia,
+    ) {}
 
     public function ejecutar(Colaborador $colaborador, ?int $servicioId, ?string $motivo = null): Colaborador
     {
         return DB::transaction(function () use ($colaborador, $servicioId, $motivo): Colaborador {
             /** @var Colaborador $colaborador */
             $colaborador = Colaborador::query()->whereKey($colaborador->getKey())->lockForUpdate()->firstOrFail();
+
+            // Re-chequeo AUTORITATIVO bajo el mismo candado que toman las
+            // entregas/redistribuciones sobre el colaborador: nada puede
+            // entrar a su custodia entre esta verificación y el cambio.
+            $saleDeUnServicio = $colaborador->servicio_actual_id !== null
+                && $colaborador->servicio_actual_id !== $servicioId;
+
+            if ($saleDeUnServicio && $this->custodia->tienePendientes($colaborador)) {
+                throw new ExcepcionDeNegocioSimple(sprintf(
+                    'No es posible cambiar a %s de servicio mientras tenga bienes bajo custodia (%s). Devuélvelos al almacén o entrégalos a quien quede como responsable y vuelve a intentarlo.',
+                    $colaborador->nombre_completo,
+                    implode('; ', $this->custodia->resumenLegible($colaborador)),
+                ));
+            }
 
             $servicioAnterior = $colaborador->servicio_actual_id !== null
                 ? Servicio::query()->with('contrato')->find($colaborador->servicio_actual_id)

@@ -361,7 +361,7 @@ class AlmacenController extends Controller
      */
     public function buscar(Request $request): JsonResponse
     {
-        $this->authorize('viewAny', Almacen::class);
+        $this->authorize('seleccionarEnOperacion', Almacen::class);
 
         $termino = trim((string) $request->query('q', ''));
         $idsAutorizadas = $this->idsEmpresasAutorizadas($request);

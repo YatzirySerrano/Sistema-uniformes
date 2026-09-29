@@ -43,6 +43,10 @@ const props = defineProps<{
     empresaId: number;
     condicionesIncidencia: OpcionCondicion[];
     condicionesNoIncidencia: OpcionCondicion[];
+    /** `unidades-activo.administrar`: dar de baja. */
+    puedeAdministrar: boolean;
+    /** `unidades-activo.condicion`: dañada, robo / extravío, recuperar, restaurar. */
+    puedeCondicion: boolean;
 }>();
 
 const emit = defineEmits<{ 'update:open': [boolean] }>();
@@ -73,19 +77,28 @@ const accionesDisponibles = computed<{ valor: Accion; etiqueta: string }[]>(
         const u = unidadSel.value;
         const opciones: { valor: Accion; etiqueta: string }[] = [];
 
-        if (enAlmacenFuncionando.value) {
+        // Cada acción sólo se ofrece con SU permiso: la condición física
+        // (`unidades-activo.condicion`) y la baja (`unidades-activo.administrar`)
+        // son capacidades independientes. El backend revalida ambas.
+        const condicion = props.puedeCondicion;
+
+        if (condicion && enAlmacenFuncionando.value) {
             opciones.push({ valor: 'danar', etiqueta: 'Dañado' });
         }
-        if (u.estado === 'asignada' || enAlmacenFuncionando.value) {
+        if (
+            condicion &&
+            (u.estado === 'asignada' || enAlmacenFuncionando.value)
+        ) {
             opciones.push({ valor: 'incidencia', etiqueta: 'Robo / extravío' });
         }
-        if (enAlmacenFuncionando.value) {
+        if (props.puedeAdministrar && enAlmacenFuncionando.value) {
             opciones.push({ valor: 'baja', etiqueta: 'Dar de baja' });
         }
-        if (esIncidencia.value) {
+        if (condicion && esIncidencia.value) {
             opciones.push({ valor: 'recuperar', etiqueta: 'Recuperar unidad' });
         }
         if (
+            condicion &&
             u.estado === 'en_almacen' &&
             (u.condicion === 'en_reparacion' || u.condicion === 'inservible')
         ) {

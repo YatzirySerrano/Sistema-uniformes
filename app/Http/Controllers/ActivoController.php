@@ -331,7 +331,7 @@ class ActivoController extends Controller
      */
     public function buscar(Request $request, ServicioReservas $reservas): JsonResponse
     {
-        $this->authorize('viewAny', Activo::class);
+        $this->authorize('seleccionarEnOperacion', Activo::class);
 
         $empresa = $this->empresaDelFiltro($request);
 
@@ -768,7 +768,9 @@ class ActivoController extends Controller
                     && $request->user()->can('update', $activo),
                 'minimos' => $request->user()->can('inventario.minimos'),
                 'ajustar_inventario' => $request->user()->can('inventario.ajustar'),
+                'condicion_inventario' => $request->user()->can('activos.condicion'),
                 'gestionar_unidades' => $request->user()->can('unidades-activo.administrar'),
+                'condicion_unidades' => $request->user()->can('unidades-activo.condicion'),
             ],
             'suspendidos' => $this->cascada->paraVista($this->cascada->checklistDe($activo)),
         ]);

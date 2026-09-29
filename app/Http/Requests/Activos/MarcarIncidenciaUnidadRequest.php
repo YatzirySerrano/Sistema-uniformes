@@ -14,7 +14,7 @@ class MarcarIncidenciaUnidadRequest extends FormRequest
         /** @var UnidadActivo $unidad */
         $unidad = $this->route('unidad');
 
-        return $this->user()?->can('administrar', $unidad) ?? false;
+        return $this->user()?->can('gestionarCondicion', $unidad) ?? false;
     }
 
     /**

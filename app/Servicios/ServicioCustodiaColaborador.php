@@ -2,14 +2,19 @@
 
 namespace App\Servicios;
 
+use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
+use App\Enums\EstadoEntrega;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\TipoControlActivo;
+use App\Models\Activo;
 use App\Models\Colaborador;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
 use App\Models\EntregaUniforme;
 use App\Models\IncidenciaCustodia;
 use App\Models\UnidadActivo;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -24,8 +29,11 @@ use Illuminate\Support\Collection;
  *
  * Regla de negocio:
  * - Artículos por CANTIDAD: por cada renglón de una entrega firmada/corregida,
- *   `pendiente = entregado − devuelto CONFIRMADO − reportado como robo/pérdida`
- *   (`App\Models\IncidenciaCustodia`, ver `pendientesPorDetalle()`). Una
+ *   `pendiente = entregado − devuelto CONFIRMADO − reportado como robo/pérdida
+ *   − REDISTRIBUIDO a otro colaborador` (`App\Models\IncidenciaCustodia` y los
+ *   renglones hijos con `detalle_origen_id`, ver `pendientesPorDetalle()`).
+ *   Lo redistribuido pasa a contar en la custodia del destinatario (su
+ *   propio renglón), nunca en las dos a la vez. Una
  *   devolución todavía `pendiente_firma` NO libera custodia ni cuenta como
  *   devuelta (el colaborador sigue teniendo el artículo hasta que ambas
  *   firmas concreten la devolución). Un robo/pérdida reportado tampoco
@@ -35,7 +43,12 @@ use Illuminate\Support\Collection;
  * - UNIDADES identificadas: toda unidad con `colaborador_id = X` y
  *   `estado = Asignada` — cubre asignadas normales y también perdidas/robadas
  *   (`MarcarUnidadIncidencia` conserva `estado = Asignada`): una responsabilidad
- *   abierta bloquea el traslado hasta resolverse por su flujo correcto.
+ *   abierta bloquea el traslado hasta resolverse por su flujo correcto. Una
+ *   redistribución cambia `colaborador_id` de la unidad, así que sale de la
+ *   custodia del origen y entra a la del destinatario en el mismo instante.
+ *
+ * La usan también el cambio de servicio (`CambiarServicioColaborador`), la
+ * redistribución (`RedistribuirCustodia`) y sus selectores.
  *
  * Nunca crea devoluciones ni mueve inventario: sólo LEE y clasifica.
  */
@@ -57,6 +70,146 @@ class ServicioCustodiaColaborador
         }
 
         return $this->cantidadesPendientes($colaborador) !== [];
+    }
+
+    /**
+     * Resumen humano de la custodia pendiente, agrupado para un mensaje de
+     * bloqueo ("Camisa talla M: 7", "Microondas MIC-003"): cantidades
+     * sumadas por activo + variante (aunque vengan de varias entregas) y una
+     * línea por unidad identificada. Misma fuente que `pendientes()`.
+     *
+     * @param  list<array{tipo: string, activo: string, talla: string|null, cantidad: int, referencia: string|null}>|null  $pendientes  resultado ya calculado de `pendientes()` (evita repetir la consulta)
+     * @return list<string>
+     */
+    public function resumenLegible(Colaborador $colaborador, ?array $pendientes = null): array
+    {
+        $cantidades = [];
+        $unidades = [];
+
+        foreach ($pendientes ?? $this->pendientes($colaborador) as $fila) {
+            if ($fila['tipo'] === 'unidad') {
+                $unidades[] = $fila['activo'].' '.$fila['referencia'];
+
+                continue;
+            }
+
+            $clave = $fila['activo'].($fila['talla'] !== null ? ' talla '.$fila['talla'] : '');
+            $cantidades[$clave] = ($cantidades[$clave] ?? 0) + $fila['cantidad'];
+        }
+
+        $lineas = [];
+        foreach ($cantidades as $etiqueta => $total) {
+            $lineas[] = "{$etiqueta}: {$total}";
+        }
+
+        return [...$lineas, ...$unidades];
+    }
+
+    /**
+     * Registro de colaborador (activo) ligado a la cuenta del usuario dentro
+     * de una empresa: es quien POSEE la custodia cuando ese usuario
+     * redistribuye. El usuario autenticado no es el custodio — el custodio es
+     * su `Colaborador` (`colaboradores.usuario_id`). Sin registro ligado en
+     * esa empresa no hay custodia que redistribuir (nunca se inventa una).
+     */
+    public function custodioDeUsuario(User $usuario, int $empresaId): ?Colaborador
+    {
+        if (! $usuario->puedeAccederEmpresa($empresaId)) {
+            return null;
+        }
+
+        return Colaborador::query()
+            ->where('usuario_id', $usuario->getKey())
+            ->where('empresa_id', $empresaId)
+            ->where('activo', true)
+            ->orderBy('id')
+            ->first();
+    }
+
+    /**
+     * Custodios ligados al usuario en sus empresas autorizadas y activas
+     * (normalmente uno): alimentan el selector de empresa del modo
+     * "redistribuir mi custodia".
+     *
+     * @return Collection<int, Colaborador>
+     */
+    public function custodiosDeUsuario(User $usuario): Collection
+    {
+        return Colaborador::query()
+            ->where('usuario_id', $usuario->getKey())
+            ->where('activo', true)
+            ->whereHas('empresa', fn (Builder $q) => $q->where('activa', true))
+            ->with('empresa:id,codigo,nombre_comercial')
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (Colaborador $c): bool => $usuario->puedeAccederEmpresa($c->empresa_id))
+            ->unique('empresa_id')
+            ->values();
+    }
+
+    /**
+     * Existencias por CANTIDAD que el custodio puede redistribuir AHORA,
+     * agregadas por activo + variante (suma de los saldos pendientes de todos
+     * sus renglones). Sólo activos por cantidad activos de su empresa — lo
+     * mismo que exige la entrega. Lectura sin lock: la autoridad es
+     * `RedistribuirCustodia`, que recalcula bajo lock al confirmar.
+     *
+     * @return list<array{activo_id: int, talla_id: int|null, activo: string, talla: string|null, disponible: int}>
+     */
+    public function cantidadesRedistribuibles(Colaborador $custodio): array
+    {
+        $filas = $this->cantidadesPendientes($custodio, [$custodio->empresa_id]);
+
+        if ($filas === []) {
+            return [];
+        }
+
+        $activosValidos = Activo::query()
+            ->whereIn('id', array_unique(array_column($filas, 'activo_id')))
+            ->where('empresa_id', $custodio->empresa_id)
+            ->where('tipo_control', TipoControlActivo::Cantidad)
+            ->where('activo', true)
+            ->pluck('nombre', 'id');
+
+        $agrupado = [];
+        foreach ($filas as $fila) {
+            if (! $activosValidos->has($fila['activo_id'])) {
+                continue;
+            }
+
+            $clave = $fila['activo_id'].'-'.($fila['talla_id'] ?? '0');
+            $agrupado[$clave] ??= [
+                'activo_id' => $fila['activo_id'],
+                'talla_id' => $fila['talla_id'],
+                'activo' => (string) $activosValidos[$fila['activo_id']],
+                'talla' => $fila['talla'],
+                'disponible' => 0,
+            ];
+            $agrupado[$clave]['disponible'] += $fila['pendiente'];
+        }
+
+        return array_values($agrupado);
+    }
+
+    /**
+     * Unidades identificadas que el custodio puede redistribuir: asignadas a
+     * él, funcionando (una perdida/robada/dañada no se reasigna) y sin una
+     * devolución pendiente de firma.
+     *
+     * @return Builder<UnidadActivo>
+     */
+    public function unidadesRedistribuibles(Colaborador $custodio): Builder
+    {
+        return UnidadActivo::query()
+            ->where('empresa_id', $custodio->empresa_id)
+            ->where('colaborador_id', $custodio->getKey())
+            ->where('estado', EstadoUnidadActivo::Asignada)
+            ->where('condicion', CondicionUnidadActivo::Funcionando)
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')
+                ->from('detalles_devolucion as dd')
+                ->join('devoluciones as dv', 'dv.id', '=', 'dd.devolucion_id')
+                ->whereColumn('dd.unidad_activo_id', 'unidades_activo.id')
+                ->where('dv.estado', EstadoDevolucion::PendienteFirma->value));
     }
 
     /**
@@ -189,15 +342,44 @@ class ServicioCustodiaColaborador
             ->groupBy('detalle_entrega_id')
             ->pluck('total', 'detalle_entrega_id');
 
+        $redistribuidoPorDetalle = $this->redistribuidoPorDetalle($detalles->pluck('id')->all());
+
         return $detalles
             ->mapWithKeys(fn (DetalleEntrega $d): array => [
                 $d->getKey() => max(
                     (int) $d->cantidad
                         - (int) ($devueltoPorDetalle[$d->getKey()] ?? 0)
-                        - (int) ($incidenciaPorDetalle[$d->getKey()] ?? 0),
+                        - (int) ($incidenciaPorDetalle[$d->getKey()] ?? 0)
+                        - (int) ($redistribuidoPorDetalle[$d->getKey()] ?? 0),
                     0
                 ),
             ])
+            ->all();
+    }
+
+    /**
+     * Piezas que ya salieron de cada renglón hacia OTRO colaborador por
+     * redistribución (renglones hijos con `detalle_origen_id`). Cuenta toda
+     * redistribución no anulada — incluida una todavía `pendiente_firma`, que
+     * sólo existe dentro de la transacción que la crea — para que nunca se
+     * pueda sobregirar la custodia del origen.
+     *
+     * @param  array<int, int>  $idsDetalle
+     * @return array<int, int> redistribuido indexado por `detalle_entrega_id`
+     */
+    public function redistribuidoPorDetalle(array $idsDetalle): array
+    {
+        if ($idsDetalle === []) {
+            return [];
+        }
+
+        return DetalleEntrega::query()
+            ->whereIn('detalle_origen_id', $idsDetalle)
+            ->whereHas('entrega', fn ($q) => $q->where('estado', '!=', EstadoEntrega::Anulada))
+            ->selectRaw('detalle_origen_id, SUM(cantidad) as total')
+            ->groupBy('detalle_origen_id')
+            ->pluck('total', 'detalle_origen_id')
+            ->map(fn ($total): int => (int) $total)
             ->all();
     }
 
@@ -227,10 +409,21 @@ class ServicioCustodiaColaborador
                         select coalesce(sum(ic.cantidad), 0)
                         from incidencias_custodia ic
                         where ic.detalle_entrega_id = detalles_entrega.id
-                    )', [EstadoDevolucion::Confirmada->value]);
+                    ) + (
+                        select coalesce(sum(dr.cantidad), 0)
+                        from detalles_entrega dr
+                        inner join entregas_uniformes er on er.id = dr.entrega_uniforme_id
+                        where dr.detalle_origen_id = detalles_entrega.id
+                        and er.estado != ?
+                        and er.deleted_at is null
+                    )', [EstadoDevolucion::Confirmada->value, EstadoEntrega::Anulada->value]);
             })->orWhereHas('detalles', function (Builder $d) {
+                // La unidad sigue asignada Y sigue en manos del colaborador
+                // de ESTA entrega: si se redistribuyó, ya es custodia de otro.
                 $d->whereNotNull('unidad_activo_id')
-                    ->whereHas('unidadActivo', fn (Builder $u) => $u->where('estado', EstadoUnidadActivo::Asignada));
+                    ->whereHas('unidadActivo', fn (Builder $u) => $u
+                        ->where('estado', EstadoUnidadActivo::Asignada)
+                        ->whereColumn('unidades_activo.colaborador_id', 'entregas_uniformes.colaborador_id'));
             });
         });
     }
@@ -288,7 +481,7 @@ class ServicioCustodiaColaborador
      * colaborador (todas sus entregas firmadas/corregidas).
      *
      * @param  array<int, int>|null  $idsEmpresasAutorizadas  Acota a estas empresas cuando no es `null` — ver `totalPiezasPendientes()`.
-     * @return list<array{activo: string, talla: string|null, pendiente: int, folio: string|null, entrega_id: int|null, detalle_entrega_id: int}>
+     * @return list<array{activo: string, talla: string|null, pendiente: int, folio: string|null, entrega_id: int|null, detalle_entrega_id: int, activo_id: int, talla_id: int|null}>
      */
     private function cantidadesPendientes(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): array
     {
@@ -324,6 +517,8 @@ class ServicioCustodiaColaborador
                 'folio' => $detalle->entrega?->folio,
                 'entrega_id' => $detalle->entrega_uniforme_id,
                 'detalle_entrega_id' => $detalle->id,
+                'activo_id' => $detalle->activo_id,
+                'talla_id' => $detalle->talla_id,
             ];
         }
 

@@ -176,11 +176,16 @@ class SucursalController extends Controller
      * ej. el Dashboard en modo "todas las empresas": ningún filtro debe
      * dejar el buscador inutilizable sólo porque no hay una empresa elegida).
      * En ambos casos respeta el alcance real del usuario.
+     *
+     * Es un selector CONTEXTUAL (Entregas, Devoluciones, Colaboradores,
+     * Servicios, Dashboard…), no el módulo Sucursales: NO exige
+     * `sucursales.ver`. La fuente es sólo el alcance autorizado
+     * (`AccesoEmpresa::sucursalesAutorizadas`: empresa autorizada +
+     * `sucursal_usuario`) y la respuesta se limita a id + nombre. El listado
+     * y el detalle administrativos siguen protegidos por `SucursalPolicy`.
      */
     public function buscar(Request $request): JsonResponse
     {
-        $this->authorize('viewAny', Sucursal::class);
-
         if ($request->filled('empresa_id')) {
             $empresa = $this->empresaDelFiltro($request);
             $sucursalesAutorizadas = $empresa === null

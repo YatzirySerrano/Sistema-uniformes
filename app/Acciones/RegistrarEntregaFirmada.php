@@ -2,6 +2,7 @@
 
 namespace App\Acciones;
 
+use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\AcuseRecepcion;
 use App\Models\EntregaUniforme;
 use Illuminate\Support\Facades\DB;
@@ -11,7 +12,12 @@ use Illuminate\Support\Facades\DB;
  * deja una entrega nueva en `PendienteFirma` esperando firma posterior.
  *
  * Orquesta, SIN duplicar reglas:
- *   1. `CrearEntregaUniforme` — crea la entrega y descuenta inventario.
+ *   1. Según el ORIGEN de los bienes:
+ *      - `CrearEntregaUniforme` — salida de almacén: crea la entrega y
+ *        descuenta inventario.
+ *      - `RedistribuirCustodia` — redistribución de la custodia de un
+ *        colaborador (`$custodioOrigenId`): crea la entrega y cambia de
+ *        custodio SIN tocar inventario.
  *   2. `ConfirmarAcuseRecepcion::confirmarEnTransaccion()` — valida AMBAS
  *      firmas + aceptación, congela el snapshot, guarda las firmas en disco
  *      privado y marca la entrega FIRMADA.
@@ -31,6 +37,7 @@ class RegistrarEntregaFirmada
 {
     public function __construct(
         private readonly CrearEntregaUniforme $crearEntrega,
+        private readonly RedistribuirCustodia $redistribuir,
         private readonly ConfirmarAcuseRecepcion $confirmarAcuse,
     ) {}
 
@@ -42,7 +49,7 @@ class RegistrarEntregaFirmada
      */
     public function ejecutar(
         int $colaboradorId,
-        int $almacenId,
+        ?int $almacenId,
         int $encargadoId,
         string $fechaEntrega,
         array $activos,
@@ -57,26 +64,47 @@ class RegistrarEntregaFirmada
         ?string $userAgent,
         array $evidencias = [],
         ?string $reservaToken = null,
+        ?int $custodioOrigenId = null,
     ): AcuseRecepcion {
         /** @var array{entrega: EntregaUniforme, acuse: AcuseRecepcion} $resultado */
         $resultado = DB::transaction(function () use (
             $colaboradorId, $almacenId, $encargadoId, $fechaEntrega,
             $activos, $unidades, $conjuntos, $notas, $servicioId, $evidencias,
-            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken,
+            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId,
         ): array {
-            $entrega = $this->crearEntrega->ejecutar(
-                $colaboradorId,
-                $almacenId,
-                $encargadoId,
-                $fechaEntrega,
-                $activos,
-                $unidades,
-                $conjuntos,
-                $notas,
-                $servicioId,
-                $evidencias,
-                $reservaToken,
-            );
+            if ($custodioOrigenId !== null) {
+                if ($conjuntos !== []) {
+                    throw new ExcepcionDeNegocioSimple('Los conjuntos sólo se entregan desde almacén. Al redistribuir tu custodia agrega sus artículos o unidades por separado.');
+                }
+
+                $entrega = $this->redistribuir->ejecutar(
+                    $custodioOrigenId,
+                    $colaboradorId,
+                    $encargadoId,
+                    $fechaEntrega,
+                    $activos,
+                    $unidades,
+                    $notas,
+                    $servicioId,
+                    $evidencias,
+                );
+            } elseif ($almacenId === null) {
+                throw new ExcepcionDeNegocioSimple('Selecciona el almacén de origen.');
+            } else {
+                $entrega = $this->crearEntrega->ejecutar(
+                    $colaboradorId,
+                    $almacenId,
+                    $encargadoId,
+                    $fechaEntrega,
+                    $activos,
+                    $unidades,
+                    $conjuntos,
+                    $notas,
+                    $servicioId,
+                    $evidencias,
+                    $reservaToken,
+                );
+            }
 
             $acuse = $this->confirmarAcuse->confirmarEnTransaccion(
                 $entrega,

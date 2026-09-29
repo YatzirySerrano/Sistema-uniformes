@@ -12,6 +12,15 @@ class ActivoPolicy
         return $user->can('activos.ver');
     }
 
+    /**
+     * Usar el catálogo de activos como SELECTOR dentro de una entrega desde
+     * almacén, sin navegar el módulo Activos.
+     */
+    public function seleccionarEnOperacion(User $user): bool
+    {
+        return $this->viewAny($user) || $user->can('entregas.crear');
+    }
+
     public function view(User $user, Activo $activo): bool
     {
         return $user->can('activos.ver') && $user->puedeAccederEmpresa($activo->empresa_id);

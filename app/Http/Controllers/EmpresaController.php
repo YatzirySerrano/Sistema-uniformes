@@ -198,13 +198,18 @@ class EmpresaController extends Controller
     }
 
     /**
-     * Búsqueda con autocompletado de empresas autorizadas para los combobox de
-     * formularios y filtros (BuscadorAsync). Respeta el alcance del usuario.
+     * Selector CONTEXTUAL de empresas (BuscadorAsync de Entregas,
+     * Devoluciones, Inventario, altas…): "¿con qué empresa voy a operar?".
+     * No es el módulo Empresas, así que NO exige `empresas.ver`: la fuente es
+     * exclusivamente el alcance autorizado del usuario (`AccesoEmpresa`,
+     * `empresa_usuario` o alcance global) — la misma lista que ya se comparte
+     * a todo usuario autenticado como `empresasAutorizadas`. Devuelve sólo lo
+     * necesario para elegir (id, código, nombre comercial): nunca métricas,
+     * RFC, razón social, sucursales ni colaboradores. El listado y el detalle
+     * administrativos (`index`/`show`) siguen exigiendo la Policy del módulo.
      */
     public function buscar(Request $request): JsonResponse
     {
-        $this->authorize('viewAny', Empresa::class);
-
         $termino = trim((string) $request->query('q', ''));
 
         $empresas = $this->empresasAutorizadas($request)

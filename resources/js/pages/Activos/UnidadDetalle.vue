@@ -93,7 +93,7 @@ const props = defineProps<{
     condicionesRecuperacion: { valor: string; etiqueta: string }[];
     condicionesRestauracion: { valor: string; etiqueta: string }[];
     condicionesDano: { valor: string; etiqueta: string }[];
-    permisos: { administrar: boolean };
+    permisos: { administrar: boolean; condicion: boolean };
 }>();
 
 const esIncidencia = ['perdido', 'robado'].includes(props.unidad.condicion);
@@ -395,7 +395,7 @@ function guardarEquipo(): void {
                 </Button>
                 <Button
                     v-if="
-                        permisos.administrar &&
+                        permisos.condicion &&
                         unidad.estado === 'asignada' &&
                         !esIncidencia
                     "
@@ -406,7 +406,7 @@ function guardarEquipo(): void {
                     <AlertTriangle class="size-3.5" /> Reportar pérdida / robo
                 </Button>
                 <Button
-                    v-if="permisos.administrar && esIncidencia"
+                    v-if="permisos.condicion && esIncidencia"
                     variant="outline"
                     size="sm"
                     @click="dialogoRecuperar = true"
@@ -414,7 +414,7 @@ function guardarEquipo(): void {
                     <RotateCcw class="size-3.5" /> Recuperar unidad
                 </Button>
                 <Button
-                    v-if="permisos.administrar && noEntregablePorCondicion"
+                    v-if="permisos.condicion && noEntregablePorCondicion"
                     variant="outline"
                     size="sm"
                     @click="dialogoRestaurar = true"
@@ -422,7 +422,7 @@ function guardarEquipo(): void {
                     <RotateCcw class="size-3.5" /> Restaurar condición
                 </Button>
                 <Button
-                    v-if="permisos.administrar && puedeMarcarDanada"
+                    v-if="permisos.condicion && puedeMarcarDanada"
                     variant="outline"
                     size="sm"
                     @click="dialogoDanar = true"

@@ -23,8 +23,10 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Acciones/RegistrarTraspasoInventario.php,app/Servicios/HomologadorActivo.php,app/Http/Requests/Inventario/RegistrarTraspasoRequest.php,app/Models/TraspasoInventario.php,app/Models/TraspasoRenglon.php,app/Http/Controllers/MovimientoInventarioController.php | .ai/rules/controllers.md |
 | app/Enums/CondicionDevolucion.php,app/Http/Controllers/DevolucionController.php,app/Http/Requests/Devoluciones/GuardarDevolucionRequest.php,app/Acciones/MarcarCondicionInventario.php | .ai/rules/devoluciones-acciones.md |
 | app/Acciones/RegistrarDevolucionFirmada.php,app/Acciones/ConfirmarAcuseDevolucion.php,app/Acciones/RegistrarDevolucion.php,app/Http/Controllers/DevolucionController.php,resources/js/pages/Devoluciones/Crear.vue | .ai/rules/devoluciones.md |
+| app/{Acciones/RedistribuirCustodia.php,Acciones/RegistrarEntregaFirmada.php,Servicios/ServicioCustodiaColaborador.php,Http/Requests/Entregas/GuardarEntregaRequest.php,Http/Controllers/EntregaController.php,Acciones/CambiarServicioColaborador.php} | .ai/rules/entregas-controllers.md |
 | app/Models/Conjunto.php,app/Acciones/CrearEntregaUniforme.php,app/Http/Requests/Entregas/GuardarEntregaRequest.php | .ai/rules/entregas.md |
 | app/{Enums/PerfilTecnicoUnidad.php,Soporte/ResolverPerfilTecnicoUnidad.php,Models/UnidadActivoEspecificacion.php} | .ai/rules/enums.md |
+| bootstrap/app.php,app/Soporte/AccesoNoAutorizado.php,resources/js/lib/avisoSinPermiso.ts,resources/js/pages/Errores/SinPermiso.vue | .ai/rules/errores.md |
 | resources/js/pages/Inventario/Traspasos/Crear.vue,app/Http/Requests/Inventario/RegistrarTraspasoRequest.php,app/Acciones/RegistrarTraspasoInventario.php,app/Excepciones/ExistenciasInsuficientesException.php | .ai/rules/excepciones.md |
 | app/Http/Controllers/ReporteController.php,app/Servicios/ServicioReportes.php | .ai/rules/http-controllers-servicios.md |
 | app/Servicios/ServicioImportacion*.php,app/Http/Controllers/Importacion*Controller.php | .ai/rules/http-controllers.md |
@@ -42,6 +44,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,Conjunto}Controller.php, app/Http/Requests/{Almacenes,Areas,Activos,Conjuntos}/**, app/Http/Requests/Concerns/ResuelveEmpresa.php, app/Soporte/AccesoEmpresa.php, app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php, app/Acciones/{RegistrarEntradaInventario,AjustarInventario}.php, app/Models/{Conjunto,ConjuntoComponente}.php, app/Soporte/DescripcionAuditoria.php, app/Acciones/ConfirmarAcuse*.php | .ai/rules/modulos-nuevos.md |
 | app/Acciones/RegistrarEntregaFirmada.php,app/Acciones/ConfirmarAcuseRecepcion.php,app/Http/Controllers/EntregaController.php,app/Http/Requests/Entregas/GuardarEntregaRequest.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/pages-entregas.md |
 | resources/js/pages/**/Detalle.vue, resources/js/pages/**/Index.vue | .ai/rules/pages.md |
+| app/Policies/**,app/Http/Controllers/{Empresa,Sucursal,Colaborador,Almacen,Activo,UnidadActivo,Conjunto,Inventario}Controller.php | .ai/rules/policies-http-controllers.md |
 | app/Soporte/Permisos.php,database/seeders/RolesPermisosSeeder.php,app/Policies/** | .ai/rules/policies.md |
 | app/Http/Controllers/Auth/VerificarCorreoController.php,app/Providers/AppServiceProvider.php,bootstrap/app.php,lang/es.json | .ai/rules/providers.md |
 | app/Acciones/RegistrarUnidadesActivo.php,app/Soporte/NormalizadorNombre.php,resources/views/reportes/etiquetas_unidades.blade.php | .ai/rules/reportes.md |

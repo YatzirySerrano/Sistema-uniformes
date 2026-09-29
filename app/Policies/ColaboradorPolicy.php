@@ -12,6 +12,19 @@ class ColaboradorPolicy
         return $user->can('colaboradores.ver');
     }
 
+    /**
+     * Usar colaboradores como SELECTOR dentro de una operación (destinatario
+     * de una entrega), sin navegar el módulo Colaboradores. Lo concede el
+     * propio módulo (`colaboradores.ver`) o la capacidad operativa que lo
+     * necesita. El alcance (empresa/sucursal) lo sigue acotando el endpoint.
+     */
+    public function seleccionarEnOperacion(User $user): bool
+    {
+        return $this->viewAny($user)
+            || $user->can('entregas.crear')
+            || $user->can('entregas.redistribuir');
+    }
+
     public function view(User $user, Colaborador $colaborador): bool
     {
         return $user->can('colaboradores.ver') && $user->puedeAccederEmpresa($colaborador->empresa_id);
@@ -35,6 +48,16 @@ class ColaboradorPolicy
     public function cambiarEmpresa(User $user, Colaborador $colaborador): bool
     {
         return $user->can('colaboradores.cambiar-empresa') && $user->puedeAccederEmpresa($colaborador->empresa_id);
+    }
+
+    /**
+     * Consultar la custodia pendiente del colaborador antes de moverlo:
+     * la necesita tanto quien lo transfiere de empresa como quien le cambia
+     * el servicio (misma fuente, `ServicioCustodiaColaborador`).
+     */
+    public function consultarCustodia(User $user, Colaborador $colaborador): bool
+    {
+        return $this->cambiarEmpresa($user, $colaborador) || $this->update($user, $colaborador);
     }
 
     public function desactivar(User $user, Colaborador $colaborador): bool

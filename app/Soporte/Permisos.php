@@ -107,7 +107,8 @@ final class Permisos
                 'activos.ver' => 'Ver activos',
                 'activos.crear' => 'Crear activos',
                 'activos.editar' => 'Editar activos',
-                'activos.administrar' => 'Administrar activos (estado y tipos)',
+                'activos.administrar' => 'Administrar estado de activos (activar, desactivar y restaurar)',
+                'activos.condicion' => 'Gestionar la condición física de existencias por cantidad (dañado, baja, robo / extravío)',
                 'tallas.administrar' => 'Administrar variantes / tallas',
                 'tipos-activo.administrar' => 'Administrar el catálogo de tipos de activo',
                 'categorias-activo.administrar' => 'Administrar el catálogo de categorías de activo',
@@ -118,7 +119,7 @@ final class Permisos
             'permisos' => [
                 'inventario.ver' => 'Ver existencias globales y movimientos',
                 'inventario.entrada' => 'Registrar ingreso de stock',
-                'inventario.ajustar' => 'Ajustar existencias de almacén',
+                'inventario.ajustar' => 'Corregir existencias de almacén (conteo real)',
                 'inventario.minimos' => 'Configurar mínimos por almacén',
                 'inventario.transferir' => 'Transferir entre almacenes',
             ],
@@ -128,6 +129,7 @@ final class Permisos
             'permisos' => [
                 'unidades-activo.ver' => 'Ver unidades y sus códigos',
                 'unidades-activo.administrar' => 'Registrar, corregir y dar de baja unidades',
+                'unidades-activo.condicion' => 'Gestionar la condición de unidades (dañada, pérdida / robo, recuperación y restauración)',
             ],
         ],
         'conjuntos' => [
@@ -150,7 +152,8 @@ final class Permisos
             'etiqueta' => 'Entregas',
             'permisos' => [
                 'entregas.ver' => 'Ver entregas',
-                'entregas.crear' => 'Registrar entregas',
+                'entregas.crear' => 'Registrar entregas desde almacén',
+                'entregas.redistribuir' => 'Redistribuir a otros colaboradores los activos bajo su propia custodia',
                 'entregas.corregir' => 'Corregir entregas firmadas',
             ],
         ],
@@ -265,10 +268,14 @@ final class Permisos
                 'servicios.ver', 'servicios.crear', 'servicios.editar',
                 'activos.ver',
                 'inventario.ver', 'inventario.entrada', 'inventario.minimos',
-                'unidades-activo.ver', 'unidades-activo.administrar',
+                'unidades-activo.ver', 'unidades-activo.administrar', 'unidades-activo.condicion',
                 'inventario-fisico.ver', 'inventario-fisico.administrar',
                 'conjuntos.ver', 'conjuntos.crear', 'conjuntos.editar',
-                'entregas.ver', 'entregas.crear',
+                // El Supervisor recibe activos del almacén (vía un usuario con
+                // `entregas.crear`) y los REDISTRIBUYE desde su custodia: por
+                // defecto no hace salidas libres de almacén. Es sólo el valor
+                // inicial del rol base; la matriz de Roles y permisos manda.
+                'entregas.ver', 'entregas.redistribuir',
                 'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf', 'acuses.ver-firma',
                 'devoluciones.ver', 'devoluciones.crear', 'devoluciones.confirmar', 'devoluciones.ver-pdf', 'devoluciones.ver-firma',
                 'reportes.ver', 'reportes.exportar',

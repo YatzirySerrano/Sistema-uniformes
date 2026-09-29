@@ -285,7 +285,7 @@ class ConjuntoController extends Controller
      */
     public function buscar(Request $request): JsonResponse
     {
-        $this->authorize('viewAny', Conjunto::class);
+        $this->authorize('seleccionarEnOperacion', Conjunto::class);
 
         $empresa = $this->empresaDelFiltro($request);
 
@@ -347,7 +347,7 @@ class ConjuntoController extends Controller
      */
     public function disponibilidad(Request $request, Conjunto $conjunto): JsonResponse
     {
-        $this->authorize('view', $conjunto);
+        $this->authorize('consultarDisponibilidad', $conjunto);
 
         $datos = $request->validate([
             'almacen_id' => [

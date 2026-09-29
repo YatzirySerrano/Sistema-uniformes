@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useForm } from '@inertiajs/vue3';
+import { Link, useForm } from '@inertiajs/vue3';
+import { CircleAlert, Loader2 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -41,6 +42,48 @@ const contratoSel = ref<ContratoOpcion | null>(
 const servicioSel = ref<ServicioOpcion | null>(null);
 const dejarSinServicio = ref(false);
 
+// Custodia pendiente: mientras el colaborador conserve bienes asignados, NO
+// puede salir de su servicio actual (la ubicación de esos bienes se deriva
+// del servicio). Misma fuente que el cambio de empresa
+// (`GET colaboradores/{id}/custodia`); el backend lo vuelve a verificar bajo
+// candado al confirmar.
+const revisandoCustodia = ref(false);
+const errorCustodia = ref<string | null>(null);
+const resumenCustodia = ref<string[]>([]);
+const bloqueadoPorCustodia = computed(
+    () => props.servicioActual !== null && resumenCustodia.value.length > 0,
+);
+
+async function revisarCustodia(): Promise<void> {
+    resumenCustodia.value = [];
+    errorCustodia.value = null;
+    // Sin servicio actual no hay ubicación de la que "salgan" los bienes.
+    if (props.servicioActual === null) return;
+
+    revisandoCustodia.value = true;
+    try {
+        const res = await fetch(
+            `/colaboradores/${props.colaboradorId}/custodia`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            },
+        );
+        if (!res.ok) {
+            errorCustodia.value =
+                'No se pudo revisar la custodia del colaborador. Inténtalo de nuevo.';
+            return;
+        }
+        const data = (await res.json()) as { resumen?: string[] };
+        resumenCustodia.value = data.resumen ?? [];
+    } catch {
+        errorCustodia.value =
+            'No se pudo revisar la custodia del colaborador. Inténtalo de nuevo.';
+    } finally {
+        revisandoCustodia.value = false;
+    }
+}
+
 const form = useForm<{ servicio_id: number | null; motivo: string }>({
     servicio_id: props.servicioActual?.id ?? null,
     motivo: '',
@@ -56,7 +99,9 @@ watch(
         servicioSel.value = null;
         dejarSinServicio.value = false;
         form.reset();
+        form.clearErrors();
         form.servicio_id = props.servicioActual?.id ?? null;
+        void revisarCustodia();
     },
 );
 
@@ -107,7 +152,16 @@ async function buscarServicios(termino: string, signal?: AbortSignal) {
 }
 
 const puedeGuardar = computed(
-    () => dejarSinServicio.value || servicioSel.value !== null,
+    () =>
+        !bloqueadoPorCustodia.value &&
+        !revisandoCustodia.value &&
+        errorCustodia.value === null &&
+        (dejarSinServicio.value || servicioSel.value !== null),
+);
+
+/** Errores de negocio del backend (p. ej. custodia que apareció después). */
+const errorNegocio = computed(
+    () => (form.errors as Record<string, string | undefined>).negocio,
 );
 
 function enviar(): void {
@@ -131,8 +185,9 @@ function enviar(): void {
                 <DialogDescription>
                     Actualiza únicamente la ubicación operativa vigente del
                     colaborador. No crea ni modifica entregas, devoluciones ni
-                    asignaciones de activos: los que ya tenga siguen con él y
-                    mostrarán la nueva ubicación automáticamente.
+                    asignaciones de activos. Si tiene bienes bajo custodia,
+                    primero hay que devolverlos o entregarlos a quien quede como
+                    responsable.
                 </DialogDescription>
             </DialogHeader>
 
@@ -152,6 +207,50 @@ function enviar(): void {
                 <p v-else class="text-muted-foreground text-sm">
                     Actualmente sin servicio asignado.
                 </p>
+
+                <p
+                    v-if="revisandoCustodia"
+                    class="text-muted-foreground flex items-center gap-2 text-sm"
+                >
+                    <Loader2 class="size-4 animate-spin" /> Revisando bienes
+                    bajo custodia…
+                </p>
+                <p
+                    v-else-if="errorCustodia"
+                    class="flex items-start gap-2 text-sm text-red-600 dark:text-red-400"
+                >
+                    <CircleAlert class="mt-0.5 size-4 shrink-0" />
+                    {{ errorCustodia }}
+                </p>
+                <div
+                    v-else-if="bloqueadoPorCustodia"
+                    class="space-y-2 rounded-lg border border-red-500/40 bg-red-50/60 p-3 text-sm dark:bg-red-950/30"
+                    role="alert"
+                >
+                    <p
+                        class="flex items-start gap-2 font-medium text-red-700 dark:text-red-400"
+                    >
+                        <CircleAlert class="mt-0.5 size-4 shrink-0" />
+                        No es posible cambiar el servicio mientras el
+                        colaborador tenga bienes bajo custodia.
+                    </p>
+                    <ul class="list-disc space-y-0.5 pl-6">
+                        <li v-for="linea in resumenCustodia" :key="linea">
+                            {{ linea }}
+                        </li>
+                    </ul>
+                    <p class="text-muted-foreground text-xs">
+                        Resuélvelo con una devolución al almacén o entregándolos
+                        a quien quede como responsable (redistribución). Después
+                        podrás cambiar el servicio.
+                    </p>
+                    <Button as-child variant="outline" size="sm">
+                        <Link
+                            :href="`/devoluciones/crear?colaborador_id=${props.colaboradorId}`"
+                            >Ir a Devoluciones</Link
+                        >
+                    </Button>
+                </div>
 
                 <label class="flex items-center gap-2 text-sm">
                     <input
@@ -223,6 +322,8 @@ function enviar(): void {
                     ></textarea>
                     <InputError :message="form.errors.motivo" />
                 </div>
+
+                <InputError :message="errorNegocio" />
 
                 <DialogFooter>
                     <Button

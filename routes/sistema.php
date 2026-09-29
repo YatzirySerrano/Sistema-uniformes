@@ -214,6 +214,11 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('entregas/crear', [EntregaController::class, 'create'])->name('entregas.create');
     Route::get('entregas/buscar', [EntregaController::class, 'buscar'])->name('entregas.buscar');
     Route::get('entregas/disponibilidad', [EntregaController::class, 'disponibilidad'])->name('entregas.disponibilidad');
+    // Redistribución de custodia: selectores acotados a lo que el usuario
+    // tiene HOY bajo su custodia (nunca el inventario del almacén).
+    Route::get('entregas/custodia/activos', [EntregaController::class, 'custodiaActivos'])->name('entregas.custodia.activos');
+    Route::get('entregas/custodia/unidades', [EntregaController::class, 'custodiaUnidades'])->name('entregas.custodia.unidades');
+    Route::get('entregas/custodia/disponibilidad', [EntregaController::class, 'custodiaDisponibilidad'])->name('entregas.custodia.disponibilidad');
     // Apartado temporal (TTL) del borrador de Entrega — ver ReservarInventarioEntrega.
     Route::post('entregas/reserva', [EntregaController::class, 'reservar'])->name('entregas.reserva');
     Route::delete('entregas/reserva/{token}', [EntregaController::class, 'liberarReserva'])->name('entregas.reserva.liberar');

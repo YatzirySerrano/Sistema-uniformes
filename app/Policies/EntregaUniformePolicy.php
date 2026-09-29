@@ -18,9 +18,34 @@ class EntregaUniformePolicy
         return $user->can('entregas.ver') && $user->puedeAccederEmpresa($entrega->empresa_id);
     }
 
+    /**
+     * Puede abrir "Registrar entrega" por ALGUNA de sus dos vías. Cuál de
+     * ellas (y con qué fuente de bienes) lo deciden `entregarDesdeAlmacen` y
+     * `redistribuir`, siempre por permisos efectivos — nunca por el nombre
+     * del rol.
+     */
     public function create(User $user): bool
     {
+        return $this->entregarDesdeAlmacen($user) || $this->redistribuir($user);
+    }
+
+    /**
+     * Salida de almacén: elige cualquier existencia del almacén (dentro de
+     * su alcance de empresa) y la descuenta del inventario.
+     */
+    public function entregarDesdeAlmacen(User $user): bool
+    {
         return $user->can('entregas.crear');
+    }
+
+    /**
+     * Redistribución: sólo puede entregar lo que HOY está bajo la custodia
+     * de su propio registro de colaborador (se valida en el request y bajo
+     * lock en `RedistribuirCustodia`); no toca inventario.
+     */
+    public function redistribuir(User $user): bool
+    {
+        return $user->can('entregas.redistribuir');
     }
 
     public function firmar(User $user, EntregaUniforme $entrega): bool

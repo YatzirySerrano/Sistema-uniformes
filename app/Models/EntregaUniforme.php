@@ -19,6 +19,9 @@ use Illuminate\Support\Carbon;
  * @property string $folio
  * @property int $empresa_id
  * @property int $sucursal_id
+ * @property int|null $almacen_id
+ * @property int|null $colaborador_origen_id
+ * @property int|null $servicio_id
  * @property int $colaborador_id
  * @property int $encargado_id
  * @property EstadoEntrega $estado
@@ -37,6 +40,7 @@ class EntregaUniforme extends Model
         'empresa_id',
         'sucursal_id',
         'almacen_id',
+        'colaborador_origen_id',
         'servicio_id',
         'colaborador_id',
         'encargado_id',
@@ -77,6 +81,29 @@ class EntregaUniforme extends Model
     public function almacen(): BelongsTo
     {
         return $this->belongsTo(Almacen::class);
+    }
+
+    /**
+     * Colaborador custodio del que salieron los bienes cuando la entrega es
+     * una REDISTRIBUCIÓN de custodia (no una salida de almacén). NULL en las
+     * entregas desde almacén.
+     *
+     * @return BelongsTo<Colaborador, $this>
+     */
+    public function colaboradorOrigen(): BelongsTo
+    {
+        return $this->belongsTo(Colaborador::class, 'colaborador_origen_id');
+    }
+
+    /**
+     * ¿Esta entrega redistribuye custodia (colaborador → colaborador) en vez
+     * de sacar stock de un almacén? Una redistribución nunca descuenta
+     * inventario: los bienes ya salieron del almacén cuando se entregaron al
+     * custodio.
+     */
+    public function esRedistribucion(): bool
+    {
+        return $this->colaborador_origen_id !== null;
     }
 
     /**

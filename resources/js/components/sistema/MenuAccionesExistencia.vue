@@ -30,9 +30,14 @@ import {
  * la propia pantalla abra su diálogo (detalle del activo). Sin permiso de
  * mínimos pero con `activoHref`, el enlace se ofrece igual como "Ver
  * desglose" — nunca desaparece el único acceso a más detalle del activo.
+ *
+ * "Corregir existencia" (`inventario.ajustar`) y "Cambiar condición"
+ * (`activos.condicion`) son capacidades INDEPENDIENTES: cada opción depende
+ * sólo de su propio permiso (el backend revalida ambos).
  */
 const props = defineProps<{
     puedeAjustar: boolean;
+    puedeCondicion: boolean;
     puedeMinimos: boolean;
     activoHref?: string;
 }>();
@@ -45,7 +50,9 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <DropdownMenu v-if="puedeAjustar || puedeMinimos || activoHref">
+    <DropdownMenu
+        v-if="puedeAjustar || puedeCondicion || puedeMinimos || activoHref"
+    >
         <DropdownMenuTrigger as-child>
             <Button variant="outline" size="sm">
                 <Wrench class="size-3.5" />
@@ -63,7 +70,7 @@ const emit = defineEmits<{
                 Corregir existencia
             </DropdownMenuItem>
             <DropdownMenuItem
-                v-if="puedeAjustar"
+                v-if="puedeCondicion"
                 class="cursor-pointer"
                 @select="emit('cambiar-condicion')"
             >

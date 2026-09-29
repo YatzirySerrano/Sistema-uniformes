@@ -70,6 +70,7 @@ const props = defineProps<{
     permisos: {
         entrada: boolean;
         ajustar: boolean;
+        condicion: boolean;
         minimos: boolean;
     };
 }>();
@@ -543,6 +544,7 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
                 <div class="mt-auto pt-1">
                     <MenuAccionesExistencia
                         :puede-ajustar="permisos.ajustar"
+                        :puede-condicion="permisos.condicion"
                         :puede-minimos="permisos.minimos"
                         :activo-href="`/activos/${s.activo_id}`"
                         @corregir-existencia="abrirAjuste(s)"
@@ -588,6 +590,7 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
                         <td class="px-3 py-2 text-right">
                             <MenuAccionesExistencia
                                 :puede-ajustar="permisos.ajustar"
+                                :puede-condicion="permisos.condicion"
                                 :puede-minimos="permisos.minimos"
                                 :activo-href="`/activos/${s.activo_id}`"
                                 @corregir-existencia="abrirAjuste(s)"

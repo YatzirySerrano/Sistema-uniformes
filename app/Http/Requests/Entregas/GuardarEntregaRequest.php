@@ -11,6 +11,7 @@ use App\Models\Conjunto;
 use App\Models\EntregaUniforme;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
+use App\Servicios\ServicioCustodiaColaborador;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -26,12 +27,64 @@ use Illuminate\Validation\Validator;
  * Flujo ÚNICO: la petición trae SIEMPRE las dos firmas manuscritas y la
  * aceptación. No existe un alta "pendiente de firma"; sin firmas la
  * validación falla y no se registra ni descuenta nada.
+ *
+ * ORIGEN de los bienes (`origen`):
+ * - `almacen` (por defecto): salida de almacén — exige `entregarDesdeAlmacen`
+ *   y valida contra el saldo del almacén elegido.
+ * - `custodia`: redistribución — exige `redistribuir` y valida EXCLUSIVAMENTE
+ *   contra la custodia actual del colaborador ligado al usuario autenticado
+ *   (`ServicioCustodiaColaborador`). Nada de lo que mande el frontend
+ *   (ids, cantidades, unidades) se acepta si no está hoy en esa custodia;
+ *   `RedistribuirCustodia` lo revalida además bajo lock.
  */
 class GuardarEntregaRequest extends FormRequest
 {
+    public const ORIGEN_ALMACEN = 'almacen';
+
+    public const ORIGEN_CUSTODIA = 'custodia';
+
+    private ?Colaborador $custodioResuelto = null;
+
+    private bool $custodioYaResuelto = false;
+
     public function authorize(): bool
     {
-        return $this->user()?->can('create', EntregaUniforme::class) ?? false;
+        $usuario = $this->user();
+
+        if ($usuario === null) {
+            return false;
+        }
+
+        return $this->esRedistribucion()
+            ? $usuario->can('redistribuir', EntregaUniforme::class)
+            : $usuario->can('entregarDesdeAlmacen', EntregaUniforme::class);
+    }
+
+    public function esRedistribucion(): bool
+    {
+        return $this->input('origen') === self::ORIGEN_CUSTODIA;
+    }
+
+    /**
+     * Colaborador (ligado al usuario autenticado) cuya custodia se
+     * redistribuye, en la empresa del destinatario. `null` si la entrega es
+     * desde almacén o si el usuario no tiene registro de colaborador ahí.
+     */
+    public function custodio(): ?Colaborador
+    {
+        if ($this->custodioYaResuelto) {
+            return $this->custodioResuelto;
+        }
+
+        $this->custodioYaResuelto = true;
+        $destinatario = Colaborador::query()->find($this->integer('colaborador_id'));
+        $usuario = $this->user();
+
+        if (! $this->esRedistribucion() || $destinatario === null || $usuario === null) {
+            return null;
+        }
+
+        return $this->custodioResuelto = app(ServicioCustodiaColaborador::class)->custodioDeUsuario($usuario, $destinatario->empresa_id);
     }
 
     /**
@@ -46,31 +99,16 @@ class GuardarEntregaRequest extends FormRequest
             return ['colaborador_id' => ['required', 'integer', 'exists:colaboradores,id']];
         }
 
+        if ($this->esRedistribucion()) {
+            return [...$this->reglasComunes($empresaId), ...$this->reglasCustodia($empresaId)];
+        }
+
         return [
-            'colaborador_id' => [
-                'required', 'integer',
-                Rule::exists('colaboradores', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)->where('activo', true)),
-            ],
+            ...$this->reglasComunes($empresaId),
             'almacen_id' => [
                 'required', 'integer',
                 Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
             ],
-            // El servicio de DESTINO de la entrega NO lo elige el frontend: se
-            // deriva SIEMPRE del servicio operativo vigente del colaborador
-            // (`servicio_actual_id`) en el controlador, y se guarda como
-            // snapshot histórico. Cualquier `servicio_id` que venga en el body
-            // se ignora. Aquí sólo se valida (en `withValidator`) que ese
-            // servicio vigente, si existe, siga operativo.
-            'fecha_entrega' => ['required', 'date', 'before_or_equal:today'],
-            'notas' => ['nullable', 'string', 'max:1000'],
-
-            // Firmas de AMBAS partes + aceptación: parte inseparable del alta.
-            'firma' => ['required', 'string', 'max:3000000'],
-            'firma_operador' => ['required', 'string', 'max:3000000'],
-            'aceptacion' => ['accepted'],
-            // Idempotencia opcional generada por el formulario: evita que un
-            // doble submit / reintento de red registre dos entregas.
-            'idempotency_key' => ['nullable', 'uuid'],
             // Token del apartado temporal armado en el paso 2 (ver
             // `App\Acciones\ReservarInventarioEntrega`). Opcional por
             // compatibilidad; si viene, `CrearEntregaUniforme` la valida y
@@ -113,6 +151,137 @@ class GuardarEntregaRequest extends FormRequest
     }
 
     /**
+     * Reglas compartidas por ambos orígenes.
+     *
+     * @return array<string, mixed>
+     */
+    private function reglasComunes(int $empresaId): array
+    {
+        return [
+            'origen' => ['nullable', Rule::in([self::ORIGEN_ALMACEN, self::ORIGEN_CUSTODIA])],
+            'colaborador_id' => [
+                'required', 'integer',
+                Rule::exists('colaboradores', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)->where('activo', true)),
+            ],
+            // El servicio de DESTINO de la entrega NO lo elige el frontend: se
+            // deriva SIEMPRE del servicio operativo vigente del colaborador
+            // (`servicio_actual_id`) en el controlador, y se guarda como
+            // snapshot histórico. Cualquier `servicio_id` que venga en el body
+            // se ignora. Aquí sólo se valida (en `withValidator`) que ese
+            // servicio vigente, si existe, siga operativo.
+            'fecha_entrega' => ['required', 'date', 'before_or_equal:today'],
+            'notas' => ['nullable', 'string', 'max:1000'],
+
+            // Firmas de AMBAS partes + aceptación: parte inseparable del alta.
+            'firma' => ['required', 'string', 'max:3000000'],
+            'firma_operador' => ['required', 'string', 'max:3000000'],
+            'aceptacion' => ['accepted'],
+            // Idempotencia opcional generada por el formulario: evita que un
+            // doble submit / reintento de red registre dos entregas.
+            'idempotency_key' => ['nullable', 'uuid'],
+        ];
+    }
+
+    /**
+     * Redistribución: sin almacén ni conjuntos (el conjunto es una plantilla
+     * de salida de almacén); cada activo/unidad debe estar HOY en la
+     * custodia del colaborador ligado al usuario.
+     *
+     * @return array<string, mixed>
+     */
+    private function reglasCustodia(int $empresaId): array
+    {
+        $custodioId = $this->custodio()?->getKey() ?? 0;
+
+        return [
+            'conjuntos' => ['prohibited'],
+
+            'activos' => ['nullable', 'array'],
+            'activos.*.activo_id' => [
+                'required', 'integer',
+                Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)->where('tipo_control', 'cantidad')->where('activo', true)),
+            ],
+            // La variante es la que TIENE la pieza en custodia (aunque hoy
+            // esté retirada del catálogo): sólo se exige que exista.
+            'activos.*.talla_id' => ['nullable', 'integer', Rule::exists('tallas', 'id')],
+            'activos.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
+            'activos.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
+
+            'unidades' => ['nullable', 'array'],
+            'unidades.*.unidad_activo_id' => [
+                'required', 'integer', 'distinct',
+                Rule::exists('unidades_activo', 'id')->where(fn ($q) => $q
+                    ->where('empresa_id', $empresaId)
+                    ->where('colaborador_id', $custodioId)
+                    ->where('estado', EstadoUnidadActivo::Asignada->value)
+                    ->where('condicion', CondicionUnidadActivo::Funcionando->value)),
+            ],
+            'unidades.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
+            'unidades.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
+        ];
+    }
+
+    /**
+     * Cantidades solicitadas vs. custodia ACTUAL del custodio (misma fuente
+     * que el selector y que la acción). Aviso temprano con error por renglón;
+     * la autoridad final es `RedistribuirCustodia` bajo lock.
+     *
+     * @param  array<int|string, mixed>  $activos
+     */
+    private function validarContraCustodia(Validator $validator, Colaborador $destinatario, array $activos): void
+    {
+        $custodio = $this->custodio();
+
+        if ($custodio === null) {
+            $validator->errors()->add('origen', 'Tu cuenta no está ligada a un colaborador de esta empresa, así que no tienes activos bajo custodia que redistribuir.');
+
+            return;
+        }
+
+        if ($custodio->getKey() === $destinatario->getKey()) {
+            $validator->errors()->add('colaborador_id', 'No puedes entregarte a ti mismo activos de tu propia custodia.');
+
+            return;
+        }
+
+        $disponibles = collect(app(ServicioCustodiaColaborador::class)->cantidadesRedistribuibles($custodio))
+            ->keyBy(fn (array $f): string => $f['activo_id'].'-'.($f['talla_id'] ?? '0'));
+
+        $solicitado = [];
+        foreach ($activos as $fila) {
+            if (! is_array($fila)) {
+                continue;
+            }
+            $clave = (int) ($fila['activo_id'] ?? 0).'-'.((($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '') ? (int) $fila['talla_id'] : '0');
+            $solicitado[$clave] = ($solicitado[$clave] ?? 0) + (int) ($fila['cantidad'] ?? 0);
+        }
+
+        foreach ($activos as $i => $fila) {
+            if (! is_array($fila) || $validator->errors()->has("activos.{$i}.activo_id") || $validator->errors()->has("activos.{$i}.talla_id")) {
+                continue;
+            }
+
+            $clave = (int) ($fila['activo_id'] ?? 0).'-'.((($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '') ? (int) $fila['talla_id'] : '0');
+            $enCustodia = $disponibles->get($clave);
+
+            if ($enCustodia === null) {
+                $validator->errors()->add("activos.{$i}.activo_id", 'Ese activo (con esa variante) no está bajo tu custodia.');
+
+                continue;
+            }
+
+            if (($solicitado[$clave] ?? 0) > $enCustodia['disponible']) {
+                $talla = $enCustodia['talla'] !== null ? ' talla '.$enCustodia['talla'] : '';
+                $validator->errors()->add(
+                    "activos.{$i}.cantidad",
+                    "En tu custodia sólo quedan {$enCustodia['disponible']} de {$enCustodia['activo']}{$talla}.",
+                );
+            }
+        }
+    }
+
+    /**
      * Reglas que no se expresan bien con `Rule::exists`: al menos un renglón
      * en total, y coherencia de variante por componente de conjunto (fija /
      * libre / ninguna — igual que en `GuardarConjuntoRequest`).
@@ -125,13 +294,24 @@ class GuardarEntregaRequest extends FormRequest
             $conjuntos = is_array($this->input('conjuntos')) ? $this->input('conjuntos') : [];
 
             if ($activos === [] && $unidades === [] && $conjuntos === []) {
-                $validator->errors()->add('items', 'Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
+                $validator->errors()->add('items', $this->esRedistribucion()
+                    ? 'Agrega al menos un activo o unidad de tu custodia a la entrega.'
+                    : 'Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
 
                 return;
             }
 
-            $colaborador = Colaborador::query()->find($this->integer('colaborador_id'));
+            $colaborador = Colaborador::query()->with('sucursal')->find($this->integer('colaborador_id'));
             if ($colaborador === null) {
+                return;
+            }
+
+            // Alcance de SUCURSAL del destinatario (además del de empresa, que
+            // ya acotó `rules()`): un usuario restringido a ciertas sucursales
+            // no entrega a colaboradores de otras.
+            if ($colaborador->sucursal !== null && ! ($this->user()?->puedeAccederSucursal($colaborador->sucursal) ?? false)) {
+                $validator->errors()->add('colaborador_id', 'No tienes acceso a la sucursal de ese colaborador.');
+
                 return;
             }
             $empresaId = $colaborador->empresa_id;
@@ -149,6 +329,12 @@ class GuardarEntregaRequest extends FormRequest
                     'servicio_id',
                     'El servicio operativo vigente de este colaborador está inactivo (o su contrato). Reasígnalo a un servicio activo desde su ficha antes de registrar la entrega.',
                 );
+            }
+
+            if ($this->esRedistribucion()) {
+                $this->validarContraCustodia($validator, $colaborador, $activos);
+
+                return;
             }
 
             $activoIdsSueltos = collect($activos)->pluck('activo_id')->filter()->map(fn ($id) => (int) $id)->unique();
@@ -348,12 +534,15 @@ class GuardarEntregaRequest extends FormRequest
             'firma_operador.required' => 'Falta la firma del encargado que realiza la entrega.',
             'aceptacion.accepted' => 'Debes confirmar la aceptación antes de finalizar la entrega.',
             'colaborador_id.exists' => 'El colaborador seleccionado no es válido o no tienes acceso a su empresa.',
+            'conjuntos.prohibited' => 'Los conjuntos sólo se entregan desde almacén. Al redistribuir tu custodia agrega sus artículos o unidades por separado.',
             'activos.*.activo_id.required' => 'Selecciona un activo.',
             'activos.*.cantidad.required' => 'Indica la cantidad.',
             'activos.*.cantidad.min' => 'La cantidad debe ser mayor a cero.',
             'unidades.*.unidad_activo_id.required' => 'Selecciona una unidad identificada.',
             'unidades.*.unidad_activo_id.distinct' => 'No puedes elegir la misma unidad dos veces.',
-            'unidades.*.unidad_activo_id.exists' => 'Esa unidad ya no está disponible en el almacén de origen (fue asignada, se movió o dejó de ser entregable).',
+            'unidades.*.unidad_activo_id.exists' => $this->esRedistribucion()
+                ? 'Esa unidad ya no está bajo tu custodia (fue entregada, devuelta o reportada) o no puede redistribuirse.'
+                : 'Esa unidad ya no está disponible en el almacén de origen (fue asignada, se movió o dejó de ser entregable).',
             'conjuntos.*.conjunto_id.required' => 'Selecciona un conjunto.',
             'conjuntos.*.cantidad.required' => 'Indica la cantidad.',
             'conjuntos.*.cantidad.min' => 'La cantidad debe ser mayor a cero.',

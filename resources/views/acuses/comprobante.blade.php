@@ -71,6 +71,12 @@
                 <td><strong>Fecha de entrega:</strong></td>
                 <td>{{ $snapshot['entrega']['fecha_entrega'] ?? '' }}</td>
             </tr>
+            @if (! empty($snapshot['origen']))
+                <tr>
+                    <td><strong>Origen de los bienes:</strong></td>
+                    <td colspan="3">Redistribución desde la custodia de {{ $snapshot['origen']['nombre_completo'] ?? '' }}@if (! empty($snapshot['origen']['numero_empleado'])) ({{ $snapshot['origen']['numero_empleado'] }})@endif</td>
+                </tr>
+            @endif
             <tr>
                 <td><strong>Fecha y hora de firma:</strong></td>
                 <td>{{ \App\Soporte\FechaHora::local($acuse->firmado_en) }}</td>

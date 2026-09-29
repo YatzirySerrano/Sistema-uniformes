@@ -48,6 +48,12 @@ class CorregirEntrega
             throw new ExcepcionDeNegocioSimple('Una entrega firmada no puede modificarse.');
         }
 
+        // La corrección compensa INVENTARIO de almacén; una redistribución de
+        // custodia nunca lo movió, así que no hay nada que compensar aquí.
+        if ($entrega->esRedistribucion()) {
+            throw new ExcepcionDeNegocioSimple('Una redistribución de custodia no se corrige: registra una devolución o una nueva redistribución.');
+        }
+
         $entrega->loadMissing('detalles');
         $empresaId = $entrega->empresa_id;
         $sucursalId = $entrega->sucursal_id;

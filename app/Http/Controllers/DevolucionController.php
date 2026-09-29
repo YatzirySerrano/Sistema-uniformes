@@ -251,7 +251,7 @@ class DevolucionController extends Controller
         $entregaId = $request->integer('entrega_id');
 
         if ($entregaId > 0) {
-            $candidata = EntregaUniforme::query()->with(['colaborador:id,nombre_completo,numero_empleado', 'empresa:id,nombre_comercial', 'almacen:id,nombre', 'detalles.talla:id,valor', 'detalles.unidadActivo:id,codigo,estado,condicion'])->find($entregaId);
+            $candidata = EntregaUniforme::query()->with(['colaborador:id,nombre_completo,numero_empleado', 'empresa:id,nombre_comercial', 'almacen:id,nombre', 'detalles.talla:id,valor', 'detalles.unidadActivo:id,codigo,estado,condicion,colaborador_id'])->find($entregaId);
 
             if ($candidata !== null && $request->user()->puedeAccederEmpresa($candidata->empresa_id)) {
                 $entrega = $candidata;
@@ -314,7 +314,10 @@ class DevolucionController extends Controller
             'renglones' => $entrega->detalles
                 ->filter(fn ($d) => $d->unidad_activo_id === null
                     ? ($pendientePorDetalle[$d->id] ?? 0) > 0
-                    : $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada)
+                    // Asignada Y todavía en manos del colaborador de ESTA
+                    // entrega: si se redistribuyó, la devuelve quien la tiene.
+                    : $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada
+                        && $d->unidadActivo->colaborador_id === $entrega->colaborador_id)
                 ->values()
                 ->map(fn ($d): array => [
                     'detalle_entrega_id' => $d->id,
@@ -329,7 +332,8 @@ class DevolucionController extends Controller
                     'ya_devuelto' => $d->unidad_activo_id === null ? $d->cantidad - ($pendientePorDetalle[$d->id] ?? 0) : null,
                     'es_unidad' => $d->unidad_activo_id !== null,
                     'unidad_codigo' => $d->unidadActivo?->codigo,
-                    'unidad_disponible' => $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada,
+                    'unidad_disponible' => $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada
+                        && $d->unidadActivo->colaborador_id === $entrega->colaborador_id,
                     'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
                     'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
                 ]),

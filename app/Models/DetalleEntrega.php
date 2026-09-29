@@ -6,6 +6,7 @@ use Database\Factories\DetalleEntregaFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
@@ -20,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property int $activo_id
  * @property int|null $talla_id
  * @property int|null $unidad_activo_id
+ * @property int|null $detalle_origen_id
  * @property int|null $conjunto_id
  * @property string|null $conjunto_nombre_snapshot
  * @property int $cantidad
@@ -38,6 +40,7 @@ class DetalleEntrega extends Model
         'activo_id',
         'talla_id',
         'unidad_activo_id',
+        'detalle_origen_id',
         'conjunto_id',
         'conjunto_nombre_snapshot',
         'cantidad',
@@ -82,6 +85,28 @@ class DetalleEntrega extends Model
     public function unidadActivo(): BelongsTo
     {
         return $this->belongsTo(UnidadActivo::class);
+    }
+
+    /**
+     * Renglón de la custodia del colaborador origen del que salieron estas
+     * piezas / esta unidad (sólo en redistribuciones). Permite reconstruir
+     * la cadena Almacén → custodio → destinatario renglón por renglón.
+     *
+     * @return BelongsTo<DetalleEntrega, $this>
+     */
+    public function detalleOrigen(): BelongsTo
+    {
+        return $this->belongsTo(DetalleEntrega::class, 'detalle_origen_id');
+    }
+
+    /**
+     * Renglones de redistribuciones posteriores que salieron de éste.
+     *
+     * @return HasMany<DetalleEntrega, $this>
+     */
+    public function redistribuciones(): HasMany
+    {
+        return $this->hasMany(DetalleEntrega::class, 'detalle_origen_id');
     }
 
     /**

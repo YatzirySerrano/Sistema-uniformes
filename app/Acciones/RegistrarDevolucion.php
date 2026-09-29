@@ -16,6 +16,7 @@ use App\Models\EntregaUniforme;
 use App\Models\UnidadActivo;
 use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioReservas;
@@ -42,6 +43,7 @@ class RegistrarDevolucion
         private readonly ResolverAlmacenOperativo $resolverAlmacen,
         private readonly ServicioEvidencias $evidenciasSvc,
         private readonly ServicioReservas $reservas,
+        private readonly ServicioCustodiaColaborador $custodia,
     ) {}
 
     /**
@@ -175,7 +177,11 @@ class RegistrarDevolucion
         $yaSolicitado = (int) DetalleDevolucion::query()
             ->where('detalle_entrega_id', $detalleOriginal->getKey())
             ->sum('cantidad');
-        $pendiente = (int) $detalleOriginal->cantidad - $yaSolicitado;
+        // Lo que el colaborador ya REDISTRIBUYÓ desde este renglón ahora es
+        // custodia de otro: no puede devolverlo él (el mismo lock de fila
+        // serializa esta devolución con una redistribución concurrente).
+        $redistribuido = $this->custodia->redistribuidoPorDetalle([$detalleOriginal->getKey()])[$detalleOriginal->getKey()] ?? 0;
+        $pendiente = (int) $detalleOriginal->cantidad - $yaSolicitado - $redistribuido;
 
         if ($cantidad > $pendiente) {
             throw new ExcepcionDeNegocioSimple(sprintf(
@@ -215,6 +221,12 @@ class RegistrarDevolucion
 
         if ($unidad->estado !== EstadoUnidadActivo::Asignada) {
             throw new ExcepcionDeNegocioSimple('Esta unidad no está asignada actualmente; no se puede devolver.');
+        }
+
+        // Redistribuida después de esta entrega: ya es custodia de otro
+        // colaborador y sólo él (desde su propia entrega) puede devolverla.
+        if ($unidad->colaborador_id !== $entrega->colaborador_id) {
+            throw new ExcepcionDeNegocioSimple("La unidad {$unidad->codigo} ya no está bajo la custodia de este colaborador (fue redistribuida); devuélvela desde la entrega de quien la tiene actualmente.");
         }
 
         $condicion = CondicionUnidadActivo::from($item['condicion']);

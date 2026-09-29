@@ -12,9 +12,23 @@ class ConjuntoPolicy
         return $user->can('conjuntos.ver');
     }
 
+    /**
+     * Usar conjuntos como SELECTOR dentro de una entrega desde almacén (y
+     * consultar su disponibilidad), sin navegar el módulo Conjuntos.
+     */
+    public function seleccionarEnOperacion(User $user): bool
+    {
+        return $this->viewAny($user) || $user->can('entregas.crear');
+    }
+
     public function view(User $user, Conjunto $conjunto): bool
     {
         return $user->can('conjuntos.ver') && $user->puedeAccederEmpresa($conjunto->empresa_id);
+    }
+
+    public function consultarDisponibilidad(User $user, Conjunto $conjunto): bool
+    {
+        return $this->seleccionarEnOperacion($user) && $user->puedeAccederEmpresa($conjunto->empresa_id);
     }
 
     public function create(User $user): bool

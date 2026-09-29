@@ -618,11 +618,13 @@ class ColaboradorController extends Controller
     /**
      * Custodia pendiente del colaborador (unidades identificadas asignadas +
      * artículos por cantidad sin devolver), para la previsualización del
-     * wizard de transferencia. Sólo lectura; nunca crea devoluciones.
+     * wizard de transferencia de empresa y del diálogo de cambio de servicio
+     * (ambos bloquean mientras haya custodia). Sólo lectura; nunca crea
+     * devoluciones. `resumen` agrupa por activo + variante para el mensaje.
      */
     public function custodiaPendiente(Request $request, Colaborador $colaborador, ServicioCustodiaColaborador $custodia): JsonResponse
     {
-        $this->authorize('cambiarEmpresa', $colaborador);
+        $this->authorize('consultarCustodia', $colaborador);
 
         $colaborador->loadMissing('empresa:id,nombre_comercial');
         $pendientes = $custodia->pendientes($colaborador);
@@ -631,6 +633,7 @@ class ColaboradorController extends Controller
             'empresa_actual' => $colaborador->empresa?->nombre_comercial,
             'tiene_pendientes' => $pendientes !== [],
             'pendientes' => $pendientes,
+            'resumen' => $custodia->resumenLegible($colaborador, $pendientes),
         ]);
     }
 
@@ -672,7 +675,7 @@ class ColaboradorController extends Controller
      */
     public function buscar(Request $request): JsonResponse
     {
-        $this->authorize('viewAny', Colaborador::class);
+        $this->authorize('seleccionarEnOperacion', Colaborador::class);
 
         $idsAutorizadas = $this->idsEmpresasAutorizadas($request);
         $termino = trim((string) $request->query('q', ''));

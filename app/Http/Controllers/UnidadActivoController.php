@@ -24,6 +24,7 @@ use App\Http\Requests\Activos\RecuperarUnidadRequest;
 use App\Http\Requests\Activos\RestaurarCondicionUnidadRequest;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
@@ -389,6 +390,31 @@ class UnidadActivoController extends Controller
             'referencia' => $this->referenciaNavegable($m, $usuarioActual, $entregasReferidas, $devolucionesReferidas),
         ]);
 
+        // Redistribuciones de custodia (colaborador → colaborador): no son
+        // movimientos de inventario (la unidad no entra ni sale de ningún
+        // almacén), pero sí forman parte de su historia de custodia.
+        $redistribuciones = DetalleEntrega::query()
+            ->where('unidad_activo_id', $unidad->id)
+            ->whereHas('entrega', fn (Builder $q) => $q->whereNotNull('colaborador_origen_id'))
+            ->with(['entrega.colaborador:id,nombre_completo', 'entrega.colaboradorOrigen:id,nombre_completo'])
+            ->get()
+            ->map(fn (DetalleEntrega $d): array => [
+                'tipo' => 'Redistribución de custodia',
+                'motivo' => sprintf(
+                    'De %s a %s',
+                    // Ambos existen: `whereHas` exige el origen y el destinatario
+                    // es FK obligatoria (restrictOnDelete).
+                    $d->entrega->colaboradorOrigen->nombre_completo,
+                    $d->entrega->colaborador->nombre_completo,
+                ),
+                'ocurrido_en' => ($d->entrega->confirmada_en ?? $d->entrega->created_at)?->toIso8601String(),
+                'referencia' => $usuarioActual->can('view', $d->entrega)
+                    ? ['tipo' => 'entrega', 'etiqueta' => "Entrega {$d->entrega->folio}", 'url' => route('entregas.show', $d->entrega)]
+                    : null,
+            ]);
+
+        $movimientos = $movimientos->concat($redistribuciones)->sortByDesc('ocurrido_en')->values();
+
         return Inertia::render('Activos/UnidadDetalle', [
             'unidad' => [
                 'id' => $unidad->id,
@@ -439,6 +465,7 @@ class UnidadActivoController extends Controller
                 ->map(fn ($c): array => ['valor' => $c->value, 'etiqueta' => $c->etiqueta()]),
             'permisos' => [
                 'administrar' => $request->user()->can('administrar', $unidad),
+                'condicion' => $request->user()->can('gestionarCondicion', $unidad),
             ],
         ]);
     }
@@ -520,7 +547,7 @@ class UnidadActivoController extends Controller
      */
     public function buscar(Request $request, ServicioReservas $reservas): JsonResponse
     {
-        $this->authorize('viewAny', UnidadActivo::class);
+        $this->authorize('seleccionarEnOperacion', UnidadActivo::class);
 
         $activoId = (int) $request->query('activo_id', 0);
 
