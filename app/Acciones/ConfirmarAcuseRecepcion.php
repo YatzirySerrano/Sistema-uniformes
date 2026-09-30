@@ -319,6 +319,12 @@ class ConfirmarAcuseRecepcion
                 'activo' => $d->activo_nombre_snapshot,
                 'talla' => $d->talla_valor_snapshot,
                 'cantidad' => (int) $d->cantidad,
+                // Finalidad TAL COMO se guardó en el renglón (null = "Sin
+                // clasificar"; nunca se infiere) y, si vino de un conjunto,
+                // su nombre. Los snapshots previos no traen estas claves y la
+                // plantilla los sigue mostrando exactamente como antes.
+                'finalidad' => $d->finalidad?->value,
+                'conjunto' => $d->conjunto_nombre_snapshot,
                 // Referencia DETERMINISTA de la evidencia (hash + mime): prueba
                 // QUÉ imagen pertenecía al acuse, sin depender de que el
                 // archivo físico siga existiendo. Ausente en snapshots viejos.

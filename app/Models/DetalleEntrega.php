@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\FinalidadCustodia;
 use Database\Factories\DetalleEntregaFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -22,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property int|null $talla_id
  * @property int|null $unidad_activo_id
  * @property int|null $detalle_origen_id
+ * @property FinalidadCustodia|null $finalidad
  * @property int|null $conjunto_id
  * @property string|null $conjunto_nombre_snapshot
  * @property int $cantidad
@@ -41,6 +43,7 @@ class DetalleEntrega extends Model
         'talla_id',
         'unidad_activo_id',
         'detalle_origen_id',
+        'finalidad',
         'conjunto_id',
         'conjunto_nombre_snapshot',
         'cantidad',
@@ -52,6 +55,7 @@ class DetalleEntrega extends Model
     {
         return [
             'cantidad' => 'integer',
+            'finalidad' => FinalidadCustodia::class,
         ];
     }
 

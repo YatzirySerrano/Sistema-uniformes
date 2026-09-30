@@ -42,9 +42,9 @@ class RegistrarEntregaFirmada
     ) {}
 
     /**
-     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string}>  $activos
-     * @param  array<int, array{unidad_activo_id: int|string}>  $unidades
-     * @param  array<int, array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>}>  $conjuntos
+     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string, finalidad?: string|null, bolsa?: string|null}>  $activos
+     * @param  array<int, array{unidad_activo_id: int|string, finalidad?: string|null}>  $unidades
+     * @param  array<int, array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>, finalidad?: string|null, finalidades?: array<int|string, string|null>}>  $conjuntos
      * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias
      */
     public function ejecutar(
@@ -65,12 +65,13 @@ class RegistrarEntregaFirmada
         array $evidencias = [],
         ?string $reservaToken = null,
         ?int $custodioOrigenId = null,
+        bool $incluirPersonales = false,
     ): AcuseRecepcion {
         /** @var array{entrega: EntregaUniforme, acuse: AcuseRecepcion} $resultado */
         $resultado = DB::transaction(function () use (
             $colaboradorId, $almacenId, $encargadoId, $fechaEntrega,
             $activos, $unidades, $conjuntos, $notas, $servicioId, $evidencias,
-            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId,
+            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId, $incluirPersonales,
         ): array {
             if ($custodioOrigenId !== null) {
                 $entrega = $this->redistribuir->ejecutar(
@@ -83,7 +84,8 @@ class RegistrarEntregaFirmada
                     $notas,
                     $servicioId,
                     $evidencias,
-                    array_map(fn (array $c): array => ['conjunto_id' => $c['conjunto_id'], 'cantidad' => $c['cantidad']], $conjuntos),
+                    array_map(fn (array $c): array => ['conjunto_id' => $c['conjunto_id'], 'cantidad' => $c['cantidad'], 'finalidad' => $c['finalidad'] ?? null], $conjuntos),
+                    $incluirPersonales,
                 );
             } elseif ($almacenId === null) {
                 throw new ExcepcionDeNegocioSimple('Selecciona el almacén de origen.');

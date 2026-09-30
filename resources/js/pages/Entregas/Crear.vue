@@ -6,6 +6,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
 import ApartadoTemporalBanner from '@/components/sistema/ApartadoTemporalBanner.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
+import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
@@ -97,7 +98,19 @@ type OpcionActivo = {
     usa_variantes: boolean;
     tallas: { id: number; valor: string; disponible?: number }[];
     disponible?: number;
+    /** Sólo en modo custodia: id real del activo (`id` es sintético por bolsa). */
+    activo_id?: number;
+    /** Bolsa de la custodia de la que sale: para redistribuir / uso personal. */
+    bolsa?: 'redistribucion' | 'personal';
+    bolsa_etiqueta?: string;
 };
+
+/** Finalidad con la que RECIBE el destinatario (ver `FinalidadCustodia`). */
+type Finalidad = 'uso_personal' | 'redistribucion';
+const OPCIONES_FINALIDAD: { valor: Finalidad; etiqueta: string }[] = [
+    { valor: 'uso_personal', etiqueta: 'Uso personal' },
+    { valor: 'redistribucion', etiqueta: 'Para redistribuir' },
+];
 
 type OpcionUnidad = {
     id: number;
@@ -468,12 +481,16 @@ type FilaActivo = {
     activo_id: number | '';
     talla_id: number | null;
     cantidad: number;
+    /** Sin valor por defecto: quien entrega la elige explícitamente por renglón. */
+    finalidad: Finalidad | null;
+    bolsa: 'redistribucion' | 'personal' | null;
     evidencia: File | null;
     evidencia_origen: OrigenEvidencia;
 };
 type FilaUnidad = {
     activo_id: number | '';
     unidad_activo_id: number | '';
+    finalidad: Finalidad | null;
     evidencia: File | null;
     evidencia_origen: OrigenEvidencia;
 };
@@ -486,6 +503,9 @@ type FilaConjunto = {
     // Inertia no puede generar la ruta `conjuntos.${i}.variantes.${id}` que
     // usa `form.clearErrors()` más abajo.
     variantes: Record<string, number | null>;
+    finalidad: Finalidad | null;
+    /** Excepción por componente (id de componente → finalidad). */
+    finalidades: Record<string, Finalidad>;
 };
 
 const form = useForm<{
@@ -603,6 +623,7 @@ async function cargarDisponibilidad(): Promise<void> {
         saldos: {
             activo_id: number;
             talla_id: number | null;
+            bolsa?: string;
             disponible: number;
         }[];
         total_unidades?: number;
@@ -613,7 +634,8 @@ async function cargarDisponibilidad(): Promise<void> {
     }
     const mapa: Record<string, number> = {};
     for (const s of json.saldos) {
-        mapa[`${s.activo_id}-${s.talla_id ?? '0'}`] = s.disponible;
+        mapa[claveDisponible(s.activo_id, s.talla_id, s.bolsa ?? null)] =
+            s.disponible;
     }
     disponibilidad.value = mapa;
 }
@@ -657,9 +679,9 @@ function activoSinExistencias(item: OpcionActivo): string | false {
 }
 
 /** "Disponible: N" o, al redistribuir, "Disponible en tu custodia: N". */
-function textoDisponible(n: number): string {
+function textoDisponible(n: number, bolsaEtiqueta?: string): string {
     return esCustodia.value
-        ? `Disponible en tu custodia: ${n}`
+        ? `${bolsaEtiqueta ? `${bolsaEtiqueta} · ` : ''}Disponible en tu custodia: ${n}`
         : `Disponible: ${n}`;
 }
 
@@ -668,6 +690,10 @@ function agregarActivo(): void {
         activo_id: '',
         talla_id: null,
         cantidad: 1,
+        // Sin preselección: una sugerencia por defecto hacía que renglones
+        // pensados «Para redistribuir» se guardaran como uso personal.
+        finalidad: null,
+        bolsa: null,
         evidencia: null,
         evidencia_origen: null,
     });
@@ -681,7 +707,8 @@ function quitarActivo(i: number): void {
 
 function alElegirActivo(i: number, o: OpcionActivo | null): void {
     activosUI[i].sel = o;
-    form.activos[i].activo_id = o?.id ?? '';
+    form.activos[i].activo_id = o?.activo_id ?? o?.id ?? '';
+    form.activos[i].bolsa = o?.bolsa ?? null;
     form.activos[i].talla_id = null;
     // El renglón vuelve a empezar: nada de arrastrar cantidad ni la foto del
     // artículo anterior (la evidencia siempre pertenece a un elemento real).
@@ -691,12 +718,23 @@ function alElegirActivo(i: number, o: OpcionActivo | null): void {
     form.clearErrors(`activos.${i}.activo_id`, `activos.${i}.talla_id`);
 }
 
+/** En custodia la clave incluye la bolsa (redistribuir / personal). */
+function claveDisponible(
+    activoId: number | '',
+    tallaId: number | null,
+    bolsa: string | null,
+): string {
+    const base = `${activoId}-${tallaId ?? '0'}`;
+    return bolsa ? `${base}-${bolsa}` : base;
+}
+
 function disponibleDe(
     activoId: number | '',
     tallaId: number | null,
+    bolsa: string | null = null,
 ): number | null {
     if (!activoId) return null;
-    const clave = `${activoId}-${tallaId ?? '0'}`;
+    const clave = claveDisponible(activoId, tallaId, bolsa);
     return clave in disponibilidad.value ? disponibilidad.value[clave] : null;
 }
 
@@ -734,11 +772,13 @@ function activoIndividualSinExistencias(item: OpcionActivo): string | false {
 
 function buscarUnidades(i: number) {
     return async (q: string, signal?: AbortSignal): Promise<OpcionUnidad[]> => {
-        const activoId = unidadesUI[i].activoSel?.id;
+        const activoSel = unidadesUI[i].activoSel;
+        const activoId = activoSel?.activo_id ?? activoSel?.id;
+        const bolsa = activoSel?.bolsa ?? 'redistribucion';
         if (!activoId || !origenListo.value) return [];
         const res = await fetch(
             esCustodia.value
-                ? `/entregas/custodia/unidades?empresa_id=${empresaId.value}&activo_id=${activoId}&q=${encodeURIComponent(q)}${paramContexto}`
+                ? `/entregas/custodia/unidades?empresa_id=${empresaId.value}&activo_id=${activoId}&bolsa=${bolsa}&q=${encodeURIComponent(q)}${paramContexto}`
                 : `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenSel.value?.id}&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
             {
                 headers: { Accept: 'application/json' },
@@ -761,6 +801,7 @@ function agregarUnidad(): void {
     form.unidades.push({
         activo_id: '',
         unidad_activo_id: '',
+        finalidad: null,
         evidencia: null,
         evidencia_origen: null,
     });
@@ -775,7 +816,7 @@ function quitarUnidad(i: number): void {
 function alElegirActivoUnidad(i: number, o: OpcionActivo | null): void {
     unidadesUI[i].activoSel = o;
     unidadesUI[i].unidadSel = null;
-    form.unidades[i].activo_id = o?.id ?? '';
+    form.unidades[i].activo_id = o?.activo_id ?? o?.id ?? '';
     form.unidades[i].unidad_activo_id = '';
     // La foto corresponde a una unidad física concreta: al cambiar de activo
     // (y por tanto de unidad) no se arrastra.
@@ -908,7 +949,13 @@ function recalcularDisponibilidadConjuntoConRetraso(i: number): void {
 }
 
 function agregarConjunto(): void {
-    form.conjuntos.push({ conjunto_id: '', cantidad: 1, variantes: {} });
+    form.conjuntos.push({
+        conjunto_id: '',
+        cantidad: 1,
+        variantes: {},
+        finalidad: null,
+        finalidades: {},
+    });
     conjuntosUI.push({ sel: null });
 }
 
@@ -976,7 +1023,13 @@ function conjuntoCustodiaIncompleto(
 }
 
 function agregarConjuntoCustodia(): void {
-    form.conjuntos.push({ conjunto_id: '', cantidad: 1, variantes: {} });
+    form.conjuntos.push({
+        conjunto_id: '',
+        cantidad: 1,
+        variantes: {},
+        finalidad: null,
+        finalidades: {},
+    });
     conjuntosCustodiaUI.push({ sel: null });
 }
 
@@ -1043,6 +1096,24 @@ const puedeAvanzarPaso1 = computed(
 const problemasPaso2 = computed<string[]>(() => {
     const problemas: string[] = [];
 
+    // La finalidad se elige SIEMPRE explícitamente (nunca se infiere).
+    const sinFinalidad =
+        form.activos.filter((f) => f.activo_id !== '' && f.finalidad === null)
+            .length +
+        form.unidades.filter(
+            (f) => f.unidad_activo_id !== '' && f.finalidad === null,
+        ).length +
+        form.conjuntos.filter(
+            (f) => f.conjunto_id !== '' && f.finalidad === null,
+        ).length;
+    if (sinFinalidad > 0) {
+        problemas.push(
+            sinFinalidad === 1
+                ? 'Elige la finalidad (Uso personal o Para redistribuir) del renglón marcado.'
+                : `Elige la finalidad (Uso personal o Para redistribuir) de los ${sinFinalidad} renglones marcados.`,
+        );
+    }
+
     form.activos.forEach((fila, i) => {
         if (fila.activo_id === '') return;
         const sel = activosUI[i]?.sel;
@@ -1056,7 +1127,7 @@ const problemasPaso2 = computed<string[]>(() => {
             problemas.push(`«${nombre}»: la cantidad debe ser al menos 1.`);
             return;
         }
-        const disp = disponibleDe(fila.activo_id, fila.talla_id);
+        const disp = disponibleDe(fila.activo_id, fila.talla_id, fila.bolsa);
         if (disp !== null && fila.cantidad > disp) {
             const talla = sel?.tallas.find(
                 (t) => t.id === fila.talla_id,
@@ -1171,6 +1242,8 @@ const puedeConfirmar = computed(
 // ------------------------------------------------------------------
 const esMovilOTablet = useMediaQuery('(max-width: 1024px)');
 const dialogoProblemasMovil = ref(false);
+/** Marca en rojo los campos faltantes sólo después de intentar continuar. */
+const intentoContinuar = ref(false);
 const resumenProblemasRef = ref<HTMLElement | null>(null);
 
 function desplazarseAResumenProblemas(): void {
@@ -1202,6 +1275,7 @@ function mostrarProblemasPaso2(): void {
 async function irA(n: 1 | 2 | 3): Promise<void> {
     if (n === 2 && !puedeAvanzarPaso1.value) return;
     if (n === 3) {
+        intentoContinuar.value = true;
         if (!puedeAvanzarPaso1.value || !puedeAvanzarPaso2.value) {
             if (puedeAvanzarPaso1.value && problemasPaso2.value.length) {
                 mostrarProblemasPaso2();
@@ -1729,6 +1803,8 @@ onMounted(() => {
                                             : textoDisponible(
                                                   (a as OpcionActivo)
                                                       .disponible ?? 0,
+                                                  (a as OpcionActivo)
+                                                      .bolsa_etiqueta,
                                               )
                                 "
                                 placeholder="Buscar activo…"
@@ -1783,6 +1859,7 @@ onMounted(() => {
                                     disponibleDe(
                                         fila.activo_id,
                                         fila.talla_id,
+                                        fila.bolsa,
                                     ) ?? undefined
                                 "
                                 class="h-9"
@@ -1792,6 +1869,7 @@ onMounted(() => {
                                     disponibleDe(
                                         fila.activo_id,
                                         fila.talla_id,
+                                        fila.bolsa,
                                     ) !== null
                                 "
                                 class="mt-0.5 text-[11px]"
@@ -1799,6 +1877,7 @@ onMounted(() => {
                                     (disponibleDe(
                                         fila.activo_id,
                                         fila.talla_id,
+                                        fila.bolsa,
                                     ) ?? 0) < fila.cantidad
                                         ? 'text-destructive'
                                         : 'text-muted-foreground'
@@ -1811,6 +1890,7 @@ onMounted(() => {
                                             (disponibleDe(
                                                 fila.activo_id,
                                                 fila.talla_id,
+                                                fila.bolsa,
                                             ) ?? 0)
                                     "
                                 >
@@ -1819,6 +1899,7 @@ onMounted(() => {
                                         disponibleDe(
                                             fila.activo_id,
                                             fila.talla_id,
+                                            fila.bolsa,
                                         )
                                     }}
                                     disponibles · quedarán
@@ -1826,6 +1907,7 @@ onMounted(() => {
                                         (disponibleDe(
                                             fila.activo_id,
                                             fila.talla_id,
+                                            fila.bolsa,
                                         ) ?? 0) - fila.cantidad
                                     }}
                                 </template>
@@ -1835,6 +1917,7 @@ onMounted(() => {
                                         disponibleDe(
                                             fila.activo_id,
                                             fila.talla_id,
+                                            fila.bolsa,
                                         )
                                     }}
                                     unidades disponibles de
@@ -1876,6 +1959,31 @@ onMounted(() => {
                                 v-model="fila.evidencia"
                                 v-model:origen="fila.evidencia_origen"
                                 etiqueta="Agregar foto de evidencia"
+                            />
+                        </div>
+                        <div
+                            class="flex flex-wrap items-center gap-2 sm:col-span-full"
+                        >
+                            <Label
+                                :for="`fin-art-${i}`"
+                                class="text-muted-foreground text-xs"
+                                >Finalidad para quien recibe</Label
+                            >
+                            <div class="w-44">
+                                <SelectSimple
+                                    :id="`fin-art-${i}`"
+                                    v-model="fila.finalidad"
+                                    :opciones="OPCIONES_FINALIDAD"
+                                    placeholder="Elige la finalidad"
+                                    :invalido="
+                                        intentoContinuar &&
+                                        fila.finalidad === null
+                                    "
+                                />
+                            </div>
+                            <AyudaTooltip
+                                texto="«Uso personal»: el bien queda asignado para uso directo de este colaborador. «Para redistribuir»: lo recibe para después entregarlo a otras personas."
+                                etiqueta="Ayuda sobre la finalidad"
                             />
                         </div>
                     </div>
@@ -1931,7 +2039,13 @@ onMounted(() => {
                                 "
                                 :etiqueta="(a) => (a as OpcionActivo).nombre"
                                 :descripcion="
-                                    (a) => (a as OpcionActivo).codigo ?? ''
+                                    (a) =>
+                                        [
+                                            (a as OpcionActivo).bolsa_etiqueta,
+                                            (a as OpcionActivo).codigo,
+                                        ]
+                                            .filter(Boolean)
+                                            .join(' · ')
                                 "
                                 placeholder="Activo…"
                                 placeholder-busqueda="Buscar por nombre o código"
@@ -1998,6 +2112,31 @@ onMounted(() => {
                                 v-model="fila.evidencia"
                                 v-model:origen="fila.evidencia_origen"
                                 etiqueta="Agregar foto de evidencia"
+                            />
+                        </div>
+                        <div
+                            class="flex flex-wrap items-center gap-2 sm:col-span-full"
+                        >
+                            <Label
+                                :for="`fin-uni-${i}`"
+                                class="text-muted-foreground text-xs"
+                                >Finalidad para quien recibe</Label
+                            >
+                            <div class="w-44">
+                                <SelectSimple
+                                    :id="`fin-uni-${i}`"
+                                    v-model="fila.finalidad"
+                                    :opciones="OPCIONES_FINALIDAD"
+                                    placeholder="Elige la finalidad"
+                                    :invalido="
+                                        intentoContinuar &&
+                                        fila.finalidad === null
+                                    "
+                                />
+                            </div>
+                            <AyudaTooltip
+                                texto="«Uso personal»: el bien queda asignado para uso directo de este colaborador. «Para redistribuir»: lo recibe para después entregarlo a otras personas."
+                                etiqueta="Ayuda sobre la finalidad"
                             />
                         </div>
                     </div>
@@ -2252,6 +2391,71 @@ onMounted(() => {
                                 {{ c.faltantes ?? c.requeridas_total }}
                             </p>
                         </div>
+                        <div
+                            class="flex flex-wrap items-center gap-2 sm:col-span-full"
+                        >
+                            <Label
+                                :for="`fin-conj-${i}`"
+                                class="text-muted-foreground text-xs"
+                                >Finalidad para quien recibe</Label
+                            >
+                            <div class="w-44">
+                                <SelectSimple
+                                    :id="`fin-conj-${i}`"
+                                    v-model="fila.finalidad"
+                                    :opciones="OPCIONES_FINALIDAD"
+                                    placeholder="Elige la finalidad"
+                                    :invalido="
+                                        intentoContinuar &&
+                                        fila.finalidad === null
+                                    "
+                                />
+                            </div>
+                            <AyudaTooltip
+                                texto="«Uso personal»: el bien queda asignado para uso directo de este colaborador. «Para redistribuir»: lo recibe para después entregarlo a otras personas."
+                                etiqueta="Ayuda sobre la finalidad"
+                            />
+                        </div>
+                        <details
+                            v-if="
+                                disponibilidadConjuntos[i]?.componentes.length
+                            "
+                            class="text-xs sm:col-span-full"
+                        >
+                            <summary
+                                class="text-muted-foreground cursor-pointer"
+                            >
+                                Finalidad distinta por componente (opcional)
+                            </summary>
+                            <ul class="mt-2 space-y-1.5">
+                                <li
+                                    v-for="c in disponibilidadConjuntos[i]
+                                        ?.componentes ?? []"
+                                    :key="c.componente_id"
+                                    class="flex flex-wrap items-center gap-2"
+                                >
+                                    <span class="min-w-0 flex-1 truncate">{{
+                                        c.activo_nombre
+                                    }}</span>
+                                    <div class="w-44">
+                                        <SelectSimple
+                                            :model-value="
+                                                fila.finalidades[
+                                                    String(c.componente_id)
+                                                ] ?? fila.finalidad
+                                            "
+                                            :opciones="OPCIONES_FINALIDAD"
+                                            @update:model-value="
+                                                (v) =>
+                                                    (fila.finalidades[
+                                                        String(c.componente_id)
+                                                    ] = v as Finalidad)
+                                            "
+                                        />
+                                    </div>
+                                </li>
+                            </ul>
+                        </details>
                     </div>
                     <p
                         v-if="origenListo && !form.conjuntos.length"
@@ -2376,6 +2580,31 @@ onMounted(() => {
                         >
                             <Trash2 class="size-4" />
                         </Button>
+                        <div
+                            class="flex flex-wrap items-center gap-2 sm:col-span-full"
+                        >
+                            <Label
+                                :for="`fin-conjc-${i}`"
+                                class="text-muted-foreground text-xs"
+                                >Finalidad para quien recibe</Label
+                            >
+                            <div class="w-44">
+                                <SelectSimple
+                                    :id="`fin-conjc-${i}`"
+                                    v-model="fila.finalidad"
+                                    :opciones="OPCIONES_FINALIDAD"
+                                    placeholder="Elige la finalidad"
+                                    :invalido="
+                                        intentoContinuar &&
+                                        fila.finalidad === null
+                                    "
+                                />
+                            </div>
+                            <AyudaTooltip
+                                texto="«Uso personal»: el bien queda asignado para uso directo de este colaborador. «Para redistribuir»: lo recibe para después entregarlo a otras personas."
+                                etiqueta="Ayuda sobre la finalidad"
+                            />
+                        </div>
                     </div>
                     <p
                         v-if="origenListo && !form.conjuntos.length"

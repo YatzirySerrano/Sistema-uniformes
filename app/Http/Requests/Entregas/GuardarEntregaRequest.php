@@ -4,6 +4,7 @@ namespace App\Http\Requests\Entregas;
 
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\FinalidadCustodia;
 use App\Enums\TipoControlActivo;
 use App\Models\Activo;
 use App\Models\CambioServicioColaborador;
@@ -12,6 +13,7 @@ use App\Models\Conjunto;
 use App\Models\EntregaUniforme;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
+use App\Models\UnidadActivo;
 use App\Servicios\ServicioCustodiaColaborador;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -115,6 +117,40 @@ class GuardarEntregaRequest extends FormRequest
     }
 
     /**
+     * ¿Puede tomar de la bolsa de uso personal / sin clasificar? Con
+     * `entregas.redistribuir-propios`, o dentro de la revisión de un cambio
+     * de servicio (esa revisión ya decidió bien por bien qué se redistribuye).
+     */
+    public function incluirPersonales(): bool
+    {
+        if (! $this->esRedistribucion()) {
+            return false;
+        }
+
+        return $this->filled('cambio_servicio_id') || ($this->user()?->can('redistribuirPropios', EntregaUniforme::class) ?? false);
+    }
+
+    /**
+     * Finalidad de cada renglón para quien RECIBE (uso personal / para
+     * redistribuir). Nullable por compatibilidad: sin ella el renglón queda
+     * "sin clasificar" (el formulario siempre la envía).
+     *
+     * @return array<string, mixed>
+     */
+    private function reglasFinalidad(): array
+    {
+        $finalidad = ['nullable', Rule::enum(FinalidadCustodia::class)];
+
+        return [
+            'activos.*.finalidad' => $finalidad,
+            'unidades.*.finalidad' => $finalidad,
+            'conjuntos.*.finalidad' => $finalidad,
+            'conjuntos.*.finalidades' => ['nullable', 'array'],
+            'conjuntos.*.finalidades.*' => $finalidad,
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function rules(): array
@@ -127,11 +163,12 @@ class GuardarEntregaRequest extends FormRequest
         }
 
         if ($this->esRedistribucion()) {
-            return [...$this->reglasComunes($empresaId), ...$this->reglasCustodia($empresaId)];
+            return [...$this->reglasComunes($empresaId), ...$this->reglasCustodia($empresaId), ...$this->reglasFinalidad()];
         }
 
         return [
             ...$this->reglasComunes($empresaId),
+            ...$this->reglasFinalidad(),
             'almacen_id' => [
                 'required', 'integer',
                 Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
@@ -240,6 +277,9 @@ class GuardarEntregaRequest extends FormRequest
             // La variante es la que TIENE la pieza en custodia (aunque hoy
             // esté retirada del catálogo): sólo se exige que exista.
             'activos.*.talla_id' => ['nullable', 'integer', Rule::exists('tallas', 'id')],
+            // De qué bolsa de la custodia sale: "para redistribuir" (por
+            // defecto) o "uso personal / sin clasificar" (requiere permiso).
+            'activos.*.bolsa' => ['nullable', Rule::in([ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION, ServicioCustodiaColaborador::BOLSA_PERSONAL])],
             'activos.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
             'activos.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
             'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
@@ -284,15 +324,21 @@ class GuardarEntregaRequest extends FormRequest
             return;
         }
 
-        $disponibles = collect(app(ServicioCustodiaColaborador::class)->cantidadesRedistribuibles($custodio))
-            ->keyBy(fn (array $f): string => $f['activo_id'].'-'.($f['talla_id'] ?? '0'));
+        $servicio = app(ServicioCustodiaColaborador::class);
+        $incluirPersonales = $this->incluirPersonales();
+        $bolsaDe = fn (array $fila): string => ($fila['bolsa'] ?? null) === ServicioCustodiaColaborador::BOLSA_PERSONAL
+            ? ServicioCustodiaColaborador::BOLSA_PERSONAL
+            : ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION;
+
+        $disponibles = collect($servicio->cantidadesRedistribuibles($custodio, $incluirPersonales))
+            ->keyBy(fn (array $f): string => $f['activo_id'].'-'.($f['talla_id'] ?? '0').'-'.$f['bolsa']);
 
         $solicitado = [];
         foreach ($activos as $fila) {
             if (! is_array($fila)) {
                 continue;
             }
-            $clave = (int) ($fila['activo_id'] ?? 0).'-'.((($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '') ? (int) $fila['talla_id'] : '0');
+            $clave = (int) ($fila['activo_id'] ?? 0).'-'.((($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '') ? (int) $fila['talla_id'] : '0').'-'.$bolsaDe($fila);
             $solicitado[$clave] = ($solicitado[$clave] ?? 0) + (int) ($fila['cantidad'] ?? 0);
         }
 
@@ -301,11 +347,19 @@ class GuardarEntregaRequest extends FormRequest
                 continue;
             }
 
-            $clave = (int) ($fila['activo_id'] ?? 0).'-'.((($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '') ? (int) $fila['talla_id'] : '0');
+            if ($bolsaDe($fila) === ServicioCustodiaColaborador::BOLSA_PERSONAL && ! $incluirPersonales) {
+                $validator->errors()->add("activos.{$i}.activo_id", 'No tienes permiso para reasignar activos de uso personal de tu custodia.');
+
+                continue;
+            }
+
+            $clave = (int) ($fila['activo_id'] ?? 0).'-'.((($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '') ? (int) $fila['talla_id'] : '0').'-'.$bolsaDe($fila);
             $enCustodia = $disponibles->get($clave);
 
             if ($enCustodia === null) {
-                $validator->errors()->add("activos.{$i}.activo_id", 'Ese activo (con esa variante) no está bajo tu custodia.');
+                $validator->errors()->add("activos.{$i}.activo_id", $bolsaDe($fila) === ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION
+                    ? 'Ese activo (con esa variante) no está en tu custodia para redistribuir.'
+                    : 'Ese activo (con esa variante) no está en tu custodia de uso personal.');
 
                 continue;
             }
@@ -316,6 +370,19 @@ class GuardarEntregaRequest extends FormRequest
                     "activos.{$i}.cantidad",
                     "En tu custodia sólo quedan {$enCustodia['disponible']} de {$enCustodia['activo']}{$talla}.",
                 );
+            }
+        }
+
+        // Unidades de uso personal / sin clasificar: sólo con permiso.
+        if (! $incluirPersonales) {
+            foreach ((array) $this->input('unidades', []) as $i => $fila) {
+                $unidad = is_array($fila) ? UnidadActivo::query()->find((int) ($fila['unidad_activo_id'] ?? 0)) : null;
+
+                if ($unidad !== null
+                    && $unidad->colaborador_id === $custodio->getKey()
+                    && $servicio->bolsaDeUnidad($unidad) !== ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION) {
+                    $validator->errors()->add("unidades.{$i}.unidad_activo_id", "La unidad {$unidad->codigo} es de uso personal (o sin clasificar) y no tienes permiso para reasignarla.");
+                }
             }
         }
 

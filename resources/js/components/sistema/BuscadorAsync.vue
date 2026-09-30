@@ -219,7 +219,11 @@ onBeforeUnmount(() => {
             aria-haspopup="listbox"
             @click="disabled ? null : abierto ? cerrar() : abrir()"
         >
-            <span v-if="modelValue" class="min-w-0 flex-1 truncate text-left">
+            <span
+                v-if="modelValue"
+                class="min-w-0 flex-1 truncate text-left"
+                :title="etiqueta(modelValue)"
+            >
                 {{ etiqueta(modelValue) }}
             </span>
             <span

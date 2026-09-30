@@ -48,6 +48,8 @@ const OPCIONES_PERFIL = [
     { valor: 'celular', etiqueta: 'Celular' },
     { valor: 'computadora', etiqueta: 'Computadora' },
     { valor: 'tablet', etiqueta: 'Tablet' },
+    { valor: 'transporte', etiqueta: 'Transporte' },
+    { valor: 'electrodomestico', etiqueta: 'Electrodoméstico' },
 ];
 
 /** Sugerencia NO autoritativa a partir del nombre; el perfil real lo fija el administrador. */
@@ -60,6 +62,18 @@ function perfilSugerido(nombre: string): PerfilTecnico | null {
     if (/\b(computadora|laptop|pc|notebook|equipo de computo)\b/.test(n))
         return 'computadora';
     if (/\btablet\b/.test(n)) return 'tablet';
+    if (
+        /\b(vehiculo|automovil|auto|camioneta|motocicleta|moto|transporte)\b/.test(
+            n,
+        )
+    )
+        return 'transporte';
+    if (
+        /\b(electrodomestico|refrigerador|microondas|cafetera|frigobar|ventilador|horno)\b/.test(
+            n,
+        )
+    )
+        return 'electrodomestico';
     return null;
 }
 type OpcionTipo = { id: number; nombre: string };

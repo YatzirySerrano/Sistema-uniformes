@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, ref } from 'vue';
+import { CABECERA_SEGUNDO_PLANO } from '@/lib/avisoSinPermiso';
 import { xsrfToken } from '@/lib/utils';
 
 /** Duración de una reserva nueva o recién extendida (debe igualar `Reserva::DURACION_MINUTOS`). */
@@ -44,6 +45,11 @@ export function useReservaBorrador<T extends RespuestaReserva>(rutas: {
     const vencida = ref(false);
     const segundosRestantes = ref(DURACION_MINUTOS * 60);
 
+    // Sólo se libera lo que de verdad se pidió apartar con el token actual:
+    // un formulario que nunca reservó (p. ej. modo redistribución, o salir
+    // sin capturar nada) no dispara ningún DELETE al desmontarse.
+    let tokenConApartado = false;
+
     let temporizadorCountdown: ReturnType<typeof setInterval> | null = null;
     let temporizadorDebounce: ReturnType<typeof setTimeout> | null = null;
 
@@ -88,6 +94,7 @@ export function useReservaBorrador<T extends RespuestaReserva>(rutas: {
 
         cargando.value = true;
         error.value = null;
+        tokenConApartado = true;
 
         try {
             const res = await fetch(rutas.reservar, {
@@ -141,18 +148,23 @@ export function useReservaBorrador<T extends RespuestaReserva>(rutas: {
             clearTimeout(temporizadorDebounce);
             temporizadorDebounce = null;
         }
-        const t = token.value;
-        void fetch(`${rutas.liberarBase}/${t}`, {
-            method: 'DELETE',
-            headers: {
-                Accept: 'application/json',
-                'X-XSRF-TOKEN': xsrfToken(),
-            },
-            credentials: 'same-origin',
-            keepalive: true,
-        }).catch(() => {
-            // Best-effort: el TTL de 10 minutos libera la reserva de todas formas.
-        });
+        if (tokenConApartado) {
+            tokenConApartado = false;
+            void fetch(`${rutas.liberarBase}/${token.value}`, {
+                method: 'DELETE',
+                headers: {
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': xsrfToken(),
+                    // Limpieza interna, no una acción del usuario: si falla
+                    // (incluido un 403) no se le muestra ningún aviso.
+                    [CABECERA_SEGUNDO_PLANO]: '1',
+                },
+                credentials: 'same-origin',
+                keepalive: true,
+            }).catch(() => {
+                // Best-effort: el TTL de 10 minutos libera la reserva de todas formas.
+            });
+        }
         resultado.value = null;
         expiraEn.value = null;
         vencida.value = false;

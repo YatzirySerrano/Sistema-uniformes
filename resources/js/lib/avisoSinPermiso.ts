@@ -3,6 +3,26 @@ import { toast } from 'vue-sonner';
 
 const MENSAJE_GENERAL = 'No tienes permiso para realizar esta acción.';
 
+/**
+ * Marca una petición interna best-effort (limpieza al salir de una pantalla,
+ * p. ej. liberar un apartado temporal): no es una acción del usuario, así que
+ * su 403 no se le avisa. Sólo la usan peticiones de limpieza; los 403 de
+ * acciones y buscadores reales siguen mostrándose.
+ */
+export const CABECERA_SEGUNDO_PLANO = 'X-Peticion-Segundo-Plano';
+
+function esSegundoPlano(
+    entrada: RequestInfo | URL,
+    opciones?: RequestInit,
+): boolean {
+    const cabeceras = new Headers(
+        opciones?.headers ??
+            (entrada instanceof Request ? entrada.headers : undefined),
+    );
+
+    return cabeceras.get(CABECERA_SEGUNDO_PLANO) === '1';
+}
+
 let ultimoAviso = 0;
 
 /**
@@ -49,7 +69,8 @@ function mensajeDe(data: unknown): string | null {
  * - `fetch` de la propia aplicación (buscadores, acciones inline): se avisa
  *   con el mismo toast, sin alterar la respuesta que recibe quien llamó.
  *
- * Las navegaciones (GET) reciben la página `Errores/SinPermiso`.
+ * Las navegaciones (GET) reciben la página `Errores/SinPermiso`. Las
+ * peticiones marcadas con `CABECERA_SEGUNDO_PLANO` no avisan.
  */
 export function initializeAvisoSinPermiso(): void {
     router.on('httpException', (event) => {
@@ -75,7 +96,7 @@ export function initializeAvisoSinPermiso(): void {
     ): Promise<Response> => {
         const respuesta = await fetchOriginal(entrada, opciones);
 
-        if (respuesta.status === 403) {
+        if (respuesta.status === 403 && !esSegundoPlano(entrada, opciones)) {
             const url =
                 entrada instanceof Request ? entrada.url : String(entrada);
             const mismoOrigen =

@@ -6,6 +6,7 @@ use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoEntrega;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\FinalidadCustodia;
 use App\Enums\TipoControlActivo;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
@@ -57,10 +58,24 @@ class RedistribuirCustodia
     ) {}
 
     /**
-     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string}>  $activos
-     * @param  array<int, array{unidad_activo_id: int|string}>  $unidades
+     * ¿Esta operación puede tomar de la bolsa de uso personal / sin
+     * clasificar? Sólo con `entregas.redistribuir-propios` o dentro de la
+     * revisión de un cambio de servicio (lo decide el llamador, nunca el
+     * formulario).
+     */
+    private bool $incluirPersonales = false;
+
+    /**
+     * Cada renglón puede indicar de qué BOLSA de la custodia sale (`bolsa`:
+     * `redistribucion` por defecto, o `personal`) y con qué FINALIDAD lo
+     * recibe el destinatario (`finalidad`): nunca se hereda a ciegas — la
+     * laptop que un supervisor recibió "para repartir" suele llegar al
+     * destinatario como su "uso personal".
+     *
+     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string, bolsa?: string|null, finalidad?: string|null}>  $activos
+     * @param  array<int, array{unidad_activo_id: int|string, finalidad?: string|null}>  $unidades
      * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias  claves "activo:{i}" / "unidad:{i}"
-     * @param  array<int, array{conjunto_id: int|string, cantidad: int|string}>  $conjuntos  conjuntos COMPLETOS recibidos como tal y todavía bajo custodia
+     * @param  array<int, array{conjunto_id: int|string, cantidad: int|string, finalidad?: string|null}>  $conjuntos  conjuntos COMPLETOS recibidos como tal y todavía bajo custodia
      */
     public function ejecutar(
         int $custodioId,
@@ -73,7 +88,10 @@ class RedistribuirCustodia
         ?int $servicioId = null,
         array $evidencias = [],
         array $conjuntos = [],
+        bool $incluirPersonales = false,
     ): EntregaUniforme {
+        $this->incluirPersonales = $incluirPersonales;
+
         if ($custodioId === $colaboradorId) {
             throw new ExcepcionDeNegocioSimple('No puedes entregarte a ti mismo activos de tu propia custodia.');
         }
@@ -130,7 +148,11 @@ class RedistribuirCustodia
 
             foreach ($lineasCantidad as $i => $fila) {
                 $tallaId = ($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '' ? (int) $fila['talla_id'] : null;
-                $creados = $this->redistribuirCantidad($entrega, $custodio, (int) $fila['activo_id'], $tallaId, (int) $fila['cantidad']);
+                $bolsa = ($fila['bolsa'] ?? null) === ServicioCustodiaColaborador::BOLSA_PERSONAL
+                    ? ServicioCustodiaColaborador::BOLSA_PERSONAL
+                    : ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION;
+                $finalidadDestino = FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? ''));
+                $creados = $this->redistribuirCantidad($entrega, $custodio, (int) $fila['activo_id'], $tallaId, (int) $fila['cantidad'], $bolsa, $finalidadDestino);
 
                 if (isset($evidencias["activo:{$i}"])) {
                     $this->evidenciasSvc->adjuntar($creados[0], $evidencias["activo:{$i}"], $encargadoId);
@@ -140,6 +162,8 @@ class RedistribuirCustodia
                     'activo' => $creados[0]->activo_nombre_snapshot,
                     'talla' => $creados[0]->talla_valor_snapshot,
                     'cantidad' => (int) $fila['cantidad'],
+                    'desde' => $bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL ? 'Uso personal / sin clasificar' : 'Para redistribuir',
+                    'finalidad_destinatario' => FinalidadCustodia::etiquetaDe($finalidadDestino),
                 ];
             }
 
@@ -151,7 +175,9 @@ class RedistribuirCustodia
                 }
                 $unidadesVistas[] = $unidadId;
 
-                $detalle = $this->redistribuirUnidad($entrega, $custodio, $destinatario, $unidadId);
+                $finalidadDestino = FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? ''));
+                $bolsaUnidad = $this->custodia->bolsaDeUnidad(UnidadActivo::query()->findOrFail($unidadId));
+                $detalle = $this->redistribuirUnidad($entrega, $custodio, $destinatario, $unidadId, null, $finalidadDestino);
 
                 if (isset($evidencias["unidad:{$i}"])) {
                     $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $encargadoId);
@@ -161,11 +187,13 @@ class RedistribuirCustodia
                     'activo' => $detalle->activo_nombre_snapshot,
                     'unidad' => $detalle->unidadActivo?->codigo,
                     'cantidad' => 1,
+                    'desde' => $bolsaUnidad === ServicioCustodiaColaborador::BOLSA_PERSONAL ? 'Uso personal / sin clasificar' : 'Para redistribuir',
+                    'finalidad_destinatario' => FinalidadCustodia::etiquetaDe($finalidadDestino),
                 ];
             }
 
             foreach ($conjuntos as $fila) {
-                foreach ($this->redistribuirConjunto($entrega, $custodio, $destinatario, (int) $fila['conjunto_id'], (int) $fila['cantidad'], $unidadesVistas) as $renglon) {
+                foreach ($this->redistribuirConjunto($entrega, $custodio, $destinatario, (int) $fila['conjunto_id'], (int) $fila['cantidad'], $unidadesVistas, FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? ''))) as $renglon) {
                     $renglonesAuditoria[] = $renglon;
                 }
             }
@@ -208,8 +236,12 @@ class RedistribuirCustodia
      *
      * @return non-empty-list<DetalleEntrega>
      */
-    private function redistribuirCantidad(EntregaUniforme $entrega, Colaborador $custodio, int $activoId, ?int $tallaId, int $cantidad): array
+    private function redistribuirCantidad(EntregaUniforme $entrega, Colaborador $custodio, int $activoId, ?int $tallaId, int $cantidad, string $bolsa, ?FinalidadCustodia $finalidadDestino): array
     {
+        if ($bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL && ! $this->incluirPersonales) {
+            throw new ExcepcionDeNegocioSimple('No tienes permiso para reasignar activos de uso personal de tu custodia.');
+        }
+
         $activo = Activo::query()
             ->where('empresa_id', $custodio->empresa_id)
             ->where('tipo_control', TipoControlActivo::Cantidad)
@@ -221,6 +253,11 @@ class RedistribuirCustodia
             ->whereNull('unidad_activo_id')
             ->where('activo_id', $activo->id)
             ->when($tallaId === null, fn ($q) => $q->whereNull('talla_id'), fn ($q) => $q->where('talla_id', $tallaId))
+            ->when(
+                $bolsa === ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION,
+                fn ($q) => $q->where('finalidad', FinalidadCustodia::Redistribucion),
+                fn ($q) => $q->where(fn ($p) => $p->whereNull('finalidad')->orWhere('finalidad', FinalidadCustodia::UsoPersonal)),
+            )
             ->whereHas('entrega', fn ($q) => $q
                 ->where('colaborador_id', $custodio->getKey())
                 ->whereIn('estado', [EstadoEntrega::Firmada, EstadoEntrega::Corregida]))
@@ -241,7 +278,7 @@ class RedistribuirCustodia
             ));
         }
 
-        return $this->tomarDeOrigenes($entrega, $activo, $origenes, $cantidad);
+        return $this->tomarDeOrigenes($entrega, $activo, $origenes, $cantidad, null, $finalidadDestino);
     }
 
     /**
@@ -253,7 +290,7 @@ class RedistribuirCustodia
      * @param  Collection<int, DetalleEntrega>  $origenes
      * @return non-empty-list<DetalleEntrega>
      */
-    private function tomarDeOrigenes(EntregaUniforme $entrega, Activo $activo, Collection $origenes, int $cantidad, ?Conjunto $conjunto = null): array
+    private function tomarDeOrigenes(EntregaUniforme $entrega, Activo $activo, Collection $origenes, int $cantidad, ?Conjunto $conjunto = null, ?FinalidadCustodia $finalidadDestino = null): array
     {
         $pendientes = $this->custodia->pendientesPorDetalle($origenes);
         $restante = $cantidad;
@@ -270,6 +307,7 @@ class RedistribuirCustodia
                 'talla_id' => $origen->talla_id,
                 'cantidad' => $tomar,
                 'detalle_origen_id' => $origen->getKey(),
+                'finalidad' => $finalidadDestino,
                 'activo_nombre_snapshot' => $activo->nombre,
                 'talla_valor_snapshot' => $origen->talla_valor_snapshot,
                 'conjunto_id' => $conjunto?->id,
@@ -297,7 +335,7 @@ class RedistribuirCustodia
      * @param  array<int, int>  $unidadesVistas
      * @return list<array{activo: string, talla?: string|null, unidad?: string|null, cantidad: int, conjunto: string}>
      */
-    private function redistribuirConjunto(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $conjuntoId, int $cantidad, array &$unidadesVistas): array
+    private function redistribuirConjunto(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $conjuntoId, int $cantidad, array &$unidadesVistas, ?FinalidadCustodia $finalidadDestino = null): array
     {
         $conjunto = Conjunto::query()
             ->where('empresa_id', $custodio->empresa_id)
@@ -330,7 +368,7 @@ class RedistribuirCustodia
 
                 foreach ($candidatas as $unidad) {
                     $unidadesVistas[] = $unidad->id;
-                    $detalle = $this->redistribuirUnidad($entrega, $custodio, $destinatario, $unidad->id, $conjunto);
+                    $detalle = $this->redistribuirUnidad($entrega, $custodio, $destinatario, $unidad->id, $conjunto, $finalidadDestino);
                     $renglones[] = ['activo' => $detalle->activo_nombre_snapshot, 'unidad' => $unidad->codigo, 'cantidad' => 1, 'conjunto' => $conjunto->nombre];
                 }
 
@@ -342,6 +380,8 @@ class RedistribuirCustodia
                 ->whereNull('unidad_activo_id')
                 ->where('activo_id', $activo->id)
                 ->where('conjunto_id', $conjunto->id)
+                // Conjuntos: sólo la bolsa "para redistribuir".
+                ->where('finalidad', FinalidadCustodia::Redistribucion)
                 ->when($componente->talla_id !== null, fn ($q) => $q->where('talla_id', $componente->talla_id))
                 ->whereHas('entrega', fn ($q) => $q
                     ->where('colaborador_id', $custodio->getKey())
@@ -354,7 +394,7 @@ class RedistribuirCustodia
                 throw $incompleto($activo->nombre);
             }
 
-            foreach ($this->tomarDeOrigenes($entrega, $activo, $origenes, $necesarias, $conjunto) as $creado) {
+            foreach ($this->tomarDeOrigenes($entrega, $activo, $origenes, $necesarias, $conjunto, $finalidadDestino) as $creado) {
                 $renglones[] = ['activo' => $creado->activo_nombre_snapshot, 'talla' => $creado->talla_valor_snapshot, 'cantidad' => (int) $creado->cantidad, 'conjunto' => $conjunto->nombre];
             }
         }
@@ -368,7 +408,7 @@ class RedistribuirCustodia
      * transacción: si ya no es del custodio (otra pestaña la entregó
      * primero), se rechaza.
      */
-    private function redistribuirUnidad(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $unidadId, ?Conjunto $conjunto = null): DetalleEntrega
+    private function redistribuirUnidad(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $unidadId, ?Conjunto $conjunto = null, ?FinalidadCustodia $finalidadDestino = null): DetalleEntrega
     {
         $unidad = UnidadActivo::query()->whereKey($unidadId)->lockForUpdate()->first();
 
@@ -393,6 +433,10 @@ class RedistribuirCustodia
             throw new ExcepcionDeNegocioSimple("La unidad {$unidad->codigo} tiene una devolución pendiente de firma; no puede redistribuirse.");
         }
 
+        if (! $this->incluirPersonales && $this->custodia->bolsaDeUnidad($unidad) !== ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION) {
+            throw new ExcepcionDeNegocioSimple("La unidad {$unidad->codigo} es de uso personal (o sin clasificar) y no tienes permiso para reasignarla.");
+        }
+
         $origen = $this->custodia->entregaActualDeUnidad($unidad);
         $unidad->loadMissing('activo:id,nombre');
 
@@ -401,6 +445,7 @@ class RedistribuirCustodia
             'talla_id' => null,
             'unidad_activo_id' => $unidad->getKey(),
             'detalle_origen_id' => $origen?->getKey(),
+            'finalidad' => $finalidadDestino,
             'cantidad' => 1,
             'activo_nombre_snapshot' => $unidad->activo->nombre,
             'talla_valor_snapshot' => null,

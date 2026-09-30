@@ -1,10 +1,16 @@
 /**
- * Espejo en cliente de `App\Enums\PerfilTecnicoUnidad`. La fuente de verdad es
- * SIEMPRE el backend (por el `codigo` de la categoría / tipo, nunca por el
- * nombre); esto sólo sirve para que los formularios muestren los campos
- * correctos antes de enviar.
+ * Espejo en cliente de `App\Enums\PerfilTecnicoUnidad` y
+ * `App\Soporte\EspecificacionUnidad`. La fuente de verdad es SIEMPRE el
+ * backend (perfil = relación 1:1 de la categoría, nunca el nombre); esto sólo
+ * sirve para que los formularios muestren los campos correctos antes de
+ * enviar.
  */
-export type PerfilTecnico = 'celular' | 'computadora' | 'tablet';
+export type PerfilTecnico =
+    | 'celular'
+    | 'computadora'
+    | 'tablet'
+    | 'transporte'
+    | 'electrodomestico';
 
 export type CampoEspecificacion =
     | 'marca'
@@ -12,9 +18,20 @@ export type CampoEspecificacion =
     | 'imei'
     | 'numero_telefonico'
     | 'operador'
-    | 'plan';
+    | 'plan'
+    | 'clase_vehiculo'
+    | 'anio'
+    | 'color'
+    | 'placas'
+    | 'numero_serie';
 
-const PERFILES: readonly PerfilTecnico[] = ['celular', 'computadora', 'tablet'];
+const PERFILES: readonly PerfilTecnico[] = [
+    'celular',
+    'computadora',
+    'tablet',
+    'transporte',
+    'electrodomestico',
+];
 
 const CAMPOS_VISIBLES: Record<PerfilTecnico, CampoEspecificacion[]> = {
     celular: [
@@ -27,12 +44,36 @@ const CAMPOS_VISIBLES: Record<PerfilTecnico, CampoEspecificacion[]> = {
     ],
     computadora: ['marca', 'modelo'],
     tablet: ['marca', 'modelo'],
+    transporte: [
+        'clase_vehiculo',
+        'marca',
+        'modelo',
+        'anio',
+        'color',
+        'placas',
+        'numero_serie',
+    ],
+    electrodomestico: ['marca', 'modelo', 'color', 'numero_serie'],
 };
 
 const CAMPOS_REQUERIDOS: Record<PerfilTecnico, CampoEspecificacion[]> = {
     celular: ['marca', 'modelo', 'imei'],
     computadora: ['marca', 'modelo'],
     tablet: ['marca', 'modelo'],
+    transporte: ['clase_vehiculo', 'marca', 'modelo', 'anio'],
+    electrodomestico: ['marca'],
+};
+
+/** "Al menos uno de" por perfil (Transporte: placas o NIV / serie). */
+const IDENTIFICADORES_ALTERNATIVOS: Record<
+    PerfilTecnico,
+    CampoEspecificacion[][]
+> = {
+    celular: [],
+    computadora: [],
+    tablet: [],
+    transporte: [['placas', 'numero_serie']],
+    electrodomestico: [],
 };
 
 export const ETIQUETA_CAMPO: Record<CampoEspecificacion, string> = {
@@ -42,13 +83,27 @@ export const ETIQUETA_CAMPO: Record<CampoEspecificacion, string> = {
     numero_telefonico: 'Número telefónico',
     operador: 'Operador',
     plan: 'Plan',
+    clase_vehiculo: 'Tipo de vehículo',
+    anio: 'Año',
+    color: 'Color',
+    placas: 'Placas',
+    numero_serie: 'NIV / VIN / número de serie',
 };
 
 export const ETIQUETA_PERFIL: Record<PerfilTecnico, string> = {
     celular: 'Celular',
     computadora: 'Computadora',
     tablet: 'Tablet',
+    transporte: 'Transporte',
+    electrodomestico: 'Electrodoméstico',
 };
+
+export const OPCIONES_CLASE_VEHICULO = [
+    { valor: 'automovil', etiqueta: 'Automóvil' },
+    { valor: 'camioneta', etiqueta: 'Camioneta' },
+    { valor: 'motocicleta', etiqueta: 'Motocicleta' },
+    { valor: 'otro', etiqueta: 'Otro' },
+];
 
 /**
  * Coacciona el valor `perfil_tecnico` que llega del backend (relación 1:1 de
@@ -62,12 +117,34 @@ export function aPerfilTecnico(
         : null;
 }
 
+/**
+ * Espejo de `PerfilTecnicoUnidad::exigeSeguimientoIndividual()`: todo perfil
+ * técnico describe un bien físico concreto. El backend valida la misma regla.
+ */
+export function exigeSeguimientoIndividual(
+    perfil: PerfilTecnico | null,
+): boolean {
+    return perfil !== null;
+}
+
 export function camposVisibles(perfil: PerfilTecnico): CampoEspecificacion[] {
     return CAMPOS_VISIBLES[perfil];
 }
 
 export function camposRequeridos(perfil: PerfilTecnico): CampoEspecificacion[] {
     return CAMPOS_REQUERIDOS[perfil];
+}
+
+/** Texto de ayuda para los "al menos uno de" del perfil, o null. */
+export function ayudaIdentificadores(perfil: PerfilTecnico): string | null {
+    const grupos = IDENTIFICADORES_ALTERNATIVOS[perfil];
+    if (!grupos.length) return null;
+    return grupos
+        .map(
+            (g) =>
+                `Captura al menos uno: ${g.map((c) => ETIQUETA_CAMPO[c]).join(' o ')}.`,
+        )
+        .join(' ');
 }
 
 /** Fila del formulario por unidad: todos los campos presentes como string. */
@@ -82,5 +159,10 @@ export function especificacionVacia(): EspecificacionUnidad {
         numero_telefonico: '',
         operador: '',
         plan: '',
+        clase_vehiculo: '',
+        anio: '',
+        color: '',
+        placas: '',
+        numero_serie: '',
     };
 }

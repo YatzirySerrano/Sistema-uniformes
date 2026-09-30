@@ -125,6 +125,13 @@ const grupos = computed<Grupo[]>(() =>
                     visible: puede('activos.ver'),
                 },
                 {
+                    // Sólo lo que el propio usuario tiene bajo custodia.
+                    titulo: 'Mis activos',
+                    href: '/mis-activos',
+                    icono: Package,
+                    visible: puede('activos.ver-custodia-propia'),
+                },
+                {
                     titulo: 'Almacenes',
                     href: '/almacenes',
                     icono: Warehouse,

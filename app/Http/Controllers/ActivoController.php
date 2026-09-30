@@ -27,6 +27,7 @@ use App\Models\TipoActivo;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCascadaSuspension;
+use App\Servicios\ServicioDistribucionActivo;
 use App\Servicios\ServicioEstadoInventario;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioReservas;
@@ -63,6 +64,7 @@ class ActivoController extends Controller
         private readonly ServicioCascadaSuspension $cascada,
         private readonly ServicioGeneradorCodigos $codigos,
         private readonly ServicioEstadoInventario $estadoInventario,
+        private readonly ServicioDistribucionActivo $distribucion,
     ) {}
 
     public function index(Request $request): Response
@@ -747,6 +749,8 @@ class ActivoController extends Controller
             'usaVariantes' => $activo->tallas()->exists(),
             'resumenCantidades' => $estadoCantidades['resumen'] ?? null,
             'desgloseCantidades' => $estadoCantidades['desglose'] ?? null,
+            // Dónde está hoy cada pieza: almacén o custodio + finalidad.
+            'distribucion' => $this->distribucion->paraActivo($activo),
             'resumenUnidades' => $resumenUnidades === null ? null : [
                 'en_almacen' => $enAlmacenDisponibles,
                 'no_disponibles' => $noDisponiblesEnAlmacen,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CampoEspecificacionUnidad from '@/components/sistema/CampoEspecificacionUnidad.vue';
 import { useForm } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -300,11 +301,10 @@ function enviar(): void {
                                         >*</span
                                     >
                                 </Label>
-                                <Input
+                                <CampoEspecificacionUnidad
                                     :id="`ae-${i}-${campo}`"
                                     v-model="form.especificaciones[i][campo]"
-                                    class="h-8"
-                                    autocomplete="off"
+                                    :campo="campo"
                                 />
                                 <InputError
                                     :message="

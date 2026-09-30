@@ -44,6 +44,8 @@ class RegistrarTraspasoRequest extends FormRequest
             // Una clave por intento de alta: evita que un doble submit
             // registre dos traspasos (el backend la rechaza si ya la vio).
             'idempotency_key' => ['nullable', 'uuid'],
+            // Apartado temporal del borrador (ver `ReservarInventarioTraspaso`).
+            'reserva_token' => ['nullable', 'uuid'],
 
             'renglones' => ['required', 'array', 'min:1', 'max:100'],
             'renglones.*.control' => ['required', Rule::in([TipoControlActivo::Cantidad->value, TipoControlActivo::SeguimientoIndividual->value])],

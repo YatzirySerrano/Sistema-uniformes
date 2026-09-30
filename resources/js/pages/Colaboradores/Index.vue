@@ -50,6 +50,7 @@ const props = defineProps<{
         empresa_id?: number | null;
         sucursal_id?: number | null;
         estado?: string;
+        puesto?: string;
     };
     empresasAutorizadas: EmpresaAutorizada[];
     sucursales: { id: number; nombre: string }[];
@@ -88,6 +89,30 @@ const sucursalSeleccionada = ref<{ id: number; nombre: string } | null>(
 );
 const sucursalId = computed(() => sucursalSeleccionada.value?.id ?? '');
 const estado = ref(props.filtros.estado ?? 'todos');
+
+// Puesto es texto libre: el combobox ofrece los valores distintos que ya
+// existen (búsqueda remota) y el filtro viaja como texto en `?puesto=`.
+type OpcionPuesto = { id: number; nombre: string };
+const puestoSeleccionado = ref<OpcionPuesto | null>(
+    props.filtros.puesto ? { id: 0, nombre: props.filtros.puesto } : null,
+);
+const puesto = computed(() => puestoSeleccionado.value?.nombre ?? '');
+
+async function buscarPuestos(
+    termino: string,
+    signal?: AbortSignal,
+): Promise<OpcionPuesto[]> {
+    const params = new URLSearchParams({ q: termino });
+    if (empresaId.value) params.set('empresa_id', String(empresaId.value));
+    if (sucursalId.value) params.set('sucursal_id', String(sucursalId.value));
+    const res = await fetch(`/colaboradores/puestos?${params.toString()}`, {
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        signal,
+    });
+    if (!res.ok) return [];
+    return ((await res.json()).puestos ?? []) as OpcionPuesto[];
+}
 // Resincroniza los filtros si el backend resuelve una empresa/sucursal
 // distinta a la que ya tenía este ref local (p. ej. al llegar desde el
 // acceso directo de Empresas u otra página sin remontar el componente) —
@@ -145,7 +170,7 @@ watch(empresaId, () => {
 });
 
 let t: ReturnType<typeof setTimeout>;
-watch([buscar, empresaId, sucursalId, estado], () => {
+watch([buscar, empresaId, sucursalId, estado, puesto], () => {
     clearTimeout(t);
     t = setTimeout(() => {
         router.get(
@@ -154,6 +179,7 @@ watch([buscar, empresaId, sucursalId, estado], () => {
                 buscar: buscar.value || undefined,
                 empresa_id: empresaId.value || undefined,
                 sucursal_id: sucursalId.value || undefined,
+                puesto: puesto.value || undefined,
                 estado: estado.value,
             },
             { preserveState: true, replace: true, preserveScroll: true },
@@ -165,6 +191,7 @@ function limpiar() {
     buscar.value = '';
     empresaSeleccionada.value = null;
     sucursalSeleccionada.value = null;
+    puestoSeleccionado.value = null;
     estado.value = 'todos';
 }
 
@@ -277,6 +304,16 @@ function alternarEstado(c: Colaborador): void {
                     empresaId ? 'Todas las sucursales' : 'Elige una empresa'
                 "
                 placeholder-busqueda="Buscar sucursal…"
+                class="w-full sm:w-auto sm:min-w-[12rem]"
+            />
+            <BuscadorAsync
+                v-model="puestoSeleccionado"
+                :buscar="buscarPuestos"
+                :etiqueta="(p) => String(p.nombre)"
+                :dependencia="`${empresaId}-${sucursalId}`"
+                placeholder="Todos los puestos"
+                placeholder-busqueda="Buscar puesto…"
+                sin-resultados="No hay colaboradores con ese puesto."
                 class="w-full sm:w-auto sm:min-w-[12rem]"
             />
             <div class="w-full sm:w-auto sm:min-w-[9rem]">

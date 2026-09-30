@@ -18,6 +18,8 @@ import AgregarExistenciasDialog from '@/components/sistema/AgregarExistenciasDia
 import AjustarExistenciaDialog from '@/components/sistema/AjustarExistenciaDialog.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BotonEditar from '@/components/sistema/BotonEditar.vue';
+import DistribucionActualActivo from '@/components/sistema/DistribucionActualActivo.vue';
+import type { DistribucionActivo } from '@/components/sistema/DistribucionActualActivo.vue';
 import GestionarUnidadDialog from '@/components/sistema/GestionarUnidadDialog.vue';
 import MenuAccionesExistencia from '@/components/sistema/MenuAccionesExistencia.vue';
 import PanelSuspendidos from '@/components/sistema/PanelSuspendidos.vue';
@@ -88,6 +90,7 @@ const props = defineProps<{
     usaVariantes: boolean;
     resumenCantidades: Record<EstadoCantidad, number> | null;
     desgloseCantidades: AlmacenEstadoCantidad[] | null;
+    distribucion: DistribucionActivo;
     resumenUnidades: {
         en_almacen: number;
         no_disponibles: number;
@@ -667,8 +670,20 @@ function confirmarMinimoMasivo(): void {
                         </button>
                     </div>
 
+                    <p
+                        v-if="estadoCantidadExpandido === 'asignado'"
+                        class="text-muted-foreground mt-3 rounded-lg border p-3 text-sm"
+                    >
+                        Lo asignado está bajo la custodia de colaboradores:
+                        consulta quién lo tiene y con qué finalidad en
+                        <a
+                            href="#distribucion-actual"
+                            class="text-foreground font-medium underline"
+                            >Distribución actual del activo</a
+                        >.
+                    </p>
                     <div
-                        v-if="estadoCantidadExpandido"
+                        v-else-if="estadoCantidadExpandido"
                         class="mt-3 rounded-lg border p-3"
                     >
                         <p
@@ -1006,6 +1021,12 @@ function confirmarMinimoMasivo(): void {
                 </section>
             </div>
         </div>
+
+        <DistribucionActualActivo
+            :distribucion="distribucion"
+            :usa-variantes="usaVariantes"
+            :es-individual="activo.tipo_control === 'individual'"
+        />
 
         <PanelSuspendidos
             v-if="suspendidos.length"

@@ -9,6 +9,7 @@ use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\FinalidadCustodia;
 use App\Enums\TipoGrafica;
 use App\Enums\TipoReserva;
 use App\Http\Controllers\Concerns\ConEmpresa;
@@ -324,6 +325,11 @@ class DevolucionController extends Controller
                     'activo' => $d->activo_nombre_snapshot,
                     'talla' => $d->talla_valor_snapshot,
                     'cantidad' => $d->cantidad,
+                    // Finalidad del renglón de origen: permite elegir con
+                    // precisión si se devuelve lo personal o lo recibido
+                    // para redistribuir (null = "Sin clasificar").
+                    'finalidad' => $d->finalidad?->value,
+                    'finalidad_etiqueta' => FinalidadCustodia::etiquetaDe($d->finalidad),
                     'pendiente' => $d->unidad_activo_id === null ? $pendientePorDetalle[$d->id] ?? 0 : null,
                     // Historia legible del renglón (item #19/27): cuánto ya se
                     // devolvió CONFIRMADO hasta ahora — nunca duplica el cálculo

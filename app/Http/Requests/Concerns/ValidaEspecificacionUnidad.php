@@ -5,13 +5,14 @@ namespace App\Http\Requests\Concerns;
 use App\Enums\PerfilTecnicoUnidad;
 use App\Models\Activo;
 use App\Models\CategoriaActivo;
+use App\Soporte\EspecificacionUnidad;
 use App\Soporte\ResolverPerfilTecnicoUnidad;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
- * Reglas comunes para los datos técnicos por unidad identificada (marca,
- * modelo, IMEI, número, operador, plan), compartidas por el alta de Activo y
+ * Reglas comunes para los datos técnicos por unidad identificada (ver
+ * `App\Soporte\EspecificacionUnidad`), compartidas por el alta de Activo y
  * por "agregar unidades". El perfil (Celular / Computadora / Tablet) lo decide
  * SIEMPRE el backend a partir del `codigo` de la categoría/tipo, nunca el
  * frontend.
@@ -30,14 +31,7 @@ trait ValidaEspecificacionUnidad
             $imeiUnico = $imeiUnico->ignore($ignorarUnidadId, 'unidad_activo_id');
         }
 
-        return [
-            'especificaciones.*.marca' => ['nullable', 'string', 'max:120'],
-            'especificaciones.*.modelo' => ['nullable', 'string', 'max:160'],
-            'especificaciones.*.imei' => ['nullable', 'string', 'regex:/^[0-9]{14,17}$/', 'distinct', $imeiUnico],
-            'especificaciones.*.numero_telefonico' => ['nullable', 'string', 'max:30', 'regex:/^[0-9+\-\s()]{6,30}$/'],
-            'especificaciones.*.operador' => ['nullable', 'string', 'max:80'],
-            'especificaciones.*.plan' => ['nullable', 'string', 'max:200'],
-        ];
+        return EspecificacionUnidad::reglas('especificaciones.*.', ['distinct', $imeiUnico]);
     }
 
     /**
@@ -46,10 +40,9 @@ trait ValidaEspecificacionUnidad
     protected static function mensajesEspecificacion(): array
     {
         return [
-            'especificaciones.*.imei.regex' => 'El IMEI debe tener entre 14 y 17 dígitos.',
+            ...EspecificacionUnidad::mensajes('especificaciones.*.'),
             'especificaciones.*.imei.distinct' => 'Hay un IMEI repetido entre las unidades.',
             'especificaciones.*.imei.unique' => 'Ya existe una unidad registrada con ese IMEI.',
-            'especificaciones.*.numero_telefonico.regex' => 'El número telefónico no tiene un formato válido.',
         ];
     }
 
@@ -95,13 +88,7 @@ trait ValidaEspecificacionUnidad
         }
 
         foreach ($filas as $i => $fila) {
-            foreach ($perfil->camposRequeridos() as $campo) {
-                $valor = is_array($fila) ? ($fila[$campo] ?? null) : null;
-
-                if (! is_string($valor) || trim($valor) === '') {
-                    $validator->errors()->add("especificaciones.{$i}.{$campo}", 'Este dato es obligatorio para '.$perfil->etiqueta().'.');
-                }
-            }
+            EspecificacionUnidad::validarPorPerfil($validator, $perfil, is_array($fila) ? $fila : [], "especificaciones.{$i}.");
         }
     }
 }

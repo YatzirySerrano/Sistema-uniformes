@@ -6,6 +6,7 @@ use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoControlActivo;
 use App\Enums\TipoMovimiento;
+use App\Enums\TipoReserva;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
@@ -20,6 +21,7 @@ use App\Servicios\HomologadorActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
+use App\Servicios\ServicioReservas;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -53,6 +55,7 @@ class RegistrarTraspasoInventario
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
         private readonly HomologadorActivo $homologador,
+        private readonly ServicioReservas $reservas,
     ) {}
 
     /**
@@ -74,10 +77,11 @@ class RegistrarTraspasoInventario
         ?int $realizadoPor,
         ?string $motivo = null,
         ?string $notas = null,
+        ?string $reservaToken = null,
     ): TraspasoInventario {
         return DB::transaction(fn (): TraspasoInventario => $this->crearYRegistrar(
             $empresaOrigenId, $almacenOrigenId, $empresaDestinoId, $almacenDestinoId,
-            $renglones, $realizadoPor, $motivo, $notas,
+            $renglones, $realizadoPor, $motivo, $notas, $reservaToken,
         ));
     }
 
@@ -106,7 +110,21 @@ class RegistrarTraspasoInventario
         ?int $realizadoPor,
         ?string $motivo = null,
         ?string $notas = null,
+        ?string $reservaToken = null,
     ): TraspasoInventario {
+        // Apartado temporal del borrador (capa previa de UX/concurrencia): si
+        // viene, debe existir, ser de este usuario, seguir vigente y ser del
+        // MISMO origen. Nunca reemplaza los candados y validaciones de abajo,
+        // que siguen siendo la autoridad sobre saldos y unidades.
+        $reserva = null;
+        if ($reservaToken !== null && $realizadoPor !== null) {
+            $reserva = $this->reservas->bloquearActivaPorToken($reservaToken, $realizadoPor, TipoReserva::Traspaso);
+
+            if ($reserva->empresa_id !== $empresaOrigenId || $reserva->almacen_id !== $almacenOrigenId) {
+                throw new ExcepcionDeNegocioSimple('El apartado de existencias corresponde a otro almacén de origen. Vuelve a revisar los artículos.');
+            }
+        }
+
         $empresaOrigen = Empresa::query()->findOr($empresaOrigenId, fn () => throw new ExcepcionDeNegocioSimple('La empresa origen no existe.'));
         $empresaDestino = Empresa::query()->findOr($empresaDestinoId, fn () => throw new ExcepcionDeNegocioSimple('La empresa destino no existe.'));
         $almacenOrigen = Almacen::query()->findOr($almacenOrigenId, fn () => throw new ExcepcionDeNegocioSimple('El almacén origen no existe.'));
@@ -161,6 +179,11 @@ class RegistrarTraspasoInventario
 
             $this->traspasarUnidades($traspaso, $empresaOrigen, $almacenOrigen, $empresaDestino, $almacenDestino, $activoOrigen, $renglon, $manualDestinoId, $realizadoPor);
         }
+
+        // Todo se movió bajo lock: el apartado cumplió su propósito. Si algo de
+        // lo anterior hubiera fallado, la transacción revierte y la reserva
+        // sigue vigente para corregir y reintentar.
+        $reserva?->update(['consumida_en' => now()]);
 
         // Snapshot inmutable de "qué se traspasó" para la Auditoría: reutiliza
         // las columnas `*_snapshot` que cada renglón ya guardó en el momento

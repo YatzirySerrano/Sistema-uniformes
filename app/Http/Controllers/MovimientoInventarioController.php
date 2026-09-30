@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Acciones\RegistrarTraspasoFirmado;
+use App\Acciones\ReservarInventarioTraspaso;
 use App\Enums\TipoGrafica;
 use App\Enums\TipoMovimiento;
+use App\Enums\TipoReserva;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
@@ -18,6 +20,7 @@ use App\Models\MovimientoInventario;
 use App\Models\TraspasoInventario;
 use App\Models\User;
 use App\Servicios\HomologadorActivo;
+use App\Servicios\ServicioReservas;
 use App\Soporte\ContextoExportacion;
 use App\Soporte\FechaHora;
 use App\Soporte\SerieGraficaReporte;
@@ -463,6 +466,66 @@ class MovimientoInventarioController extends Controller
         return response()->json(['renglones' => $renglones]);
     }
 
+    /**
+     * Recalcula el apartado temporal (10 min) del borrador de traspaso — ver
+     * `App\Acciones\ReservarInventarioTraspaso`. Se llama con debounce
+     * mientras el usuario edita el paso 2; confirmar sigue siendo
+     * `almacenarTraspaso()`, que revalida todo bajo lock.
+     */
+    public function reservarTraspaso(Request $request, ReservarInventarioTraspaso $accion): JsonResponse
+    {
+        abort_unless($request->user()->can('inventario.transferir'), 403);
+
+        $datos = $request->validate([
+            'token' => ['required', 'uuid'],
+            'empresa_origen_id' => ['required', 'integer'],
+            'almacen_origen_id' => ['required', 'integer'],
+            // Reglas LAXAS: se llama en caliente con renglones a medio llenar.
+            'renglones' => ['nullable', 'array'],
+            'renglones.*.control' => ['nullable', 'string'],
+            'renglones.*.activo_origen_id' => ['nullable'],
+            'renglones.*.talla_id' => ['nullable'],
+            'renglones.*.cantidad' => ['nullable'],
+            'renglones.*.unidad_ids' => ['nullable', 'array'],
+        ]);
+
+        $empresaOrigenId = (int) $datos['empresa_origen_id'];
+        $almacenOrigenId = (int) $datos['almacen_origen_id'];
+        abort_unless($request->user()->puedeAccederEmpresa($empresaOrigenId), 403);
+        abort_unless(Almacen::query()->whereKey($almacenOrigenId)->where('activo', true)->paraEmpresa($empresaOrigenId)->exists(), 422, 'El almacén origen no abastece a esa empresa.');
+
+        return response()->json($accion->ejecutar(
+            $datos['token'],
+            $request->user()->id,
+            $empresaOrigenId,
+            $almacenOrigenId,
+            $datos['renglones'] ?? [],
+        ));
+    }
+
+    /**
+     * Libera el apartado del borrador (cancelar, cambiar de almacén…). Liberar
+     * algo ya vencido o inexistente es un no-op válido.
+     */
+    public function liberarReservaTraspaso(Request $request, string $token, ServicioReservas $reservas): JsonResponse
+    {
+        abort_unless($request->user()->can('inventario.transferir'), 403);
+        $reservas->liberar($token, $request->user()->id);
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Extensión EXPLÍCITA de +10 minutos pedida por el usuario.
+     */
+    public function extenderReservaTraspaso(Request $request, string $token, ServicioReservas $reservas): JsonResponse
+    {
+        abort_unless($request->user()->can('inventario.transferir'), 403);
+        $reserva = $reservas->extender($token, $request->user()->id, TipoReserva::Traspaso);
+
+        return response()->json(['token' => $reserva->token, 'expira_en' => $reserva->expira_en->toIso8601String()]);
+    }
+
     public function almacenarTraspaso(RegistrarTraspasoRequest $request, RegistrarTraspasoFirmado $accion): RedirectResponse
     {
         $datos = $request->validated();
@@ -488,6 +551,7 @@ class MovimientoInventarioController extends Controller
                 $datos['notas'] ?? null,
                 $request->ip(),
                 $request->userAgent(),
+                $datos['reserva_token'] ?? null,
             );
         } catch (Throwable $e) {
             // Falló: se libera la clave para permitir un reintento legítimo.

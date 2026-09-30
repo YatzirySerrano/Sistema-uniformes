@@ -35,6 +35,7 @@ use App\Servicios\ServicioEtiquetasQr;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioReservas;
 use App\Soporte\ContextoExportacion;
+use App\Soporte\EspecificacionUnidad;
 use App\Soporte\PaletaGraficas;
 use App\Soporte\SerieGraficaReporte;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -291,6 +292,8 @@ class UnidadActivoController extends Controller
                         ->orWhereHas('especificacion', fn (Builder $e) => $e
                             ->where('imei', 'like', "%{$buscar}%")
                             ->orWhere('numero_telefonico', 'like', "%{$buscar}%")
+                            ->orWhere('placas', 'like', "%{$buscar}%")
+                            ->orWhere('numero_serie', 'like', "%{$buscar}%")
                             ->orWhere('marca', 'like', "%{$buscar}%")
                             ->orWhere('modelo', 'like', "%{$buscar}%"));
                 });
@@ -445,9 +448,7 @@ class UnidadActivoController extends Controller
                 'perfil_tecnico' => $perfil?->value,
                 'perfil_tecnico_etiqueta' => $perfil?->etiqueta(),
                 'datos_equipo' => $unidad->datosEquipo(),
-                'especificacion' => $perfil === null || $unidad->especificacion === null ? null : $unidad->especificacion->only([
-                    'marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan',
-                ]),
+                'especificacion' => $perfil === null || $unidad->especificacion === null ? null : $unidad->especificacion->only(array_keys(EspecificacionUnidad::CAMPOS)),
                 'imagen_url' => $unidad->imagen === null ? null : route('unidades-activo.imagen', $unidad),
             ],
             'movimientos' => $movimientos,
@@ -589,6 +590,8 @@ class UnidadActivoController extends Controller
                 ->orWhereHas('especificacion', fn (Builder $e) => $e
                     ->where('imei', 'like', "%{$termino}%")
                     ->orWhere('numero_telefonico', 'like', "%{$termino}%")
+                    ->orWhere('placas', 'like', "%{$termino}%")
+                    ->orWhere('numero_serie', 'like', "%{$termino}%")
                     ->orWhere('marca', 'like', "%{$termino}%")
                     ->orWhere('modelo', 'like', "%{$termino}%"))))
             ->orderByRaw("case when estado = 'en_almacen' and condicion = 'funcionando' then 0 else 1 end")
@@ -647,7 +650,8 @@ class UnidadActivoController extends Controller
     ): RedirectResponse {
         $unidad->loadMissing('especificacion');
         $datos = $request->validated();
-        $datos = array_map(fn ($v) => is_string($v) && trim($v) === '' ? null : $v, $datos);
+        // Sólo los campos enviados, normalizados igual que en el alta.
+        $datos = array_intersect_key(EspecificacionUnidad::normalizar($datos), $datos);
 
         $anteriores = $unidad->especificacion?->only(array_keys($datos)) ?? [];
 

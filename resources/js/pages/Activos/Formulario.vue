@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CampoEspecificacionUnidad from '@/components/sistema/CampoEspecificacionUnidad.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import { Plus } from '@lucide/vue';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
@@ -29,6 +30,8 @@ import {
     camposVisibles,
     especificacionVacia,
     aPerfilTecnico,
+    ayudaIdentificadores,
+    exigeSeguimientoIndividual,
 } from '@/lib/perfilTecnicoUnidad';
 
 type OpcionTipo = { id: number; nombre: string };
@@ -197,6 +200,24 @@ const form = useForm<{
 const perfilTecnico = computed(() =>
     aPerfilTecnico(categoriaSel.value?.perfil_tecnico),
 );
+// Regla central (espejo de `PerfilTecnicoUnidad::exigeSeguimientoIndividual`,
+// el backend la valida igual): una categoría con perfil técnico obliga a
+// seguimiento individual. Al elegirla se selecciona sola y "Por cantidad"
+// queda deshabilitado con su explicación.
+const individualObligatorio = computed(() =>
+    exigeSeguimientoIndividual(perfilTecnico.value),
+);
+watch(
+    individualObligatorio,
+    (obligatorio) => {
+        // Al editar no se cambia en silencio el control de un activo que ya
+        // tiene historia: el backend sólo exige la regla si cambia la
+        // categoría o el control.
+        if (obligatorio && !esEdicion) form.tipo_control = 'individual';
+    },
+    { immediate: true },
+);
+
 // Gate del bloque "Unidad N": aplica a CUALQUIER activo de seguimiento
 // individual con cantidad a crear, tenga o no perfil técnico — la foto por
 // unidad nunca depende de eso (celular, radio, herramienta, equipo…).
@@ -774,11 +795,25 @@ function enviar() {
                                 v-model="form.tipo_control"
                                 type="radio"
                                 :value="c.valor"
+                                :disabled="
+                                    individualObligatorio &&
+                                    !esEdicion &&
+                                    c.valor !== 'individual'
+                                "
                                 class="size-3.5"
                             />
                             {{ c.etiqueta }}
                         </label>
                     </div>
+                    <p
+                        v-if="individualObligatorio && perfilTecnico"
+                        class="text-muted-foreground text-xs"
+                    >
+                        Este tipo de activo ({{
+                            ETIQUETA_PERFIL[perfilTecnico]
+                        }}) requiere seguimiento individual para conservar su
+                        trazabilidad.
+                    </p>
                     <InputError :message="form.errors.tipo_control" />
                 </div>
 
@@ -997,6 +1032,7 @@ function enviar() {
                         <p class="text-muted-foreground text-xs">
                             Captura los datos de cada unidad. El código se
                             genera al guardar.
+                            {{ ayudaIdentificadores(perfilTecnico) ?? '' }}
                         </p>
                     </div>
                     <InputError :message="form.errors.especificaciones" />
@@ -1026,15 +1062,10 @@ function enviar() {
                                         >*</span
                                     >
                                 </Label>
-                                <Input
+                                <CampoEspecificacionUnidad
                                     :id="`esp-${i}-${campo}`"
                                     v-model="form.especificaciones[i][campo]"
-                                    :placeholder="
-                                        campo === 'imei'
-                                            ? '15 dígitos'
-                                            : undefined
-                                    "
-                                    autocomplete="off"
+                                    :campo="campo"
                                 />
                                 <InputError
                                     :message="

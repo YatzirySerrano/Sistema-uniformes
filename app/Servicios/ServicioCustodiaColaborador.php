@@ -6,6 +6,7 @@ use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoDevolucion;
 use App\Enums\EstadoEntrega;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\FinalidadCustodia;
 use App\Enums\TipoControlActivo;
 use App\Models\Activo;
 use App\Models\Colaborador;
@@ -55,6 +56,21 @@ use Illuminate\Support\Collection;
  */
 class ServicioCustodiaColaborador
 {
+    /** Bolsa de custodia recibida PARA REDISTRIBUIR. */
+    public const BOLSA_REDISTRIBUCION = 'redistribucion';
+
+    /**
+     * Bolsa de uso personal: incluye lo marcado como uso personal y lo SIN
+     * CLASIFICAR (históricos), que por seguridad se trata igual — nunca se
+     * ofrece para entregar sin `entregas.redistribuir-propios`.
+     */
+    public const BOLSA_PERSONAL = 'personal';
+
+    public static function bolsaDe(?FinalidadCustodia $finalidad): string
+    {
+        return $finalidad === FinalidadCustodia::Redistribucion ? self::BOLSA_REDISTRIBUCION : self::BOLSA_PERSONAL;
+    }
+
     /**
      * ¿El colaborador tiene algo pendiente de devolución? Versión barata para
      * el gate (no arma la lista completa).
@@ -151,8 +167,11 @@ class ServicioCustodiaColaborador
     {
         $porConjunto = [];
 
+        // Sólo la bolsa "para redistribuir": un conjunto recibido para uso
+        // personal no se ofrece como tal (sus piezas pueden reasignarse sueltas
+        // con el permiso de bienes personales).
         foreach ($this->cantidadesPendientes($custodio, [$custodio->empresa_id]) as $fila) {
-            if ($fila['conjunto_id'] === null) {
+            if ($fila['conjunto_id'] === null || self::bolsaDe($fila['finalidad']) !== self::BOLSA_REDISTRIBUCION) {
                 continue;
             }
             $porConjunto[$fila['conjunto_id']]['cantidad'][$fila['activo_id']][$fila['talla_id'] ?? 0] =
@@ -219,14 +238,15 @@ class ServicioCustodiaColaborador
 
     /**
      * Existencias por CANTIDAD que el custodio puede redistribuir AHORA,
-     * agregadas por activo + variante (suma de los saldos pendientes de todos
-     * sus renglones). Sólo activos por cantidad activos de su empresa — lo
-     * mismo que exige la entrega. Lectura sin lock: la autoridad es
-     * `RedistribuirCustodia`, que recalcula bajo lock al confirmar.
+     * agregadas por activo + variante + BOLSA (suma de los saldos pendientes
+     * de sus renglones). Por defecto sólo la bolsa "para redistribuir"; con
+     * `$incluirPersonales` también la de uso personal / sin clasificar (cada
+     * fila dice de qué bolsa sale). Sólo activos por cantidad activos de su
+     * empresa. Lectura sin lock: la autoridad es `RedistribuirCustodia`.
      *
-     * @return list<array{activo_id: int, talla_id: int|null, activo: string, talla: string|null, disponible: int}>
+     * @return list<array{activo_id: int, talla_id: int|null, activo: string, talla: string|null, disponible: int, bolsa: string}>
      */
-    public function cantidadesRedistribuibles(Colaborador $custodio): array
+    public function cantidadesRedistribuibles(Colaborador $custodio, bool $incluirPersonales = false): array
     {
         $filas = $this->cantidadesPendientes($custodio, [$custodio->empresa_id]);
 
@@ -243,17 +263,20 @@ class ServicioCustodiaColaborador
 
         $agrupado = [];
         foreach ($filas as $fila) {
-            if (! $activosValidos->has($fila['activo_id'])) {
+            $bolsa = self::bolsaDe($fila['finalidad']);
+
+            if (! $activosValidos->has($fila['activo_id']) || (! $incluirPersonales && $bolsa !== self::BOLSA_REDISTRIBUCION)) {
                 continue;
             }
 
-            $clave = $fila['activo_id'].'-'.($fila['talla_id'] ?? '0');
+            $clave = $fila['activo_id'].'-'.($fila['talla_id'] ?? '0').'-'.$bolsa;
             $agrupado[$clave] ??= [
                 'activo_id' => $fila['activo_id'],
                 'talla_id' => $fila['talla_id'],
                 'activo' => (string) $activosValidos[$fila['activo_id']],
                 'talla' => $fila['talla'],
                 'disponible' => 0,
+                'bolsa' => $bolsa,
             ];
             $agrupado[$clave]['disponible'] += $fila['pendiente'];
         }
@@ -268,7 +291,7 @@ class ServicioCustodiaColaborador
      *
      * @return Builder<UnidadActivo>
      */
-    public function unidadesRedistribuibles(Colaborador $custodio): Builder
+    public function unidadesRedistribuibles(Colaborador $custodio, bool $incluirPersonales = false): Builder
     {
         return UnidadActivo::query()
             ->where('empresa_id', $custodio->empresa_id)
@@ -279,7 +302,37 @@ class ServicioCustodiaColaborador
                 ->from('detalles_devolucion as dd')
                 ->join('devoluciones as dv', 'dv.id', '=', 'dd.devolucion_id')
                 ->whereColumn('dd.unidad_activo_id', 'unidades_activo.id')
-                ->where('dv.estado', EstadoDevolucion::PendienteFirma->value));
+                ->where('dv.estado', EstadoDevolucion::PendienteFirma->value))
+            ->when(! $incluirPersonales, fn (Builder $q) => $this->soloBolsa($q, self::BOLSA_REDISTRIBUCION));
+    }
+
+    /**
+     * Acota unidades a una bolsa según la finalidad de su renglón de entrega
+     * VIGENTE (el más reciente de la unidad). Una unidad sin renglón (p. ej.
+     * importada ya asignada) cuenta como uso personal / sin clasificar.
+     *
+     * @param  Builder<UnidadActivo>  $query
+     * @return Builder<UnidadActivo>
+     */
+    public function soloBolsa(Builder $query, string $bolsa): Builder
+    {
+        $esRedistribucion = fn ($q) => $q->selectRaw('1')
+            ->from('detalles_entrega as dvig')
+            ->whereColumn('dvig.unidad_activo_id', 'unidades_activo.id')
+            ->where('dvig.finalidad', FinalidadCustodia::Redistribucion->value)
+            ->whereRaw('dvig.id = (select max(dmax.id) from detalles_entrega dmax where dmax.unidad_activo_id = unidades_activo.id)');
+
+        return $bolsa === self::BOLSA_REDISTRIBUCION
+            ? $query->whereExists($esRedistribucion)
+            : $query->whereNotExists($esRedistribucion);
+    }
+
+    /**
+     * Bolsa de UNA unidad asignada (según su renglón vigente).
+     */
+    public function bolsaDeUnidad(UnidadActivo $unidad): string
+    {
+        return self::bolsaDe(DetalleEntrega::query()->where('unidad_activo_id', $unidad->getKey())->latest('id')->first()?->finalidad);
     }
 
     /**
@@ -292,7 +345,7 @@ class ServicioCustodiaColaborador
      * usuario tenga que memorizar ni volver a buscar nada.
      *
      * @param  array<int, int>|null  $idsEmpresasAutorizadas  Aislamiento histórico (ver `totalPiezasPendientes()`): `null` = sin acotar (uso interno del wizard de transferencia, que ya exige alcance global), un arreglo = sólo lo que esas empresas autorizan (panel de custodia en el perfil del colaborador).
-     * @return list<array{tipo: string, tipo_etiqueta: string, activo: string, talla: string|null, cantidad: int, referencia: string|null, entrega_id: int|null, entrega_folio: string|null, detalle_entrega_id: int|null, unidad_activo_id: int|null, unidad_public_token: string|null}>
+     * @return list<array{tipo: string, tipo_etiqueta: string, finalidad: string|null, finalidad_etiqueta: string, activo: string, talla: string|null, cantidad: int, referencia: string|null, entrega_id: int|null, entrega_folio: string|null, detalle_entrega_id: int|null, unidad_activo_id: int|null, unidad_public_token: string|null}>
      */
     public function pendientes(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): array
     {
@@ -309,6 +362,8 @@ class ServicioCustodiaColaborador
                 return [
                     'tipo' => 'unidad',
                     'tipo_etiqueta' => 'Unidad identificada',
+                    'finalidad' => $detalle?->finalidad?->value,
+                    'finalidad_etiqueta' => FinalidadCustodia::etiquetaDe($detalle?->finalidad),
                     'activo' => $u->activo->nombre,
                     'talla' => null,
                     'cantidad' => 1,
@@ -325,6 +380,8 @@ class ServicioCustodiaColaborador
         $cantidades = array_map(fn (array $fila): array => [
             'tipo' => 'cantidad',
             'tipo_etiqueta' => 'Artículo por cantidad',
+            'finalidad' => $fila['finalidad']?->value,
+            'finalidad_etiqueta' => FinalidadCustodia::etiquetaDe($fila['finalidad']),
             'activo' => $fila['activo'],
             'talla' => $fila['talla'],
             'cantidad' => $fila['pendiente'],
@@ -551,7 +608,7 @@ class ServicioCustodiaColaborador
      * colaborador (todas sus entregas firmadas/corregidas).
      *
      * @param  array<int, int>|null  $idsEmpresasAutorizadas  Acota a estas empresas cuando no es `null` — ver `totalPiezasPendientes()`.
-     * @return list<array{activo: string, talla: string|null, pendiente: int, folio: string|null, entrega_id: int|null, detalle_entrega_id: int, activo_id: int, talla_id: int|null, conjunto_id: int|null}>
+     * @return list<array{activo: string, talla: string|null, pendiente: int, folio: string|null, entrega_id: int|null, detalle_entrega_id: int, activo_id: int, talla_id: int|null, conjunto_id: int|null, finalidad: FinalidadCustodia|null}>
      */
     private function cantidadesPendientes(Colaborador $colaborador, ?array $idsEmpresasAutorizadas = null): array
     {
@@ -590,6 +647,7 @@ class ServicioCustodiaColaborador
                 'activo_id' => $detalle->activo_id,
                 'talla_id' => $detalle->talla_id,
                 'conjunto_id' => $detalle->conjunto_id,
+                'finalidad' => $detalle->finalidad,
             ];
         }
 

@@ -130,6 +130,7 @@ class ColaboradorController extends Controller
             'Búsqueda' => $filtros['buscar'] ?? null,
             'Sucursal' => ($filtros['sucursal_id'] ?? null) ? Sucursal::query()->find((int) $filtros['sucursal_id'])?->nombre : null,
             'Área' => ($filtros['area_id'] ?? null) ? Area::query()->find((int) $filtros['area_id'])?->nombre : null,
+            'Puesto' => $filtros['puesto'] ?? null,
             'Estado' => match ($filtros['estado'] ?? null) {
                 'activos' => 'Activos',
                 'inactivos' => 'Eliminados',
@@ -150,6 +151,39 @@ class ColaboradorController extends Controller
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'N.º empleado', 'Nombre completo', 'CURP', 'Puesto', 'Área', 'Correo', 'Empresa', 'Sucursal', 'Estado',
         ], $contexto);
+    }
+
+    /**
+     * Opciones del filtro "Puesto": como es texto libre, se ofrecen los
+     * valores DISTINTOS que ya existen dentro del alcance del usuario (y de la
+     * empresa/sucursal filtradas), agrupando variantes de mayúsculas/espacios
+     * ("Guardia", " guardia ") en una sola opción. Búsqueda remota, 20 máx.
+     */
+    public function puestos(Request $request): JsonResponse
+    {
+        $this->authorize('viewAny', Colaborador::class);
+
+        $filtros = $this->filtrosListado($request);
+        $termino = Str::lower(trim((string) $request->query('q', '')));
+
+        $puestos = $this->consultaColaboradores($request, [
+            'sucursal_id' => $filtros['sucursal_id'] ?? null,
+            'estado' => $filtros['estado'] ?? null,
+        ])
+            ->toBase()
+            ->reorder()
+            ->whereNotNull('puesto')
+            ->whereRaw("TRIM(puesto) <> ''")
+            ->when($termino !== '', fn ($q) => $q->whereRaw('LOWER(puesto) LIKE ?', ['%'.$termino.'%']))
+            ->selectRaw('MIN(TRIM(puesto)) as puesto')
+            ->groupByRaw('LOWER(TRIM(puesto))')
+            ->orderByRaw('LOWER(TRIM(puesto))')
+            ->limit(20)
+            ->pluck('puesto')
+            ->values()
+            ->map(fn ($puesto, int $i): array => ['id' => $i + 1, 'nombre' => (string) $puesto]);
+
+        return response()->json(['puestos' => $puestos]);
     }
 
     /**
@@ -216,6 +250,9 @@ class ColaboradorController extends Controller
             'sucursal_id' => ['nullable', 'integer'],
             'area_id' => ['nullable', 'integer'],
             'estado' => ['nullable', 'in:activos,inactivos,todos'],
+            // `puesto` es texto libre (no hay catálogo): se filtra por el
+            // valor normalizado (sin mayúsculas/espacios sobrantes).
+            'puesto' => ['nullable', 'string', 'max:255'],
         ]);
 
         // `validate()` con la regla `integer` sólo comprueba el formato, no
@@ -264,6 +301,8 @@ class ColaboradorController extends Controller
                 ->orWhere('curp', 'like', "%{$b}%")))
             ->when($filtros['sucursal_id'] ?? null, fn (Builder $q, $s) => $q->where('sucursal_id', $s))
             ->when($filtros['area_id'] ?? null, fn (Builder $q, $a) => $q->where('area_id', $a))
+            ->when(trim((string) ($filtros['puesto'] ?? '')) !== '', fn (Builder $q) => $q
+                ->whereRaw('LOWER(TRIM(puesto)) = ?', [Str::lower(trim((string) $filtros['puesto']))]))
             ->when(! $puedeVerEliminados, fn (Builder $q) => $q->where('activo', true))
             ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'activos', fn (Builder $q) => $q->where('activo', true))
             ->when($puedeVerEliminados && ($filtros['estado'] ?? null) === 'inactivos', fn (Builder $q) => $q->where('activo', false))
@@ -444,6 +483,9 @@ class ColaboradorController extends Controller
             // servicio: mismo criterio que la pantalla destino
             // (`DevolucionController::create` → `DevolucionPolicy::create`).
             'puedeRegistrarDevoluciones' => $usuario->can('create', Devolucion::class),
+            // Clasificar la finalidad de la custodia (cada renglón revalida la
+            // empresa en `EntregaUniformePolicy::clasificarFinalidad`).
+            'puedeClasificarFinalidad' => $usuario->can('entregas.crear') && $usuario->puedeAccederEmpresa($colaborador->empresa_id),
             'expediente' => $puedeVerExpediente ? [
                 'id' => $colaborador->id,
                 'nombre_completo' => $colaborador->nombre_completo,

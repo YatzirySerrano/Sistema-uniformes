@@ -120,7 +120,7 @@ beforeEach(function () {
     $this->completar = fn () => $this->actingAs($this->gestor)->post('/cambios-servicio/'.($this->cambio)()->id.'/completar');
 
     $this->stock = fn (): int => (int) SaldoInventario::query()->where('activo_id', $this->datos['activoA']->id)->value('cantidad');
-    $this->camisasDe = fn (Colaborador $c): int => array_sum(array_column(app(ServicioCustodiaColaborador::class)->cantidadesRedistribuibles($c->fresh()), 'disponible'));
+    $this->camisasDe = fn (Colaborador $c): int => array_sum(array_column(app(ServicioCustodiaColaborador::class)->cantidadesRedistribuibles($c->fresh(), true), 'disponible'));
 });
 
 it('un colaborador sin custodia cambia de servicio de inmediato, sin revisión', function () {
@@ -189,7 +189,9 @@ it('resuelve mantener, devolver y redistribuir por cantidades parciales y por un
         'origen' => 'custodia',
         'cambio_servicio_id' => $cambio->id,
         'colaborador_id' => $this->carolina->id,
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
+        // Custodia "sin clasificar" (entregada sin finalidad): dentro de la
+        // revisión se puede tomar de la bolsa personal sin permiso extra.
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'bolsa' => 'personal']],
         'unidades' => [['unidad_activo_id' => $this->microondas->id]],
     ])->assertSessionHasNoErrors()->assertRedirect("/cambios-servicio/{$cambio->id}");
 
@@ -263,7 +265,7 @@ it('no completa con una revisión obsoleta: si la custodia cambió después, se 
     ($this->mantenerTodo)();
 
     // Otra operación redistribuye el microondas después de la revisión.
-    app(RedistribuirCustodia::class)->ejecutar($this->yatziri->id, $this->carolina->id, $this->admin->id, now()->toDateString(), [], [['unidad_activo_id' => $this->microondas->id]]);
+    app(RedistribuirCustodia::class)->ejecutar($this->yatziri->id, $this->carolina->id, $this->admin->id, now()->toDateString(), [], [['unidad_activo_id' => $this->microondas->id]], incluirPersonales: true);
 
     ($this->completar)()->assertSessionHasErrors('negocio');
 

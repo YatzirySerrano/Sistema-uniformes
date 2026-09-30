@@ -64,6 +64,7 @@ class RegistrarTraspasoFirmado
         ?string $notas,
         ?string $ip,
         ?string $userAgent,
+        ?string $reservaToken = null,
     ): AcuseTraspaso {
         $firma = $this->confirmarAcuse->validarFirma($firmaBase64);
         $hashFirma = hash('sha256', $firma['binario']);
@@ -73,11 +74,11 @@ class RegistrarTraspasoFirmado
         try {
             $acuse = DB::transaction(function () use (
                 $empresaOrigenId, $almacenOrigenId, $empresaDestinoId, $almacenDestinoId,
-                $renglones, $firmante, $motivo, $notas, $ruta, $hashFirma, $ip, $userAgent,
+                $renglones, $firmante, $motivo, $notas, $ruta, $hashFirma, $ip, $userAgent, $reservaToken,
             ): AcuseTraspaso {
                 $traspaso = $this->registrarTraspaso->crearYRegistrar(
                     $empresaOrigenId, $almacenOrigenId, $empresaDestinoId, $almacenDestinoId,
-                    $renglones, $firmante->getKey(), $motivo, $notas,
+                    $renglones, $firmante->getKey(), $motivo, $notas, $reservaToken,
                 );
 
                 return $this->confirmarAcuse->confirmarEnTransaccion(

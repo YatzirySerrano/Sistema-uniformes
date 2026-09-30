@@ -6,6 +6,7 @@ use App\Acciones\ConfirmarAcuseRecepcion;
 use App\Acciones\RegistrarEntregaFirmada;
 use App\Acciones\ReservarInventarioEntrega;
 use App\Enums\EstadoEntrega;
+use App\Enums\FinalidadCustodia;
 use App\Enums\TipoReserva;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
@@ -21,6 +22,7 @@ use App\Models\Evidencia;
 use App\Models\SaldoInventario;
 use App\Models\UnidadActivo;
 use App\Models\User;
+use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
@@ -36,6 +38,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -392,7 +395,11 @@ class EntregaController extends Controller
      */
     public function liberarReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
     {
-        $this->authorize('entregarDesdeAlmacen', EntregaUniforme::class);
+        // Liberar sólo toca apartados PROPIOS (`user_id`) y nunca aparta nada:
+        // basta con poder registrar entregas de cualquier origen. Así la
+        // limpieza al salir del formulario no devuelve 403 a quien sólo
+        // redistribuye desde su custodia.
+        $this->authorize('create', EntregaUniforme::class);
         $reservas->liberar($token, $request->user()->id);
 
         return response()->json(['ok' => true]);
@@ -425,38 +432,46 @@ class EntregaController extends Controller
             return response()->json(['activos' => []]);
         }
 
+        $incluirPersonales = $this->incluirPersonalesDesdeRequest($request);
         $termino = Str::lower(trim((string) $request->query('q', '')));
         $control = $request->query('control') === 'individual' ? 'individual' : 'cantidad';
 
+        // Una opción por activo Y bolsa ("para redistribuir" / "uso personal o
+        // sin clasificar"): nunca se mezclan en un mismo renglón. `id` es
+        // sintético y único; `activo_id` es el real que se envía al guardar.
+        $opcion = fn (int $activoId, string $bolsa, array $datos): array => [
+            'id' => $activoId * 2 + ($bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL ? 1 : 0),
+            'activo_id' => $activoId,
+            'bolsa' => $bolsa,
+            'bolsa_etiqueta' => $bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL ? 'Uso personal / sin clasificar' : 'Para redistribuir',
+            'codigo' => null,
+            'tipo' => null,
+            'categoria' => null,
+            ...$datos,
+        ];
+
         if ($control === 'individual') {
-            $activos = $custodia->unidadesRedistribuibles($custodio)
+            $activos = $custodia->unidadesRedistribuibles($custodio, $incluirPersonales)
                 ->with('activo:id,nombre,codigo')
                 ->get()
-                ->groupBy('activo_id')
-                ->map(fn (Collection $grupo): array => [
-                    'id' => (int) $grupo->first()->activo_id,
+                ->groupBy(fn (UnidadActivo $u): string => $u->activo_id.'-'.$custodia->bolsaDeUnidad($u))
+                ->map(fn (Collection $grupo, string $clave): array => $opcion((int) $grupo->first()->activo_id, explode('-', $clave, 2)[1], [
                     'nombre' => $grupo->first()->activo->nombre,
                     'codigo' => $grupo->first()->activo->codigo,
-                    'tipo' => null,
-                    'categoria' => null,
                     'control' => 'individual',
                     'usa_variantes' => false,
                     'tallas' => [],
                     'disponible' => $grupo->count(),
-                ]);
+                ]));
         } else {
-            $activos = collect($custodia->cantidadesRedistribuibles($custodio))
-                ->groupBy('activo_id')
-                ->map(function (Collection $grupo): array {
+            $activos = collect($custodia->cantidadesRedistribuibles($custodio, $incluirPersonales))
+                ->groupBy(fn (array $f): string => $f['activo_id'].'-'.$f['bolsa'])
+                ->map(function (Collection $grupo) use ($opcion): array {
                     $conVariante = $grupo->filter(fn (array $f): bool => $f['talla_id'] !== null);
                     $sinVariante = $grupo->first(fn (array $f): bool => $f['talla_id'] === null);
 
-                    return [
-                        'id' => (int) $grupo->first()['activo_id'],
+                    return $opcion((int) $grupo->first()['activo_id'], (string) $grupo->first()['bolsa'], [
                         'nombre' => $grupo->first()['activo'],
-                        'codigo' => null,
-                        'tipo' => null,
-                        'categoria' => null,
                         'control' => 'cantidad',
                         'usa_variantes' => $conVariante->isNotEmpty(),
                         'tallas' => $conVariante->map(fn (array $f): array => [
@@ -465,17 +480,78 @@ class EntregaController extends Controller
                             'disponible' => $f['disponible'],
                         ])->values()->all(),
                         'disponible' => $sinVariante['disponible'] ?? 0,
-                    ];
+                    ]);
                 });
         }
 
         $resultado = $activos
             ->when($termino !== '', fn (Collection $c) => $c->filter(fn (array $a): bool => str_contains(Str::lower($a['nombre'].' '.($a['codigo'] ?? '')), $termino)))
-            ->sortBy('nombre')
+            // Primero lo que es para redistribuir; lo personal después.
+            ->sortBy(fn (array $a): string => ($a['bolsa'] === ServicioCustodiaColaborador::BOLSA_PERSONAL ? '1' : '0').$a['nombre'])
             ->take(30)
             ->values();
 
         return response()->json(['activos' => $resultado]);
+    }
+
+    /**
+     * Clasifica la finalidad de un renglón que SIGUE bajo custodia (uso
+     * personal / para redistribuir). Pensado para los históricos "sin
+     * clasificar"; no mueve inventario ni custodia, sólo la intención.
+     */
+    public function clasificarFinalidad(Request $request, DetalleEntrega $detalle, ServicioCustodiaColaborador $custodia, ServicioAuditoria $auditoria): RedirectResponse
+    {
+        $detalle->loadMissing(['entrega.colaborador', 'unidadActivo']);
+        abort_if($detalle->entrega === null, 404);
+        $this->authorize('clasificarFinalidad', $detalle->entrega);
+
+        $datos = $request->validate(
+            ['finalidad' => ['required', Rule::enum(FinalidadCustodia::class)]],
+            ['finalidad.required' => 'Elige la finalidad.'],
+        );
+
+        $sigueEnCustodia = $detalle->unidad_activo_id !== null
+            ? $detalle->unidadActivo?->colaborador_id === $detalle->entrega->colaborador_id
+                && $custodia->entregaActualDeUnidad($detalle->unidadActivo)?->getKey() === $detalle->getKey()
+            : $custodia->pendienteDeDetalle($detalle) > 0;
+
+        if (! $sigueEnCustodia) {
+            throw new ExcepcionDeNegocioSimple('Ese renglón ya no está bajo la custodia del colaborador.');
+        }
+
+        $anterior = $detalle->finalidad;
+        $nueva = FinalidadCustodia::from($datos['finalidad']);
+        $detalle->update(['finalidad' => $nueva]);
+
+        $auditoria->registrar('entregas', 'clasificar_finalidad', [
+            'tipo_entidad' => EntregaUniforme::class,
+            'entidad_id' => $detalle->entrega->id,
+            'empresa_id' => $detalle->entrega->empresa_id,
+            'descripcion' => sprintf(
+                'Finalidad de «%s»%s en la custodia de %s (%s): %s → %s.',
+                $detalle->activo_nombre_snapshot,
+                $detalle->unidadActivo !== null ? ' '.$detalle->unidadActivo->codigo : '',
+                $detalle->entrega->colaborador->nombre_completo,
+                $detalle->entrega->folio,
+                FinalidadCustodia::etiquetaDe($anterior),
+                $nueva->etiqueta(),
+            ),
+            'valores_anteriores' => ['finalidad' => FinalidadCustodia::etiquetaDe($anterior)],
+            'valores_nuevos' => ['finalidad' => $nueva->etiqueta()],
+        ]);
+
+        return back()->with('toast', ['type' => 'success', 'message' => 'Finalidad actualizada.']);
+    }
+
+    /**
+     * ¿Los selectores de custodia pueden ofrecer la bolsa de uso personal?
+     * Sólo con `entregas.redistribuir-propios`, o dentro de la revisión de
+     * un cambio de servicio (su custodio ya se validó en `custodioDesdeRequest`).
+     */
+    private function incluirPersonalesDesdeRequest(Request $request): bool
+    {
+        return $request->filled('cambio_servicio_id')
+            || $request->user()->can('redistribuirPropios', EntregaUniforme::class);
     }
 
     /**
@@ -495,7 +571,14 @@ class EntregaController extends Controller
 
         $termino = trim((string) $request->query('q', ''));
 
-        $unidades = $custodia->unidadesRedistribuibles($custodio)
+        $bolsa = (string) $request->query('bolsa', ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION);
+        $incluirPersonales = $this->incluirPersonalesDesdeRequest($request);
+
+        if ($bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL && ! $incluirPersonales) {
+            return response()->json(['unidades' => []]);
+        }
+
+        $unidades = $custodia->soloBolsa($custodia->unidadesRedistribuibles($custodio, true), $bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL ? ServicioCustodiaColaborador::BOLSA_PERSONAL : ServicioCustodiaColaborador::BOLSA_REDISTRIBUCION)
             ->where('activo_id', $activoId)
             ->when($termino !== '', fn (Builder $q) => $q->where('codigo', 'like', "%{$termino}%"))
             ->with(['activo:id,nombre', 'especificacion'])
@@ -530,10 +613,12 @@ class EntregaController extends Controller
             return response()->json(['saldos' => [], 'custodio' => null]);
         }
 
-        $saldos = collect($custodia->cantidadesRedistribuibles($custodio))
+        $incluirPersonales = $this->incluirPersonalesDesdeRequest($request);
+        $saldos = collect($custodia->cantidadesRedistribuibles($custodio, $incluirPersonales))
             ->map(fn (array $f): array => [
                 'activo_id' => $f['activo_id'],
                 'talla_id' => $f['talla_id'],
+                'bolsa' => $f['bolsa'],
                 'disponible' => $f['disponible'],
             ])
             ->values();
@@ -543,7 +628,7 @@ class EntregaController extends Controller
             'custodio' => ['id' => $custodio->id, 'nombre_completo' => $custodio->nombre_completo],
             // Para el estado vacío: sin piezas NI unidades no hay nada que
             // entregar (nunca se cae al inventario del almacén).
-            'total_unidades' => $custodia->unidadesRedistribuibles($custodio)->count(),
+            'total_unidades' => $custodia->unidadesRedistribuibles($custodio, $incluirPersonales)->count(),
         ]);
     }
 
@@ -738,6 +823,7 @@ class EntregaController extends Controller
                 $evidencias,
                 $custodioOrigenId === null ? ($datos['reserva_token'] ?? null) : null,
                 $custodioOrigenId,
+                $request->incluirPersonales(),
             );
         } catch (Throwable $e) {
             // Falló: se libera la clave para permitir un reintento legítimo y se
@@ -872,6 +958,10 @@ class EntregaController extends Controller
                     'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
                     'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
                     'conjunto' => $d->conjunto_nombre_snapshot,
+                    // Finalidad tal como se guardó en ESTE renglón (null =
+                    // "Sin clasificar"); nunca se agrupan renglones distintos.
+                    'finalidad' => $d->finalidad?->value,
+                    'finalidad_etiqueta' => FinalidadCustodia::etiquetaDe($d->finalidad),
                     // Cadena de custodia del renglón: de qué entrega anterior
                     // salió (redistribución) y a quién se redistribuyó después.
                     'recibido_de' => $d->detalleOrigen?->entrega === null ? null : [

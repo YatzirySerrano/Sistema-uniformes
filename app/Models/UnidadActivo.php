@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use App\Enums\ClaseVehiculo;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\EstadoVisibleUnidad;
 use App\Enums\PerfilTecnicoUnidad;
+use App\Soporte\EspecificacionUnidad;
 use App\Soporte\ResolverPerfilTecnicoUnidad;
 use Database\Factories\UnidadActivoFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -200,20 +202,20 @@ class UnidadActivo extends Model
         $this->loadMissing('especificacion');
         $esp = $this->especificacion;
 
-        $etiquetas = [
-            'marca' => 'Marca',
-            'modelo' => 'Modelo',
-            'imei' => 'IMEI',
-            'numero_telefonico' => 'Número telefónico',
-            'operador' => 'Operador',
-            'plan' => 'Plan',
-        ];
+        return array_map(function (string $campo) use ($esp): array {
+            $valor = $esp?->{$campo};
 
-        return array_map(fn (string $campo): array => [
-            'campo' => $campo,
-            'etiqueta' => $etiquetas[$campo],
-            'valor' => $esp?->{$campo},
-        ], $perfil->camposVisibles());
+            // La clase de vehículo se guarda como clave; se muestra su etiqueta.
+            if ($campo === 'clase_vehiculo' && is_string($valor)) {
+                $valor = ClaseVehiculo::tryFrom($valor)?->etiqueta() ?? $valor;
+            }
+
+            return [
+                'campo' => $campo,
+                'etiqueta' => EspecificacionUnidad::CAMPOS[$campo],
+                'valor' => $valor === null ? null : (string) $valor,
+            ];
+        }, $perfil->camposVisibles());
     }
 
     /**

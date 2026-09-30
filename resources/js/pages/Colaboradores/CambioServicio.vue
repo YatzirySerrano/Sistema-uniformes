@@ -26,6 +26,7 @@ type Operacion = {
 
 type Renglon = {
     id: number;
+    finalidad_etiqueta: string;
     es_unidad: boolean;
     activo: string;
     talla: string | null;
@@ -386,6 +387,9 @@ function varianteEstado(e: Renglon['estado']) {
                             >
                         </p>
                         <p class="text-muted-foreground text-xs">
+                            <Badge variant="outline" class="mr-1 text-xs">{{
+                                r.finalidad_etiqueta
+                            }}</Badge>
                             {{
                                 r.es_unidad
                                     ? 'Unidad identificada'

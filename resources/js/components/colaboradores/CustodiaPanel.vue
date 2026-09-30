@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Link, useForm } from '@inertiajs/vue3';
+import { Link, router, useForm } from '@inertiajs/vue3';
 import { AlertTriangle, Boxes, ExternalLink } from '@lucide/vue';
 import { ref } from 'vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -21,6 +21,8 @@ import { Label } from '@/components/ui/label';
 type PendienteFila = {
     tipo: 'unidad' | 'cantidad';
     tipo_etiqueta: string;
+    finalidad: 'uso_personal' | 'redistribucion' | null;
+    finalidad_etiqueta: string;
     activo: string;
     talla: string | null;
     cantidad: number;
@@ -50,7 +52,23 @@ const props = defineProps<{
     pendientes: PendienteFila[];
     incidencias: IncidenciaFila[];
     puedeReportar: boolean;
+    /** Clasificar la finalidad (uso personal / para redistribuir) de un renglón. */
+    puedeClasificarFinalidad?: boolean;
 }>();
+
+const OPCIONES_FINALIDAD = [
+    { valor: 'uso_personal', etiqueta: 'Uso personal' },
+    { valor: 'redistribucion', etiqueta: 'Para redistribuir' },
+];
+
+function clasificar(f: PendienteFila, valor: string | number | null): void {
+    if (!f.detalle_entrega_id || !valor || valor === f.finalidad) return;
+    router.put(
+        `/entregas/renglones/${f.detalle_entrega_id}/finalidad`,
+        { finalidad: valor },
+        { preserveScroll: true },
+    );
+}
 
 const dialogoIncidencia = ref(false);
 const filaSeleccionada = ref<PendienteFila | null>(null);
@@ -125,6 +143,17 @@ function fecha(iso: string | null): string {
                             >
                         </p>
                         <p class="text-muted-foreground text-xs">
+                            <Badge
+                                :variant="
+                                    f.finalidad === 'redistribucion'
+                                        ? 'warning'
+                                        : f.finalidad
+                                          ? 'secondary'
+                                          : 'outline'
+                                "
+                                class="mr-1 text-xs"
+                                >{{ f.finalidad_etiqueta }}</Badge
+                            >
                             {{ f.tipo_etiqueta }} · Cantidad
                             {{ f.cantidad }}
                             <span v-if="f.entrega_folio">
@@ -135,7 +164,20 @@ function fecha(iso: string | null): string {
                             >
                         </p>
                     </div>
-                    <div class="flex flex-wrap gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div
+                            v-if="
+                                puedeClasificarFinalidad && f.detalle_entrega_id
+                            "
+                            class="w-44"
+                        >
+                            <SelectSimple
+                                :model-value="f.finalidad"
+                                :opciones="OPCIONES_FINALIDAD"
+                                placeholder="Clasificar finalidad"
+                                @update:model-value="(v) => clasificar(f, v)"
+                            />
+                        </div>
                         <Button
                             v-if="f.tipo === 'unidad' && f.unidad_public_token"
                             variant="outline"

@@ -3,7 +3,9 @@
 namespace App\Http\Requests\Activos;
 
 use App\Enums\PerfilTecnicoUnidad;
+use App\Enums\TipoControlActivo;
 use App\Http\Requests\Concerns\NormalizaEntrada;
+use App\Models\Activo;
 use App\Models\CategoriaActivo;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -60,6 +62,30 @@ class GuardarCategoriaActivoRequest extends FormRequest
 
             if (CategoriaActivo::existeNombre($nombre, $ignorar)) {
                 $validator->errors()->add('nombre', 'Ya existe una categoría con ese nombre.');
+            }
+        });
+
+        // Un perfil técnico exige seguimiento individual
+        // (`PerfilTecnicoUnidad::exigeSeguimientoIndividual`): no se asigna a
+        // una categoría que ya tiene activos controlados por cantidad.
+        $validator->after(function (Validator $validator): void {
+            $perfil = PerfilTecnicoUnidad::tryFrom((string) $this->input('perfil_tecnico'));
+            $categoria = $this->route('categoria');
+
+            if ($perfil === null || ! $perfil->exigeSeguimientoIndividual() || ! $categoria instanceof CategoriaActivo) {
+                return;
+            }
+
+            $porCantidad = Activo::query()
+                ->where('categoria_id', $categoria->getKey())
+                ->where('tipo_control', TipoControlActivo::Cantidad)
+                ->count();
+
+            if ($porCantidad > 0) {
+                $validator->errors()->add(
+                    'perfil_tecnico',
+                    "Esta categoría tiene {$porCantidad} activo(s) controlados por cantidad; el perfil {$perfil->etiqueta()} requiere seguimiento individual. Reclasifica esos activos primero.",
+                );
             }
         });
     }

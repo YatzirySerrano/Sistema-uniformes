@@ -217,8 +217,11 @@ function enviar(): void {
 
 <template>
     <form class="space-y-4" @submit.prevent="enviar">
+        <!-- `min-w-0 grid-cols-1` en cada campo: sin columna explícita, la
+             pista `auto` del campo crecería al ancho completo (sin saltos) del
+             contrato elegido e invadiría el campo vecino. -->
         <div class="grid gap-4 sm:grid-cols-2">
-            <div class="grid gap-1.5 sm:col-span-2">
+            <div class="grid min-w-0 grid-cols-1 gap-1.5 sm:col-span-2">
                 <Label for="sf-empresa" class="flex items-center gap-1.5">
                     Empresa
                     <span class="text-destructive">*</span>
@@ -241,7 +244,7 @@ function enviar(): void {
                 <InputError :message="error('empresa_id')" />
             </div>
 
-            <div class="grid gap-1.5">
+            <div class="grid min-w-0 grid-cols-1 gap-1.5">
                 <Label for="sf-contrato" class="flex items-center gap-1.5">
                     Contrato
                     <span class="text-destructive">*</span>
@@ -267,7 +270,7 @@ function enviar(): void {
                 <InputError :message="error('contrato_id')" />
             </div>
 
-            <div class="grid gap-1.5">
+            <div class="grid min-w-0 grid-cols-1 gap-1.5">
                 <Label for="sf-sucursal" class="flex items-center gap-1.5">
                     Sucursal responsable
                     <span class="text-destructive">*</span>
@@ -292,7 +295,7 @@ function enviar(): void {
                 <InputError :message="error('sucursal_id')" />
             </div>
 
-            <div class="grid gap-1.5 sm:col-span-2">
+            <div class="grid min-w-0 grid-cols-1 gap-1.5 sm:col-span-2">
                 <Label for="sf-nombre" class="flex items-center gap-1.5">
                     Nombre
                     <span class="text-destructive">*</span>
@@ -311,7 +314,7 @@ function enviar(): void {
                 <InputError :message="error('nombre')" />
             </div>
 
-            <div class="grid gap-1.5">
+            <div class="grid min-w-0 grid-cols-1 gap-1.5">
                 <Label for="sf-codigo" class="flex items-center gap-1.5">
                     Código
                     <AyudaTooltip
@@ -333,7 +336,7 @@ function enviar(): void {
                 </div>
             </div>
 
-            <div class="grid gap-1.5">
+            <div class="grid min-w-0 grid-cols-1 gap-1.5">
                 <Label for="sf-direccion">Dirección</Label>
                 <Input
                     id="sf-direccion"
@@ -343,7 +346,7 @@ function enviar(): void {
                 <InputError :message="error('direccion')" />
             </div>
 
-            <div class="grid gap-1.5 sm:col-span-2">
+            <div class="grid min-w-0 grid-cols-1 gap-1.5 sm:col-span-2">
                 <Label for="sf-descripcion">Descripción</Label>
                 <textarea
                     id="sf-descripcion"

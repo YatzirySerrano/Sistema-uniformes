@@ -89,6 +89,10 @@ class ServicioEstadoInventario
                 ->where('detalles_entrega.activo_id', $activo->id)
                 ->whereNull('detalles_entrega.unidad_activo_id')
                 ->whereIn('entregas_uniformes.estado', [EstadoEntrega::Firmada->value, EstadoEntrega::Corregida->value])
+                // Una redistribución sólo cambia de custodio piezas que YA
+                // estaban asignadas (y no sale de ningún almacén): contarla
+                // aquí las duplicaba en una fila de almacén anónima.
+                ->whereNull('entregas_uniformes.colaborador_origen_id')
                 ->selectRaw('entregas_uniformes.almacen_id as almacen_id, detalles_entrega.talla_id as talla_id, SUM(detalles_entrega.cantidad) as total')
                 ->groupBy('entregas_uniformes.almacen_id', 'detalles_entrega.talla_id')
                 ->get() as $entregado

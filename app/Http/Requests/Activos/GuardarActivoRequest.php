@@ -136,6 +136,33 @@ class GuardarActivoRequest extends FormRequest
             }
         });
 
+        // Regla CENTRAL de dominio (`PerfilTecnicoUnidad::exigeSeguimientoIndividual`):
+        // una categoría con perfil técnico (Celular, Computadora, Tablet,
+        // Transporte, Electrodoméstico…) sólo admite seguimiento individual.
+        // Nunca por nombre: el perfil es la relación 1:1 de la categoría. Al
+        // editar sólo se exige si cambia la categoría o el control (no bloquea
+        // la edición de datos generales de un registro histórico).
+        $validator->after(function (Validator $validator): void {
+            $activo = $this->route('activo');
+            $categoriaId = $this->integer('categoria_id') ?: null;
+            $tipoControl = $this->input('tipo_control');
+
+            if ($activo instanceof Activo
+                && $activo->categoria_id === $categoriaId
+                && $activo->tipo_control->value === $tipoControl) {
+                return;
+            }
+
+            $perfil = $this->perfilTecnicoDeEntrada(null, $categoriaId);
+
+            if ($perfil !== null && $perfil->exigeSeguimientoIndividual() && $tipoControl !== TipoControlActivo::SeguimientoIndividual->value) {
+                $validator->errors()->add(
+                    'tipo_control',
+                    "Los activos con perfil {$perfil->etiqueta()} requieren seguimiento individual para conservar su trazabilidad.",
+                );
+            }
+        });
+
         if ($this->route('activo') !== null) {
             return; // stock inicial sólo aplica al alta
         }

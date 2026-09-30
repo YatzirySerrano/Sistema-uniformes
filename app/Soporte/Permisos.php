@@ -107,6 +107,7 @@ final class Permisos
             'etiqueta' => 'Activos, tipos y categorías',
             'permisos' => [
                 'activos.ver' => 'Ver activos',
+                'activos.ver-custodia-propia' => 'Ver únicamente mis activos bajo custodia',
                 'activos.crear' => 'Crear activos',
                 'activos.editar' => 'Editar activos',
                 'activos.administrar' => 'Administrar estado de activos (activar, desactivar y restaurar)',
@@ -156,6 +157,7 @@ final class Permisos
                 'entregas.ver' => 'Ver entregas',
                 'entregas.crear' => 'Registrar entregas desde almacén',
                 'entregas.redistribuir' => 'Redistribuir activos bajo custodia (la propia, o la de un colaborador al revisar su cambio de servicio)',
+                'entregas.redistribuir-propios' => 'Reasignar activos de uso personal (y sin clasificar) de mi custodia',
                 'entregas.corregir' => 'Corregir entregas firmadas',
             ],
         ],

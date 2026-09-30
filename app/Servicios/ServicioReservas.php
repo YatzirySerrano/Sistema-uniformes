@@ -12,7 +12,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Lectura/escritura de bajo nivel de `Reserva`/`RenglonReserva`, compartida
- * por `ReservarInventarioEntrega` y `ReservarCustodiaDevolucion` sin mezclar
+ * por `ReservarInventarioEntrega`, `ReservarInventarioTraspaso` y
+ * `ReservarCustodiaDevolucion` sin mezclar
  * sus reglas de negocio (cada Acción decide QUÉ demanda agregar y contra qué
  * compara; este servicio sólo sabe leer/escribir filas de reserva).
  *
@@ -44,9 +45,9 @@ class ServicioReservas
 
     /**
      * Cuánta CANTIDAD de un activo+talla tienen apartada otras reservas
-     * ACTIVAS del mismo tipo (nunca se mezcla demanda de Entrega con
-     * demanda de Devolución: son dos apartados conceptualmente distintos
-     * sobre datos distintos — cantidad de almacén vs. custodia pendiente).
+     * ACTIVAS que compiten por el mismo dato (`TipoReserva::tiposQueCompartenStock()`):
+     * Entrega y Traspaso comparten el stock del almacén; Devolución nunca se
+     * mezcla con ellos (aparta custodia pendiente, no cantidad de almacén).
      */
     public function demandaCantidadDeOtros(TipoReserva $tipo, int $empresaId, ?int $almacenId, int $activoId, ?int $tallaId, ?string $excluirToken = null): int
     {
@@ -57,7 +58,7 @@ class ServicioReservas
             ->when($tallaId === null, fn ($q) => $q->whereNull('talla_id'), fn ($q) => $q->where('talla_id', $tallaId))
             ->whereHas('reserva', function (Builder $q) use ($tipo, $empresaId, $almacenId, $excluirToken): void {
                 $this->filtrarActivaExcluyendoPropia($q, $excluirToken)
-                    ->where('tipo', $tipo)
+                    ->whereIn('tipo', $tipo->tiposQueCompartenStock())
                     ->where('empresa_id', $empresaId)
                     ->when($almacenId !== null, fn (Builder $q2) => $q2->where('almacen_id', $almacenId));
             });
@@ -107,7 +108,7 @@ class ServicioReservas
             ->whereIn('activo_id', $activoIds)
             ->whereHas('reserva', function (Builder $q) use ($tipo, $empresaId, $almacenId, $excluirToken): void {
                 $this->filtrarActivaExcluyendoPropia($q, $excluirToken)
-                    ->where('tipo', $tipo)
+                    ->whereIn('tipo', $tipo->tiposQueCompartenStock())
                     ->where('empresa_id', $empresaId)
                     ->when($almacenId !== null, fn (Builder $q2) => $q2->where('almacen_id', $almacenId));
             })

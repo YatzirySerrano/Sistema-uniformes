@@ -20,6 +20,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $numero_telefonico
  * @property string|null $operador
  * @property string|null $plan
+ * @property string|null $clase_vehiculo
+ * @property int|null $anio
+ * @property string|null $color
+ * @property string|null $placas
+ * @property string|null $numero_serie
  */
 class UnidadActivoEspecificacion extends Model
 {
@@ -33,7 +38,19 @@ class UnidadActivoEspecificacion extends Model
         'numero_telefonico',
         'operador',
         'plan',
+        'clase_vehiculo',
+        'anio',
+        'color',
+        'placas',
+        'numero_serie',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'anio' => 'integer',
+        ];
+    }
 
     /**
      * @return BelongsTo<UnidadActivo, $this>

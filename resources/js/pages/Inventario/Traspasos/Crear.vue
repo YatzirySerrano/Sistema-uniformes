@@ -11,6 +11,7 @@ import {
     X,
 } from '@lucide/vue';
 import { computed, nextTick, reactive, ref, watch } from 'vue';
+import ApartadoTemporalBanner from '@/components/sistema/ApartadoTemporalBanner.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
@@ -19,7 +20,29 @@ import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+    type RespuestaReserva,
+    useReservaBorrador,
+} from '@/composables/useReservaBorrador';
 import type { EmpresaAutorizada } from '@/types/sistema';
+
+/** Respuesta de `POST /inventario/traspasos/reserva` (`ReservarInventarioTraspaso`). */
+type RespuestaReservaTraspaso = RespuestaReserva & {
+    lineas_cantidad: {
+        activo_id: number;
+        talla_id: number | null;
+        activo_nombre: string | null;
+        talla_valor: string | null;
+        disponible_efectivo: number;
+        solicitado: number;
+        suficiente: boolean;
+    }[];
+    lineas_unidad: {
+        unidad_activo_id: number;
+        ok: boolean;
+        motivo: string | null;
+    }[];
+};
 
 type OpcionAlmacen = { id: number; nombre: string; codigo: string | null };
 type OpcionTalla = { id: number; valor: string; disponible?: number };
@@ -157,7 +180,51 @@ const preview = ref<Record<number, PreviewRenglon>>({});
 function limpiarRenglones(): void {
     filas.splice(0, filas.length);
     preview.value = {};
+    // Cambió el origen: el apartado anterior ya no aplica.
+    reserva.reiniciarToken();
 }
+
+// ------------------------------------------------ Apartado temporal (10 min)
+// Mismo patrón que Entregas (`useReservaBorrador`): mientras se arman los
+// renglones se apartan las existencias para que otro usuario no crea tener
+// disponibles las mismas. Es sólo UX: al confirmar, el backend vuelve a
+// validar saldos y unidades bajo candado.
+const reserva = useReservaBorrador<RespuestaReservaTraspaso>({
+    reservar: '/inventario/traspasos/reserva',
+    liberarBase: '/inventario/traspasos/reserva',
+    extenderBase: '/inventario/traspasos/reserva',
+});
+
+function payloadReserva(): Record<string, unknown> {
+    return {
+        empresa_origen_id: empresaOrigenId.value,
+        almacen_origen_id: almacenOrigen.value?.id ?? null,
+        renglones: filas.map((f) => ({
+            control: f.control,
+            activo_origen_id: f.activoSel?.id ?? null,
+            talla_id: f.control === 'cantidad' ? f.talla_id : null,
+            cantidad: f.control === 'cantidad' ? f.cantidad : null,
+            unidad_ids:
+                f.control === 'individual' ? f.unidades.map((u) => u.id) : [],
+        })),
+    };
+}
+
+watch(
+    () =>
+        filas.map((f) => [
+            f.activoSel?.id,
+            f.talla_id,
+            f.cantidad,
+            f.unidades.map((u) => u.id).join(','),
+        ]),
+    () => {
+        if (empresaOrigenId.value === null || !almacenOrigen.value) return;
+        if (!filas.some((f) => f.activoSel)) return;
+        reserva.reservarConRetraso(payloadReserva());
+    },
+    { deep: true },
+);
 function agregarFila(): void {
     filas.push({
         control: 'cantidad',
@@ -177,7 +244,7 @@ function buscarActivos(control: 'cantidad' | 'individual') {
     return async (q: string, signal?: AbortSignal): Promise<OpcionActivo[]> => {
         if (empresaOrigenId.value === null || !almacenOrigen.value) return [];
         const res = await fetch(
-            `/activos/buscar?empresa_id=${empresaOrigenId.value}&almacen_id=${almacenOrigen.value.id}&control=${control}&q=${encodeURIComponent(q)}`,
+            `/activos/buscar?empresa_id=${empresaOrigenId.value}&almacen_id=${almacenOrigen.value.id}&control=${control}&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
             {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
@@ -194,7 +261,7 @@ function buscarUnidadesFila(i: number) {
         const activoId = filas[i].activoSel?.id;
         if (!activoId || !almacenOrigen.value) return [];
         const res = await fetch(
-            `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenOrigen.value.id}&solo_disponibles=1&q=${encodeURIComponent(q)}`,
+            `/activos/unidades/buscar?activo_id=${activoId}&almacen_id=${almacenOrigen.value.id}&solo_disponibles=1&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
             {
                 headers: { Accept: 'application/json' },
                 credentials: 'same-origin',
@@ -313,6 +380,7 @@ const form = useForm<{
     renglones: RenglonPayload[];
     firma: string;
     idempotency_key: string;
+    reserva_token: string | null;
 }>({
     empresa_origen_id: null,
     almacen_origen_id: null,
@@ -322,6 +390,7 @@ const form = useForm<{
     notas: '',
     renglones: [],
     firma: '',
+    reserva_token: null,
     // Una clave por intento de alta: evita que un doble submit registre dos
     // traspasos (el backend la rechaza si ya la vio).
     idempotency_key:
@@ -404,6 +473,21 @@ const problemasPaso2 = computed<string[]>(() => {
             );
         }
     });
+
+    // Disponibilidad EFECTIVA (saldo − lo apartado por otros usuarios),
+    // calculada por el backend al apartar.
+    const res = reserva.resultado.value;
+    if (res && !res.ok) {
+        for (const l of res.lineas_cantidad) {
+            if (l.suficiente) continue;
+            msgs.push(
+                `«${l.activo_nombre ?? 'Activo'}»${l.talla_valor ? ` talla ${l.talla_valor}` : ''}: pediste ${l.solicitado} y hay ${l.disponible_efectivo} disponibles (otras operaciones tienen apartado el resto).`,
+            );
+        }
+        for (const l of res.lineas_unidad) {
+            if (!l.ok && l.motivo) msgs.push(l.motivo);
+        }
+    }
     return msgs;
 });
 
@@ -422,9 +506,15 @@ const puedeAvanzar2 = computed(
         !filas.some((_, i) => ambiguoSinResolver(i)),
 );
 
-function irA(n: 1 | 2 | 3): void {
+async function irA(n: 1 | 2 | 3): Promise<void> {
     if (n >= 2 && !puedeAvanzar1.value) return;
     if (n === 3 && !puedeAvanzar2.value) return;
+
+    // Antes de revisar/firmar: apartado sincrónico y vigente, o no se avanza.
+    if (n === 3) {
+        const resultado = await reserva.reservar(payloadReserva());
+        if (!resultado || !resultado.ok) return;
+    }
     paso.value = n;
 
     // El PadFirma vive dentro del contenedor del paso 3 (`v-show`), así que
@@ -436,7 +526,11 @@ function irA(n: 1 | 2 | 3): void {
 }
 
 const puedeConfirmar = computed(
-    () => puedeAvanzar2.value && !firmaVacia.value && !form.processing,
+    () =>
+        puedeAvanzar2.value &&
+        !reserva.vencida.value &&
+        !firmaVacia.value &&
+        !form.processing,
 );
 
 function enviar(): void {
@@ -458,6 +552,7 @@ function enviar(): void {
             f.control === 'individual' ? f.unidades.map((u) => u.id) : null,
     }));
     form.firma = firma;
+    form.reserva_token = reserva.token.value;
     form.post('/inventario/traspasos', {
         preserveScroll: true,
         onError: () => {
@@ -619,6 +714,15 @@ function enviar(): void {
 
             <!-- ============ PASO 2 ============ -->
             <div v-show="paso === 2" class="space-y-4">
+                <ApartadoTemporalBanner
+                    v-if="almacenOrigen && filas.some((f) => f.activoSel)"
+                    :minutos-segundos="reserva.minutosSegundos.value"
+                    :por-vencer="reserva.porVencer.value"
+                    :vencida="reserva.vencida.value"
+                    :cargando="reserva.cargando.value"
+                    :error="reserva.error.value"
+                    @extender="reserva.extender()"
+                />
                 <p
                     v-if="errln['negocio']"
                     class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-2 text-sm"
@@ -944,6 +1048,21 @@ function enviar(): void {
 
             <!-- ============ PASO 3 ============ -->
             <div v-show="paso === 3" class="space-y-4">
+                <ApartadoTemporalBanner
+                    :minutos-segundos="reserva.minutosSegundos.value"
+                    :por-vencer="reserva.porVencer.value"
+                    :vencida="reserva.vencida.value"
+                    :cargando="reserva.cargando.value"
+                    :error="reserva.error.value"
+                    @extender="reserva.extender()"
+                />
+                <p
+                    v-if="reserva.vencida.value"
+                    class="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-sm text-amber-700 dark:text-amber-400"
+                >
+                    Tu apartado de existencias venció. Vuelve al paso anterior
+                    para actualizar la disponibilidad antes de confirmar.
+                </p>
                 <p
                     v-if="errln['negocio']"
                     class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-2 text-sm"

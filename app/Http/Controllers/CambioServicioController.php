@@ -7,6 +7,7 @@ use App\Acciones\CompletarCambioServicio;
 use App\Acciones\GuardarDecisionesCambioServicio;
 use App\Acciones\IniciarCambioServicio;
 use App\Enums\CondicionUnidadActivo;
+use App\Enums\FinalidadCustodia;
 use App\Http\Requests\Colaboradores\CambiarServicioColaboradorRequest;
 use App\Http\Requests\Colaboradores\GuardarDecisionesCambioServicioRequest;
 use App\Models\CambioServicioColaborador;
@@ -15,6 +16,7 @@ use App\Models\Colaborador;
 use App\Models\Devolucion;
 use App\Models\Servicio;
 use App\Servicios\ServicioCambioServicio;
+use App\Servicios\ServicioCustodiaColaborador;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -49,7 +51,7 @@ class CambioServicioController extends Controller
         ]);
     }
 
-    public function show(Request $request, CambioServicioColaborador $cambio, ServicioCambioServicio $servicio): Response
+    public function show(Request $request, CambioServicioColaborador $cambio, ServicioCambioServicio $servicio, ServicioCustodiaColaborador $custodia): Response
     {
         $this->authorize('view', $cambio);
 
@@ -61,7 +63,8 @@ class CambioServicioController extends Controller
             'servicioDestino:id,nombre,contrato_id', 'servicioDestino.contrato:id,nombre',
             'iniciadoPor:id,name', 'completadoPor:id,name',
             'renglones.destinatario:id,nombre_completo,numero_empleado',
-            'renglones.unidadActivo:id,condicion',
+            'renglones.unidadActivo:id,condicion,colaborador_id',
+            'renglones.detalleEntrega:id,finalidad',
         ]);
 
         $usuario = $request->user();
@@ -90,6 +93,10 @@ class CambioServicioController extends Controller
             ],
             'renglones' => $cambio->renglones->map(fn (CambioServicioRenglon $r): array => [
                 'id' => $r->id,
+                // Sólo informativo: la finalidad nunca limita la decisión.
+                'finalidad_etiqueta' => FinalidadCustodia::etiquetaDe($r->esUnidad()
+                    ? ($r->unidadActivo === null ? null : $custodia->entregaActualDeUnidad($r->unidadActivo)?->finalidad)
+                    : $r->detalleEntrega?->finalidad),
                 'es_unidad' => $r->esUnidad(),
                 'activo' => $r->activo_nombre_snapshot,
                 'talla' => $r->talla_valor_snapshot,

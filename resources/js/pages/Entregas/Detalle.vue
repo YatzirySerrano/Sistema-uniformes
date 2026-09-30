@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { varianteBadgeEstadoEntrega } from '@/lib/estadoEntrega';
 import { fechaHora, fechaNegocio } from '@/lib/fecha';
+import { varianteBadgeFinalidad } from '@/lib/finalidadCustodia';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
 
 const props = defineProps<{
@@ -42,6 +43,8 @@ const props = defineProps<{
             unidad_estado_visible: string | null;
             unidad_estado_visible_etiqueta: string | null;
             conjunto: string | null;
+            finalidad: 'uso_personal' | 'redistribucion' | null;
+            finalidad_etiqueta: string;
             recibido_de: {
                 entrega_id: number;
                 folio: string;
@@ -227,7 +230,16 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                         class="rounded-lg border p-3 text-sm"
                     >
                         <div class="flex items-start justify-between gap-2">
-                            <p class="font-medium">{{ it.activo }}</p>
+                            <p class="font-medium">
+                                {{ it.activo }}
+                                <Badge
+                                    :variant="
+                                        varianteBadgeFinalidad(it.finalidad)
+                                    "
+                                    class="ml-1 text-xs"
+                                    >{{ it.finalidad_etiqueta }}</Badge
+                                >
+                            </p>
                             <p class="text-muted-foreground shrink-0 text-xs">
                                 Cantidad
                                 <span class="text-foreground font-semibold">{{
@@ -300,6 +312,7 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                                 <th class="py-1.5">Activo</th>
                                 <th class="py-1.5">Talla / unidad</th>
                                 <th class="py-1.5">Conjunto</th>
+                                <th class="py-1.5">Finalidad</th>
                                 <th class="py-1.5">Evidencia</th>
                                 <th class="py-1.5 text-right">Cantidad</th>
                             </tr>
@@ -335,6 +348,15 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                                 </td>
                                 <td class="text-muted-foreground py-1.5">
                                     {{ it.conjunto ?? '—' }}
+                                </td>
+                                <td class="py-1.5">
+                                    <Badge
+                                        :variant="
+                                            varianteBadgeFinalidad(it.finalidad)
+                                        "
+                                        class="text-xs"
+                                        >{{ it.finalidad_etiqueta }}</Badge
+                                    >
                                 </td>
                                 <td class="py-1.5">
                                     <div

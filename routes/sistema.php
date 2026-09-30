@@ -24,6 +24,7 @@ use App\Http\Controllers\ImportacionColaboradorController;
 use App\Http\Controllers\ImportacionMaestraController;
 use App\Http\Controllers\InventarioController;
 use App\Http\Controllers\InventarioFisicoController;
+use App\Http\Controllers\MisActivosController;
 use App\Http\Controllers\MovimientoInventarioController;
 use App\Http\Controllers\PanelController;
 use App\Http\Controllers\ReporteController;
@@ -55,6 +56,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('colaboradores/siguiente-numero', [ColaboradorController::class, 'siguienteNumeroEmpleado'])->name('colaboradores.siguiente-numero');
     Route::post('colaboradores/validar-curp', [ColaboradorController::class, 'validarCurp'])->name('colaboradores.validar-curp');
     Route::get('colaboradores/exportar', [ColaboradorController::class, 'exportar'])->name('colaboradores.exportar');
+    Route::get('colaboradores/puestos', [ColaboradorController::class, 'puestos'])->name('colaboradores.puestos');
     Route::get('colaboradores/crear', [ColaboradorController::class, 'create'])->name('colaboradores.create');
     Route::post('colaboradores', [ColaboradorController::class, 'store'])->name('colaboradores.store');
     Route::get('colaboradores/{colaborador}/foto', [ColaboradorController::class, 'foto'])->name('colaboradores.foto');
@@ -119,6 +121,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     // Unidades de seguimiento individual (dentro del hub de Activos). Deben
     // registrarse ANTES de `activos/{activo}` para que "unidades" no sea
     // capturado como un id de activo por el binding implícito.
+    // Custodia propia del colaborador vinculado a la cuenta (sólo lectura).
+    Route::get('mis-activos', [MisActivosController::class, 'index'])->name('mis-activos.index');
     Route::get('activos/unidades', [UnidadActivoController::class, 'index'])->name('unidades-activo.index');
     Route::get('activos/unidades/buscar', [UnidadActivoController::class, 'buscar'])->name('unidades-activo.buscar');
     Route::get('activos/unidades/etiquetas', [UnidadActivoController::class, 'generarEtiquetas'])->name('unidades-activo.etiquetas');
@@ -187,6 +191,9 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventario/traspasos/exportar', [MovimientoInventarioController::class, 'exportarTraspasos'])->name('inventario.traspasos.exportar');
     Route::get('inventario/traspasos/crear', [MovimientoInventarioController::class, 'nuevoTraspaso'])->name('inventario.traspasos.create');
     Route::get('inventario/traspasos/previsualizar', [MovimientoInventarioController::class, 'previsualizarTraspaso'])->name('inventario.traspasos.previsualizar');
+    Route::post('inventario/traspasos/reserva', [MovimientoInventarioController::class, 'reservarTraspaso'])->name('inventario.traspasos.reserva');
+    Route::delete('inventario/traspasos/reserva/{token}', [MovimientoInventarioController::class, 'liberarReservaTraspaso'])->name('inventario.traspasos.reserva.liberar');
+    Route::post('inventario/traspasos/reserva/{token}/extender', [MovimientoInventarioController::class, 'extenderReservaTraspaso'])->name('inventario.traspasos.reserva.extender');
     Route::post('inventario/traspasos', [MovimientoInventarioController::class, 'almacenarTraspaso'])->name('inventario.traspasos.store');
     Route::get('inventario/traspasos/{traspaso}', [MovimientoInventarioController::class, 'traspasoShow'])->name('inventario.traspasos.show');
 
@@ -235,6 +242,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('entregas/custodia/unidades', [EntregaController::class, 'custodiaUnidades'])->name('entregas.custodia.unidades');
     Route::get('entregas/custodia/disponibilidad', [EntregaController::class, 'custodiaDisponibilidad'])->name('entregas.custodia.disponibilidad');
     Route::get('entregas/custodia/conjuntos', [EntregaController::class, 'custodiaConjuntos'])->name('entregas.custodia.conjuntos');
+    Route::put('entregas/renglones/{detalle}/finalidad', [EntregaController::class, 'clasificarFinalidad'])->name('entregas.renglones.finalidad');
     // Apartado temporal (TTL) del borrador de Entrega — ver ReservarInventarioEntrega.
     Route::post('entregas/reserva', [EntregaController::class, 'reservar'])->name('entregas.reserva');
     Route::delete('entregas/reserva/{token}', [EntregaController::class, 'liberarReserva'])->name('entregas.reserva.liberar');

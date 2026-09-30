@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import CampoEspecificacionUnidad from '@/components/sistema/CampoEspecificacionUnidad.vue';
+import type {
+    CampoEspecificacion,
+    EspecificacionUnidad,
+} from '@/lib/perfilTecnicoUnidad';
+import { especificacionVacia } from '@/lib/perfilTecnicoUnidad';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import {
     AlertTriangle,
@@ -73,14 +79,9 @@ const props = defineProps<{
             etiqueta: string;
             valor: string | null;
         }[];
-        especificacion: {
-            marca: string | null;
-            modelo: string | null;
-            imei: string | null;
-            numero_telefonico: string | null;
-            operador: string | null;
-            plan: string | null;
-        } | null;
+        especificacion: Partial<
+            Record<CampoEspecificacion, string | number | null>
+        > | null;
         imagen_url: string | null;
     };
     movimientos: {
@@ -275,32 +276,23 @@ function darDeBaja(): void {
 }
 
 /* --- Editar datos del equipo --- */
-type CampoEquipo =
-    | 'marca'
-    | 'modelo'
-    | 'imei'
-    | 'numero_telefonico'
-    | 'operador'
-    | 'plan';
+// Todos los campos técnicos (el perfil decide cuáles se muestran: sólo los
+// de `datos_equipo`); valores como texto para los inputs.
+function valoresEquipo(): EspecificacionUnidad {
+    const base = especificacionVacia();
+    const esp = props.unidad.especificacion ?? {};
+    for (const campo of Object.keys(base) as CampoEspecificacion[]) {
+        const valor = esp[campo];
+        base[campo] =
+            valor === null || valor === undefined ? '' : String(valor);
+    }
+    return base;
+}
 const dialogoEquipo = ref(false);
-const formEquipo = useForm({
-    marca: props.unidad.especificacion?.marca ?? '',
-    modelo: props.unidad.especificacion?.modelo ?? '',
-    imei: props.unidad.especificacion?.imei ?? '',
-    numero_telefonico: props.unidad.especificacion?.numero_telefonico ?? '',
-    operador: props.unidad.especificacion?.operador ?? '',
-    plan: props.unidad.especificacion?.plan ?? '',
-});
+const formEquipo = useForm<EspecificacionUnidad>(valoresEquipo());
 
 function abrirEditarEquipo(): void {
-    formEquipo.defaults({
-        marca: props.unidad.especificacion?.marca ?? '',
-        modelo: props.unidad.especificacion?.modelo ?? '',
-        imei: props.unidad.especificacion?.imei ?? '',
-        numero_telefonico: props.unidad.especificacion?.numero_telefonico ?? '',
-        operador: props.unidad.especificacion?.operador ?? '',
-        plan: props.unidad.especificacion?.plan ?? '',
-    });
+    formEquipo.defaults(valoresEquipo());
     formEquipo.reset();
     formEquipo.clearErrors();
     dialogoEquipo.value = true;
@@ -1022,10 +1014,10 @@ function guardarEquipo(): void {
                         <Label :for="`eq-${d.campo}`" class="text-xs">
                             {{ d.etiqueta }}
                         </Label>
-                        <Input
+                        <CampoEspecificacionUnidad
                             :id="`eq-${d.campo}`"
-                            v-model="formEquipo[d.campo as CampoEquipo]"
-                            autocomplete="off"
+                            v-model="formEquipo[d.campo as CampoEspecificacion]"
+                            :campo="d.campo as CampoEspecificacion"
                         />
                         <InputError
                             :message="

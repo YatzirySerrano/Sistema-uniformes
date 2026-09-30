@@ -12,6 +12,7 @@ import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +21,7 @@ import {
     useReservaBorrador,
 } from '@/composables/useReservaBorrador';
 import { fechaNegocio } from '@/lib/fecha';
+import { varianteBadgeFinalidad } from '@/lib/finalidadCustodia';
 
 type OpcionEntrega = {
     id: number;
@@ -37,6 +39,8 @@ type Renglon = {
     activo: string;
     talla: string | null;
     cantidad: number;
+    finalidad: 'uso_personal' | 'redistribucion' | null;
+    finalidad_etiqueta: string;
     pendiente: number | null;
     /** Cuánto ya se devolvió CONFIRMADO hasta ahora (`cantidad - pendiente`). */
     ya_devuelto: number | null;
@@ -906,6 +910,20 @@ function enviar(): void {
                         >
                             <p class="font-medium sm:col-span-2">
                                 {{ renglonDe(fila.detalle_entrega_id)?.activo }}
+                                <Badge
+                                    v-if="renglonDe(fila.detalle_entrega_id)"
+                                    :variant="
+                                        varianteBadgeFinalidad(
+                                            renglonDe(fila.detalle_entrega_id)
+                                                ?.finalidad ?? null,
+                                        )
+                                    "
+                                    class="ml-1 text-xs"
+                                    >{{
+                                        renglonDe(fila.detalle_entrega_id)
+                                            ?.finalidad_etiqueta
+                                    }}</Badge
+                                >
                             </p>
                             <p
                                 v-if="renglonDe(fila.detalle_entrega_id)?.talla"
@@ -1026,6 +1044,20 @@ function enviar(): void {
                         <div class="text-sm">
                             <p class="font-medium">
                                 {{ renglonDe(fila.detalle_entrega_id)?.activo }}
+                                <Badge
+                                    v-if="renglonDe(fila.detalle_entrega_id)"
+                                    :variant="
+                                        varianteBadgeFinalidad(
+                                            renglonDe(fila.detalle_entrega_id)
+                                                ?.finalidad ?? null,
+                                        )
+                                    "
+                                    class="ml-1 text-xs"
+                                    >{{
+                                        renglonDe(fila.detalle_entrega_id)
+                                            ?.finalidad_etiqueta
+                                    }}</Badge
+                                >
                             </p>
                             <p class="text-muted-foreground font-mono text-xs">
                                 {{

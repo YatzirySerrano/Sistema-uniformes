@@ -79,6 +79,8 @@ type HistoricoEmpresa = {
 type PendienteFila = {
     tipo: 'unidad' | 'cantidad';
     tipo_etiqueta: string;
+    finalidad: 'uso_personal' | 'redistribucion' | null;
+    finalidad_etiqueta: string;
     activo: string;
     talla: string | null;
     cantidad: number;
@@ -121,6 +123,7 @@ const props = defineProps<{
     puedeVerDevoluciones: boolean;
     puedeReportarIncidenciaCustodia: boolean;
     puedeRegistrarDevoluciones: boolean;
+    puedeClasificarFinalidad: boolean;
     expediente: ExpedientePayload | null;
     custodia: {
         pendientes: PendienteFila[];
@@ -613,6 +616,7 @@ const modalEmpresa = ref(false);
                 :pendientes="custodia.pendientes"
                 :incidencias="custodia.incidencias"
                 :puede-reportar="puedeReportarIncidenciaCustodia"
+                :puede-clasificar-finalidad="puedeClasificarFinalidad"
             />
         </section>
 

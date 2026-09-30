@@ -14,6 +14,7 @@ use App\Models\ImagenUnidadActivo;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioInventario;
+use App\Soporte\EspecificacionUnidad;
 use App\Soporte\NormalizadorNombre;
 use App\Soporte\ServicioGeneradorCodigosGlobal;
 use Illuminate\Database\Eloquent\Collection;
@@ -42,7 +43,7 @@ class RegistrarUnidadesActivo
     ) {}
 
     /**
-     * @param  list<array{marca?: string|null, modelo?: string|null, imei?: string|null, numero_telefonico?: string|null, operador?: string|null, plan?: string|null}>  $especificaciones  datos técnicos por unidad (índice 0..N-1), sólo para activos con perfil técnico
+     * @param  list<array<string, mixed>>  $especificaciones  datos técnicos por unidad (índice 0..N-1), sólo para activos con perfil técnico
      * @param  list<array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string}|null>  $imagenes  foto OPCIONAL por unidad (índice 0..N-1, alineado por posición — nunca por nombre de archivo), ya escrita en disco por `ServicioEvidencias::guardarPendiente()` antes de llamar aquí; si la transacción falla, el llamador debe descartar los archivos con `ServicioEvidencias::descartar()`
      * @return Collection<int, UnidadActivo>
      */
@@ -118,18 +119,11 @@ class RegistrarUnidadesActivo
      * constraint UNIQUE de `imei` es la última defensa contra un IMEI repetido
      * en una alta concurrente; se traduce a un mensaje en español.
      *
-     * @param  array{marca?: string|null, modelo?: string|null, imei?: string|null, numero_telefonico?: string|null, operador?: string|null, plan?: string|null}  $datos
+     * @param  array<string, mixed>  $datos  campos de `App\Soporte\EspecificacionUnidad::CAMPOS`
      */
     private function guardarEspecificacion(UnidadActivo $unidad, array $datos): void
     {
-        $campos = ['marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan'];
-        $valores = [];
-
-        foreach ($campos as $campo) {
-            $valor = $datos[$campo] ?? null;
-            $valor = is_string($valor) ? trim($valor) : $valor;
-            $valores[$campo] = ($valor === '' || $valor === null) ? null : $valor;
-        }
+        $valores = EspecificacionUnidad::normalizar($datos);
 
         if (array_filter($valores, fn ($v): bool => $v !== null) === []) {
             return;

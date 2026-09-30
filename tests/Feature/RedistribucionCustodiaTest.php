@@ -82,8 +82,14 @@ beforeEach(function () {
 
     $this->camisas = fn (int $cantidad): array => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => $cantidad]];
 
-    $this->entregarDesdeAlmacen = fn (Colaborador $colaborador, array $activos = [], array $unidades = []) => $this->actingAs($this->admin)
-        ->post('/entregas', ($this->payload)($colaborador, $activos, $unidades, ['almacen_id' => $this->datos['almacenA']->id]));
+    // El almacén entrega al custodio PARA REDISTRIBUIR (finalidad explícita).
+    $this->entregarDesdeAlmacen = fn (Colaborador $colaborador, array $activos = [], array $unidades = [], string $finalidad = 'redistribucion') => $this->actingAs($this->admin)
+        ->post('/entregas', ($this->payload)(
+            $colaborador,
+            array_map(fn (array $a): array => [...$a, 'finalidad' => $finalidad], $activos),
+            array_map(fn (array $u): array => [...$u, 'finalidad' => $finalidad], $unidades),
+            ['almacen_id' => $this->datos['almacenA']->id],
+        ));
 
     $this->redistribuir = fn (User $usuario, Colaborador $colaborador, array $activos = [], array $unidades = []) => $this->actingAs($usuario)
         ->post('/entregas', ($this->payload)($colaborador, $activos, $unidades, ['origen' => 'custodia']));
@@ -94,7 +100,7 @@ beforeEach(function () {
         ->value('cantidad');
 
     $this->custodiaCamisas = fn (Colaborador $colaborador): int => array_sum(array_column(
-        app(ServicioCustodiaColaborador::class)->cantidadesRedistribuibles($colaborador->fresh()),
+        app(ServicioCustodiaColaborador::class)->cantidadesRedistribuibles($colaborador->fresh(), true),
         'disponible',
     ));
 });
@@ -327,7 +333,10 @@ it('audita la redistribución con origen, destinatario y renglones legibles', fu
         ->and($registro->empresa_id)->toBe($this->datos['empresaA']->id)
         ->and($registro->valores_nuevos['origen'])->toStartWith('Yatziri Custodia')
         ->and($registro->valores_nuevos['destinatario'])->toStartWith($this->juan->nombre_completo)
-        ->and($registro->valores_nuevos['renglones'])->toBe([['activo' => 'Camisa', 'talla' => 'M', 'cantidad' => 3]]);
+        ->and($registro->valores_nuevos['renglones'])->toBe([[
+            'activo' => 'Camisa', 'talla' => 'M', 'cantidad' => 3,
+            'desde' => 'Para redistribuir', 'finalidad_destinatario' => 'Sin clasificar',
+        ]]);
 });
 
 it('sólo con entregas.crear el único origen es el almacén', function () {

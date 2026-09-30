@@ -6,6 +6,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | --- | --- |
 | app/{Acciones/{IniciarCambioServicio,GuardarDecisionesCambioServicio,CompletarCambioServicio,CancelarCambioServicio,CambiarServicioColaborador}.php,Servicios/ServicioCambioServicio.php,Models/CambioServicio*.php,Http/Controllers/CambioServicioController.php} | .ai/rules/acciones-controllers.md |
 | resources/js/pages/Inventario/Movimientos.vue,resources/js/pages/Entregas/Crear.vue,app/Policies/EntregaUniformePolicy.php,app/Acciones/CorregirEntrega.php | .ai/rules/acciones.md |
+| app/Servicios/ServicioDistribucionActivo.php,app/Servicios/ServicioEstadoInventario.php,resources/js/components/sistema/DistribucionActualActivo.vue,resources/js/pages/Activos/Detalle.vue | .ai/rules/activos.md |
 | app/Servicios/ServicioEvidencias.php,app/Servicios/ServicioAcusePdf.php,app/Servicios/ServicioAcuseDevolucionPdf.php,resources/views/acuses/comprobante.blade.php,resources/views/acuses/comprobante-devolucion.blade.php | .ai/rules/acuses.md |
 | resources/js/components/almacenes/FormularioAlmacen.vue | .ai/rules/almacenes.md |
 | bootstrap/app.php,app/Providers/AppServiceProvider.php | .ai/rules/bootstrap-providers.md |
@@ -37,6 +38,8 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Enums/EstadoVisibleUnidad.php,app/Http/Controllers/UnidadActivoController.php,app/Soporte/PaletaGraficas.php,resources/js/lib/estadoVisibleUnidad.ts,resources/js/composables/useGraficasDashboard.ts | .ai/rules/js-composables.md |
 | app/Http/Requests/Entregas/GuardarEntregaRequest.php,app/Http/Controllers/EntregaController.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/js-pages-entregas.md |
 | app/Servicios/ServicioDashboard.php,app/Http/Controllers/PanelController.php,app/Enums/SeccionDashboard.php,resources/js/pages/Panel.vue | .ai/rules/js-pages.md |
+| resources/js/composables/useReservaBorrador.ts,resources/js/lib/avisoSinPermiso.ts,app/Http/Controllers/EntregaController.php | .ai/rules/lib-http-controllers.md |
+| app/{Enums/PerfilTecnicoUnidad.php,Soporte/EspecificacionUnidad.php,Http/Requests/Activos/{GuardarActivoRequest,GuardarCategoriaActivoRequest,ActualizarEspecificacionUnidadRequest}.php,Http/Requests/Concerns/ValidaEspecificacionUnidad.php},resources/js/lib/perfilTecnicoUnidad.ts,resources/js/components/sistema/CampoEspecificacionUnidad.vue | .ai/rules/lib-js-components-sistema.md |
 | app/Soporte/FechaHora.php,app/Soporte/ContextoExportacion.php,resources/views/acuses/*.blade.php,resources/views/reportes/*.blade.php,resources/js/lib/fecha.ts | .ai/rules/lib.md |
 | app/Models/Area.php,database/migrations/*areas*.php,app/Servicios/ServicioImportacionColaboradores.php | .ai/rules/migrations-servicios.md |
 | app/{Servicios/ServicioCuentaColaborador.php,Http/Controllers/CuentaColaboradorController.php,Models/User.php,Models/Colaborador.php},database/migrations/*permisos*.php,app/Soporte/Permisos.php | .ai/rules/migrations-soporte.md |
@@ -50,6 +53,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Soporte/Permisos.php,database/seeders/RolesPermisosSeeder.php,app/Policies/** | .ai/rules/policies.md |
 | app/Http/Controllers/Auth/VerificarCorreoController.php,app/Providers/AppServiceProvider.php,bootstrap/app.php,lang/es.json | .ai/rules/providers.md |
 | app/Acciones/RegistrarUnidadesActivo.php,app/Soporte/NormalizadorNombre.php,resources/views/reportes/etiquetas_unidades.blade.php | .ai/rules/reportes.md |
+| app/{Enums/{FinalidadCustodia,TipoReserva}.php,Servicios/ServicioCustodiaColaborador.php,Acciones/{RedistribuirCustodia,CrearEntregaUniforme}.php,Http/Requests/Entregas/GuardarEntregaRequest.php,Http/Controllers/{EntregaController,MisActivosController}.php} | .ai/rules/requests-entregas-controllers.md |
 | app/Servicios/ServicioEvidencias.php,app/Models/Evidencia.php,app/Acciones/CrearEntregaUniforme.php,app/Acciones/RegistrarDevolucion.php,app/Http/Requests/Entregas/GuardarIdentidadEntregaRequest.php | .ai/rules/requests-entregas.md |
 | app/Http/Controllers/ServicioController.php,app/Acciones/AsignarColaboradoresServicio.php,app/Http/Requests/Servicios/AsignarColaboradoresServicioRequest.php | .ai/rules/requests-servicios.md |
 | app/Models/BitacoraAuditoria.php,app/Servicios/ServicioAuditoria.php,app/Http/Controllers/BitacoraController.php | .ai/rules/servicios-http-controllers.md |
@@ -58,4 +62,5 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Http/Controllers/{Almacen,TipoActivo,Sucursal,Area,Activo}Controller.php,app/Soporte/ServicioGeneradorCodigos*.php | .ai/rules/soporte.md |
 | tests/** | .ai/rules/tests.md |
 | resources/js/pages/**, resources/js/components/**, resources/js/components/AppLogoIcon.vue,public/favicon.svg,public/favicon.ico,public/apple-touch-icon.png | .ai/rules/ux.md |
+| resources/js/pages/Entregas/Crear.vue,app/Acciones/ConfirmarAcuseRecepcion.php,resources/views/acuses/comprobante.blade.php | .ai/rules/views-acuses.md |
 | app/Http/Controllers/InventarioFisicoController.php,app/Servicios/ServicioResumenInventarioFisico.php,resources/views/reportes/inventario-fisico-acta.blade.php | .ai/rules/views-reportes.md |

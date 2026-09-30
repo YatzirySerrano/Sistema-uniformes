@@ -3,6 +3,7 @@
 namespace App\Acciones;
 
 use App\Enums\EstadoEntrega;
+use App\Enums\FinalidadCustodia;
 use App\Enums\TipoControlActivo;
 use App\Enums\TipoMovimiento;
 use App\Enums\TipoReserva;
@@ -49,9 +50,9 @@ class CrearEntregaUniforme
     ) {}
 
     /**
-     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string}>  $activos
-     * @param  array<int, array{unidad_activo_id: int|string}>  $unidades
-     * @param  array<int, array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>}>  $conjuntos
+     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string, finalidad?: string|null, bolsa?: string|null}>  $activos
+     * @param  array<int, array{unidad_activo_id: int|string, finalidad?: string|null}>  $unidades
+     * @param  array<int, array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>, finalidad?: string|null, finalidades?: array<int|string, string|null>}>  $conjuntos
      * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias  claves "activo:{i}" / "unidad:{i}" referidas a los índices de $activos / $unidades
      */
     public function ejecutar(
@@ -131,7 +132,7 @@ class CrearEntregaUniforme
             $unidadesUsadas = [];
 
             foreach ($activosConsolidados as $item) {
-                $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, $item['activo_id'], $item['talla_id'], $item['cantidad']);
+                $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, $item['activo_id'], $item['talla_id'], $item['cantidad'], finalidad: $item['finalidad']);
             }
 
             foreach ($activosConEvidencia as $i => $fila) {
@@ -140,7 +141,7 @@ class CrearEntregaUniforme
                     continue;
                 }
                 $tallaId = ($fila['talla_id'] ?? null) !== null ? (int) $fila['talla_id'] : null;
-                $detalle = $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, (int) $fila['activo_id'], $tallaId, $cantidad);
+                $detalle = $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, (int) $fila['activo_id'], $tallaId, $cantidad, finalidad: FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? '')));
                 $this->evidenciasSvc->adjuntar($detalle, $evidencias["activo:{$i}"], $encargadoId);
             }
 
@@ -154,7 +155,7 @@ class CrearEntregaUniforme
 
                 $unidad = $this->unidadesActivo->bloquearYVerificarEntregable($unidadId);
                 $this->validarUnidadParaEntrega($unidad, $empresaId, $almacen->getKey());
-                $detalle = $this->registrarComponenteUnidad($entrega, $sucursalId, $encargadoId, $unidad);
+                $detalle = $this->registrarComponenteUnidad($entrega, $sucursalId, $encargadoId, $unidad, finalidad: FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? '')));
                 if (isset($evidencias["unidad:{$i}"])) {
                     $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $encargadoId);
                 }
@@ -184,7 +185,7 @@ class CrearEntregaUniforme
         });
     }
 
-    private function registrarComponenteCantidad(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, int $activoId, ?int $tallaId, int $cantidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null): DetalleEntrega
+    private function registrarComponenteCantidad(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, int $activoId, ?int $tallaId, int $cantidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null, ?FinalidadCustodia $finalidad = null): DetalleEntrega
     {
         $activo = Activo::query()->where('empresa_id', $empresaId)->where('tipo_control', TipoControlActivo::Cantidad)->where('activo', true)
             ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a esta empresa o ya no está disponible.'));
@@ -198,6 +199,7 @@ class CrearEntregaUniforme
             'activo_id' => $activo->id,
             'talla_id' => $tallaId,
             'cantidad' => $cantidad,
+            'finalidad' => $finalidad,
             'activo_nombre_snapshot' => $activo->nombre,
             'talla_valor_snapshot' => $tallaValor,
             'conjunto_id' => $conjuntoId,
@@ -236,13 +238,14 @@ class CrearEntregaUniforme
         return $detalle;
     }
 
-    private function registrarComponenteUnidad(EntregaUniforme $entrega, int $sucursalId, int $encargadoId, UnidadActivo $unidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null): DetalleEntrega
+    private function registrarComponenteUnidad(EntregaUniforme $entrega, int $sucursalId, int $encargadoId, UnidadActivo $unidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null, ?FinalidadCustodia $finalidad = null): DetalleEntrega
     {
         $detalle = $entrega->detalles()->create([
             'activo_id' => $unidad->activo_id,
             'talla_id' => null,
             'unidad_activo_id' => $unidad->id,
             'cantidad' => 1,
+            'finalidad' => $finalidad,
             'activo_nombre_snapshot' => $unidad->activo->nombre,
             'talla_valor_snapshot' => null,
             'conjunto_id' => $conjuntoId,
@@ -266,7 +269,7 @@ class CrearEntregaUniforme
     }
 
     /**
-     * @param  array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>}  $fila
+     * @param  array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>, finalidad?: string|null, finalidades?: array<int|string, string|null>}  $fila
      * @param  array<int, int>  $unidadesUsadas
      */
     private function expandirConjunto(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, array $fila, array &$unidadesUsadas): void
@@ -276,6 +279,10 @@ class CrearEntregaUniforme
 
         $cantidadConjuntos = (int) $fila['cantidad'];
         $variantesElegidas = $fila['variantes'] ?? [];
+        // Finalidad del conjunto, con excepción opcional por componente (p. ej.
+        // la laptop del kit de uso personal y las camisas para repartir).
+        $finalidadConjunto = FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? ''));
+        $finalidadesPorComponente = is_array($fila['finalidades'] ?? null) ? $fila['finalidades'] : [];
 
         // Se pasa SIEMPRE el mapa de variantes elegidas (aunque venga vacío):
         // activa el modo "Entrega" de `Conjunto::disponibilidad()`, que nunca
@@ -292,8 +299,10 @@ class CrearEntregaUniforme
 
             $tallaId = Conjunto::resolverTallaComponente($componente, $variantesElegidas);
 
+            $finalidad = FinalidadCustodia::tryFrom((string) ($finalidadesPorComponente[$componente->id] ?? '')) ?? $finalidadConjunto;
+
             if ($activo->tipo_control === TipoControlActivo::Cantidad) {
-                $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacenId, $encargadoId, $activo->id, $tallaId, $cantidadNecesaria, $conjunto->id, $conjunto->nombre);
+                $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacenId, $encargadoId, $activo->id, $tallaId, $cantidadNecesaria, $conjunto->id, $conjunto->nombre, $finalidad);
 
                 continue;
             }
@@ -301,7 +310,7 @@ class CrearEntregaUniforme
             $reservadas = $this->unidadesActivo->reservarDisponibles($activo->id, $almacenId, $cantidadNecesaria, $unidadesUsadas);
 
             foreach ($reservadas as $unidad) {
-                $this->registrarComponenteUnidad($entrega, $sucursalId, $encargadoId, $unidad, $conjunto->id, $conjunto->nombre);
+                $this->registrarComponenteUnidad($entrega, $sucursalId, $encargadoId, $unidad, $conjunto->id, $conjunto->nombre, $finalidad);
                 $unidadesUsadas[] = $unidad->id;
             }
         }
@@ -311,8 +320,8 @@ class CrearEntregaUniforme
      * Suma cantidades de activos sueltos repetidos (mismo activo + talla) y
      * descarta los de cantidad no positiva.
      *
-     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string}>  $activos
-     * @return array<int, array{activo_id: int, talla_id: int|null, cantidad: int}>
+     * @param  array<int, array{activo_id: int|string, talla_id?: int|string|null, cantidad: int|string, finalidad?: string|null, bolsa?: string|null}>  $activos
+     * @return array<int, array{activo_id: int, talla_id: int|null, cantidad: int, finalidad: FinalidadCustodia|null}>
      */
     private function consolidarActivos(array $activos): array
     {
@@ -326,8 +335,11 @@ class CrearEntregaUniforme
             }
 
             $tallaId = ($item['talla_id'] ?? null) !== null ? (int) $item['talla_id'] : null;
-            $clave = $item['activo_id'].'-'.($tallaId ?? '0');
-            $mapa[$clave] ??= ['activo_id' => (int) $item['activo_id'], 'talla_id' => $tallaId, 'cantidad' => 0];
+            $finalidad = FinalidadCustodia::tryFrom((string) ($item['finalidad'] ?? ''));
+            // Renglones con distinta finalidad NO se funden: cada intención
+            // queda en su propio DetalleEntrega.
+            $clave = $item['activo_id'].'-'.($tallaId ?? '0').'-'.($finalidad === null ? '' : $finalidad->value);
+            $mapa[$clave] ??= ['activo_id' => (int) $item['activo_id'], 'talla_id' => $tallaId, 'cantidad' => 0, 'finalidad' => $finalidad];
             $mapa[$clave]['cantidad'] += $cantidad;
         }
 

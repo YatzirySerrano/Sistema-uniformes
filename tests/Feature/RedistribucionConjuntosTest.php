@@ -69,14 +69,14 @@ beforeEach(function () {
         ...($this->firmas)(),
         'colaborador_id' => $this->yatziri->id,
         'almacen_id' => $this->datos['almacenA']->id,
-        'conjuntos' => [['conjunto_id' => $this->kit->id, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => $this->kit->id, 'cantidad' => 1, 'finalidad' => 'redistribucion']],
     ])->assertSessionHasNoErrors();
 
     $this->redistribuirKit = fn (array $extra = []) => $this->actingAs($this->redistribuidor)->post('/entregas', [
         ...($this->firmas)(),
         'origen' => 'custodia',
         'colaborador_id' => $this->juan->id,
-        'conjuntos' => [['conjunto_id' => $this->kit->id, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => $this->kit->id, 'cantidad' => 1, 'finalidad' => 'redistribucion']],
         ...$extra,
     ]);
 

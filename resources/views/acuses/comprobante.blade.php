@@ -48,8 +48,9 @@
         </table>
     </div>
 
-    <p>Comprobante de entrega y recepción de uniformes. El colaborador declara haber recibido a
-    su entera satisfacción las prendas descritas en este documento.</p>
+    <p>Comprobante de entrega y recepción de activos y/o uniformes. El colaborador declara haber
+    recibido a su entera satisfacción los bienes descritos en este documento, con la finalidad
+    indicada en cada renglón cuando aplica.</p>
 
     <div class="caja">
         <table class="datos">
@@ -88,25 +89,29 @@
 
     @php($itemsCantidad = collect($snapshot['items'] ?? [])->reject(fn ($i) => isset($i['unidad'])))
     @php($itemsUnidad = collect($snapshot['items'] ?? [])->filter(fn ($i) => isset($i['unidad'])))
+    {{-- Sólo los snapshots firmados desde que existe la finalidad traen la clave: los históricos se ven igual que siempre. --}}
+    @php($conFinalidad = collect($snapshot['items'] ?? [])->contains(fn ($i) => array_key_exists('finalidad', $i)))
+    @php($etiquetaFinalidad = fn ($i) => \App\Enums\FinalidadCustodia::etiquetaDe(\App\Enums\FinalidadCustodia::tryFrom((string) ($i['finalidad'] ?? ''))))
 
     @if ($itemsCantidad->isNotEmpty())
         <h2>Activos por cantidad</h2>
         <table class="items">
             <thead>
-                <tr><th>Activo</th><th>Talla / Variante</th><th style="text-align:right">Cantidad</th></tr>
+                <tr><th>Activo</th><th>Talla / Variante</th>@if ($conFinalidad)<th>Finalidad</th>@endif<th style="text-align:right">Cantidad</th></tr>
             </thead>
             <tbody>
                 @foreach ($snapshot['items'] ?? [] as $item)
                     @continue(isset($item['unidad']))
                     @php($imgs = $evidenciasPorItem[$loop->index] ?? [])
                     <tr>
-                        <td>{{ $item['activo'] ?? $item['prenda'] ?? '' }}</td>
+                        <td>{{ $item['activo'] ?? $item['prenda'] ?? '' }}@if (! empty($item['conjunto']))<br><span class="muted">Parte del conjunto: {{ $item['conjunto'] }}</span>@endif</td>
                         <td>{{ $item['talla'] }}</td>
+                        @if ($conFinalidad)<td>{{ $etiquetaFinalidad($item) }}</td>@endif
                         <td style="text-align:right">{{ $item['cantidad'] }}</td>
                     </tr>
                     @if (!empty($imgs))
                         <tr class="evidencia-fila">
-                            <td colspan="3">
+                            <td colspan="{{ $conFinalidad ? 4 : 3 }}">
                                 <strong style="font-size:9px; color:#64748b">Evidencia fotográfica:</strong><br>
                                 @foreach ($imgs as $img)
                                     @if ($img)
@@ -122,7 +127,7 @@
             </tbody>
             <tfoot>
                 <tr>
-                    <th colspan="2" style="text-align:right">Total de prendas</th>
+                    <th colspan="{{ $conFinalidad ? 3 : 2 }}" style="text-align:right">Total de piezas</th>
                     <th style="text-align:right">{{ $itemsCantidad->sum('cantidad') }}</th>
                 </tr>
             </tfoot>
@@ -133,7 +138,7 @@
         <h2>Unidades de seguimiento individual</h2>
         <table class="items">
             <thead>
-                <tr><th>Código</th><th>Activo</th><th>Datos técnicos</th></tr>
+                <tr><th>Código</th><th>Activo</th>@if ($conFinalidad)<th>Finalidad</th>@endif<th>Datos técnicos</th></tr>
             </thead>
             <tbody>
                 @foreach ($snapshot['items'] ?? [] as $item)
@@ -141,7 +146,8 @@
                     @php($imgs = $evidenciasPorItem[$loop->index] ?? [])
                     <tr>
                         <td>{{ $item['unidad']['codigo'] ?? '' }}</td>
-                        <td>{{ $item['activo'] ?? '' }}</td>
+                        <td>{{ $item['activo'] ?? '' }}@if (! empty($item['conjunto']))<br><span class="muted">Parte del conjunto: {{ $item['conjunto'] }}</span>@endif</td>
+                        @if ($conFinalidad)<td>{{ $etiquetaFinalidad($item) }}</td>@endif
                         <td class="datos-equipo">
                             @foreach ($item['unidad']['datos_equipo'] ?? [] as $dato)
                                 {{ $dato['etiqueta'] }}: {{ $dato['valor'] }}<br>
@@ -150,7 +156,7 @@
                     </tr>
                     @if (!empty($imgs))
                         <tr class="evidencia-fila">
-                            <td colspan="3">
+                            <td colspan="{{ $conFinalidad ? 4 : 3 }}">
                                 <strong style="font-size:9px; color:#64748b">Evidencia fotográfica:</strong><br>
                                 @foreach ($imgs as $img)
                                     @if ($img)
