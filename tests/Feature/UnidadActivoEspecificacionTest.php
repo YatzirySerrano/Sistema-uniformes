@@ -228,6 +228,7 @@ it('alta HTTP de un Activo Celular con 2 unidades exige y guarda los datos por u
     // Falta el modelo de la unidad 2 → error inline por fila.
     $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id,
             'nombre' => 'Celular Corporativo',
             'tipo_control' => 'individual',
@@ -244,6 +245,7 @@ it('alta HTTP de un Activo Celular con 2 unidades exige y guarda los datos por u
     // Datos completos → alta OK con una especificación por unidad.
     $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id,
             'nombre' => 'Celular Corporativo',
             'tipo_control' => 'individual',

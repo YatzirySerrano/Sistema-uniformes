@@ -4,6 +4,7 @@ namespace App\Acciones;
 
 use App\Models\AcuseDevolucion;
 use App\Models\Devolucion;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -58,12 +59,13 @@ class RegistrarDevolucionFirmada
         ?string $userAgent,
         array $evidencias = [],
         ?string $reservaToken = null,
+        ?UploadedFile $archivoFirmaColaborador = null,
     ): AcuseDevolucion {
         /** @var array{devolucion: Devolucion, acuse: AcuseDevolucion} $resultado */
         $resultado = DB::transaction(function () use (
             $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor,
             $motivo, $notas, $evidencias,
-            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken,
+            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $archivoFirmaColaborador,
         ): array {
             $devolucion = $this->registrarDevolucion->crearYRegistrar(
                 $entregaId, $almacenId, $fecha, $activos, $unidades, $registradaPor, $motivo, $notas, $evidencias, $reservaToken,
@@ -77,6 +79,7 @@ class RegistrarDevolucionFirmada
                 $registradaPor,
                 $ip,
                 $userAgent,
+                $archivoFirmaColaborador,
             );
 
             return ['devolucion' => $devolucion, 'acuse' => $acuse];

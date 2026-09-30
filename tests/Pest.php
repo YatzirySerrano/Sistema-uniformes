@@ -3,11 +3,13 @@
 use App\Enums\CategoriaDocumentoExpediente;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\CategoriaActivo;
 use App\Models\Colaborador;
 use App\Models\DocumentoExpediente;
 use App\Models\Empresa;
 use App\Models\Sucursal;
 use App\Models\Talla;
+use App\Models\TipoActivo;
 use App\Models\User;
 use Database\Seeders\RolesPermisosSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -398,4 +400,25 @@ function subirIdentificacion(TestCase $test, User $admin, int $colaboradorId, st
     ])->assertRedirect();
 
     return DocumentoExpediente::query()->where('colaborador_id', $colaboradorId)->latest('id')->firstOrFail();
+}
+
+/**
+ * Tipo + categoría (obligatorios en el alta/edición de un Activo) para los
+ * payloads de prueba. Si se pasa una categoría, se respeta su tipo ligado;
+ * si no tiene tipo, se crea uno cualquiera (compatible por definición).
+ * Los tests que necesitan otro tipo o categoría concretos los sobrescriben
+ * después del spread.
+ *
+ * @return array{tipo_activo_id: int, categoria_id: int}
+ */
+function clasificacionActivo(?CategoriaActivo $categoria = null): array
+{
+    // Por defecto, categoría SIN tipo ligado: es compatible con cualquier
+    // `tipo_activo_id` que el test sobrescriba después.
+    $categoria ??= CategoriaActivo::factory()->create();
+
+    return [
+        'tipo_activo_id' => $categoria->tipo_activo_id ?? TipoActivo::factory()->create()->id,
+        'categoria_id' => $categoria->id,
+    ];
 }

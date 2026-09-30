@@ -6,12 +6,14 @@ Before planning or editing, find the row whose globs match the file's path and r
 | --- | --- |
 | app/{Acciones/{IniciarCambioServicio,GuardarDecisionesCambioServicio,CompletarCambioServicio,CancelarCambioServicio,CambiarServicioColaborador}.php,Servicios/ServicioCambioServicio.php,Models/CambioServicio*.php,Http/Controllers/CambioServicioController.php} | .ai/rules/acciones-controllers.md |
 | resources/js/pages/Inventario/Movimientos.vue,resources/js/pages/Entregas/Crear.vue,app/Policies/EntregaUniformePolicy.php,app/Acciones/CorregirEntrega.php | .ai/rules/acciones.md |
+| app/Http/Requests/Activos/GuardarActivoRequest.php,resources/js/pages/Activos/Formulario.vue,app/Http/Controllers/CategoriaActivoController.php | .ai/rules/activos-http-controllers.md |
 | app/Servicios/ServicioDistribucionActivo.php,app/Servicios/ServicioEstadoInventario.php,resources/js/components/sistema/DistribucionActualActivo.vue,resources/js/pages/Activos/Detalle.vue | .ai/rules/activos.md |
 | app/Servicios/ServicioEvidencias.php,app/Servicios/ServicioAcusePdf.php,app/Servicios/ServicioAcuseDevolucionPdf.php,resources/views/acuses/comprobante.blade.php,resources/views/acuses/comprobante-devolucion.blade.php | .ai/rules/acuses.md |
 | resources/js/components/almacenes/FormularioAlmacen.vue | .ai/rules/almacenes.md |
 | bootstrap/app.php,app/Providers/AppServiceProvider.php | .ai/rules/bootstrap-providers.md |
 | app/{Servicios/ServicioExpediente.php,Acciones/SubirVersionDocumentoExpediente.php,Http/Requests/Colaboradores/ActualizarDocumentoExpedienteRequest.php,Http/Controllers/DocumentoExpedienteController.php} | .ai/rules/colaboradores-controllers.md |
 | app/{Acciones/CambiarEmpresaColaborador.php,Servicios/ServicioCustodiaColaborador.php,Http/Requests/Colaboradores/CambiarEmpresaColaboradorRequest.php,Acciones/CrearEntregaUniforme.php} | .ai/rules/colaboradores.md |
+| app/Http/Controllers/ColaboradorController.php,resources/js/components/colaboradores/CustodiaPendienteBaja.vue | .ai/rules/components-colaboradores.md |
 | resources/js/pages/auth/Login.vue,resources/js/pages/auth/ConfirmPassword.vue,resources/js/pages/settings/Security.vue,resources/js/components/PasskeyVerify.vue,resources/js/components/ManagePasskeys.vue | .ai/rules/components-js-components.md |
 | resources/js/components/sistema/SubidaArchivo.vue, resources/js/components/sistema/PadFirma.vue | .ai/rules/components-sistema.md |
 | resources/js/pages/**, resources/js/components/** | .ai/rules/components.md |
@@ -26,13 +28,16 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Enums/CondicionDevolucion.php,app/Http/Controllers/DevolucionController.php,app/Http/Requests/Devoluciones/GuardarDevolucionRequest.php,app/Acciones/MarcarCondicionInventario.php | .ai/rules/devoluciones-acciones.md |
 | app/Acciones/RegistrarDevolucionFirmada.php,app/Acciones/ConfirmarAcuseDevolucion.php,app/Acciones/RegistrarDevolucion.php,app/Http/Controllers/DevolucionController.php,resources/js/pages/Devoluciones/Crear.vue | .ai/rules/devoluciones.md |
 | app/{Acciones/RedistribuirCustodia.php,Acciones/RegistrarEntregaFirmada.php,Servicios/ServicioCustodiaColaborador.php,Http/Requests/Entregas/GuardarEntregaRequest.php,Http/Controllers/EntregaController.php,Acciones/CambiarServicioColaborador.php} | .ai/rules/entregas-controllers.md |
+| app/Http/Requests/Entregas/GuardarEntregaRequest.php,resources/js/pages/Entregas/Crear.vue,app/Http/Controllers/EntregaController.php | .ai/rules/entregas-http-controllers.md |
 | app/Models/Conjunto.php,app/Acciones/CrearEntregaUniforme.php,app/Http/Requests/Entregas/GuardarEntregaRequest.php | .ai/rules/entregas.md |
 | app/{Enums/PerfilTecnicoUnidad.php,Soporte/ResolverPerfilTecnicoUnidad.php,Models/UnidadActivoEspecificacion.php} | .ai/rules/enums.md |
 | bootstrap/app.php,app/Soporte/AccesoNoAutorizado.php,resources/js/lib/avisoSinPermiso.ts,resources/js/pages/Errores/SinPermiso.vue | .ai/rules/errores.md |
 | resources/js/pages/Inventario/Traspasos/Crear.vue,app/Http/Requests/Inventario/RegistrarTraspasoRequest.php,app/Acciones/RegistrarTraspasoInventario.php,app/Excepciones/ExistenciasInsuficientesException.php | .ai/rules/excepciones.md |
 | app/Http/Controllers/ReporteController.php,app/Servicios/ServicioReportes.php | .ai/rules/http-controllers-servicios.md |
 | app/Servicios/ServicioImportacion*.php,app/Http/Controllers/Importacion*Controller.php | .ai/rules/http-controllers.md |
+| app/Acciones/CrearRondaInventarioFisico.php,resources/js/pages/InventarioFisico/Crear.vue | .ai/rules/inventario-fisico.md |
 | resources/js/pages/Activos/Detalle.vue,resources/js/pages/Inventario/Index.vue,resources/js/components/sistema/AgregarExistenciasDialog.vue | .ai/rules/inventario-js-components-sistema.md |
+| app/Acciones/RedistribuirCustodia.php,app/Enums/TipoMovimiento.php,app/Enums/DireccionMovimiento.php,app/Servicios/ServicioInventario.php,app/Http/Controllers/MovimientoInventarioController.php,resources/js/pages/Inventario/Movimientos.vue | .ai/rules/inventario.md |
 | resources/js/composables/useVistaPreferida.ts,resources/js/components/sistema/SelectorVista.vue | .ai/rules/js-components-sistema.md |
 | resources/js/pages/auth/Login.vue,resources/js/components/PasskeyVerify.vue | .ai/rules/js-components.md |
 | app/Enums/EstadoVisibleUnidad.php,app/Http/Controllers/UnidadActivoController.php,app/Soporte/PaletaGraficas.php,resources/js/lib/estadoVisibleUnidad.ts,resources/js/composables/useGraficasDashboard.ts | .ai/rules/js-composables.md |
@@ -48,6 +53,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Models/{Empresa,Sucursal,Almacen,Area,Activo,TipoActivo,CategoriaActivo,SaldoInventario,MovimientoInventario,UnidadActivo,SecuenciaCodigo,Conjunto,ConjuntoComponente}.php | .ai/rules/models.md |
 | app/Http/Controllers/{Almacen,Area,Activo,TipoActivo,CategoriaActivo,CatalogoActivo,Talla,Inventario,MovimientoInventario,Conjunto}Controller.php, app/Http/Requests/{Almacenes,Areas,Activos,Conjuntos}/**, app/Http/Requests/Concerns/ResuelveEmpresa.php, app/Soporte/AccesoEmpresa.php, app/Servicios/{ServicioInventario,ResolverAlmacenOperativo}.php, app/Acciones/{RegistrarEntradaInventario,AjustarInventario}.php, app/Models/{Conjunto,ConjuntoComponente}.php, app/Soporte/DescripcionAuditoria.php, app/Acciones/ConfirmarAcuse*.php | .ai/rules/modulos-nuevos.md |
 | app/Acciones/RegistrarEntregaFirmada.php,app/Acciones/ConfirmarAcuseRecepcion.php,app/Http/Controllers/EntregaController.php,app/Http/Requests/Entregas/GuardarEntregaRequest.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/pages-entregas.md |
+| app/Http/Controllers/InventarioController.php,resources/js/pages/Inventario/Index.vue,resources/js/components/sistema/ResumenSeguimientoIndividual.vue | .ai/rules/pages-inventario-js-components-sistema.md |
 | resources/js/pages/**/Detalle.vue, resources/js/pages/**/Index.vue | .ai/rules/pages.md |
 | app/Policies/**,app/Http/Controllers/{Empresa,Sucursal,Colaborador,Almacen,Activo,UnidadActivo,Conjunto,Inventario}Controller.php | .ai/rules/policies-http-controllers.md |
 | app/Soporte/Permisos.php,database/seeders/RolesPermisosSeeder.php,app/Policies/** | .ai/rules/policies.md |
@@ -58,6 +64,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Http/Controllers/ServicioController.php,app/Acciones/AsignarColaboradoresServicio.php,app/Http/Requests/Servicios/AsignarColaboradoresServicioRequest.php | .ai/rules/requests-servicios.md |
 | app/Models/BitacoraAuditoria.php,app/Servicios/ServicioAuditoria.php,app/Http/Controllers/BitacoraController.php | .ai/rules/servicios-http-controllers.md |
 | resources/js/pages/Activos/Formulario.vue,app/Http/Requests/Activos/{GuardarActivoRequest,AgregarExistenciasRequest}.php,app/Servicios/ServicioEtiquetasQr.php | .ai/rules/servicios.md |
+| app/Servicios/ServicioFirmaColaborador.php,app/Soporte/ValidadorFirma.php,app/Acciones/ConfirmarAcuse*.php,app/Http/Requests/Concerns/ValidaFirmaColaborador.php,resources/js/components/sistema/FirmaColaborador.vue,resources/js/components/sistema/PadFirma.vue | .ai/rules/sistema-js-components-sistema.md |
 | app/Http/Controllers/Concerns/ExportaListado.php,app/Exports/ListadoExport.php,resources/views/reportes/listado-generico.blade.php,resources/js/components/sistema/BotonesExportar.vue | .ai/rules/sistema.md |
 | app/Http/Controllers/{Almacen,TipoActivo,Sucursal,Area,Activo}Controller.php,app/Soporte/ServicioGeneradorCodigos*.php | .ai/rules/soporte.md |
 | tests/** | .ai/rules/tests.md |

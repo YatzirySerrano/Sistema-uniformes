@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Acciones\RegistrarTraspasoFirmado;
 use App\Acciones\ReservarInventarioTraspaso;
+use App\Enums\FinalidadCustodia;
 use App\Enums\TipoGrafica;
 use App\Enums\TipoMovimiento;
 use App\Enums\TipoReserva;
@@ -13,6 +14,7 @@ use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Inventario\RegistrarTraspasoRequest;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\InventarioFisico;
@@ -61,6 +63,8 @@ class MovimientoInventarioController extends Controller
 
         $foliosTraspaso = $this->foliosTraspaso($paginador->getCollection());
         $foliosInventarioFisico = $this->foliosInventarioFisico($paginador->getCollection());
+        $foliosDocumentos = $this->foliosDocumentos($paginador->getCollection());
+        $custodias = $this->custodiasReferenciadas($paginador->getCollection());
 
         $movimientos = $paginador->through(fn (MovimientoInventario $m): array => [
             'id' => $m->id,
@@ -68,6 +72,10 @@ class MovimientoInventarioController extends Controller
             'tipo' => $m->tipo->value,
             'tipo_etiqueta' => $m->etiquetaEfectiva(),
             'direccion' => $m->direccion->value,
+            // Eventos de custodia (redistribución): no cambian el stock de
+            // ningún almacén; la UI no muestra Antes/Después para ellos.
+            'afecta_stock' => $m->tipo->afectaStock(),
+            'custodia' => $m->referencia_tipo === DetalleEntrega::class ? ($custodias[$m->referencia_id] ?? null) : null,
             'cantidad' => $m->cantidad,
             'existencia_anterior' => $m->existencia_anterior,
             'existencia_resultante' => $m->existencia_resultante,
@@ -78,7 +86,7 @@ class MovimientoInventarioController extends Controller
             'talla' => $m->talla?->valor,
             'unidad_codigo' => $m->unidadActivo?->codigo,
             'motivo' => $m->motivo,
-            'referencia' => $this->referenciaLegible($m, $foliosTraspaso, $foliosInventarioFisico),
+            'referencia' => $this->referenciaLegible($m, $foliosTraspaso, $foliosInventarioFisico, $foliosDocumentos),
             'realizado_por' => $m->realizadoPor?->name,
             'ocurrido_en' => $m->ocurrido_en->toIso8601String(),
         ]);
@@ -326,6 +334,10 @@ class MovimientoInventarioController extends Controller
                 'ocurrido_en' => $encontrado->ocurrido_en->toIso8601String(),
                 'referencia' => $this->referenciaDetalle($encontrado, $request->user()),
                 'colaborador' => $this->colaboradorDelMovimiento($encontrado),
+                'afecta_stock' => $encontrado->tipo->afectaStock(),
+                'custodia' => $encontrado->referencia_tipo === DetalleEntrega::class
+                    ? ($this->custodiasReferenciadas(collect([$encontrado]))[$encontrado->referencia_id] ?? null)
+                    : null,
             ],
         ]);
     }
@@ -351,6 +363,15 @@ class MovimientoInventarioController extends Controller
 
         if ($m->referencia_tipo === EntregaUniforme::class) {
             $entrega = EntregaUniforme::query()->find($m->referencia_id);
+
+            return $entrega === null ? ['etiqueta' => null, 'url' => null] : [
+                'etiqueta' => "Entrega {$entrega->folio}",
+                'url' => $usuario->can('view', $entrega) ? route('entregas.show', $entrega) : null,
+            ];
+        }
+
+        if ($m->referencia_tipo === DetalleEntrega::class) {
+            $entrega = DetalleEntrega::query()->find($m->referencia_id)?->entrega;
 
             return $entrega === null ? ['etiqueta' => null, 'url' => null] : [
                 'etiqueta' => "Entrega {$entrega->folio}",
@@ -400,6 +421,10 @@ class MovimientoInventarioController extends Controller
 
         if ($m->referencia_tipo === Devolucion::class) {
             return Devolucion::query()->find($m->referencia_id)?->colaborador?->nombre_completo;
+        }
+
+        if ($m->referencia_tipo === DetalleEntrega::class) {
+            return DetalleEntrega::query()->find($m->referencia_id)?->entrega?->colaborador?->nombre_completo;
         }
 
         return null;
@@ -648,8 +673,8 @@ class MovimientoInventarioController extends Controller
             $m->etiquetaEfectiva(),
             $m->direccion->value,
             $m->cantidad,
-            $m->existencia_anterior,
-            $m->existencia_resultante,
+            $m->tipo->afectaStock() ? $m->existencia_anterior : 'No aplica',
+            $m->tipo->afectaStock() ? $m->existencia_resultante : 'No aplica',
             $m->almacen?->nombre,
             $m->sucursal?->nombre,
             $m->activo?->nombre,
@@ -772,13 +797,85 @@ class MovimientoInventarioController extends Controller
     }
 
     /**
+     * Folios de las entregas / devoluciones referenciadas en una página de
+     * movimientos (una consulta por tipo de documento, sin N+1).
+     *
+     * @param  Collection<int, MovimientoInventario>  $movimientos
+     * @return array<string, string> clave "{clase}:{id}"
+     */
+    private function foliosDocumentos(Collection $movimientos): array
+    {
+        $folios = [];
+
+        foreach ([EntregaUniforme::class, Devolucion::class] as $clase) {
+            $ids = $movimientos->where('referencia_tipo', $clase)->pluck('referencia_id')->filter()->unique()->all();
+
+            if ($ids === []) {
+                continue;
+            }
+
+            foreach ($clase::query()->whereIn('id', $ids)->pluck('folio', 'id') as $id => $folio) {
+                $folios["{$clase}:{$id}"] = (string) $folio;
+            }
+        }
+
+        return $folios;
+    }
+
+    /**
+     * Datos de custodia de los movimientos de REDISTRIBUCIÓN de una página,
+     * reconstruidos desde su renglón de entrega (fuente de verdad, nunca
+     * duplicada en el movimiento): custodio origen → destino, folio,
+     * finalidad con la que lo tenía el origen y con la que lo recibe el
+     * destinatario. Una consulta con eager loading para toda la página.
+     *
+     * @param  Collection<int, MovimientoInventario>  $movimientos
+     * @return array<int, array{entrega_id: int, folio: string|null, origen: string|null, destino: string|null, finalidad_origen: string, finalidad_destino: string}>
+     */
+    private function custodiasReferenciadas(Collection $movimientos): array
+    {
+        $ids = $movimientos->where('referencia_tipo', DetalleEntrega::class)->pluck('referencia_id')->filter()->unique()->all();
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return DetalleEntrega::query()
+            ->whereIn('id', $ids)
+            ->with([
+                'entrega:id,folio,colaborador_id,colaborador_origen_id',
+                'entrega.colaborador:id,nombre_completo',
+                'entrega.colaboradorOrigen:id,nombre_completo',
+                'detalleOrigen:id,finalidad',
+            ])
+            ->get()
+            ->mapWithKeys(fn (DetalleEntrega $d): array => [$d->id => [
+                'entrega_id' => $d->entrega_uniforme_id,
+                'folio' => $d->entrega?->folio,
+                'origen' => $d->entrega?->colaboradorOrigen?->nombre_completo,
+                'destino' => $d->entrega?->colaborador?->nombre_completo,
+                'finalidad_origen' => FinalidadCustodia::etiquetaDe($d->detalleOrigen?->finalidad),
+                'finalidad_destino' => FinalidadCustodia::etiquetaDe($d->finalidad),
+            ]])
+            ->all();
+    }
+
+    /**
      * Etiqueta legible de la referencia de un movimiento para las cards.
      *
      * @param  array<int, string>  $foliosTraspaso
      * @param  array<int, string>  $foliosInventarioFisico
+     * @param  array<string, string>  $foliosDocumentos
      */
-    private function referenciaLegible(MovimientoInventario $m, array $foliosTraspaso, array $foliosInventarioFisico): ?string
+    private function referenciaLegible(MovimientoInventario $m, array $foliosTraspaso, array $foliosInventarioFisico, array $foliosDocumentos = []): ?string
     {
+        if ($m->referencia_tipo === EntregaUniforme::class || $m->referencia_tipo === Devolucion::class) {
+            $folio = $foliosDocumentos["{$m->referencia_tipo}:{$m->referencia_id}"] ?? null;
+            $nombre = $m->referencia_tipo === EntregaUniforme::class ? 'Entrega' : 'Devolución';
+
+            return $folio !== null ? "{$nombre} {$folio}" : null;
+        }
+
         if ($m->referencia_tipo === TraspasoInventario::class) {
             $folio = $foliosTraspaso[$m->referencia_id] ?? null;
 

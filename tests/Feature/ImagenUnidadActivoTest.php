@@ -35,6 +35,7 @@ it('una unidad sin foto sigue funcionando con normalidad', function () {
 
 it('el alta múltiple asocia cada foto EXACTAMENTE a su unidad por índice, nunca cruzadas', function () {
     $this->actingAs($this->admin)->post('/activos', [
+        ...clasificacionActivo(),
         'empresa_id' => $this->empresa->id,
         'nombre' => 'Radio portátil',
         'tipo_control' => 'individual',
@@ -77,6 +78,7 @@ it('MIME inválido (contenido real no es imagen) es rechazado aunque el nombre/e
 it('un error a mitad del alta múltiple no deja fotos huérfanas en disco (la del índice 0 se limpia aunque el índice 1 falle)', function () {
     $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id,
             'nombre' => 'Taladro',
             'tipo_control' => 'individual',

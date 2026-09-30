@@ -72,11 +72,12 @@ class ColaboradorPolicy
     /**
      * Consultar la custodia pendiente del colaborador antes de moverlo:
      * la necesita tanto quien lo transfiere de empresa como quien le cambia
-     * el servicio (misma fuente, `ServicioCustodiaColaborador`).
+     * el servicio, y quien lo da de baja (la custodia debe estar en cero) —
+     * misma fuente, `ServicioCustodiaColaborador`.
      */
     public function consultarCustodia(User $user, Colaborador $colaborador): bool
     {
-        return $this->cambiarEmpresa($user, $colaborador) || $this->update($user, $colaborador);
+        return $this->cambiarEmpresa($user, $colaborador) || $this->update($user, $colaborador) || $this->desactivar($user, $colaborador);
     }
 
     public function desactivar(User $user, Colaborador $colaborador): bool

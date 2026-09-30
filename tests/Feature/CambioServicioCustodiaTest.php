@@ -88,8 +88,8 @@ beforeEach(function () {
         ...($this->firmas)(),
         'colaborador_id' => $this->yatziri->id,
         'almacen_id' => $this->datos['almacenA']->id,
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 6]],
-        'unidades' => [['unidad_activo_id' => $this->laptop->id], ['unidad_activo_id' => $this->microondas->id], ['unidad_activo_id' => $this->radio->id]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 6, 'finalidad' => 'uso_personal']],
+        'unidades' => [['unidad_activo_id' => $this->laptop->id, 'finalidad' => 'uso_personal'], ['unidad_activo_id' => $this->microondas->id, 'finalidad' => 'uso_personal'], ['unidad_activo_id' => $this->radio->id, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
     $this->entregaOriginal = EntregaUniforme::sole();
 
@@ -191,8 +191,8 @@ it('resuelve mantener, devolver y redistribuir por cantidades parciales y por un
         'colaborador_id' => $this->carolina->id,
         // Custodia "sin clasificar" (entregada sin finalidad): dentro de la
         // revisión se puede tomar de la bolsa personal sin permiso extra.
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'bolsa' => 'personal']],
-        'unidades' => [['unidad_activo_id' => $this->microondas->id]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'bolsa' => 'personal', 'finalidad' => 'uso_personal']],
+        'unidades' => [['unidad_activo_id' => $this->microondas->id, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors()->assertRedirect("/cambios-servicio/{$cambio->id}");
 
     expect(($this->stock)())->toBe(16);

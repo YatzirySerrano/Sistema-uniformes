@@ -7,6 +7,7 @@ use App\Acciones\CambiarServicioColaborador;
 use App\Acciones\RegistrarIncidenciaCustodia;
 use App\Enums\TipoGrafica;
 use App\Enums\TipoIncidenciaCustodia;
+use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Colaboradores\ActualizarFotoColaboradorRequest;
@@ -35,6 +36,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -645,11 +647,34 @@ class ColaboradorController extends Controller
         return back()->with('toast', ['type' => 'success', 'message' => 'Foto actualizada.']);
     }
 
-    public function toggle(Colaborador $colaborador): RedirectResponse
+    /**
+     * Eliminar (desactivar) / restaurar. Desactivar exige custodia pendiente
+     * en CERO — misma regla estricta que "Transferir a otra empresa"
+     * (`ServicioCustodiaColaborador::tienePendientes`: unidades asignadas y
+     * renglones por cantidad de cualquier finalidad, incluidos los "sin
+     * clasificar" y los componentes de conjuntos). Aquí no existe "mantener
+     * conmigo": un colaborador inactivo deja de ser custodio operativo y sus
+     * bienes quedarían sin responsable. Se re-chequea con el colaborador
+     * bloqueado (mismo candado que `CrearEntregaUniforme`), así una entrega
+     * en curso y la baja se serializan.
+     */
+    public function toggle(Colaborador $colaborador, ServicioCustodiaColaborador $custodia): RedirectResponse
     {
         $this->authorize('desactivar', $colaborador);
 
-        $colaborador->update(['activo' => ! $colaborador->activo]);
+        $colaborador = DB::transaction(function () use ($colaborador, $custodia): Colaborador {
+            $bloqueado = Colaborador::query()->whereKey($colaborador->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($bloqueado->activo && $custodia->tienePendientes($bloqueado)) {
+                throw new ExcepcionDeNegocioSimple(
+                    'Este colaborador todavía tiene activos bajo custodia. Registra las devoluciones antes de continuar.'
+                );
+            }
+
+            $bloqueado->update(['activo' => ! $bloqueado->activo]);
+
+            return $bloqueado;
+        });
 
         $this->auditoria->registrar('colaboradores', $colaborador->activo ? 'activar' : 'desactivar', [
             'tipo_entidad' => Colaborador::class, 'entidad_id' => $colaborador->id, 'empresa_id' => $colaborador->empresa_id,

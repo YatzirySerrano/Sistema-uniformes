@@ -15,10 +15,12 @@ use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioAcuseDevolucionPdf;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioFirmaColaborador;
 use App\Servicios\ServicioFolios;
 use App\Servicios\ServicioInventario;
 use App\Servicios\ServicioUnidadesActivo;
 use App\Soporte\ValidadorFirma;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -51,6 +53,7 @@ class ConfirmarAcuseDevolucion
 
     public function __construct(
         private readonly ValidadorFirma $validadorFirma,
+        private readonly ServicioFirmaColaborador $firmaColaborador,
         private readonly ServicioFolios $folios,
         private readonly ServicioAcuseDevolucionPdf $pdf,
         private readonly ServicioAuditoria $auditoria,
@@ -95,6 +98,7 @@ class ConfirmarAcuseDevolucion
         ?int $usuarioOperadorId,
         ?string $ip,
         ?string $userAgent,
+        ?UploadedFile $archivoFirmaColaborador = null,
     ): AcuseDevolucion {
         if ($devolucion->estado !== EstadoDevolucion::PendienteFirma) {
             throw new ExcepcionDeNegocioSimple('Esta devolución ya fue confirmada.');
@@ -108,7 +112,8 @@ class ConfirmarAcuseDevolucion
             throw new ExcepcionDeNegocioSimple('Debes confirmar que aceptas la responsabilidad antes de firmar.');
         }
 
-        $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
+        // Operador primero (sólo valida, no escribe): si su firma es inválida
+        // no queda ningún archivo del colaborador escrito.
         $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
         $devolucion->loadMissing([
@@ -120,18 +125,21 @@ class ConfirmarAcuseDevolucion
 
         $snapshot = $this->construirSnapshot($devolucion);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-        $hashFirmaColaborador = hash('sha256', $firmaColaborador['binario']);
         $hashFirmaOperador = hash('sha256', $firmaOperador['binario']);
 
-        $rutaFirmaColaborador = sprintf('firmas/%d/%s.png', $devolucion->empresa_id, Str::uuid());
+        // Firma de quien firma como colaborador: dibujada o archivo subido
+        // (firma a distancia) — ver `ServicioFirmaColaborador`.
+        $firmaPreparada = $this->firmaColaborador->preparar($firmaColaboradorBase64, $archivoFirmaColaborador, $devolucion->empresa_id);
+        $rutaFirmaColaborador = $firmaPreparada['ruta_firma'];
+        $hashFirmaColaborador = $firmaPreparada['hash_firma'];
+
         $rutaFirmaOperador = sprintf('firmas/%d/%s.png', $devolucion->empresa_id, Str::uuid());
-        Storage::disk('local')->put($rutaFirmaColaborador, $firmaColaborador['binario']);
         Storage::disk('local')->put($rutaFirmaOperador, $firmaOperador['binario']);
 
         try {
             $acuse = DB::transaction(function () use (
                 $devolucion, $snapshot, $hashDocumento, $hashFirmaColaborador, $hashFirmaOperador,
-                $rutaFirmaColaborador, $rutaFirmaOperador, $usuarioOperadorId, $ip, $userAgent,
+                $rutaFirmaColaborador, $rutaFirmaOperador, $usuarioOperadorId, $ip, $userAgent, $firmaPreparada,
             ): AcuseDevolucion {
                 // Recarga con bloqueo para evitar doble confirmación concurrente.
                 $bloqueada = Devolucion::query()->whereKey($devolucion->getKey())->lockForUpdate()->first();
@@ -230,18 +238,22 @@ class ConfirmarAcuseDevolucion
                     'confirmada_en' => now(),
                 ]);
 
+                $this->firmaColaborador->adjuntar($acuse, $firmaPreparada, $usuarioOperadorId);
+
                 $this->auditoria->registrar('devoluciones', 'confirmar', [
                     'tipo_entidad' => AcuseDevolucion::class,
                     'entidad_id' => $acuse->getKey(),
                     'empresa_id' => $devolucion->empresa_id,
                     'sucursal_id' => $devolucion->sucursal_id,
                     'descripcion' => 'Acuse '.$acuse->folio.' firmado (colaborador y encargado) para la devolución '.$devolucion->folio,
+                    'valores_nuevos' => ['firma_colaborador' => $this->firmaColaborador->descripcionMetodo($firmaPreparada)],
                 ]);
 
                 return $acuse;
             });
         } catch (Throwable $e) {
-            Storage::disk('local')->delete([$rutaFirmaColaborador, $rutaFirmaOperador]);
+            Storage::disk('local')->delete([$rutaFirmaOperador]);
+            $this->firmaColaborador->descartar($firmaPreparada);
 
             throw $e;
         }

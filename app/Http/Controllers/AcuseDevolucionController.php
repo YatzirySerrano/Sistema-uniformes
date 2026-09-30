@@ -118,8 +118,12 @@ class AcuseDevolucionController extends Controller
 
         abort_unless(Storage::disk('local')->exists($acuse->ruta_firma), 404);
 
-        return Storage::disk('local')->response($acuse->ruta_firma, 'firma-'.$acuse->folio.'.png', [
-            'Content-Type' => 'image/png',
+        // Firma a distancia por PDF: `ruta_firma` ES el documento subido.
+        $esPdf = $acuse->firmaArchivo?->esPdf() ?? false;
+
+        return Storage::disk('local')->response($acuse->ruta_firma, 'firma-'.$acuse->folio.($esPdf ? '.pdf' : '.png'), [
+            'Content-Type' => $esPdf ? 'application/pdf' : 'image/png',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 

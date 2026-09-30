@@ -4,13 +4,21 @@ import { ArrowLeft } from '@lucide/vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { fechaHora } from '@/lib/fecha';
+import {
+    claseCambio,
+    etiquetaDireccion,
+    textoCambio,
+} from '@/lib/movimientoInventario';
+import type { CustodiaMovimiento } from '@/lib/movimientoInventario';
 
 defineProps<{
     movimiento: {
         id: number;
         tipo: string;
         tipo_etiqueta: string;
-        direccion: 'entrada' | 'salida';
+        direccion: 'entrada' | 'salida' | 'sin_efecto';
+        afecta_stock: boolean;
+        custodia: CustodiaMovimiento | null;
         cantidad: number;
         existencia_anterior: number;
         existencia_resultante: number;
@@ -65,26 +73,19 @@ function fecha(iso: string): string {
                         :variant="
                             movimiento.direccion === 'entrada'
                                 ? 'default'
-                                : 'secondary'
+                                : movimiento.direccion === 'salida'
+                                  ? 'secondary'
+                                  : 'outline'
                         "
                     >
-                        {{
-                            movimiento.direccion === 'entrada'
-                                ? 'Entrada'
-                                : 'Salida'
-                        }}
+                        {{ etiquetaDireccion(movimiento.direccion) }}
                     </Badge>
                 </div>
                 <span
                     class="text-lg font-semibold whitespace-nowrap"
-                    :class="
-                        movimiento.direccion === 'entrada'
-                            ? 'text-emerald-600'
-                            : 'text-rose-600'
-                    "
+                    :class="claseCambio(movimiento.direccion)"
                 >
-                    {{ movimiento.direccion === 'entrada' ? '+' : '−'
-                    }}{{ movimiento.cantidad }}
+                    {{ textoCambio(movimiento.direccion, movimiento.cantidad) }}
                 </span>
             </div>
 
@@ -128,7 +129,7 @@ function fecha(iso: string): string {
                         >
                     </dd>
                 </div>
-                <div>
+                <div v-if="movimiento.afecta_stock">
                     <dt class="text-muted-foreground text-xs">
                         Existencia antes → después
                     </dt>
@@ -137,6 +138,40 @@ function fecha(iso: string): string {
                         {{ movimiento.existencia_resultante }}
                     </dd>
                 </div>
+                <div v-else>
+                    <dt class="text-muted-foreground text-xs">
+                        Existencia del almacén
+                    </dt>
+                    <dd>No cambia: sólo cambió quién tiene el bien.</dd>
+                </div>
+                <template v-if="movimiento.custodia">
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Custodio de origen
+                        </dt>
+                        <dd>
+                            {{ movimiento.custodia.origen ?? '—' }}
+                            <span class="text-muted-foreground text-xs"
+                                >·
+                                {{ movimiento.custodia.finalidad_origen }}</span
+                            >
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-muted-foreground text-xs">
+                            Custodio de destino
+                        </dt>
+                        <dd>
+                            {{ movimiento.custodia.destino ?? '—' }}
+                            <span class="text-muted-foreground text-xs"
+                                >·
+                                {{
+                                    movimiento.custodia.finalidad_destino
+                                }}</span
+                            >
+                        </dd>
+                    </div>
+                </template>
                 <div>
                     <dt class="text-muted-foreground text-xs">Realizó</dt>
                     <dd>{{ movimiento.realizado_por ?? '—' }}</dd>

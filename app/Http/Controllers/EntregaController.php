@@ -436,11 +436,13 @@ class EntregaController extends Controller
         $termino = Str::lower(trim((string) $request->query('q', '')));
         $control = $request->query('control') === 'individual' ? 'individual' : 'cantidad';
 
-        // Una opción por activo Y bolsa ("para redistribuir" / "uso personal o
-        // sin clasificar"): nunca se mezclan en un mismo renglón. `id` es
-        // sintético y único; `activo_id` es el real que se envía al guardar.
-        $opcion = fn (int $activoId, string $bolsa, array $datos): array => [
-            'id' => $activoId * 2 + ($bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL ? 1 : 0),
+        // Una opción por activo + VARIANTE + bolsa ("para redistribuir" / "uso
+        // personal o sin clasificar"): el mismo activo en dos bolsas (o dos
+        // tallas) aparece como opciones distintas y autoexplicativas — nunca
+        // "Pantalón" dos veces sin decir cuál es cuál. `id` es sintético y
+        // único; `activo_id` es el real que se envía al guardar.
+        $opcion = fn (int $activoId, string $bolsa, ?int $tallaId, array $datos): array => [
+            'id' => (($activoId * 1_000_000) + ($tallaId ?? 0)) * 2 + ($bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL ? 1 : 0),
             'activo_id' => $activoId,
             'bolsa' => $bolsa,
             'bolsa_etiqueta' => $bolsa === ServicioCustodiaColaborador::BOLSA_PERSONAL ? 'Uso personal / sin clasificar' : 'Para redistribuir',
@@ -455,7 +457,7 @@ class EntregaController extends Controller
                 ->with('activo:id,nombre,codigo')
                 ->get()
                 ->groupBy(fn (UnidadActivo $u): string => $u->activo_id.'-'.$custodia->bolsaDeUnidad($u))
-                ->map(fn (Collection $grupo, string $clave): array => $opcion((int) $grupo->first()->activo_id, explode('-', $clave, 2)[1], [
+                ->map(fn (Collection $grupo, string $clave): array => $opcion((int) $grupo->first()->activo_id, explode('-', $clave, 2)[1], null, [
                     'nombre' => $grupo->first()->activo->nombre,
                     'codigo' => $grupo->first()->activo->codigo,
                     'control' => 'individual',
@@ -464,30 +466,28 @@ class EntregaController extends Controller
                     'disponible' => $grupo->count(),
                 ]));
         } else {
+            // `talla_fija`: la variante ya viene decidida por la opción (el
+            // renglón no vuelve a pedir talla). `tallas` conserva la forma
+            // de siempre (una sola) para el resto del formulario.
             $activos = collect($custodia->cantidadesRedistribuibles($custodio, $incluirPersonales))
-                ->groupBy(fn (array $f): string => $f['activo_id'].'-'.$f['bolsa'])
-                ->map(function (Collection $grupo) use ($opcion): array {
-                    $conVariante = $grupo->filter(fn (array $f): bool => $f['talla_id'] !== null);
-                    $sinVariante = $grupo->first(fn (array $f): bool => $f['talla_id'] === null);
-
-                    return $opcion((int) $grupo->first()['activo_id'], (string) $grupo->first()['bolsa'], [
-                        'nombre' => $grupo->first()['activo'],
-                        'control' => 'cantidad',
-                        'usa_variantes' => $conVariante->isNotEmpty(),
-                        'tallas' => $conVariante->map(fn (array $f): array => [
-                            'id' => (int) $f['talla_id'],
-                            'valor' => (string) $f['talla'],
-                            'disponible' => $f['disponible'],
-                        ])->values()->all(),
-                        'disponible' => $sinVariante['disponible'] ?? 0,
-                    ]);
-                });
+                ->map(fn (array $f): array => $opcion((int) $f['activo_id'], (string) $f['bolsa'], $f['talla_id'], [
+                    'nombre' => $f['activo'],
+                    'control' => 'cantidad',
+                    'usa_variantes' => $f['talla_id'] !== null,
+                    'talla_fija' => $f['talla_id'] === null ? null : ['id' => (int) $f['talla_id'], 'valor' => (string) $f['talla']],
+                    'tallas' => $f['talla_id'] === null ? [] : [[
+                        'id' => (int) $f['talla_id'],
+                        'valor' => (string) $f['talla'],
+                        'disponible' => $f['disponible'],
+                    ]],
+                    'disponible' => $f['disponible'],
+                ]));
         }
 
         $resultado = $activos
             ->when($termino !== '', fn (Collection $c) => $c->filter(fn (array $a): bool => str_contains(Str::lower($a['nombre'].' '.($a['codigo'] ?? '')), $termino)))
             // Primero lo que es para redistribuir; lo personal después.
-            ->sortBy(fn (array $a): string => ($a['bolsa'] === ServicioCustodiaColaborador::BOLSA_PERSONAL ? '1' : '0').$a['nombre'])
+            ->sortBy(fn (array $a): string => ($a['bolsa'] === ServicioCustodiaColaborador::BOLSA_PERSONAL ? '1' : '0').$a['nombre'].'|'.($a['talla_fija']['valor'] ?? ''))
             ->take(30)
             ->values();
 
@@ -815,7 +815,9 @@ class EntregaController extends Controller
                 // el colaborador no tiene servicio (personal administrativo),
                 // la entrega se registra igual con snapshot nulo.
                 $colaborador->servicio_actual_id,
-                $datos['firma'],
+                // Firma de quien recibe: dibujada (`firma`) o archivo subido
+                // (`firma_archivo`, firma a distancia) — nunca ambas.
+                $request->firmaPorArchivo() ? '' : (string) ($datos['firma'] ?? ''),
                 $datos['firma_operador'],
                 true, // aceptación (validada por la regla `accepted`)
                 $request->ip(),
@@ -824,6 +826,7 @@ class EntregaController extends Controller
                 $custodioOrigenId === null ? ($datos['reserva_token'] ?? null) : null,
                 $custodioOrigenId,
                 $request->incluirPersonales(),
+                $request->firmaPorArchivo() ? $request->file('firma_archivo') : null,
             );
         } catch (Throwable $e) {
             // Falló: se libera la clave para permitir un reintento legítimo y se
@@ -976,6 +979,10 @@ class EntregaController extends Controller
                             'folio' => $hijo->entrega->folio,
                             'colaborador' => $hijo->entrega->colaborador?->nombre_completo,
                             'cantidad' => (int) $hijo->cantidad,
+                            // Cada eslabón se describe solo: variante (por
+                            // cantidad) o código de unidad — nunca mezclados.
+                            'talla' => $hijo->talla_valor_snapshot,
+                            'unidad_codigo' => $hijo->unidad_activo_id === null ? null : $d->unidadActivo?->codigo,
                         ])->values()->all(),
                 ]),
                 'correcciones' => $entrega->correcciones->map(fn ($c): array => [
@@ -990,6 +997,13 @@ class EntregaController extends Controller
                 'folio' => $entrega->acuse->folio,
                 'firmado_en' => $entrega->acuse->firmado_en->toIso8601String(),
                 'tiene_pdf' => $entrega->acuse->tienePdf(),
+                // Cómo firmó quien recibe: dibujada en el pad o archivo subido
+                // (firma a distancia; nombre original y tipo).
+                'firma_metodo' => $entrega->acuse->metodoFirma(),
+                'firma_archivo' => $entrega->acuse->firmaArchivo === null ? null : [
+                    'nombre' => $entrega->acuse->firmaArchivo->nombre_original,
+                    'es_pdf' => $entrega->acuse->firmaArchivo->esPdf(),
+                ],
             ],
             'permisos' => [
                 'firmar' => $request->user()->can('firmar', $entrega),

@@ -21,6 +21,7 @@ use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioFolios;
+use App\Servicios\ServicioInventario;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -55,7 +56,18 @@ class RedistribuirCustodia
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
         private readonly ServicioEvidencias $evidenciasSvc,
+        private readonly ServicioInventario $inventario,
     ) {}
+
+    /**
+     * Deja el renglón en el historial de movimientos como evento de custodia
+     * (sin almacén, sin efecto en stock). La fuente de verdad del traspaso
+     * sigue siendo el `DetalleEntrega` (al que apunta la referencia).
+     */
+    private function registrarEventoCustodia(EntregaUniforme $entrega, DetalleEntrega $detalle): void
+    {
+        $this->inventario->registrarMovimientoCustodia($detalle, $entrega, $this->motivoCustodia, $this->encargadoId);
+    }
 
     /**
      * ¿Esta operación puede tomar de la bolsa de uso personal / sin
@@ -64,6 +76,11 @@ class RedistribuirCustodia
      * formulario).
      */
     private bool $incluirPersonales = false;
+
+    /** Texto del evento de custodia en Movimientos ("ENT-…: A → B"). */
+    private string $motivoCustodia = '';
+
+    private ?int $encargadoId = null;
 
     /**
      * Cada renglón puede indicar de qué BOLSA de la custodia sale (`bolsa`:
@@ -145,6 +162,13 @@ class RedistribuirCustodia
             ]);
 
             $renglonesAuditoria = [];
+            $this->encargadoId = $encargadoId;
+            $this->motivoCustodia = sprintf(
+                'Redistribución %s: %s → %s',
+                $entrega->folio,
+                $custodio->nombre_completo,
+                $destinatario->nombre_completo,
+            );
 
             foreach ($lineasCantidad as $i => $fila) {
                 $tallaId = ($fila['talla_id'] ?? null) !== null && $fila['talla_id'] !== '' ? (int) $fila['talla_id'] : null;
@@ -314,6 +338,8 @@ class RedistribuirCustodia
                 'conjunto_nombre_snapshot' => $conjunto?->nombre,
             ]);
 
+            $this->registrarEventoCustodia($entrega, $creados[array_key_last($creados)]);
+
             $restante -= $tomar;
             if ($restante === 0) {
                 break;
@@ -454,9 +480,11 @@ class RedistribuirCustodia
         ]);
 
         // Sólo cambia QUIÉN la tiene. Sigue `Asignada` y conserva su almacén
-        // de procedencia (al que volvería con una devolución); no hay
-        // movimiento de inventario porque no sale nada de ningún almacén.
+        // de procedencia (al que volvería con una devolución); no sale nada
+        // de ningún almacén: el historial registra un evento de CUSTODIA
+        // (delta de stock = 0), también visible en la ficha de la unidad.
         $unidad->update(['colaborador_id' => $destinatario->getKey()]);
+        $this->registrarEventoCustodia($entrega, $detalle);
 
         return $detalle;
     }

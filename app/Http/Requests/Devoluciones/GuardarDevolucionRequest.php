@@ -4,6 +4,7 @@ namespace App\Http\Requests\Devoluciones;
 
 use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
+use App\Http\Requests\Concerns\ValidaFirmaColaborador;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use Illuminate\Foundation\Http\FormRequest;
@@ -19,6 +20,8 @@ use Illuminate\Validation\Validator;
  */
 class GuardarDevolucionRequest extends FormRequest
 {
+    use ValidaFirmaColaborador;
+
     public function authorize(): bool
     {
         return $this->user()?->can('create', Devolucion::class) ?? false;
@@ -56,7 +59,8 @@ class GuardarDevolucionRequest extends FormRequest
             // Flujo ÚNICO (wizard): la petición trae SIEMPRE las dos firmas
             // manuscritas y la aceptación. La validez del trazo la revalida
             // `ValidadorFirma` dentro de `ConfirmarAcuseDevolucion`.
-            'firma' => ['required', 'string', 'max:3000000'],
+            // Firma de quien devuelve: dibujada o archivo (firma a distancia).
+            ...$this->reglasFirmaColaborador(),
             'firma_operador' => ['required', 'string', 'max:3000000'],
             'aceptacion' => ['accepted'],
             // Token del apartado temporal de custodia armado en el paso 2
@@ -121,7 +125,7 @@ class GuardarDevolucionRequest extends FormRequest
             'almacen_id.required' => 'Selecciona el almacén destino.',
             'almacen_id.exists' => 'El almacén seleccionado no abastece a la empresa de esta entrega.',
             'fecha.before_or_equal' => 'La fecha de devolución no puede ser futura.',
-            'firma.required' => 'Solicita la firma de quien devuelve para continuar.',
+            ...$this->mensajesFirmaColaborador('de quien devuelve'),
             'firma_operador.required' => 'Falta la firma del encargado que recibe la devolución.',
             'aceptacion.accepted' => 'Debes confirmar la aceptación antes de finalizar la devolución.',
             'activos.*.detalle_entrega_id.exists' => 'Ese renglón no pertenece a esta entrega.',

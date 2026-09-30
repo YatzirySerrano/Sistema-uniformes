@@ -10,7 +10,9 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
  * Evidencia fotográfica OPCIONAL de un renglón de entrega o devolución
- * (`evidenciable` → `DetalleEntrega` / `DetalleDevolucion`). El archivo vive
+ * (`evidenciable` → `DetalleEntrega` / `DetalleDevolucion`), o archivo de
+ * firma a distancia de un acuse (`AcuseRecepcion` / `AcuseDevolucion`,
+ * `origen = firma_archivo`). El archivo vive
  * siempre en disco privado; esta fila sólo guarda la referencia y los
  * metadatos verificados en el servidor (mime real, peso, hash). Una vez
  * confirmada la entrega/devolución es contenido histórico: no se borra ni se
@@ -26,7 +28,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property string $extension
  * @property int $peso_bytes
  * @property string $hash_sha256
- * @property string $origen camara | archivo
+ * @property string $origen camara | archivo | firma_archivo
  * @property int|null $subido_por
  */
 class Evidencia extends Model
@@ -37,6 +39,14 @@ class Evidencia extends Model
     public const ORIGEN_CAMARA = 'camara';
 
     public const ORIGEN_ARCHIVO = 'archivo';
+
+    /**
+     * Archivo de FIRMA de quien recibe/devuelve subido a distancia (imagen o
+     * PDF), ligado al acuse (`AcuseRecepcion` / `AcuseDevolucion`). Es el
+     * registro del método "archivo": nombre original, MIME real, peso, hash,
+     * quién lo subió y cuándo.
+     */
+    public const ORIGEN_FIRMA_ARCHIVO = 'firma_archivo';
 
     protected $table = 'evidencias';
 
@@ -67,6 +77,11 @@ class Evidencia extends Model
     public function evidenciable(): MorphTo
     {
         return $this->morphTo();
+    }
+
+    public function esPdf(): bool
+    {
+        return $this->mime === 'application/pdf';
     }
 
     /**

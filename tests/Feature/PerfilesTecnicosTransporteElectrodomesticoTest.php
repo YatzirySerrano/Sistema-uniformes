@@ -32,6 +32,7 @@ beforeEach(function () {
     };
 
     $this->alta = fn (CategoriaActivo $categoria, string $control, array $especificaciones = [], string $nombre = 'Activo') => $this->actingAs($this->admin)->post('/activos', [
+        ...clasificacionActivo($categoria),
         'empresa_id' => $this->empresa->id,
         'nombre' => $nombre,
         'tipo_control' => $control,

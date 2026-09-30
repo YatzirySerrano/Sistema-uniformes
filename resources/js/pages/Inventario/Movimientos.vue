@@ -9,6 +9,7 @@ import {
     Trash2,
     Undo2,
     User,
+    Users,
     Warehouse,
     type LucideIcon,
 } from '@lucide/vue';
@@ -17,6 +18,8 @@ import BotonesExportar from '@/components/sistema/BotonesExportar.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
 import { Button } from '@/components/ui/button';
 import { fechaHora } from '@/lib/fecha';
+import { claseCambio, textoCambio } from '@/lib/movimientoInventario';
+import type { CustodiaMovimiento } from '@/lib/movimientoInventario';
 import DatePicker from '@/components/sistema/DatePicker.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
@@ -31,6 +34,9 @@ type Movimiento = {
     tipo: string;
     tipo_etiqueta: string;
     direccion: string;
+    /** false = evento de custodia: no cambia el stock de ningún almacén. */
+    afecta_stock: boolean;
+    custodia: CustodiaMovimiento | null;
     cantidad: number;
     existencia_anterior: number;
     existencia_resultante: number;
@@ -61,6 +67,7 @@ const ICONOS_TIPO: Record<string, LucideIcon> = {
     incidencia: AlertTriangle,
     traspaso_entrada: ArrowLeftRight,
     traspaso_salida: ArrowLeftRight,
+    redistribucion_custodia: Users,
 };
 
 function iconoTipo(tipo: string): LucideIcon {
@@ -236,14 +243,9 @@ const vista = useVistaPreferida('movimientos', 'tabla');
                     </span>
                     <span
                         class="font-semibold whitespace-nowrap"
-                        :class="
-                            m.direccion === 'entrada'
-                                ? 'text-emerald-600'
-                                : 'text-rose-600'
-                        "
+                        :class="claseCambio(m.direccion)"
                     >
-                        {{ m.direccion === 'entrada' ? '+' : '−'
-                        }}{{ m.cantidad }}
+                        {{ textoCambio(m.direccion, m.cantidad) }}
                     </span>
                 </div>
                 <p>
@@ -259,6 +261,29 @@ const vista = useVistaPreferida('movimientos', 'tabla');
                     >
                 </p>
                 <div
+                    v-if="m.custodia"
+                    class="bg-muted/40 grid gap-0.5 rounded-lg px-2 py-1.5 text-xs"
+                >
+                    <p>
+                        <span class="text-muted-foreground">De:</span>
+                        {{ m.custodia.origen ?? '—' }}
+                        <span class="text-muted-foreground"
+                            >({{ m.custodia.finalidad_origen }})</span
+                        >
+                    </p>
+                    <p>
+                        <span class="text-muted-foreground">A:</span>
+                        {{ m.custodia.destino ?? '—' }}
+                        <span class="text-muted-foreground"
+                            >({{ m.custodia.finalidad_destino }})</span
+                        >
+                    </p>
+                    <p class="text-muted-foreground">
+                        No afecta las existencias del almacén.
+                    </p>
+                </div>
+                <div
+                    v-else
                     class="bg-muted/40 grid grid-cols-2 divide-x rounded-lg text-center"
                 >
                     <div class="px-2 py-1.5">
@@ -324,7 +349,15 @@ const vista = useVistaPreferida('movimientos', 'tabla');
                         >
                             {{ fecha(m.ocurrido_en) }}
                         </td>
-                        <td class="px-3 py-2">{{ m.tipo_etiqueta }}</td>
+                        <td class="px-3 py-2">
+                            {{ m.tipo_etiqueta }}
+                            <span
+                                v-if="m.custodia"
+                                class="text-muted-foreground block text-xs"
+                                >{{ m.custodia.origen ?? '—' }} →
+                                {{ m.custodia.destino ?? '—' }}</span
+                            >
+                        </td>
                         <td class="px-3 py-2">
                             {{ m.almacen ?? '—' }}
                             <span
@@ -341,18 +374,16 @@ const vista = useVistaPreferida('movimientos', 'tabla');
                         </td>
                         <td
                             class="px-3 py-2 text-right font-medium"
-                            :class="
-                                m.direccion === 'entrada'
-                                    ? 'text-emerald-600'
-                                    : 'text-rose-600'
-                            "
+                            :class="claseCambio(m.direccion)"
                         >
-                            {{ m.direccion === 'entrada' ? '+' : '−'
-                            }}{{ m.cantidad }}
+                            {{ textoCambio(m.direccion, m.cantidad) }}
                         </td>
                         <td class="text-muted-foreground px-3 py-2 text-right">
-                            {{ m.existencia_anterior }} →
-                            {{ m.existencia_resultante }}
+                            <template v-if="m.afecta_stock">
+                                {{ m.existencia_anterior }} →
+                                {{ m.existencia_resultante }}
+                            </template>
+                            <span v-else class="text-xs">No aplica</span>
                         </td>
                         <td class="text-muted-foreground px-3 py-2">
                             {{ m.realizado_por ?? '—' }}

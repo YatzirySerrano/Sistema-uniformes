@@ -8,14 +8,20 @@ use App\Acciones\MarcarCondicionInventario;
 use App\Acciones\RegistrarEntradaInventario;
 use App\Acciones\RestaurarCondicionInventario;
 use App\Enums\CondicionDevolucion;
+use App\Enums\CondicionUnidadActivo;
+use App\Enums\EstadoUnidadActivo;
+use App\Enums\EstadoVisibleUnidad;
 use App\Enums\TipoControlActivo;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Activos\RegistrarEntradaInventarioRequest;
+use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\CategoriaActivo;
+use App\Models\Empresa;
 use App\Models\SaldoInventario;
 use App\Models\TipoActivo;
+use App\Models\UnidadActivo;
 use App\Servicios\ServicioInventario;
 use App\Soporte\ContextoExportacion;
 use Illuminate\Database\Eloquent\Builder;
@@ -56,8 +62,28 @@ class InventarioController extends Controller
         $usuario = $request->user();
         $idsScope = $this->idsScopeInventario($request);
 
+        // Seguimiento individual: sus unidades NUNCA viven en
+        // `saldos_inventario` (cada pieza es una fila de `unidades_activo`),
+        // así que se resumen aparte — una fila por empresa + almacén + activo
+        // con el desglose por estado. El detalle pieza por pieza sigue en
+        // Unidades ("Ver unidades").
+        $consultaIndividuales = $this->consultaIndividuales($request, $filtros);
+        $individuales = null;
+        if ($consultaIndividuales !== null) {
+            $paginaIndividuales = $consultaIndividuales
+                ->paginate($this->porPagina(), pageName: 'pagina_individual')
+                ->withQueryString();
+            // Desglose de TODA la página en una consulta; luego cada grupo
+            // toma su fila por clave (sin N+1).
+            $filasIndividuales = $this->filasIndividuales($paginaIndividuales->getCollection());
+            $individuales = $paginaIndividuales->through(
+                fn (UnidadActivo $g): array => $filasIndividuales[self::claveIndividual($g->empresa_id, $g->almacen_id, $g->activo_id)],
+            );
+        }
+
         return Inertia::render('Inventario/Index', [
             'saldos' => $saldos,
+            'individuales' => $individuales,
             'filtros' => [...$filtros, 'empresa_id' => $empresaFiltro?->id],
             'empresasAutorizadas' => $this->opcionesEmpresas($request),
             'almacenes' => $idsScope
@@ -90,6 +116,10 @@ class InventarioController extends Controller
 
         $filtros = $this->filtrosListado($request);
         $empresaFiltro = $this->empresaDelFiltro($request);
+
+        if (($filtros['control'] ?? null) === TipoControlActivo::SeguimientoIndividual->value) {
+            return $this->exportarIndividuales($request, $filtros, $empresaFiltro);
+        }
 
         $saldos = $this->consultaSaldos($request, $filtros)
             ->orderBy('empresa_id')
@@ -129,11 +159,8 @@ class InventarioController extends Controller
             'Categoría' => ($filtros['categoria_id'] ?? null)
                 ? CategoriaActivo::query()->whereKey($filtros['categoria_id'])->value('nombre')
                 : null,
-            'Control' => match ($filtros['control'] ?? null) {
-                'cantidad' => 'Por cantidad',
-                'individual' => 'Seguimiento individual',
-                default => null,
-            },
+            // «Seguimiento individual» se exporta aparte (`exportarIndividuales`).
+            'Control' => ($filtros['control'] ?? null) === 'cantidad' ? 'Por cantidad' : null,
             'Estado' => match ($filtros['estado_stock'] ?? null) {
                 'bajo_minimo' => 'Bajo mínimo',
                 'sin_stock' => 'Sin stock',
@@ -147,6 +174,157 @@ class InventarioController extends Controller
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Empresa', 'Almacén', 'Activo', 'Código', 'Tipo', 'Categoría', 'Variante', 'Control', 'Existencia', 'Mínimo', 'Estado',
         ], $contexto);
+    }
+
+    /**
+     * Excel/PDF del resumen de seguimiento individual (filtro «Seguimiento
+     * individual»): misma consulta que la sección de la pantalla.
+     *
+     * @param  array<string, mixed>  $filtros
+     */
+    private function exportarIndividuales(Request $request, array $filtros, ?Empresa $empresaFiltro): BinaryFileResponse|HttpResponse
+    {
+        $consulta = $this->consultaIndividuales($request, $filtros);
+        $filas = $consulta === null ? [] : array_values($this->filasIndividuales($consulta->get()));
+
+        $contexto = new ContextoExportacion(
+            'Existencias globales — seguimiento individual',
+            $empresaFiltro,
+            array_filter(['Control' => 'Seguimiento individual', 'Búsqueda' => $filtros['buscar'] ?? null]),
+            count($filas),
+            generadoPor: $request->user()?->name,
+        );
+
+        return $this->respuestaExportacion($request->input('formato', 'xlsx'), array_map(fn (array $f): array => [
+            $f['empresa'], $f['almacen'], $f['activo'], $f['activo_codigo'], $f['total'],
+            $f['estados']['disponible'], $f['estados']['asignado'], $f['estados']['reparacion'], $f['estados']['inservible'],
+            $f['estados']['perdido'], $f['estados']['robado'], $f['estados']['baja'],
+        ], $filas), [
+            'Empresa', 'Almacén de procedencia', 'Activo', 'Código', 'Total de unidades', 'En almacén (disponibles)', 'Asignadas',
+            'En reparación', 'Inservibles', 'Perdidas', 'Robadas', 'Baja',
+        ], $contexto);
+    }
+
+    /**
+     * Resumen de activos de SEGUIMIENTO INDIVIDUAL: una fila por empresa +
+     * almacén + activo (el almacén es el de procedencia de la unidad; una
+     * asignada conserva el almacén del que salió). Respeta el mismo alcance
+     * y filtros que `consultaSaldos()`. `null` cuando los filtros excluyen
+     * por definición a los activos individuales (control por cantidad,
+     * variante concreta o «bajo mínimo», que no aplica a unidades).
+     *
+     * @param  array<string, mixed>  $filtros
+     * @return Builder<UnidadActivo>|null
+     */
+    private function consultaIndividuales(Request $request, array $filtros): ?Builder
+    {
+        if (($filtros['control'] ?? null) === TipoControlActivo::Cantidad->value
+            || ($filtros['talla_id'] ?? null)
+            || ($filtros['estado_stock'] ?? null) === 'bajo_minimo') {
+            return null;
+        }
+
+        $usuario = $request->user();
+        $idsScope = $this->idsScopeInventario($request);
+        $almacenesVisibles = $idsScope
+            ->flatMap(fn (int $id): array => $this->acceso()->almacenesAutorizados($usuario, $id)->pluck('id')->all())
+            ->unique()->values();
+
+        $disponible = "(estado = '".EstadoUnidadActivo::EnAlmacen->value."' and condicion = '".CondicionUnidadActivo::Funcionando->value."')";
+
+        return UnidadActivo::query()
+            ->whereIn('empresa_id', $idsScope)
+            ->whereIn('almacen_id', $almacenesVisibles)
+            ->whereHas('activo', fn (Builder $a) => $a->where('tipo_control', TipoControlActivo::SeguimientoIndividual->value))
+            ->when($filtros['buscar'] ?? null, function (Builder $q, string $texto): void {
+                $q->where(function (Builder $sub) use ($texto): void {
+                    $sub->whereHas('activo', function (Builder $a) use ($texto): void {
+                        $a->where('nombre', 'like', "%{$texto}%")
+                            ->orWhere('codigo', 'like', "%{$texto}%")
+                            ->orWhere('categoria', 'like', "%{$texto}%")
+                            ->orWhereHas('tipoActivo', fn (Builder $t) => $t->where('nombre', 'like', "%{$texto}%"))
+                            ->orWhereHas('categoriaActivo', fn (Builder $c) => $c->where('nombre', 'like', "%{$texto}%"));
+                    })->orWhereHas('almacen', fn (Builder $al) => $al->where('nombre', 'like', "%{$texto}%")->orWhere('codigo', 'like', "%{$texto}%"));
+                });
+            })
+            ->when($filtros['almacen_id'] ?? null, fn (Builder $q, $v) => $q->where('almacen_id', $v))
+            ->when($filtros['activo_id'] ?? null, fn (Builder $q, $v) => $q->where('activo_id', $v))
+            ->when($filtros['tipo_activo_id'] ?? null, fn (Builder $q, $v) => $q->whereHas('activo', fn (Builder $a) => $a->where('tipo_activo_id', $v)))
+            ->when($filtros['categoria_id'] ?? null, fn (Builder $q, $v) => $q->whereHas('activo', fn (Builder $a) => $a->where('categoria_id', $v)))
+            ->select(['empresa_id', 'almacen_id', 'activo_id'])
+            ->selectRaw('count(*) as total')
+            ->groupBy('empresa_id', 'almacen_id', 'activo_id')
+            ->when(($filtros['estado_stock'] ?? null) === 'sin_stock', fn (Builder $q) => $q->havingRaw("sum(case when {$disponible} then 1 else 0 end) = 0"))
+            ->when(($filtros['estado_stock'] ?? null) === 'con_stock', fn (Builder $q) => $q->havingRaw("sum(case when {$disponible} then 1 else 0 end) > 0"))
+            ->orderBy('empresa_id')
+            ->orderBy('almacen_id')
+            ->orderBy('activo_id');
+    }
+
+    /**
+     * Arma las filas del resumen individual para una página de grupos
+     * (empresa + almacén + activo). El desglose por estado se resuelve con
+     * `EstadoVisibleUnidad::resolver()` — la MISMA regla que el listado de
+     * Unidades, nunca una segunda interpretación — en UNA consulta agrupada
+     * por estado + condición para toda la página (sin N+1).
+     *
+     * @param  Collection<int, UnidadActivo>  $grupos
+     * @return array<string, array{empresa_id: int, empresa: string|null, almacen_id: int, almacen: string|null, activo_id: int, activo: string|null, activo_codigo: string|null, total: int, estados: array<string, int>}> por clave empresa-almacén-activo
+     */
+    private function filasIndividuales(Collection $grupos): array
+    {
+        if ($grupos->isEmpty()) {
+            return [];
+        }
+
+        $clave = self::claveIndividual(...);
+
+        $desglose = [];
+        UnidadActivo::query()
+            ->whereIn('empresa_id', $grupos->pluck('empresa_id')->unique()->all())
+            ->whereIn('almacen_id', $grupos->pluck('almacen_id')->unique()->all())
+            ->whereIn('activo_id', $grupos->pluck('activo_id')->unique()->all())
+            ->select(['empresa_id', 'almacen_id', 'activo_id', 'estado', 'condicion'])
+            ->selectRaw('count(*) as total')
+            ->groupBy('empresa_id', 'almacen_id', 'activo_id', 'estado', 'condicion')
+            ->get()
+            ->each(function (UnidadActivo $fila) use (&$desglose, $clave): void {
+                $visible = EstadoVisibleUnidad::resolver($fila->estado, $fila->condicion)->value;
+                $k = $clave($fila->empresa_id, $fila->almacen_id, $fila->activo_id);
+                $desglose[$k][$visible] = ($desglose[$k][$visible] ?? 0) + (int) $fila->getAttribute('total');
+            });
+
+        $empresas = Empresa::query()->whereIn('id', $grupos->pluck('empresa_id')->unique())->get(['id', 'nombre_comercial'])->keyBy('id');
+        $almacenes = Almacen::query()->whereIn('id', $grupos->pluck('almacen_id')->unique())->get(['id', 'nombre'])->keyBy('id');
+        $activos = Activo::query()->whereIn('id', $grupos->pluck('activo_id')->unique())->get(['id', 'nombre', 'codigo'])->keyBy('id');
+
+        $filas = [];
+        foreach ($grupos as $g) {
+            $k = $clave($g->empresa_id, $g->almacen_id, $g->activo_id);
+            $estados = [];
+            foreach (EstadoVisibleUnidad::cases() as $caso) {
+                $estados[$caso->value] = $desglose[$k][$caso->value] ?? 0;
+            }
+
+            $filas[$k] = [
+                'empresa_id' => $g->empresa_id,
+                'empresa' => $empresas->get($g->empresa_id)?->nombre_comercial,
+                'almacen_id' => $g->almacen_id,
+                'almacen' => $almacenes->get($g->almacen_id)?->nombre,
+                'activo_id' => $g->activo_id,
+                'activo' => $activos->get($g->activo_id)?->nombre,
+                'activo_codigo' => $activos->get($g->activo_id)?->codigo,
+                'total' => (int) $g->getAttribute('total'),
+                'estados' => $estados,
+            ];
+        }
+
+        return $filas;
+    }
+
+    private static function claveIndividual(int $empresaId, int $almacenId, int $activoId): string
+    {
+        return "{$empresaId}-{$almacenId}-{$activoId}";
     }
 
     /**

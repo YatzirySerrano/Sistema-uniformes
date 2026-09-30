@@ -12,8 +12,10 @@ use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Servicios\ServicioAcusePdf;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioFirmaColaborador;
 use App\Servicios\ServicioFolios;
 use App\Soporte\ValidadorFirma;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -53,6 +55,7 @@ class ConfirmarAcuseRecepcion
 
     public function __construct(
         private readonly ValidadorFirma $validadorFirma,
+        private readonly ServicioFirmaColaborador $firmaColaborador,
         private readonly ServicioFolios $folios,
         private readonly ServicioAcusePdf $pdf,
         private readonly ServicioAuditoria $auditoria,
@@ -90,6 +93,7 @@ class ConfirmarAcuseRecepcion
         ?int $usuarioOperadorId,
         ?string $ip,
         ?string $userAgent,
+        ?UploadedFile $archivoFirmaColaborador = null,
     ): AcuseRecepcion {
         if ($entrega->estado !== EstadoEntrega::PendienteFirma) {
             throw EntregaYaFirmadaException::crear();
@@ -103,7 +107,8 @@ class ConfirmarAcuseRecepcion
             throw new ExcepcionDeNegocioSimple('Debes confirmar que aceptas la responsabilidad antes de firmar.');
         }
 
-        $firmaColaborador = $this->validadorFirma->validar($firmaColaboradorBase64);
+        // Operador primero (sólo valida, no escribe): si su firma es inválida
+        // no queda ningún archivo del colaborador escrito.
         $firmaOperador = $this->validadorFirma->validar($firmaOperadorBase64);
 
         $entrega->loadMissing([
@@ -115,18 +120,21 @@ class ConfirmarAcuseRecepcion
 
         $snapshot = $this->construirSnapshot($entrega);
         $hashDocumento = hash('sha256', json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
-        $hashFirmaColaborador = hash('sha256', $firmaColaborador['binario']);
         $hashFirmaOperador = hash('sha256', $firmaOperador['binario']);
 
-        $rutaFirmaColaborador = sprintf('firmas/%d/%s.png', $entrega->empresa_id, Str::uuid());
+        // Firma de quien firma como colaborador: dibujada o archivo subido
+        // (firma a distancia) — ver `ServicioFirmaColaborador`.
+        $firmaPreparada = $this->firmaColaborador->preparar($firmaColaboradorBase64, $archivoFirmaColaborador, $entrega->empresa_id);
+        $rutaFirmaColaborador = $firmaPreparada['ruta_firma'];
+        $hashFirmaColaborador = $firmaPreparada['hash_firma'];
+
         $rutaFirmaOperador = sprintf('firmas/%d/%s.png', $entrega->empresa_id, Str::uuid());
-        Storage::disk('local')->put($rutaFirmaColaborador, $firmaColaborador['binario']);
         Storage::disk('local')->put($rutaFirmaOperador, $firmaOperador['binario']);
 
         try {
             $acuse = DB::transaction(function () use (
                 $entrega, $snapshot, $hashDocumento, $hashFirmaColaborador, $hashFirmaOperador,
-                $rutaFirmaColaborador, $rutaFirmaOperador, $usuarioOperadorId, $ip, $userAgent,
+                $rutaFirmaColaborador, $rutaFirmaOperador, $usuarioOperadorId, $ip, $userAgent, $firmaPreparada,
             ): AcuseRecepcion {
                 // Recarga con bloqueo para evitar doble firma concurrente.
                 $bloqueada = EntregaUniforme::query()->whereKey($entrega->getKey())->lockForUpdate()->first();
@@ -165,18 +173,22 @@ class ConfirmarAcuseRecepcion
                     'confirmada_en' => now(),
                 ]);
 
+                $this->firmaColaborador->adjuntar($acuse, $firmaPreparada, $usuarioOperadorId);
+
                 $this->auditoria->registrar('acuses', 'firmar', [
                     'tipo_entidad' => AcuseRecepcion::class,
                     'entidad_id' => $acuse->getKey(),
                     'empresa_id' => $entrega->empresa_id,
                     'sucursal_id' => $entrega->sucursal_id,
                     'descripcion' => 'Acuse '.$acuse->folio.' firmado (colaborador y encargado) para la entrega '.$entrega->folio,
+                    'valores_nuevos' => ['firma_colaborador' => $this->firmaColaborador->descripcionMetodo($firmaPreparada)],
                 ]);
 
                 return $acuse;
             });
         } catch (Throwable $e) {
-            Storage::disk('local')->delete([$rutaFirmaColaborador, $rutaFirmaOperador]);
+            Storage::disk('local')->delete([$rutaFirmaOperador]);
+            $this->firmaColaborador->descartar($firmaPreparada);
 
             throw $e;
         }

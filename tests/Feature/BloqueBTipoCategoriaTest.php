@@ -25,45 +25,37 @@ function activoPayload(array $override = []): array
 
 /*
 |--------------------------------------------------------------------------
-| Opcionalidad de tipo y categoría (A–E)
+| Tipo y categoría OBLIGATORIOS (A–C; antes eran opcionales)
 |--------------------------------------------------------------------------
 */
 
-it('A) guarda un activo sin tipo ni categoría', function () {
-    $this->actingAs($this->admin)
+it('A) rechaza un activo sin tipo ni categoría (petición manipulada incluida)', function () {
+    $this->actingAs($this->admin)->from('/activos/crear')
         ->post('/activos', activoPayload())
-        ->assertRedirect('/activos')
-        ->assertSessionHasNoErrors();
+        ->assertSessionHasErrors([
+            'tipo_activo_id' => 'Selecciona el tipo de activo.',
+            'categoria_id' => 'Selecciona la categoría del activo.',
+        ]);
 
-    $activo = Activo::query()->where('nombre', 'Extensión eléctrica 10 m')->first();
-    expect($activo->tipo_activo_id)->toBeNull()
-        ->and($activo->categoria_id)->toBeNull()
-        ->and($activo->categoria)->toBeNull();
+    expect(Activo::query()->where('nombre', 'Extensión eléctrica 10 m')->exists())->toBeFalse();
 });
 
-it('B) guarda un activo sólo con tipo', function () {
+it('B) rechaza un activo sólo con tipo', function () {
     $tipo = TipoActivo::factory()->create(['nombre' => 'Herramienta']);
 
-    $this->actingAs($this->admin)
+    $this->actingAs($this->admin)->from('/activos/crear')
         ->post('/activos', activoPayload(['tipo_activo_id' => $tipo->id]))
-        ->assertRedirect()->assertSessionHasNoErrors();
-
-    $activo = Activo::query()->where('nombre', 'Extensión eléctrica 10 m')->first();
-    expect($activo->tipo_activo_id)->toBe($tipo->id)
-        ->and($activo->categoria_id)->toBeNull();
+        ->assertSessionHasErrors(['categoria_id' => 'Selecciona la categoría del activo.'])
+        ->assertSessionDoesntHaveErrors('tipo_activo_id');
 });
 
-it('C) guarda un activo sólo con categoría', function () {
+it('C) rechaza un activo sólo con categoría', function () {
     $categoria = CategoriaActivo::factory()->create(['nombre' => 'Material promocional']);
 
-    $this->actingAs($this->admin)
+    $this->actingAs($this->admin)->from('/activos/crear')
         ->post('/activos', activoPayload(['categoria_id' => $categoria->id]))
-        ->assertRedirect()->assertSessionHasNoErrors();
-
-    $activo = Activo::query()->where('nombre', 'Extensión eléctrica 10 m')->first();
-    expect($activo->tipo_activo_id)->toBeNull()
-        ->and($activo->categoria_id)->toBe($categoria->id)
-        ->and($activo->categoria)->toBe('Material promocional');
+        ->assertSessionHasErrors(['tipo_activo_id' => 'Selecciona el tipo de activo.'])
+        ->assertSessionDoesntHaveErrors('categoria_id');
 });
 
 it('D) guarda un activo con tipo y categoría coherentes', function () {
@@ -77,16 +69,12 @@ it('D) guarda un activo con tipo y categoría coherentes', function () {
     expect(Activo::query()->where('nombre', 'Extensión eléctrica 10 m')->first()->categoria_id)->toBe($categoria->id);
 });
 
-it('E) un tipo o categoría creados sin relación previa con la empresa se pueden usar (catálogo global)', function () {
+it('E) un tipo y una categoría creados sin relación previa con la empresa se pueden usar (catálogo global)', function () {
     $tipo = TipoActivo::factory()->create();
     $categoria = CategoriaActivo::factory()->create();
 
     $this->actingAs($this->admin)->from('/activos/crear')
-        ->post('/activos', activoPayload(['tipo_activo_id' => $tipo->id]))
-        ->assertSessionHasNoErrors();
-
-    $this->actingAs($this->admin)->from('/activos/crear')
-        ->post('/activos', activoPayload(['nombre' => 'Otro', 'categoria_id' => $categoria->id]))
+        ->post('/activos', activoPayload(['tipo_activo_id' => $tipo->id, 'categoria_id' => $categoria->id]))
         ->assertSessionHasNoErrors();
 });
 

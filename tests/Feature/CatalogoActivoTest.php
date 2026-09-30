@@ -160,6 +160,7 @@ it('al guardar un activo con categoría del catálogo se sincroniza el espejo de
 
     $this->actingAs($admin)
         ->post('/activos', [
+            ...clasificacionActivo($categoria),
             'nombre' => 'Camisola manga larga azul',
             'tipo_control' => 'cantidad',
             'categoria_id' => $categoria->id,

@@ -60,7 +60,7 @@ function reservarEntrega(array $overrides = []): array
 
 function filaActivoA(int $cantidad): array
 {
-    return ['activo_id' => test()->datos['activoA']->id, 'talla_id' => test()->datos['tallaA']->id, 'cantidad' => $cantidad];
+    return ['activo_id' => test()->datos['activoA']->id, 'talla_id' => test()->datos['tallaA']->id, 'cantidad' => $cantidad, 'finalidad' => 'uso_personal'];
 }
 
 it('1. stock 6, usuario A reserva 6: usuario B no puede reservar 1', function () {
@@ -152,7 +152,7 @@ it('7. artículo suelto 6 más un conjunto que consume otras 6 de la misma varia
 
     $resultado = reservarEntrega([
         'activos' => [filaActivoA(6)],
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 6, 'variantes' => []]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 6, 'variantes' => [], 'finalidad' => 'uso_personal']],
     ]);
 
     expect($resultado['ok'])->toBeFalse();
@@ -172,8 +172,8 @@ it('8. dos conjuntos que consumen la misma variante agregan su demanda', functio
 
     $resultado = reservarEntrega([
         'conjuntos' => [
-            ['conjunto_id' => $conjunto->id, 'cantidad' => 2, 'variantes' => []],
-            ['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'variantes' => []],
+            ['conjunto_id' => $conjunto->id, 'cantidad' => 2, 'variantes' => [], 'finalidad' => 'uso_personal'],
+            ['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'variantes' => [], 'finalidad' => 'uso_personal'],
         ],
     ]);
 
@@ -198,8 +198,8 @@ it('10. una unidad individual no puede reservarse por dos borradores', function 
         'estado' => EstadoUnidadActivo::EnAlmacen, 'condicion' => CondicionUnidadActivo::Funcionando,
     ]);
 
-    $resultadoA = reservarEntrega(['unidades' => [['unidad_activo_id' => $unidad->id]]]);
-    $resultadoB = reservarEntrega(['user_id' => $this->otro->id, 'unidades' => [['unidad_activo_id' => $unidad->id]]]);
+    $resultadoA = reservarEntrega(['unidades' => [['unidad_activo_id' => $unidad->id, 'finalidad' => 'uso_personal']]]);
+    $resultadoB = reservarEntrega(['user_id' => $this->otro->id, 'unidades' => [['unidad_activo_id' => $unidad->id, 'finalidad' => 'uso_personal']]]);
 
     expect($resultadoA['ok'])->toBeTrue()
         ->and($resultadoA['lineas_unidad'][0]['ok'])->toBeTrue()

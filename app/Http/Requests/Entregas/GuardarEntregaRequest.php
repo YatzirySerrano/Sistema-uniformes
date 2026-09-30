@@ -6,6 +6,7 @@ use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\FinalidadCustodia;
 use App\Enums\TipoControlActivo;
+use App\Http\Requests\Concerns\ValidaFirmaColaborador;
 use App\Models\Activo;
 use App\Models\CambioServicioColaborador;
 use App\Models\Colaborador;
@@ -42,6 +43,8 @@ use Illuminate\Validation\Validator;
  */
 class GuardarEntregaRequest extends FormRequest
 {
+    use ValidaFirmaColaborador;
+
     public const ORIGEN_ALMACEN = 'almacen';
 
     public const ORIGEN_CUSTODIA = 'custodia';
@@ -132,22 +135,53 @@ class GuardarEntregaRequest extends FormRequest
 
     /**
      * Finalidad de cada renglón para quien RECIBE (uso personal / para
-     * redistribuir). Nullable por compatibilidad: sin ella el renglón queda
-     * "sin clasificar" (el formulario siempre la envía).
+     * redistribuir). OBLIGATORIA en toda entrega nueva (almacén o custodia):
+     * nunca hay un default silencioso. Los renglones HISTÓRICOS con
+     * `finalidad = NULL` ("Sin clasificar") siguen siendo válidos — esta regla
+     * sólo gobierna el alta. La excepción por componente de un conjunto
+     * (`finalidades.*`) es opcional: sin ella aplica la del conjunto.
      *
      * @return array<string, mixed>
      */
     private function reglasFinalidad(): array
     {
-        $finalidad = ['nullable', Rule::enum(FinalidadCustodia::class)];
+        $finalidad = ['required', Rule::enum(FinalidadCustodia::class)];
 
         return [
             'activos.*.finalidad' => $finalidad,
             'unidades.*.finalidad' => $finalidad,
             'conjuntos.*.finalidad' => $finalidad,
             'conjuntos.*.finalidades' => ['nullable', 'array'],
-            'conjuntos.*.finalidades.*' => $finalidad,
+            'conjuntos.*.finalidades.*' => ['nullable', Rule::enum(FinalidadCustodia::class)],
         ];
+    }
+
+    /**
+     * Unidades de seguimiento individual: el renglón puede traer el
+     * `activo_id` elegido en el formulario (el activo "genérico"); la unidad
+     * concreta es obligatoria (`unidad_activo_id` required) y, si viene el
+     * activo, debe pertenecerle — una unidad de otro activo se rechaza.
+     */
+    private function validarUnidadesContraActivo(Validator $validator): void
+    {
+        $filas = is_array($this->input('unidades')) ? $this->input('unidades') : [];
+        $ids = collect($filas)->map(fn ($f) => is_array($f) ? (int) ($f['unidad_activo_id'] ?? 0) : 0)->filter()->unique();
+        $activoDeUnidad = $ids->isEmpty() ? collect() : UnidadActivo::query()->whereIn('id', $ids)->pluck('activo_id', 'id');
+
+        foreach ($filas as $i => $fila) {
+            if (! is_array($fila) || ($fila['activo_id'] ?? '') === '' || ($fila['activo_id'] ?? null) === null) {
+                continue;
+            }
+
+            $unidadId = (int) ($fila['unidad_activo_id'] ?? 0);
+            if ($unidadId === 0 || ! $activoDeUnidad->has($unidadId) || $validator->errors()->has("unidades.{$i}.unidad_activo_id")) {
+                continue;
+            }
+
+            if ((int) $activoDeUnidad[$unidadId] !== (int) $fila['activo_id']) {
+                $validator->errors()->add("unidades.{$i}.unidad_activo_id", 'La unidad seleccionada no corresponde al activo elegido en este renglón.');
+            }
+        }
     }
 
     /**
@@ -192,6 +226,7 @@ class GuardarEntregaRequest extends FormRequest
             'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
 
             'unidades' => ['nullable', 'array'],
+            'unidades.*.activo_id' => ['nullable', 'integer'],
             'unidades.*.unidad_activo_id' => [
                 'required', 'integer', 'distinct',
                 Rule::exists('unidades_activo', 'id')->where(fn ($q) => $q
@@ -237,7 +272,8 @@ class GuardarEntregaRequest extends FormRequest
             'notas' => ['nullable', 'string', 'max:1000'],
 
             // Firmas de AMBAS partes + aceptación: parte inseparable del alta.
-            'firma' => ['required', 'string', 'max:3000000'],
+            // Firma de quien recibe: dibujada o archivo (firma a distancia).
+            ...$this->reglasFirmaColaborador(),
             'firma_operador' => ['required', 'string', 'max:3000000'],
             'aceptacion' => ['accepted'],
             // Idempotencia opcional generada por el formulario: evita que un
@@ -285,6 +321,7 @@ class GuardarEntregaRequest extends FormRequest
             'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
 
             'unidades' => ['nullable', 'array'],
+            'unidades.*.activo_id' => ['nullable', 'integer'],
             'unidades.*.unidad_activo_id' => [
                 'required', 'integer', 'distinct',
                 Rule::exists('unidades_activo', 'id')->where(fn ($q) => $q
@@ -419,6 +456,8 @@ class GuardarEntregaRequest extends FormRequest
      */
     public function withValidator(Validator $validator): void
     {
+        $validator->after(fn (Validator $validator) => $this->validarUnidadesContraActivo($validator));
+
         $validator->after(function (Validator $validator): void {
             $activos = is_array($this->input('activos')) ? $this->input('activos') : [];
             $unidades = is_array($this->input('unidades')) ? $this->input('unidades') : [];
@@ -667,14 +706,20 @@ class GuardarEntregaRequest extends FormRequest
             'almacen_id.required' => 'Selecciona el almacén de origen.',
             'almacen_id.exists' => 'El almacén seleccionado no abastece a la empresa del colaborador.',
             'fecha_entrega.before_or_equal' => 'La fecha de entrega no puede ser futura.',
-            'firma.required' => 'Solicita la firma del colaborador para continuar.',
+            ...$this->mensajesFirmaColaborador('del colaborador'),
             'firma_operador.required' => 'Falta la firma del encargado que realiza la entrega.',
             'aceptacion.accepted' => 'Debes confirmar la aceptación antes de finalizar la entrega.',
             'colaborador_id.exists' => 'El colaborador seleccionado no es válido o no tienes acceso a su empresa.',
             'activos.*.activo_id.required' => 'Selecciona un activo.',
             'activos.*.cantidad.required' => 'Indica la cantidad.',
             'activos.*.cantidad.min' => 'La cantidad debe ser mayor a cero.',
-            'unidades.*.unidad_activo_id.required' => 'Selecciona una unidad identificada.',
+            'unidades.*.unidad_activo_id.required' => 'Selecciona la unidad concreta (su código) que vas a entregar.',
+            'activos.*.finalidad.required' => 'Elige la finalidad (Uso personal o Para redistribuir) de este renglón.',
+            'unidades.*.finalidad.required' => 'Elige la finalidad (Uso personal o Para redistribuir) de esta unidad.',
+            'conjuntos.*.finalidad.required' => 'Elige la finalidad (Uso personal o Para redistribuir) de este conjunto.',
+            'activos.*.finalidad.enum' => 'La finalidad debe ser «Uso personal» o «Para redistribuir».',
+            'unidades.*.finalidad.enum' => 'La finalidad debe ser «Uso personal» o «Para redistribuir».',
+            'conjuntos.*.finalidad.enum' => 'La finalidad debe ser «Uso personal» o «Para redistribuir».',
             'unidades.*.unidad_activo_id.distinct' => 'No puedes elegir la misma unidad dos veces.',
             'unidades.*.unidad_activo_id.exists' => $this->esRedistribucion()
                 ? 'Esa unidad ya no está bajo tu custodia (fue entregada, devuelta o reportada) o no puede redistribuirse.'

@@ -138,12 +138,12 @@ it('un administrador puede ver, crear, editar, cambiar estado de un activo y adm
     $this->actingAs($admin)->get('/activos')->assertOk();
 
     $this->actingAs($admin)
-        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Chaleco', 'tipo_control' => 'cantidad', 'tallas' => [$talla->id]])
+        ->post('/activos', [...clasificacionActivo(), 'empresa_id' => $empresa->id, 'nombre' => 'Chaleco', 'tipo_control' => 'cantidad', 'tallas' => [$talla->id]])
         ->assertRedirect('/activos')->assertSessionHasNoErrors();
     $activo = Activo::query()->where('nombre', 'Chaleco')->firstOrFail();
 
     $this->actingAs($admin)
-        ->post("/activos/{$activo->id}", ['_method' => 'POST', 'nombre' => 'Chaleco Reflejante', 'tipo_control' => 'cantidad'])
+        ->post("/activos/{$activo->id}", [...clasificacionActivo(), '_method' => 'POST', 'nombre' => 'Chaleco Reflejante', 'tipo_control' => 'cantidad'])
         ->assertSessionHasNoErrors();
     expect($activo->fresh()->nombre)->toBe('Chaleco Reflejante');
 
@@ -185,7 +185,7 @@ it('un encargado sin permiso de editar activo ni crear área recibe 403', functi
     expect($encargado->can('areas.crear'))->toBeFalse();
 
     $this->actingAs($encargado)
-        ->post("/activos/{$activo->id}", ['_method' => 'POST', 'nombre' => 'Editado', 'tipo_control' => 'cantidad'])
+        ->post("/activos/{$activo->id}", [...clasificacionActivo(), '_method' => 'POST', 'nombre' => 'Editado', 'tipo_control' => 'cantidad'])
         ->assertForbidden();
 
     $this->actingAs($encargado)

@@ -182,10 +182,19 @@
             <td style="width:50%; padding-right:8px">
                 <div class="firma-caja">
                     <h2>Firma de quien devuelve</h2>
-                    @if ($firmaDataUri)
+                    @if (! empty($firmaDocumentoAdjunto))
+                        <div class="firma-img" style="padding:8px; font-size:10px">
+                            <strong>Firma: documento adjunto</strong><br>
+                            Archivo PDF «{{ $firmaDocumentoAdjunto->nombre_original }}» subido como firma a distancia; se conserva íntegro en el expediente del acuse.<br>
+                            SHA-256: {{ $firmaDocumentoAdjunto->hash_sha256 }}
+                        </div>
+                    @elseif ($firmaDataUri)
                         <img class="firma-img" src="{{ $firmaDataUri }}" alt="Firma de quien devuelve">
                     @else
                         <div class="firma-img"></div>
+                    @endif
+                    @if (! empty($firmaArchivo))
+                        <div class="muted" style="margin-top:4px">Firma registrada por archivo (a distancia) el {{ \App\Soporte\FechaHora::local($firmaArchivo->created_at) }}.</div>
                     @endif
                     <div class="muted" style="margin-top:6px">{{ $acuse->nombre_firmante_snapshot }} — N.º {{ $acuse->numero_empleado_snapshot }}</div>
                 </div>

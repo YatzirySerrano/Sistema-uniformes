@@ -3,6 +3,7 @@ import { Link, usePage } from '@inertiajs/vue3';
 import {
     ArrowLeftRight,
     Boxes,
+    BriefcaseBusiness,
     Building,
     QrCode,
     ClipboardList,
@@ -128,7 +129,9 @@ const grupos = computed<Grupo[]>(() =>
                     // Sólo lo que el propio usuario tiene bajo custodia.
                     titulo: 'Mis activos',
                     href: '/mis-activos',
-                    icono: Package,
+                    // Maletín: "lo que está bajo mi responsabilidad", distinto
+                    // de la caja del catálogo de Activos.
+                    icono: BriefcaseBusiness,
                     visible: puede('activos.ver-custodia-propia'),
                 },
                 {

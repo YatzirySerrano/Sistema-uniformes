@@ -9,6 +9,7 @@ use App\Enums\RolSistema;
 use App\Exports\ListadoExport;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoUnidad;
@@ -78,17 +79,23 @@ it('el snapshot excluye las unidades de otra empresa', function () {
     expect(InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->count())->toBe(1);
 });
 
-it('el snapshot QR sólo incluye unidades disponibles: excluye baja, asignada, perdida, robada y en reparación', function () {
-    ($this->unidad)();                                                    // disponible → dentro
-    ($this->unidad)(['estado' => 'baja', 'dado_de_baja_en' => now()]);    // baja → fuera
-    ($this->unidad)(['condicion' => CondicionUnidadActivo::Perdido]);     // perdida → fuera
-    ($this->unidad)(['condicion' => CondicionUnidadActivo::Robado]);      // robada → fuera
-    ($this->unidad)(['condicion' => CondicionUnidadActivo::EnReparacion]); // reparación → fuera
-    ($this->unidad)()->update(['estado' => 'asignada']);                  // asignada → fuera
+it('el snapshot sólo incluye unidades FÍSICAMENTE en el almacén: disponibles, en reparación e inservibles; nunca asignadas, perdidas, robadas ni de baja', function () {
+    $disponible = ($this->unidad)();
+    $reparacion = ($this->unidad)(['condicion' => CondicionUnidadActivo::EnReparacion]);
+    $inservible = ($this->unidad)(['condicion' => CondicionUnidadActivo::Inservible]);
+    ($this->unidad)(['estado' => 'baja', 'dado_de_baja_en' => now()]);
+    ($this->unidad)(['condicion' => CondicionUnidadActivo::Perdido]);
+    ($this->unidad)(['condicion' => CondicionUnidadActivo::Robado]);
+    // Asignada a un colaborador: su `almacen_id` sólo es la procedencia; no
+    // está físicamente en el almacén y no se espera en la toma.
+    $colaborador = Colaborador::factory()->for($this->empresa)->create();
+    ($this->unidad)()->update(['estado' => 'asignada', 'colaborador_id' => $colaborador->id]);
 
     $ronda = crearRonda($this->admin, $this->empresa, $this->almacen);
 
-    expect(InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->count())->toBe(1);
+    $esperadas = InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->pluck('unidad_activo_id')->sort()->values()->all();
+
+    expect($esperadas)->toBe(collect([$disponible->id, $reparacion->id, $inservible->id])->sort()->values()->all());
 });
 
 it('una unidad creada DESPUÉS de iniciar la ronda no infla el universo esperado', function () {

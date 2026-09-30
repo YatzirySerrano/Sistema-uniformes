@@ -5,6 +5,8 @@ import { useMediaQuery } from '@vueuse/core';
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
 import ApartadoTemporalBanner from '@/components/sistema/ApartadoTemporalBanner.vue';
+import FirmaColaborador from '@/components/sistema/FirmaColaborador.vue';
+import type { MetodoFirma } from '@/components/sistema/FirmaColaborador.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import BuscadorAsync from '@/components/sistema/BuscadorAsync.vue';
@@ -13,6 +15,7 @@ import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentid
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import InputError from '@/components/InputError.vue';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -103,7 +106,24 @@ type OpcionActivo = {
     /** Bolsa de la custodia de la que sale: para redistribuir / uso personal. */
     bolsa?: 'redistribucion' | 'personal';
     bolsa_etiqueta?: string;
+    /** Sólo en modo custodia: la opción ya es de una variante concreta. */
+    talla_fija?: { id: number; valor: string } | null;
 };
+
+/**
+ * Descripción de una opción "desde mi custodia": variante, bolsa y cantidad
+ * disponible explícitas, para distinguir el mismo activo en Uso personal y
+ * Para redistribuir (o en dos tallas) sin adivinar.
+ */
+function descripcionOpcionCustodia(a: OpcionActivo): string {
+    return [
+        a.talla_fija ? `Talla ${a.talla_fija.valor}` : null,
+        a.bolsa_etiqueta,
+        `Disponible: ${a.disponible ?? 0}`,
+    ]
+        .filter(Boolean)
+        .join(' · ');
+}
 
 /** Finalidad con la que RECIBE el destinatario (ver `FinalidadCustodia`). */
 type Finalidad = 'uso_personal' | 'redistribucion';
@@ -519,6 +539,9 @@ const form = useForm<{
     unidades: FilaUnidad[];
     conjuntos: FilaConjunto[];
     firma: string;
+    /** Firma de quien recibe/devuelve: dibujada en el pad o archivo subido. */
+    firma_metodo: MetodoFirma;
+    firma_archivo: File | null;
     firma_operador: string;
     aceptacion: boolean;
     idempotency_key: string;
@@ -533,6 +556,8 @@ const form = useForm<{
     unidades: [],
     conjuntos: [],
     firma: '',
+    firma_metodo: 'dibujada',
+    firma_archivo: null,
     firma_operador: '',
     aceptacion: false,
     // Una clave por intento de alta: evita que un doble submit registre dos
@@ -709,7 +734,8 @@ function alElegirActivo(i: number, o: OpcionActivo | null): void {
     activosUI[i].sel = o;
     form.activos[i].activo_id = o?.activo_id ?? o?.id ?? '';
     form.activos[i].bolsa = o?.bolsa ?? null;
-    form.activos[i].talla_id = null;
+    // Desde custodia la opción ya fija la variante (una por talla y bolsa).
+    form.activos[i].talla_id = o?.talla_fija?.id ?? null;
     // El renglón vuelve a empezar: nada de arrastrar cantidad ni la foto del
     // artículo anterior (la evidencia siempre pertenece a un elemento real).
     form.activos[i].cantidad = 1;
@@ -1051,7 +1077,7 @@ function alElegirConjuntoCustodia(
 // ------------------------------------------------------------------
 // Paso 3 — Documento de identidad + firmas
 // ------------------------------------------------------------------
-const padColaborador = ref<InstanceType<typeof PadFirma> | null>(null);
+const padColaborador = ref<InstanceType<typeof FirmaColaborador> | null>(null);
 const padOperador = ref<InstanceType<typeof PadFirma> | null>(null);
 const firmaColaboradorVacia = ref(true);
 const firmaOperadorVacia = ref(true);
@@ -1113,6 +1139,17 @@ const problemasPaso2 = computed<string[]>(() => {
                 : `Elige la finalidad (Uso personal o Para redistribuir) de los ${sinFinalidad} renglones marcados.`,
         );
     }
+
+    // Un activo de seguimiento individual NUNCA se entrega "genérico": hay
+    // que elegir la unidad concreta (su código). El backend lo exige igual.
+    form.unidades.forEach((fila, i) => {
+        if (fila.activo_id !== '' && fila.unidad_activo_id === '') {
+            const nombre = unidadesUI[i]?.activoSel?.nombre ?? 'Equipo';
+            problemas.push(
+                `«${nombre}»: selecciona la unidad concreta (código) que vas a entregar.`,
+            );
+        }
+    });
 
     form.activos.forEach((fila, i) => {
         if (fila.activo_id === '') return;
@@ -1213,7 +1250,11 @@ const faltantesFirma = computed<string[]>(() => {
             'Tu apartado de existencias venció. Vuelve al paso anterior para actualizar la disponibilidad.',
         );
     if (firmaColaboradorVacia.value)
-        faltan.push('Solicita la firma del colaborador para continuar.');
+        faltan.push(
+            form.firma_metodo === 'archivo'
+                ? 'Sube el archivo con la firma del colaborador para continuar.'
+                : 'Solicita la firma del colaborador para continuar.',
+        );
     if (firmaOperadorVacia.value)
         faltan.push('Falta la firma del encargado que realiza la entrega.');
     if (!form.aceptacion)
@@ -1301,7 +1342,7 @@ function irAPasoConError(): void {
     if (
         claves.some(
             (k) =>
-                k === 'firma' || k === 'firma_operador' || k === 'aceptacion',
+                k === 'firma' || k.startsWith('firma_') || k === 'aceptacion',
         )
     ) {
         paso.value = 3;
@@ -1330,7 +1371,11 @@ function enviar(): void {
         almacen_id: esCustodia.value ? null : datos.almacen_id,
         cambio_servicio_id: esCustodia.value ? datos.cambio_servicio_id : null,
         activos: datos.activos.filter((fila) => fila.activo_id !== ''),
-        unidades: datos.unidades.filter((fila) => fila.unidad_activo_id !== ''),
+        // Un renglón con activo pero sin unidad NO se descarta en silencio:
+        // viaja para que el backend también lo rechace.
+        unidades: datos.unidades.filter(
+            (fila) => fila.activo_id !== '' || fila.unidad_activo_id !== '',
+        ),
         conjuntos: datos.conjuntos.filter((fila) => fila.conjunto_id !== ''),
     })).post('/entregas', {
         preserveScroll: true,
@@ -1798,14 +1843,19 @@ onMounted(() => {
                                 :etiqueta="(a) => (a as OpcionActivo).nombre"
                                 :descripcion="
                                     (a) =>
-                                        (a as OpcionActivo).usa_variantes
-                                            ? ((a as OpcionActivo).codigo ?? '')
-                                            : textoDisponible(
-                                                  (a as OpcionActivo)
-                                                      .disponible ?? 0,
-                                                  (a as OpcionActivo)
-                                                      .bolsa_etiqueta,
+                                        esCustodia
+                                            ? descripcionOpcionCustodia(
+                                                  a as OpcionActivo,
                                               )
+                                            : (a as OpcionActivo).usa_variantes
+                                              ? ((a as OpcionActivo).codigo ??
+                                                '')
+                                              : textoDisponible(
+                                                    (a as OpcionActivo)
+                                                        .disponible ?? 0,
+                                                    (a as OpcionActivo)
+                                                        .bolsa_etiqueta,
+                                                )
                                 "
                                 placeholder="Buscar activo…"
                                 placeholder-busqueda="Buscar por nombre o código"
@@ -1820,13 +1870,28 @@ onMounted(() => {
                                         )
                                 "
                             />
+                            <p
+                                v-if="esCustodia && activosUI[i].sel"
+                                class="text-muted-foreground mt-1 flex flex-wrap items-center gap-1 text-xs"
+                            >
+                                Sale de tu custodia:
+                                <Badge variant="outline" class="text-xs">{{
+                                    activosUI[i].sel?.bolsa_etiqueta
+                                }}</Badge>
+                            </p>
                             <InputError
                                 :message="
                                     erroresLaxos[`activos.${i}.activo_id`]
                                 "
                             />
                         </div>
-                        <div v-if="activosUI[i].sel?.usa_variantes">
+                        <div
+                            v-if="activosUI[i].sel?.talla_fija"
+                            class="flex h-9 items-center rounded-md border px-3 text-sm"
+                        >
+                            Talla {{ activosUI[i].sel?.talla_fija?.valor }}
+                        </div>
+                        <div v-else-if="activosUI[i].sel?.usa_variantes">
                             <SelectSimple
                                 :model-value="fila.talla_id"
                                 :opciones="
@@ -1967,7 +2032,12 @@ onMounted(() => {
                             <Label
                                 :for="`fin-art-${i}`"
                                 class="text-muted-foreground text-xs"
-                                >Finalidad para quien recibe</Label
+                                >Finalidad para quien recibe
+                                <span
+                                    class="text-destructive"
+                                    aria-hidden="true"
+                                    >*</span
+                                ></Label
                             >
                             <div class="w-44">
                                 <SelectSimple
@@ -2043,6 +2113,9 @@ onMounted(() => {
                                         [
                                             (a as OpcionActivo).bolsa_etiqueta,
                                             (a as OpcionActivo).codigo,
+                                            esCustodia
+                                                ? `${(a as OpcionActivo).disponible ?? 0} en tu custodia`
+                                                : null,
                                         ]
                                             .filter(Boolean)
                                             .join(' · ')
@@ -2077,7 +2150,10 @@ onMounted(() => {
                                 :invalido="
                                     !!erroresLaxos[
                                         `unidades.${i}.unidad_activo_id`
-                                    ]
+                                    ] ||
+                                    (intentoContinuar &&
+                                        fila.activo_id !== '' &&
+                                        fila.unidad_activo_id === '')
                                 "
                                 @update:model-value="
                                     (v) =>
@@ -2120,7 +2196,12 @@ onMounted(() => {
                             <Label
                                 :for="`fin-uni-${i}`"
                                 class="text-muted-foreground text-xs"
-                                >Finalidad para quien recibe</Label
+                                >Finalidad para quien recibe
+                                <span
+                                    class="text-destructive"
+                                    aria-hidden="true"
+                                    >*</span
+                                ></Label
                             >
                             <div class="w-44">
                                 <SelectSimple
@@ -2397,7 +2478,12 @@ onMounted(() => {
                             <Label
                                 :for="`fin-conj-${i}`"
                                 class="text-muted-foreground text-xs"
-                                >Finalidad para quien recibe</Label
+                                >Finalidad para quien recibe
+                                <span
+                                    class="text-destructive"
+                                    aria-hidden="true"
+                                    >*</span
+                                ></Label
                             >
                             <div class="w-44">
                                 <SelectSimple
@@ -2586,7 +2672,12 @@ onMounted(() => {
                             <Label
                                 :for="`fin-conjc-${i}`"
                                 class="text-muted-foreground text-xs"
-                                >Finalidad para quien recibe</Label
+                                >Finalidad para quien recibe
+                                <span
+                                    class="text-destructive"
+                                    aria-hidden="true"
+                                    >*</span
+                                ></Label
                             >
                             <div class="w-44">
                                 <SelectSimple
@@ -2761,13 +2852,18 @@ onMounted(() => {
 
                     <div class="grid gap-1.5">
                         <Label>Firma del colaborador</Label>
-                        <PadFirma
+                        <FirmaColaborador
                             ref="padColaborador"
+                            v-model:metodo="form.firma_metodo"
+                            v-model:archivo="form.firma_archivo"
+                            quien="el colaborador"
+                            :error="form.errors.firma_archivo"
                             @cambio="
                                 (v: boolean) => (firmaColaboradorVacia = v)
                             "
                         />
                         <InputError :message="form.errors.firma" />
+                        <InputError :message="form.errors.firma_metodo" />
                     </div>
                 </section>
 

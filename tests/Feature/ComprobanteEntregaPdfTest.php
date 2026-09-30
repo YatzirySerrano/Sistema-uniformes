@@ -53,7 +53,7 @@ beforeEach(function () {
 it('genera el comprobante de una entrega SIN evidencia exactamente igual que antes', function () {
     $this->actingAs($this->admin)
         ->post('/entregas', ($this->payload)([
-            'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
+            'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'finalidad' => 'uso_personal']],
         ]))
         ->assertSessionHasNoErrors();
 
@@ -71,9 +71,10 @@ it('guarda en el snapshot la referencia determinista (hash + mime) de la evidenc
     $this->actingAs($this->admin)
         ->post('/entregas', ($this->payload)([
             'activos' => [
-                ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2],
+                ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'finalidad' => 'uso_personal'],
                 [
                     'activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->tallaB->id, 'cantidad' => 1,
+                    'finalidad' => 'uso_personal',
                     'evidencia' => UploadedFile::fake()->image('estado-g.jpg'),
                     'evidencia_origen' => 'archivo',
                 ],
@@ -98,6 +99,7 @@ it('el hash del documento es reverificable a partir del snapshot inmutable', fun
         ->post('/entregas', ($this->payload)([
             'activos' => [[
                 'activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1,
+                'finalidad' => 'uso_personal',
                 'evidencia' => UploadedFile::fake()->image('e.jpg'),
                 'evidencia_origen' => 'archivo',
             ]],
@@ -118,7 +120,7 @@ it('el hash del documento es reverificable a partir del snapshot inmutable', fun
 it('un acuse histórico cuyo snapshot no tiene la clave "evidencias" sigue generando PDF sin lanzar', function () {
     $this->actingAs($this->admin)
         ->post('/entregas', ($this->payload)([
-            'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
+            'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'finalidad' => 'uso_personal']],
         ]))
         ->assertSessionHasNoErrors();
 

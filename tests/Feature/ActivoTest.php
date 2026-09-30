@@ -88,6 +88,7 @@ it('un administrador crea un activo por cantidad con tallas y código autogenera
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $empresa->id,
             'nombre' => 'Playera Institucional',
             'tipo_control' => 'cantidad',
@@ -110,6 +111,7 @@ it('crea un activo por cantidad sin variantes junto con su existencia inicial (a
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $empresa->id,
             'nombre' => 'Extintor',
             'tipo_control' => 'cantidad',
@@ -138,6 +140,7 @@ it('crea un activo por cantidad con variantes y una cantidad inicial por cada un
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $empresa->id,
             'nombre' => 'Playera',
             'tipo_control' => 'cantidad',
@@ -159,7 +162,7 @@ it('crea un activo sin existencia inicial cuando no se indica cantidad ni almac�
     $empresa = Empresa::factory()->create();
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
-        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Sólo catálogo', 'tipo_control' => 'cantidad'])
+        ->post('/activos', [...clasificacionActivo(), 'empresa_id' => $empresa->id, 'nombre' => 'Sólo catálogo', 'tipo_control' => 'cantidad'])
         ->assertSessionHasNoErrors();
 
     $activo = Activo::query()->where('nombre', 'Sólo catálogo')->firstOrFail();
@@ -172,6 +175,7 @@ it('exige almacén cuando se captura una cantidad inicial mayor a cero', functio
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->from('/activos/crear')
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $empresa->id, 'nombre' => 'X', 'tipo_control' => 'cantidad', 'cantidad_inicial' => 10,
         ])
         ->assertSessionHasErrors('almacen_id');
@@ -187,6 +191,7 @@ it('si el almacén no abastece a la empresa, el alta se rechaza y no queda ning�
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->from('/activos/crear')
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $empresa->id, 'nombre' => 'Huérfano', 'tipo_control' => 'cantidad',
             'almacen_id' => $almacenAjeno->id, 'cantidad_inicial' => 5,
         ])
@@ -223,6 +228,7 @@ it('permite crear un activo de seguimiento individual sin tallas', function () {
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $empresa->id,
             'nombre' => 'Laptop Dell',
             'tipo_control' => 'individual',
@@ -241,11 +247,11 @@ it('rechaza un tipo de control inválido y un tipo de activo inactivo o inexiste
     $admin = usuarioCon(RolSistema::Administrador->value);
 
     $this->actingAs($admin)->from('/activos/crear')
-        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'X', 'tipo_control' => 'inventado'])
+        ->post('/activos', [...clasificacionActivo(), 'empresa_id' => $empresa->id, 'nombre' => 'X', 'tipo_control' => 'inventado'])
         ->assertSessionHasErrors('tipo_control');
 
     $this->actingAs($admin)->from('/activos/crear')
-        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Y', 'tipo_control' => 'cantidad', 'tipo_activo_id' => $tipoInactivo->id])
+        ->post('/activos', [...clasificacionActivo(), 'empresa_id' => $empresa->id, 'nombre' => 'Y', 'tipo_control' => 'cantidad', 'tipo_activo_id' => $tipoInactivo->id])
         ->assertSessionHasErrors('tipo_activo_id');
 });
 
@@ -255,7 +261,7 @@ it('un tipo de activo creado para una empresa puede usarse desde cualquier otra 
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->from('/activos/crear')
-        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => 'Y', 'tipo_control' => 'cantidad', 'tipo_activo_id' => $tipo->id])
+        ->post('/activos', [...clasificacionActivo(), 'empresa_id' => $empresa->id, 'nombre' => 'Y', 'tipo_control' => 'cantidad', 'tipo_activo_id' => $tipo->id])
         ->assertSessionHasNoErrors();
 
     expect(Activo::query()->where('nombre', 'Y')->first()?->tipo_activo_id)->toBe($tipo->id);
@@ -267,6 +273,7 @@ it('valida la imagen: rechaza un archivo que no es imagen', function () {
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->from('/activos/crear')
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $empresa->id,
             'nombre' => 'Con archivo',
             'tipo_control' => 'cantidad',
@@ -281,6 +288,7 @@ it('quitar la imagen (eliminar_imagen) borra la ruta y el archivo; sin bandera l
     $admin = usuarioCon(RolSistema::Administrador->value);
 
     $this->actingAs($admin)->post('/activos', [
+        ...clasificacionActivo(),
         'empresa_id' => $empresa->id,
         'nombre' => 'Con imagen',
         'tipo_control' => 'cantidad',
@@ -293,6 +301,7 @@ it('quitar la imagen (eliminar_imagen) borra la ruta y el archivo; sin bandera l
 
     // Sin bandera ni archivo nuevo: se conserva (Caso A).
     $this->actingAs($admin)->post("/activos/{$activo->id}", [
+        ...clasificacionActivo(),
         'nombre' => 'Con imagen',
         'tipo_control' => 'cantidad',
         '_method' => 'POST',
@@ -301,6 +310,7 @@ it('quitar la imagen (eliminar_imagen) borra la ruta y el archivo; sin bandera l
 
     // Con bandera: se elimina la asociación y el archivo (Caso C).
     $this->actingAs($admin)->post("/activos/{$activo->id}", [
+        ...clasificacionActivo(),
         'nombre' => 'Con imagen',
         'tipo_control' => 'cantidad',
         'eliminar_imagen' => true,
@@ -318,6 +328,7 @@ it('un rol restringido no puede eliminar la imagen de un activo fuera de su alca
     $supervisor->givePermissionTo('activos.editar');
 
     expect($this->actingAs($supervisor)->post("/activos/{$activo->id}", [
+        ...clasificacionActivo(),
         'nombre' => $activo->nombre,
         'tipo_control' => $activo->tipo_control->value,
         'eliminar_imagen' => true,
@@ -335,7 +346,7 @@ it('rechaza crear un activo en una empresa fuera del alcance del usuario', funct
 
     $this->actingAs($supervisor)
         ->from('/activos/crear')
-        ->post('/activos', ['nombre' => 'Ancla', 'tipo_control' => 'cantidad', 'empresa_id' => $ajena->id])
+        ->post('/activos', [...clasificacionActivo(), 'nombre' => 'Ancla', 'tipo_control' => 'cantidad', 'empresa_id' => $ajena->id])
         ->assertSessionHasErrors('empresa_id');
 
     expect(Activo::query()->where('nombre', 'Ancla')->exists())->toBeFalse();
@@ -417,7 +428,7 @@ it('valida sin generar un 500 cuando el nombre llega como arreglo', function () 
 
     $this->actingAs(usuarioCon(RolSistema::Administrador->value))
         ->from('/activos/crear')
-        ->post('/activos', ['empresa_id' => $empresa->id, 'nombre' => ['no'], 'tipo_control' => 'cantidad'])
+        ->post('/activos', [...clasificacionActivo(), 'empresa_id' => $empresa->id, 'nombre' => ['no'], 'tipo_control' => 'cantidad'])
         ->assertRedirect('/activos/crear')
         ->assertSessionHasErrors('nombre');
 });

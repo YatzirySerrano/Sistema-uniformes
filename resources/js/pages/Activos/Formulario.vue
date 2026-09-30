@@ -414,10 +414,14 @@ async function buscarTipos(
     return (await res.json()).tipos ?? [];
 }
 
+/** El tipo lo acaba de fijar la categoría elegida (aviso bajo el campo). */
+const tipoAutomatico = ref(false);
+
 function alElegirTipo(o: OpcionTipo | null): void {
     tipoSel.value = o;
     form.tipo_activo_id = o?.id ?? '';
     form.clearErrors('tipo_activo_id');
+    tipoAutomatico.value = false;
 }
 
 // Coherencia: si el tipo cambia a otro concreto y la categoría elegida está
@@ -466,11 +470,16 @@ function alElegirCategoria(o: OpcionCategoria | null): void {
     form.categoria_id = o?.id ?? '';
     form.clearErrors('categoria_id');
     avisoCategoria.value = '';
+    tipoAutomatico.value = false;
 
-    // Si la categoría trae tipo y el activo aún no tiene, se completa solo.
-    if (o?.tipo_activo_id != null && form.tipo_activo_id === '') {
+    // La categoría es la fuente estructurada de su tipo
+    // (`categorias_activo.tipo_activo_id`, nunca por nombre): si está ligada
+    // a uno, el tipo se fija solo. El backend valida la misma coherencia.
+    if (o?.tipo_activo_id != null && form.tipo_activo_id !== o.tipo_activo_id) {
         form.tipo_activo_id = o.tipo_activo_id;
         tipoSel.value = { id: o.tipo_activo_id, nombre: o.tipo ?? '' };
+        form.clearErrors('tipo_activo_id');
+        tipoAutomatico.value = true;
     }
 }
 
@@ -679,11 +688,11 @@ function enviar() {
                             class="flex items-center gap-1.5"
                         >
                             Categoría
-                            <span class="text-muted-foreground"
-                                >(opcional)</span
+                            <span class="text-destructive" aria-hidden="true"
+                                >*</span
                             >
                             <AyudaTooltip
-                                texto="Qué es el activo dentro de su tipo (Camisola, Pantalón, Laptop, Teléfono celular…). Se elige de un catálogo compartido por toda la plataforma. Puedes dejarlo en blanco."
+                                texto="Qué es el activo dentro de su tipo (Camisola, Pantalón, Laptop, Carro…). Se elige de un catálogo compartido por toda la plataforma. Si la categoría pertenece a un tipo, el tipo se selecciona solo."
                                 etiqueta="Ayuda sobre la categoría"
                             />
                         </Label>
@@ -696,7 +705,7 @@ function enviar() {
                             :descripcion="
                                 (c) => (c as OpcionCategoria).tipo ?? 'Sin tipo'
                             "
-                            placeholder="Sin categoría"
+                            placeholder="Selecciona la categoría"
                             placeholder-busqueda="Buscar categoría por nombre"
                             sin-resultados="No hay categorías activas."
                             :permite-crear="permisos.crear_categoria"
@@ -712,7 +721,9 @@ function enviar() {
                         />
                         <p class="text-muted-foreground text-xs">
                             Clasificación específica dentro del tipo. Ejemplo:
-                            Camisola, Laptop o Teléfono celular.
+                            Camisola, Laptop o Teléfono celular. Obligatoria: de
+                            ella dependen los datos técnicos y el tipo de
+                            control.
                         </p>
                         <p
                             v-if="avisoCategoria"
@@ -743,9 +754,11 @@ function enviar() {
                         class="flex items-center gap-1.5"
                     >
                         Tipo de activo
-                        <span class="text-muted-foreground">(opcional)</span>
+                        <span class="text-destructive" aria-hidden="true"
+                            >*</span
+                        >
                         <AyudaTooltip
-                            texto="Naturaleza del activo: Prenda, Equipo de cómputo, Dispositivo móvil, Electrónico, Accesorio, Herramienta / Equipo, Otro. El administrador puede crear tipos nuevos. Puedes dejarlo en blanco."
+                            texto="Naturaleza del activo: Prenda, Equipo de cómputo, Dispositivo móvil, Transporte, Electrodoméstico, Accesorio, Herramienta / Equipo… El administrador puede crear tipos nuevos. Si cambias el tipo a uno que no corresponde con la categoría elegida, la categoría se quita."
                             etiqueta="Ayuda sobre el tipo de activo"
                         />
                     </Label>
@@ -754,7 +767,7 @@ function enviar() {
                         :model-value="tipoSel"
                         :buscar="buscarTipos"
                         :etiqueta="(t) => (t as OpcionTipo).nombre"
-                        placeholder="Sin tipo"
+                        placeholder="Selecciona el tipo"
                         placeholder-busqueda="Buscar tipo por nombre"
                         sin-resultados="No hay tipos activos."
                         :permite-crear="permisos.crear_tipo"
@@ -768,6 +781,14 @@ function enviar() {
                     <p class="text-muted-foreground text-xs">
                         Clasificación general del activo. Ejemplo: Prenda,
                         Equipo de cómputo o Dispositivo móvil.
+                    </p>
+                    <p
+                        v-if="tipoAutomatico && tipoSel"
+                        class="text-xs text-emerald-700 dark:text-emerald-400"
+                    >
+                        Se seleccionó «{{ tipoSel.nombre }}» automáticamente
+                        porque la categoría «{{ categoriaSel?.nombre }}»
+                        pertenece a ese tipo.
                     </p>
                     <InputError :message="form.errors.tipo_activo_id" />
                 </div>

@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\DireccionMovimiento;
 use App\Enums\RolSistema;
 use App\Enums\TipoMovimiento;
 use App\Models\Activo;
@@ -86,12 +87,12 @@ beforeEach(function () {
 
 it('redistribuye un conjunto recibido: los componentes cambian de custodio sin volver a descontar inventario', function () {
     $stockAntes = (int) SaldoInventario::query()->where('activo_id', $this->datos['activoA']->id)->value('cantidad');
-    $movimientosAntes = MovimientoInventario::count();
+    $movimientosDeStockAntes = MovimientoInventario::query()->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count();
 
     ($this->redistribuirKit)()->assertSessionHasNoErrors();
 
     expect((int) SaldoInventario::query()->where('activo_id', $this->datos['activoA']->id)->value('cantidad'))->toBe($stockAntes)
-        ->and(MovimientoInventario::count())->toBe($movimientosAntes)
+        ->and(MovimientoInventario::query()->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count())->toBe($movimientosDeStockAntes)
         ->and($this->unidadRadio->fresh()->colaborador_id)->toBe($this->juan->id)
         ->and(($this->kitsCompletos)($this->yatziri))->toBe(0)
         ->and(($this->kitsCompletos)($this->juan))->toBe(1);
@@ -116,7 +117,7 @@ it('un conjunto incompleto no aparece como completo ni puede redistribuirse ente
         ...($this->firmas)(),
         'origen' => 'custodia',
         'colaborador_id' => $this->juan->id,
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     $this->actingAs($this->redistribuidor)

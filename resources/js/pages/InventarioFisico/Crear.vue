@@ -141,7 +141,7 @@ function enviar(): void {
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Nueva ronda de inventario físico"
-            descripcion="La ronda comprueba lo que debería estar físicamente en un almacén: unidades identificadas disponibles (por QR o marca manual) y artículos por cantidad. Al iniciar se congela ese universo — lo que cambie después no altera la ronda."
+            descripcion="La ronda comprueba lo que debería estar físicamente en un almacén: unidades identificadas guardadas en él (por QR o marca manual) y artículos por cantidad. Al iniciar se congela ese universo — lo que cambie después no altera la ronda."
         />
 
         <form class="flex flex-col gap-5" @submit.prevent="enviar">
@@ -198,9 +198,11 @@ function enviar(): void {
                     "
                 />
                 <p class="text-muted-foreground text-xs">
-                    Se incluyen sólo las unidades identificadas disponibles en
-                    ese almacén (en almacén, funcionando, sin asignar) y las
-                    existencias por cantidad con saldo mayor a cero.
+                    Se incluyen las unidades identificadas que están físicamente
+                    en ese almacén (disponibles, en reparación o inservibles) y
+                    las existencias por cantidad con saldo mayor a cero. No se
+                    incluyen las asignadas a un colaborador ni las perdidas,
+                    robadas o dadas de baja.
                 </p>
                 <InputError :message="form.errors.almacen_id" />
             </div>

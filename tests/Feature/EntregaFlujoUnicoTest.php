@@ -44,7 +44,7 @@ beforeEach(function () {
         'firma_operador' => firmaDemoBase64(),
         'aceptacion' => true,
         'idempotency_key' => (string) Str::uuid(),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'finalidad' => 'uso_personal']],
         ...$extra,
     ];
 });
@@ -130,7 +130,7 @@ it('la ruta histórica de firma diferida sigue funcionando para una entrega anti
         $this->datos['almacenA']->id,
         $this->admin->id,
         now()->toDateString(),
-        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
         [],
         [],
     );

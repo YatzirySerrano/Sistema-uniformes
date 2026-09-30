@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
+import CustodiaPendienteBaja from '@/components/colaboradores/CustodiaPendienteBaja.vue';
+import type { EstadoCustodiaBaja } from '@/components/colaboradores/CustodiaPendienteBaja.vue';
 import {
     ArrowLeft,
     ArrowLeftRight,
@@ -167,6 +169,7 @@ function alGuardarEditar(): void {
 // --- Eliminar / restaurar ---
 const modalEstado = ref(false);
 const procesandoEstado = ref(false);
+const estadoCustodiaBaja = ref<EstadoCustodiaBaja>('cargando');
 
 function alternarEstado(): void {
     if (props.colaborador.activo) {
@@ -648,6 +651,11 @@ const modalEmpresa = ref(false);
                         cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
+                <CustodiaPendienteBaja
+                    v-if="modalEstado"
+                    :colaborador-id="colaborador.id"
+                    @estado="(v) => (estadoCustodiaBaja = v)"
+                />
                 <DialogFooter>
                     <Button
                         variant="ghost"
@@ -658,7 +666,9 @@ const modalEmpresa = ref(false);
                     </Button>
                     <Button
                         variant="destructive"
-                        :disabled="procesandoEstado"
+                        :disabled="
+                            procesandoEstado || estadoCustodiaBaja !== 'libre'
+                        "
                         @click="confirmarEliminar"
                     >
                         Eliminar

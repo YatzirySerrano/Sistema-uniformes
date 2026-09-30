@@ -27,8 +27,14 @@ class ServicioAcuseDevolucionPdf
     {
         $snapshot = $acuse->snapshot_devolucion;
 
+        // Firma a distancia por PDF: el documento se conserva íntegro como
+        // evidencia y NO se incrusta como imagen (no se rasteriza); el
+        // comprobante lo indica como "documento adjunto".
+        $firmaArchivo = $acuse->firmaArchivo;
+        $firmaDocumentoAdjunto = $firmaArchivo !== null && $firmaArchivo->esPdf() ? $firmaArchivo : null;
+
         $firmaDataUri = null;
-        if (Storage::disk(self::DISCO)->exists($acuse->ruta_firma)) {
+        if ($firmaDocumentoAdjunto === null && Storage::disk(self::DISCO)->exists($acuse->ruta_firma)) {
             $contenido = Storage::disk(self::DISCO)->get($acuse->ruta_firma);
             $firmaDataUri = 'data:image/png;base64,'.base64_encode($contenido);
         }
@@ -50,6 +56,8 @@ class ServicioAcuseDevolucionPdf
             'acuse' => $acuse,
             'snapshot' => $snapshot,
             'firmaDataUri' => $firmaDataUri,
+            'firmaArchivo' => $firmaArchivo,
+            'firmaDocumentoAdjunto' => $firmaDocumentoAdjunto,
             'firmaOperadorDataUri' => $firmaOperadorDataUri,
             'logoDataUri' => $logoDataUri,
             'evidenciasPorItem' => $this->evidenciasPorItem($acuse),

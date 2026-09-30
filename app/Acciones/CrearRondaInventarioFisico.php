@@ -22,7 +22,9 @@ use Illuminate\Support\Facades\DB;
  * la ronda comprueba "lo que debería estar físicamente en ESTE almacén".
  *
  * Se congelan dos cosas:
- *  - Unidades identificadas (QR) DISPONIBLES en ese almacén → `inventario_fisico_unidades`.
+ *  - Unidades identificadas (QR) físicamente guardadas en ese almacén (disponibles,
+ *    en reparación o inservibles; nunca asignadas, perdidas, robadas ni de baja)
+ *    → `inventario_fisico_unidades`.
  *  - Existencias por cantidad (prendas, sin QR) → `inventario_fisico_existencias`,
  *    con `cantidad_esperada` tomada de `saldos_inventario` en ese instante.
  *
@@ -114,16 +116,20 @@ class CrearRondaInventarioFisico
 
     /**
      * ÚNICA definición del universo de unidades identificadas ESPERADAS,
-     * reutilizada por el snapshot y por la previsualización. Sólo unidades
-     * físicamente esperadas y DISPONIBLES en ese almacén:
+     * reutilizada por el snapshot y por la previsualización. El alcance de
+     * una ronda es UN ALMACÉN (toma física de ese lugar), así que sólo entran
+     * las unidades que deberían estar físicamente dentro de él:
      *
      * - de la empresa y del almacén de la ronda;
-     * - `estado = En almacén` (excluye Asignada y Baja);
-     * - `condicion = Funcionando` (excluye reparación / inservible / perdido / robado);
-     * - sin colaborador asignado.
+     * - `estado = En almacén` y sin colaborador: una unidad ASIGNADA está
+     *   bajo la custodia de una persona fuera del almacén — contarla aquí
+     *   falsearía su ubicación (su almacén_id sólo es la procedencia);
+     * - condición Funcionando, En reparación o Inservible: siguen siendo
+     *   piezas físicas guardadas en el almacén aunque no sean entregables;
+     * - nunca Perdido / Robado (no están físicamente) ni Baja (retirada
+     *   definitivamente; `estado = baja` ya la excluye).
      *
-     * Equivale a `EstadoVisibleUnidad::Disponible`. Sólo afecta a rondas nuevas
-     * — las históricas conservan su snapshot.
+     * Sólo afecta a rondas nuevas — las históricas conservan su snapshot.
      *
      * @return Builder<UnidadActivo>
      */
@@ -133,7 +139,23 @@ class CrearRondaInventarioFisico
             ->where('empresa_id', $empresaId)
             ->where('almacen_id', $almacenId)
             ->where('estado', EstadoUnidadActivo::EnAlmacen->value)
-            ->where('condicion', CondicionUnidadActivo::Funcionando->value)
+            ->whereIn('condicion', array_map(fn (CondicionUnidadActivo $c): string => $c->value, self::condicionesFisicamentePresentes()))
             ->whereNull('colaborador_id');
+    }
+
+    /**
+     * Condiciones de una unidad que sigue FÍSICAMENTE en el almacén (aunque
+     * no sea entregable). Perdido y Robado quedan fuera: no hay pieza que
+     * contar.
+     *
+     * @return list<CondicionUnidadActivo>
+     */
+    public static function condicionesFisicamentePresentes(): array
+    {
+        return [
+            CondicionUnidadActivo::Funcionando,
+            CondicionUnidadActivo::EnReparacion,
+            CondicionUnidadActivo::Inservible,
+        ];
     }
 }

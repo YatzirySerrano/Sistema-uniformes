@@ -16,6 +16,8 @@ import EstadoVacio from '@/components/sistema/EstadoVacio.vue';
 import MenuAccionesExistencia from '@/components/sistema/MenuAccionesExistencia.vue';
 import Paginacion from '@/components/sistema/Paginacion.vue';
 import RegistrarCondicionInventarioDialog from '@/components/sistema/RegistrarCondicionInventarioDialog.vue';
+import ResumenSeguimientoIndividual from '@/components/sistema/ResumenSeguimientoIndividual.vue';
+import type { FilaSeguimientoIndividual } from '@/components/sistema/ResumenSeguimientoIndividual.vue';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
@@ -61,6 +63,8 @@ type AlmacenOpcion = {
 
 const props = defineProps<{
     saldos: Paginado<Saldo>;
+    /** Resumen de seguimiento individual; `null` si los filtros lo excluyen. */
+    individuales: Paginado<FilaSeguimientoIndividual> | null;
     filtros: Record<string, string | number | undefined>;
     empresasAutorizadas: EmpresaAutorizada[];
     almacenes: AlmacenOpcion[];
@@ -181,6 +185,9 @@ watch(tipoActivoSel, (t) => {
 watch(categoriaSel, (c) => {
     filtros.categoria_id = c?.id ?? '';
 });
+
+/** Con el filtro «Seguimiento individual» no aplica la tabla de saldos. */
+const soloIndividual = computed(() => props.filtros.control === 'individual');
 
 const hayFiltros = computed(() =>
     Object.values(filtros).some((v) => v !== '' && v !== undefined),
@@ -477,132 +484,182 @@ function estadoStock(s: Saldo): { texto: string; clase: string } {
             </Button>
         </div>
 
-        <EstadoVacio
-            v-if="!saldos.data.length"
-            titulo="Sin existencias"
-            descripcion="No hay inventario con los filtros seleccionados. Registra una entrada indicando la empresa y el almacén."
-        />
-
-        <div
-            v-else-if="vista === 'cards'"
-            class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        <h2
+            v-if="!soloIndividual && individuales"
+            class="text-base font-semibold"
         >
+            Artículos por cantidad
+        </h2>
+
+        <template v-if="!soloIndividual">
+            <EstadoVacio
+                v-if="!saldos.data.length"
+                titulo="Sin existencias"
+                descripcion="No hay inventario con los filtros seleccionados. Registra una entrada indicando la empresa y el almacén."
+            />
+
             <div
-                v-for="s in saldos.data"
-                :key="s.id"
-                class="flex min-w-0 flex-col gap-2 rounded-xl border p-4 text-sm"
+                v-else-if="vista === 'cards'"
+                class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
             >
-                <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                        <p class="truncate font-medium">{{ s.activo }}</p>
-                        <p
-                            v-if="s.talla"
-                            class="text-muted-foreground truncate text-xs"
-                        >
-                            Variante {{ s.talla }}
-                        </p>
-                    </div>
-                    <Badge
-                        variant="outline"
-                        class="shrink-0 text-xs"
-                        :class="estadoStock(s).clase"
-                    >
-                        {{ estadoStock(s).texto }}
-                    </Badge>
-                </div>
-
-                <div class="text-muted-foreground grid gap-1 text-xs">
-                    <span class="flex min-w-0 items-center gap-1.5 truncate">
-                        <Building2 class="size-3.5 shrink-0" />
-                        {{ s.empresa ?? '—' }}
-                    </span>
-                    <span class="flex min-w-0 items-center gap-1.5 truncate">
-                        <WarehouseIcon class="size-3.5 shrink-0" />
-                        {{ s.almacen }}
-                    </span>
-                </div>
-
                 <div
-                    class="bg-muted/40 grid grid-cols-2 divide-x rounded-lg text-center"
+                    v-for="s in saldos.data"
+                    :key="s.id"
+                    class="flex min-w-0 flex-col gap-2 rounded-xl border p-4 text-sm"
                 >
-                    <div class="px-2 py-1.5">
-                        <p class="text-muted-foreground text-[11px]">
-                            Existencia
-                        </p>
-                        <p class="font-semibold tabular-nums">
-                            {{ s.cantidad }}
-                        </p>
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <p class="truncate font-medium">{{ s.activo }}</p>
+                            <p
+                                v-if="s.talla"
+                                class="text-muted-foreground truncate text-xs"
+                            >
+                                Variante {{ s.talla }}
+                            </p>
+                        </div>
+                        <Badge
+                            variant="outline"
+                            class="shrink-0 text-xs"
+                            :class="estadoStock(s).clase"
+                        >
+                            {{ estadoStock(s).texto }}
+                        </Badge>
                     </div>
-                    <div class="px-2 py-1.5">
-                        <p class="text-muted-foreground text-[11px]">Mínimo</p>
-                        <p class="font-semibold tabular-nums">
-                            {{ s.minimo }}
-                        </p>
-                    </div>
-                </div>
 
-                <div class="mt-auto pt-1">
-                    <MenuAccionesExistencia
-                        :puede-ajustar="permisos.ajustar"
-                        :puede-condicion="permisos.condicion"
-                        :puede-minimos="permisos.minimos"
-                        :activo-href="`/activos/${s.activo_id}`"
-                        @corregir-existencia="abrirAjuste(s)"
-                        @cambiar-condicion="abrirCondicion(s)"
-                    />
+                    <div class="text-muted-foreground grid gap-1 text-xs">
+                        <span
+                            class="flex min-w-0 items-center gap-1.5 truncate"
+                        >
+                            <Building2 class="size-3.5 shrink-0" />
+                            {{ s.empresa ?? '—' }}
+                        </span>
+                        <span
+                            class="flex min-w-0 items-center gap-1.5 truncate"
+                        >
+                            <WarehouseIcon class="size-3.5 shrink-0" />
+                            {{ s.almacen }}
+                        </span>
+                    </div>
+
+                    <div
+                        class="bg-muted/40 grid grid-cols-2 divide-x rounded-lg text-center"
+                    >
+                        <div class="px-2 py-1.5">
+                            <p class="text-muted-foreground text-[11px]">
+                                Existencia
+                            </p>
+                            <p class="font-semibold tabular-nums">
+                                {{ s.cantidad }}
+                            </p>
+                        </div>
+                        <div class="px-2 py-1.5">
+                            <p class="text-muted-foreground text-[11px]">
+                                Mínimo
+                            </p>
+                            <p class="font-semibold tabular-nums">
+                                {{ s.minimo }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="mt-auto pt-1">
+                        <MenuAccionesExistencia
+                            :puede-ajustar="permisos.ajustar"
+                            :puede-condicion="permisos.condicion"
+                            :puede-minimos="permisos.minimos"
+                            :activo-href="`/activos/${s.activo_id}`"
+                            @corregir-existencia="abrirAjuste(s)"
+                            @cambiar-condicion="abrirCondicion(s)"
+                        />
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div v-else class="overflow-x-auto rounded-xl border">
-            <table class="w-full min-w-[720px] text-sm">
-                <thead class="bg-muted/50 text-muted-foreground text-left">
-                    <tr>
-                        <th class="px-3 py-2 font-medium">Empresa</th>
-                        <th class="px-3 py-2 font-medium">Almacén</th>
-                        <th class="px-3 py-2 font-medium">Activo</th>
-                        <th class="px-3 py-2 font-medium">Variante</th>
-                        <th class="px-3 py-2 text-right font-medium">
-                            Existencia
-                        </th>
-                        <th class="px-3 py-2 text-right font-medium">Mínimo</th>
-                        <th class="px-3 py-2"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="s in saldos.data" :key="s.id" class="border-t">
-                        <td class="px-3 py-2">{{ s.empresa }}</td>
-                        <td class="px-3 py-2">{{ s.almacen }}</td>
-                        <td class="px-3 py-2">{{ s.activo }}</td>
-                        <td class="px-3 py-2">{{ s.talla }}</td>
-                        <td class="px-3 py-2 text-right font-medium">
-                            {{ s.cantidad }}
-                            <Badge
-                                v-if="s.bajo_minimo"
-                                variant="secondary"
-                                class="ml-1 text-amber-600"
-                                >mín.</Badge
+            <div v-else class="overflow-x-auto rounded-xl border">
+                <table class="w-full min-w-[720px] text-sm">
+                    <thead class="bg-muted/50 text-muted-foreground text-left">
+                        <tr>
+                            <th class="px-3 py-2 font-medium">Empresa</th>
+                            <th class="px-3 py-2 font-medium">Almacén</th>
+                            <th class="px-3 py-2 font-medium">Activo</th>
+                            <th class="px-3 py-2 font-medium">Variante</th>
+                            <th class="px-3 py-2 text-right font-medium">
+                                Existencia
+                            </th>
+                            <th class="px-3 py-2 text-right font-medium">
+                                Mínimo
+                            </th>
+                            <th class="px-3 py-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="s in saldos.data"
+                            :key="s.id"
+                            class="border-t"
+                        >
+                            <td class="px-3 py-2">{{ s.empresa }}</td>
+                            <td class="px-3 py-2">{{ s.almacen }}</td>
+                            <td class="px-3 py-2">{{ s.activo }}</td>
+                            <td class="px-3 py-2">{{ s.talla }}</td>
+                            <td class="px-3 py-2 text-right font-medium">
+                                {{ s.cantidad }}
+                                <Badge
+                                    v-if="s.bajo_minimo"
+                                    variant="secondary"
+                                    class="ml-1 text-amber-600"
+                                    >mín.</Badge
+                                >
+                            </td>
+                            <td
+                                class="text-muted-foreground px-3 py-2 text-right"
                             >
-                        </td>
-                        <td class="text-muted-foreground px-3 py-2 text-right">
-                            {{ s.minimo }}
-                        </td>
-                        <td class="px-3 py-2 text-right">
-                            <MenuAccionesExistencia
-                                :puede-ajustar="permisos.ajustar"
-                                :puede-condicion="permisos.condicion"
-                                :puede-minimos="permisos.minimos"
-                                :activo-href="`/activos/${s.activo_id}`"
-                                @corregir-existencia="abrirAjuste(s)"
-                                @cambiar-condicion="abrirCondicion(s)"
-                            />
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+                                {{ s.minimo }}
+                            </td>
+                            <td class="px-3 py-2 text-right">
+                                <MenuAccionesExistencia
+                                    :puede-ajustar="permisos.ajustar"
+                                    :puede-condicion="permisos.condicion"
+                                    :puede-minimos="permisos.minimos"
+                                    :activo-href="`/activos/${s.activo_id}`"
+                                    @corregir-existencia="abrirAjuste(s)"
+                                    @cambiar-condicion="abrirCondicion(s)"
+                                />
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
 
-        <Paginacion :links="saldos.links" :total="saldos.total" />
+            <Paginacion :links="saldos.links" :total="saldos.total" />
+        </template>
+
+        <section v-if="individuales" class="flex flex-col gap-3">
+            <div>
+                <h2 class="text-base font-semibold">
+                    Activos con seguimiento individual
+                </h2>
+                <p class="text-muted-foreground text-sm">
+                    Resumen por activo y almacén de procedencia: cuántas
+                    unidades hay y en qué estado están. Para ver cada pieza,
+                    abre «Ver unidades».
+                </p>
+            </div>
+            <EstadoVacio
+                v-if="!individuales.data.length"
+                titulo="Sin unidades"
+                descripcion="No hay activos con seguimiento individual con los filtros seleccionados."
+            />
+            <ResumenSeguimientoIndividual
+                v-else
+                :filas="individuales.data"
+                :vista="vista"
+            />
+            <Paginacion
+                :links="individuales.links"
+                :total="individuales.total"
+            />
+        </section>
 
         <AjustarExistenciaDialog
             v-if="filaActual"

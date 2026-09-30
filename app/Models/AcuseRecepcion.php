@@ -7,6 +7,7 @@ use Database\Factories\AcuseRecepcionFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Support\Carbon;
 
 /**
@@ -106,6 +107,23 @@ class AcuseRecepcion extends Model
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(User::class, 'usuario_id');
+    }
+
+    /**
+     * Archivo de firma de quien recibe cuando se firmó A DISTANCIA (imagen o PDF
+     * subido). Sin fila = firma dibujada en el pad.
+     *
+     * @return MorphOne<Evidencia, $this>
+     */
+    public function firmaArchivo(): MorphOne
+    {
+        return $this->morphOne(Evidencia::class, 'evidenciable')->where('origen', Evidencia::ORIGEN_FIRMA_ARCHIVO);
+    }
+
+    /** `archivo` si la firma de quien recibe se subió como archivo; `dibujada` si no. */
+    public function metodoFirma(): string
+    {
+        return $this->firmaArchivo !== null ? 'archivo' : 'dibujada';
     }
 
     public function tienePdf(): bool

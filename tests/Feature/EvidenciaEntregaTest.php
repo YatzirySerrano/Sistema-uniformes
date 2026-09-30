@@ -48,7 +48,7 @@ beforeEach(function () {
 it('registra una entrega SIN evidencia igual que siempre', function () {
     $this->actingAs($this->admin)
         ->post('/entregas', ($this->payload)([
-            'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2]],
+            'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'finalidad' => 'uso_personal']],
         ]))
         ->assertSessionHasNoErrors();
 
@@ -63,6 +63,7 @@ it('adjunta la evidencia de un renglón al DetalleEntrega correcto, en disco pri
                 'activo_id' => $this->datos['activoA']->id,
                 'talla_id' => $this->datos['tallaA']->id,
                 'cantidad' => 3,
+                'finalidad' => 'uso_personal',
                 'evidencia' => UploadedFile::fake()->image('estado.jpg', 800, 600),
                 'evidencia_origen' => 'camara',
             ]],
@@ -83,8 +84,8 @@ it('un renglón con evidencia NO se consolida con otro del mismo activo+variante
     $this->actingAs($this->admin)
         ->post('/entregas', ($this->payload)([
             'activos' => [
-                ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2],
-                ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 3, 'evidencia' => UploadedFile::fake()->image('e.jpg')],
+                ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 2, 'finalidad' => 'uso_personal'],
+                ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 3, 'evidencia' => UploadedFile::fake()->image('e.jpg'), 'finalidad' => 'uso_personal'],
             ],
         ]))
         ->assertSessionHasNoErrors();
@@ -101,6 +102,7 @@ it('rechaza un archivo de evidencia que no es imagen', function () {
                 'activo_id' => $this->datos['activoA']->id,
                 'talla_id' => $this->datos['tallaA']->id,
                 'cantidad' => 1,
+                'finalidad' => 'uso_personal',
                 'evidencia' => UploadedFile::fake()->create('doc.txt', 20, 'text/plain'),
             ]],
         ]))
@@ -116,6 +118,7 @@ it('si el alta falla no deja archivos de evidencia huérfanos', function () {
                 'activo_id' => $this->datos['activoA']->id,
                 'talla_id' => $this->datos['tallaA']->id,
                 'cantidad' => 999, // sin stock suficiente → revienta dentro de la acción
+                'finalidad' => 'uso_personal',
                 'evidencia' => UploadedFile::fake()->image('e.jpg'),
             ]],
         ]));
@@ -132,6 +135,7 @@ it('el endpoint de evidencia exige acceso a la empresa de la entrega (anti-IDOR)
                 'activo_id' => $this->datos['activoA']->id,
                 'talla_id' => $this->datos['tallaA']->id,
                 'cantidad' => 1,
+                'finalidad' => 'uso_personal',
                 'evidencia' => UploadedFile::fake()->image('e.jpg'),
             ]],
         ]))

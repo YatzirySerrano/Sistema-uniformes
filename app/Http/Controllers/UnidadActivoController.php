@@ -13,6 +13,7 @@ use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\EstadoVisibleUnidad;
 use App\Enums\TipoGrafica;
+use App\Enums\TipoMovimiento;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Activos\ActualizarEspecificacionUnidadRequest;
@@ -362,8 +363,13 @@ class UnidadActivoController extends Controller
 
         $perfil = $unidad->perfilTecnico();
 
+        // El evento de custodia (`RedistribucionCustodia`) se excluye aquí:
+        // la ficha ya reconstruye cada redistribución desde su renglón de
+        // entrega (abajo, incluidas las anteriores a ese evento) — así no
+        // aparece dos veces.
         $movimientosUnidad = MovimientoInventario::query()
             ->where('unidad_activo_id', $unidad->id)
+            ->where('tipo', '!=', TipoMovimiento::RedistribucionCustodia->value)
             ->orderByDesc('ocurrido_en')
             ->get();
 

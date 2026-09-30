@@ -101,6 +101,7 @@ it('el código de la unidad es estable aunque cambie de almacén, el activo o la
 it('crea un activo de seguimiento individual con N unidades desde el alta unificada', function () {
     $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id,
             'nombre' => 'Laptop Dell',
             'tipo_control' => 'individual',
@@ -116,6 +117,7 @@ it('crea un activo de seguimiento individual con N unidades desde el alta unific
 it('el alta sin "abrir_etiquetas" hace un redirect Inertia normal, sin tocar el PDF', function () {
     $respuesta = $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id,
             'nombre' => 'Monitor',
             'tipo_control' => 'individual',
@@ -133,6 +135,7 @@ it('el alta sin "abrir_etiquetas" hace un redirect Inertia normal, sin tocar el 
 it('el alta con "abrir_etiquetas" crea el activo y sus unidades con una respuesta Inertia normal (NUNCA el PDF en el POST)', function () {
     $respuesta = $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id,
             'nombre' => 'Tablet',
             'tipo_control' => 'individual',
@@ -158,6 +161,7 @@ it('el alta con "abrir_etiquetas" crea el activo y sus unidades con una respuest
 it('no genera unidades si no se captura cantidad ni almacén en el alta', function () {
     $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id, 'nombre' => 'Sólo catálogo', 'tipo_control' => 'individual',
         ])
         ->assertSessionHasNoErrors();
@@ -691,6 +695,7 @@ it('el QR de una unidad es estable: el mismo token produce siempre el mismo cont
 it('el alta de unidades sin "abrir_etiquetas" sigue creando las unidades con su token (el QR no depende de esa casilla)', function () {
     $this->actingAs($this->admin)
         ->post('/activos', [
+            ...clasificacionActivo(),
             'empresa_id' => $this->empresa->id,
             'nombre' => 'Escáner de mano',
             'tipo_control' => 'individual',

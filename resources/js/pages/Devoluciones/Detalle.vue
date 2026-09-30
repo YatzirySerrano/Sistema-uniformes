@@ -44,6 +44,8 @@ const props = defineProps<{
         folio: string;
         firmado_en: string;
         tiene_pdf: boolean;
+        firma_metodo: 'dibujada' | 'archivo';
+        firma_archivo: { nombre: string; es_pdf: boolean } | null;
         ver_pdf: boolean;
         ver_firma: boolean;
     } | null;
@@ -253,6 +255,17 @@ defineOptions({
                 <p>
                     <span class="text-muted-foreground">Folio de acuse:</span>
                     {{ acuse.folio }}
+                </p>
+                <p>
+                    <span class="text-muted-foreground"
+                        >Firma de quien devuelve:</span
+                    >
+                    <template v-if="acuse.firma_archivo">
+                        archivo subido a distancia ({{
+                            acuse.firma_archivo.es_pdf ? 'PDF' : 'imagen'
+                        }}: {{ acuse.firma_archivo.nombre }})
+                    </template>
+                    <template v-else>dibujada en el dispositivo</template>
                 </p>
                 <p>
                     <span class="text-muted-foreground">Firmado el:</span>

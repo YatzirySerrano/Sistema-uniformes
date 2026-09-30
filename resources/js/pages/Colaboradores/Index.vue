@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router } from '@inertiajs/vue3';
+import CustodiaPendienteBaja from '@/components/colaboradores/CustodiaPendienteBaja.vue';
+import type { EstadoCustodiaBaja } from '@/components/colaboradores/CustodiaPendienteBaja.vue';
 import { FileSpreadsheet, Plus, Search } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import FormularioColaborador from '@/components/colaboradores/FormularioColaborador.vue';
@@ -219,6 +221,7 @@ const vista = useVistaPreferida('colaboradores', 'tabla');
 // --- Eliminar (desactivar) / Restaurar — mismo patrón que Colaboradores/Detalle.vue ---
 const confirmandoEliminar = ref<Colaborador | null>(null);
 const procesandoEstado = ref(false);
+const estadoCustodiaBaja = ref<EstadoCustodiaBaja>('cargando');
 
 function confirmarEliminar(): void {
     if (!confirmandoEliminar.value) return;
@@ -532,6 +535,12 @@ function alternarEstado(c: Colaborador): void {
                         cuando quieras.
                     </DialogDescription>
                 </DialogHeader>
+                <CustodiaPendienteBaja
+                    v-if="confirmandoEliminar"
+                    :key="confirmandoEliminar.id"
+                    :colaborador-id="confirmandoEliminar.id"
+                    @estado="(v) => (estadoCustodiaBaja = v)"
+                />
                 <DialogFooter>
                     <Button
                         variant="ghost"
@@ -542,7 +551,9 @@ function alternarEstado(c: Colaborador): void {
                     </Button>
                     <Button
                         variant="destructive"
-                        :disabled="procesandoEstado"
+                        :disabled="
+                            procesandoEstado || estadoCustodiaBaja !== 'libre'
+                        "
                         @click="confirmarEliminar"
                     >
                         Eliminar

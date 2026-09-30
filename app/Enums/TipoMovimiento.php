@@ -18,12 +18,21 @@ enum TipoMovimiento: string
     case Recuperacion = 'recuperacion';
     case MigracionLegacy = 'migracion_legacy';
 
+    /**
+     * Cambio de CUSTODIO (colaborador → colaborador) sin salida ni entrada de
+     * almacén. Queda en el historial para reconstruir el recorrido completo
+     * del bien, pero su efecto sobre el stock del almacén es CERO
+     * (`DireccionMovimiento::SinEfecto`): nunca un falso −1/+1.
+     */
+    case RedistribucionCustodia = 'redistribucion_custodia';
+
     public function direccion(): DireccionMovimiento
     {
         return match ($this) {
             self::Inicial, self::Entrada, self::Devolucion, self::AjusteEntrada, self::TraspasoEntrada, self::Recuperacion, self::MigracionLegacy => DireccionMovimiento::Entrada,
             self::Entrega, self::AjusteSalida, self::TraspasoSalida, self::Baja, self::Incidencia => DireccionMovimiento::Salida,
             self::Correccion => DireccionMovimiento::Entrada,
+            self::RedistribucionCustodia => DireccionMovimiento::SinEfecto,
         };
     }
 
@@ -43,6 +52,16 @@ enum TipoMovimiento: string
             self::Incidencia => 'Pérdida / robo',
             self::Recuperacion => 'Recuperación de unidad',
             self::MigracionLegacy => 'Migración a almacén',
+            self::RedistribucionCustodia => 'Redistribución de custodia',
         };
+    }
+
+    /**
+     * ¿Modifica el stock de un almacén? Falso sólo para eventos de custodia
+     * entre colaboradores.
+     */
+    public function afectaStock(): bool
+    {
+        return $this->direccion() !== DireccionMovimiento::SinEfecto;
     }
 }

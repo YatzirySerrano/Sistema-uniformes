@@ -5,6 +5,7 @@ namespace App\Acciones;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\AcuseRecepcion;
 use App\Models\EntregaUniforme;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -66,12 +67,13 @@ class RegistrarEntregaFirmada
         ?string $reservaToken = null,
         ?int $custodioOrigenId = null,
         bool $incluirPersonales = false,
+        ?UploadedFile $archivoFirmaColaborador = null,
     ): AcuseRecepcion {
         /** @var array{entrega: EntregaUniforme, acuse: AcuseRecepcion} $resultado */
         $resultado = DB::transaction(function () use (
             $colaboradorId, $almacenId, $encargadoId, $fechaEntrega,
             $activos, $unidades, $conjuntos, $notas, $servicioId, $evidencias,
-            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId, $incluirPersonales,
+            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId, $incluirPersonales, $archivoFirmaColaborador,
         ): array {
             if ($custodioOrigenId !== null) {
                 $entrega = $this->redistribuir->ejecutar(
@@ -113,6 +115,7 @@ class RegistrarEntregaFirmada
                 $encargadoId,
                 $ip,
                 $userAgent,
+                $archivoFirmaColaborador,
             );
 
             return ['entrega' => $entrega, 'acuse' => $acuse];

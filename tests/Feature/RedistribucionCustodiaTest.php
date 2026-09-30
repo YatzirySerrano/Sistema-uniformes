@@ -3,6 +3,7 @@
 use App\Acciones\RedistribuirCustodia;
 use App\Acciones\RegistrarDevolucionFirmada;
 use App\Enums\CondicionDevolucion;
+use App\Enums\DireccionMovimiento;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\RolSistema;
 use App\Enums\TipoMovimiento;
@@ -80,7 +81,7 @@ beforeEach(function () {
         ...$extra,
     ];
 
-    $this->camisas = fn (int $cantidad): array => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => $cantidad]];
+    $this->camisas = fn (int $cantidad): array => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => $cantidad, 'finalidad' => 'uso_personal']];
 
     // El almacén entrega al custodio PARA REDISTRIBUIR (finalidad explícita).
     $this->entregarDesdeAlmacen = fn (Colaborador $colaborador, array $activos = [], array $unidades = [], string $finalidad = 'redistribucion') => $this->actingAs($this->admin)
@@ -122,7 +123,7 @@ it('el supervisor sólo ve en el selector lo que tiene bajo su custodia', functi
         ->assertOk()
         ->assertExactJson(['activos' => []]);
 
-    ($this->entregarDesdeAlmacen)($this->yatziri, ($this->camisas)(10), [['unidad_activo_id' => $this->unidad->id]]);
+    ($this->entregarDesdeAlmacen)($this->yatziri, ($this->camisas)(10), [['unidad_activo_id' => $this->unidad->id, 'finalidad' => 'uso_personal']]);
 
     $this->actingAs($this->supervisor)
         ->getJson("/entregas/custodia/activos?empresa_id={$this->datos['empresaA']->id}&control=cantidad")
@@ -142,7 +143,7 @@ it('el supervisor no ve lo que sigue en el almacén ni la custodia de otro super
     $otroSupervisor = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.redistribuir']);
     Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create(['usuario_id' => $otroSupervisor->id]);
 
-    ($this->entregarDesdeAlmacen)($this->yatziri, ($this->camisas)(10), [['unidad_activo_id' => $this->unidad->id]]);
+    ($this->entregarDesdeAlmacen)($this->yatziri, ($this->camisas)(10), [['unidad_activo_id' => $this->unidad->id, 'finalidad' => 'uso_personal']]);
     UnidadActivo::factory()->for($this->datos['empresaA'], 'empresa')->for($this->celular)->for($this->datos['almacenA'])->create();
 
     $this->actingAs($otroSupervisor)
@@ -154,7 +155,7 @@ it('el supervisor no ve lo que sigue en el almacén ni la custodia de otro super
 });
 
 it('rechaza una unidad manipulada en el request que no está bajo la custodia del supervisor', function () {
-    ($this->redistribuir)($this->supervisor, $this->juan, [], [['unidad_activo_id' => $this->unidad->id]])
+    ($this->redistribuir)($this->supervisor, $this->juan, [], [['unidad_activo_id' => $this->unidad->id, 'finalidad' => 'uso_personal']])
         ->assertSessionHasErrors(['unidades.0.unidad_activo_id' => 'Esa unidad ya no está bajo tu custodia (fue entregada, devuelta o reportada) o no puede redistribuirse.']);
 
     expect($this->unidad->fresh()->estado)->toBe(EstadoUnidadActivo::EnAlmacen)
@@ -173,14 +174,16 @@ it('rechaza entregar más cantidad de la que el supervisor tiene en custodia', f
 
 it('redistribuir cantidades mueve la custodia sin volver a descontar stock del almacén', function () {
     ($this->entregarDesdeAlmacen)($this->yatziri, ($this->camisas)(10));
-    $movimientosAntes = MovimientoInventario::count();
+    $movimientosDeStockAntes = MovimientoInventario::query()->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count();
 
     ($this->redistribuir)($this->supervisor, $this->juan, ($this->camisas)(3))->assertSessionHasNoErrors();
 
     $redistribucion = EntregaUniforme::query()->where('colaborador_id', $this->juan->id)->sole();
 
+    // Ningún movimiento de STOCK nuevo: sólo el evento de custodia (delta 0).
     expect(($this->stock)())->toBe(90)
-        ->and(MovimientoInventario::count())->toBe($movimientosAntes)
+        ->and(MovimientoInventario::query()->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count())->toBe($movimientosDeStockAntes)
+        ->and(MovimientoInventario::query()->where('tipo', TipoMovimiento::RedistribucionCustodia)->count())->toBe(1)
         ->and($redistribucion->colaborador_origen_id)->toBe($this->yatziri->id)
         ->and($redistribucion->almacen_id)->toBeNull()
         ->and(($this->custodiaCamisas)($this->yatziri))->toBe(7)
@@ -188,15 +191,16 @@ it('redistribuir cantidades mueve la custodia sin volver a descontar stock del a
 });
 
 it('redistribuir una unidad cambia su custodio sin generar otra salida de almacén', function () {
-    ($this->entregarDesdeAlmacen)($this->yatziri, [], [['unidad_activo_id' => $this->unidad->id]]);
-    $movimientosAntes = MovimientoInventario::query()->where('unidad_activo_id', $this->unidad->id)->count();
+    ($this->entregarDesdeAlmacen)($this->yatziri, [], [['unidad_activo_id' => $this->unidad->id, 'finalidad' => 'uso_personal']]);
+    $movimientosDeStockAntes = MovimientoInventario::query()->where('unidad_activo_id', $this->unidad->id)->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count();
 
-    ($this->redistribuir)($this->supervisor, $this->juan, [], [['unidad_activo_id' => $this->unidad->id]])->assertSessionHasNoErrors();
+    ($this->redistribuir)($this->supervisor, $this->juan, [], [['unidad_activo_id' => $this->unidad->id, 'finalidad' => 'uso_personal']])->assertSessionHasNoErrors();
 
     $this->unidad->refresh();
     expect($this->unidad->colaborador_id)->toBe($this->juan->id)
         ->and($this->unidad->estado)->toBe(EstadoUnidadActivo::Asignada)
-        ->and(MovimientoInventario::query()->where('unidad_activo_id', $this->unidad->id)->count())->toBe($movimientosAntes);
+        ->and(MovimientoInventario::query()->where('unidad_activo_id', $this->unidad->id)->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count())->toBe($movimientosDeStockAntes)
+        ->and(MovimientoInventario::query()->where('unidad_activo_id', $this->unidad->id)->where('tipo', TipoMovimiento::RedistribucionCustodia)->count())->toBe(1);
 
     $this->actingAs($this->supervisor)
         ->getJson("/entregas/custodia/unidades?empresa_id={$this->datos['empresaA']->id}&activo_id={$this->celular->id}")
@@ -207,7 +211,7 @@ it('redistribuir una unidad cambia su custodio sin generar otra salida de almac�
 });
 
 it('una unidad no puede redistribuirse dos veces: la segunda operación ya no la encuentra en la custodia', function () {
-    ($this->entregarDesdeAlmacen)($this->yatziri, [], [['unidad_activo_id' => $this->unidad->id]]);
+    ($this->entregarDesdeAlmacen)($this->yatziri, [], [['unidad_activo_id' => $this->unidad->id, 'finalidad' => 'uso_personal']]);
     $pedro = Colaborador::factory()->for($this->datos['empresaA'])->for($this->datos['sucursalA'])->create();
     $accion = app(RedistribuirCustodia::class);
 
@@ -335,7 +339,7 @@ it('audita la redistribución con origen, destinatario y renglones legibles', fu
         ->and($registro->valores_nuevos['destinatario'])->toStartWith($this->juan->nombre_completo)
         ->and($registro->valores_nuevos['renglones'])->toBe([[
             'activo' => 'Camisa', 'talla' => 'M', 'cantidad' => 3,
-            'desde' => 'Para redistribuir', 'finalidad_destinatario' => 'Sin clasificar',
+            'desde' => 'Para redistribuir', 'finalidad_destinatario' => 'Uso personal',
         ]]);
 });
 

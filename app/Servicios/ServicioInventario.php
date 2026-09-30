@@ -7,6 +7,8 @@ use App\Enums\TipoMovimiento;
 use App\Excepciones\ExistenciasInsuficientesException;
 use App\Models\Activo;
 use App\Models\Almacen;
+use App\Models\DetalleEntrega;
+use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
 use App\Models\Talla;
@@ -111,6 +113,10 @@ class ServicioInventario
             throw new \InvalidArgumentException('La cantidad del movimiento debe ser mayor a cero.');
         }
 
+        if (! $datos->tipo->afectaStock()) {
+            throw new \InvalidArgumentException('Un movimiento sin efecto en stock se registra con registrarMovimientoCustodia().');
+        }
+
         return DB::transaction(function () use ($datos): MovimientoInventario {
             $saldo = $this->lockearSaldo($datos->empresaId, $datos->almacenId, $datos->activoId, $datos->tallaId);
 
@@ -169,6 +175,10 @@ class ServicioInventario
         ?string $notas = null,
         ?int $sucursalId = null,
     ): MovimientoInventario {
+        if (! $tipo->afectaStock()) {
+            throw new \InvalidArgumentException('Un movimiento sin efecto en stock se registra con registrarMovimientoCustodia().');
+        }
+
         $direccion = $tipo->direccion();
         $entra = $direccion === DireccionMovimiento::Entrada;
 
@@ -188,6 +198,39 @@ class ServicioInventario
             'referencia_id' => $referenciaId,
             'motivo' => $motivo,
             'notas' => $notas,
+            'realizado_por' => $realizadoPor,
+            'ocurrido_en' => now(),
+        ]);
+    }
+
+    /**
+     * Evento de CUSTODIA (redistribución colaborador → colaborador) en el
+     * historial de movimientos, sin tocar `saldos_inventario` ni simular una
+     * salida/entrada de almacén: `almacen_id` NULL, dirección `SinEfecto` y
+     * existencia anterior = resultante = 0 (no hay stock de almacén
+     * involucrado; la UI lo presenta como "No afecta existencias").
+     *
+     * La referencia es el renglón NUEVO de la entrega (`DetalleEntrega`): de
+     * él se reconstruyen origen/destino, folio y finalidades sin duplicarlos.
+     */
+    public function registrarMovimientoCustodia(DetalleEntrega $detalle, EntregaUniforme $entrega, string $motivo, ?int $realizadoPor): MovimientoInventario
+    {
+        return MovimientoInventario::query()->create([
+            'empresa_id' => $entrega->empresa_id,
+            'almacen_id' => null,
+            'sucursal_id' => $entrega->sucursal_id,
+            'activo_id' => $detalle->activo_id,
+            'talla_id' => $detalle->talla_id,
+            'unidad_activo_id' => $detalle->unidad_activo_id,
+            'tipo' => TipoMovimiento::RedistribucionCustodia,
+            'direccion' => TipoMovimiento::RedistribucionCustodia->direccion(),
+            'cantidad' => max((int) $detalle->cantidad, 1),
+            'existencia_anterior' => 0,
+            'existencia_resultante' => 0,
+            'referencia_tipo' => DetalleEntrega::class,
+            'referencia_id' => $detalle->getKey(),
+            'motivo' => mb_substr($motivo, 0, 191),
+            'notas' => null,
             'realizado_por' => $realizadoPor,
             'ocurrido_en' => now(),
         ]);

@@ -3,6 +3,7 @@
 use App\Acciones\RegistrarDevolucionFirmada;
 use App\Enums\CondicionDevolucion;
 use App\Enums\CondicionUnidadActivo;
+use App\Enums\DireccionMovimiento;
 use App\Enums\EstadoUnidadActivo;
 use App\Enums\FinalidadCustodia;
 use App\Enums\RolSistema;
@@ -120,7 +121,7 @@ it('un bien personal no se puede entregar sin el permiso, ni manipulando el requ
 it('con permiso de reasignar personales lo transfiere sin tocar el almacén y el destinatario recibe su propia finalidad', function () {
     $conPropios = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.redistribuir', 'entregas.redistribuir-propios']);
     $this->yatziri->update(['usuario_id' => $conPropios->id]);
-    $movimientos = MovimientoInventario::count();
+    $movimientosDeStock = MovimientoInventario::query()->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count();
 
     $this->actingAs($conPropios)
         ->getJson("/entregas/custodia/activos?empresa_id={$this->datos['empresaA']->id}&control=individual")
@@ -132,7 +133,7 @@ it('con permiso de reasignar personales lo transfiere sin tocar el almacén y el
     $detalleJuan = DetalleEntrega::query()->where('unidad_activo_id', $this->laptop->id)->latest('id')->first();
     expect($this->laptop->fresh()->colaborador_id)->toBe($this->juan->id)
         ->and($detalleJuan->finalidad)->toBe(FinalidadCustodia::UsoPersonal)
-        ->and(MovimientoInventario::count())->toBe($movimientos)
+        ->and(MovimientoInventario::query()->where('direccion', '!=', DireccionMovimiento::SinEfecto)->count())->toBe($movimientosDeStock)
         ->and(($this->saldo)())->toBe(38);
 
     $auditoria = BitacoraAuditoria::query()->where('accion', 'redistribuir')->sole();

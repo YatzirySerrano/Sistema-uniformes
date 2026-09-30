@@ -81,15 +81,19 @@ class GuardarActivoRequest extends FormRequest
             ] : []),
             'nombre' => ['required', 'string', 'max:255'],
             'descripcion' => ['nullable', 'string', 'max:2000'],
+            // Tipo y categoría son OBLIGATORIOS (alta y edición): los perfiles
+            // técnicos y el seguimiento individual dependen de ellos. Un
+            // activo histórico sin clasificar se sigue viendo, pero al
+            // guardar una nueva edición hay que completarlo.
             'categoria_id' => [
-                'nullable', 'integer',
+                'required', 'integer',
                 Rule::exists('categorias_activo', 'id')->where(fn ($q) => $q->where('activa', true)),
             ],
             // `codigo` NUNCA se valida como entrada del usuario: lo genera
             // el backend (autogenerado, ACT-0001…) en el alta y es
             // inmutable en edición.
             'tipo_activo_id' => [
-                'nullable', 'integer',
+                'required', 'integer',
                 Rule::exists('tipos_activo', 'id')->where(fn ($q) => $q->where('activo', true)),
             ],
             'tipo_control' => ['required', new Enum(TipoControlActivo::class)],
@@ -107,10 +111,11 @@ class GuardarActivoRequest extends FormRequest
     }
 
     /**
-     * Coherencia tipo ↔ categoría: si el activo lleva tipo y categoría, y la
-     * categoría está ligada a un tipo concreto, ambos deben coincidir. Una
-     * categoría sin tipo, o un activo sin tipo, no tienen restricción (tipo y
-     * categoría son opcionales).
+     * Coherencia tipo ↔ categoría: la categoría es la fuente estructurada de
+     * su tipo (`categorias_activo.tipo_activo_id`). Si está ligada a un tipo
+     * concreto, el tipo enviado debe ser exactamente ése — una petición
+     * manipulada (Tipo = Prenda, Categoría = Carro) se rechaza. Una categoría
+     * sin tipo ligado admite cualquier tipo. Nunca se compara por nombre.
      */
     public function withValidator(Validator $validator): void
     {
@@ -131,7 +136,7 @@ class GuardarActivoRequest extends FormRequest
             if ($tipoDeLaCategoria !== null && (int) $tipoDeLaCategoria !== $tipoId) {
                 $validator->errors()->add(
                     'categoria_id',
-                    'La categoría seleccionada pertenece a otro tipo de activo. Cámbiala o quita el tipo.',
+                    'La categoría seleccionada pertenece a otro tipo de activo. Elige una categoría de ese tipo o cambia el tipo.',
                 );
             }
         });
@@ -252,7 +257,9 @@ class GuardarActivoRequest extends FormRequest
             'existencias.*.cantidad.min' => 'La cantidad no puede ser negativa.',
             'nombre.required' => 'El nombre del activo es obligatorio.',
             'nombre.max' => 'El nombre no puede superar los 255 caracteres.',
+            'tipo_activo_id.required' => 'Selecciona el tipo de activo.',
             'tipo_activo_id.exists' => 'El tipo de activo seleccionado no existe o está desactivado.',
+            'categoria_id.required' => 'Selecciona la categoría del activo.',
             'categoria_id.exists' => 'La categoría seleccionada no existe o está desactivada.',
             'tipo_control.enum' => 'El tipo de control debe ser "por cantidad" o "seguimiento individual".',
             'tipo_control.required' => 'Indica cómo se controla el activo.',

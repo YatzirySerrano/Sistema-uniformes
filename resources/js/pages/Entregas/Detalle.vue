@@ -55,6 +55,8 @@ const props = defineProps<{
                 folio: string;
                 colaborador: string | null;
                 cantidad: number;
+                talla: string | null;
+                unidad_codigo: string | null;
             }[];
         }[];
         correcciones: {
@@ -69,6 +71,8 @@ const props = defineProps<{
         folio: string;
         firmado_en: string;
         tiene_pdf: boolean;
+        firma_metodo: 'dibujada' | 'archivo';
+        firma_archivo: { nombre: string; es_pdf: boolean } | null;
     } | null;
     permisos: {
         firmar: boolean;
@@ -210,6 +214,17 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                     <span class="text-muted-foreground">Acuse:</span>
                     {{ acuse.folio }}
                 </p>
+                <p v-if="acuse">
+                    <span class="text-muted-foreground"
+                        >Firma de quien recibe:</span
+                    >
+                    <template v-if="acuse.firma_archivo">
+                        archivo subido a distancia ({{
+                            acuse.firma_archivo.es_pdf ? 'PDF' : 'imagen'
+                        }}: {{ acuse.firma_archivo.nombre }})
+                    </template>
+                    <template v-else>dibujada en el dispositivo</template>
+                </p>
                 <p v-if="entrega.notas" class="sm:col-span-2">
                     <span class="text-muted-foreground">Notas:</span>
                     {{ entrega.notas }}
@@ -223,22 +238,15 @@ const itemsConTrazabilidad = props.entrega.items.filter(
             </CardHeader>
             <CardContent>
                 <!-- Móvil: cards apiladas, nunca tabla con scroll horizontal. -->
-                <ul class="flex flex-col gap-3 sm:hidden">
+                <ul class="flex flex-col gap-3 md:hidden">
                     <li
                         v-for="(it, i) in entrega.items"
                         :key="i"
                         class="rounded-lg border p-3 text-sm"
                     >
                         <div class="flex items-start justify-between gap-2">
-                            <p class="font-medium">
+                            <p class="min-w-0 font-medium break-words">
                                 {{ it.activo }}
-                                <Badge
-                                    :variant="
-                                        varianteBadgeFinalidad(it.finalidad)
-                                    "
-                                    class="ml-1 text-xs"
-                                    >{{ it.finalidad_etiqueta }}</Badge
-                                >
                             </p>
                             <p class="text-muted-foreground shrink-0 text-xs">
                                 Cantidad
@@ -277,9 +285,23 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                                 </dt>
                                 <dd>{{ it.talla }}</dd>
                             </div>
-                            <div v-if="it.conjunto" class="flex gap-1.5">
+                            <div class="flex gap-1.5">
                                 <dt class="text-muted-foreground">Conjunto:</dt>
-                                <dd>{{ it.conjunto }}</dd>
+                                <dd>{{ it.conjunto ?? '—' }}</dd>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <dt class="text-muted-foreground">
+                                    Finalidad:
+                                </dt>
+                                <dd>
+                                    <Badge
+                                        :variant="
+                                            varianteBadgeFinalidad(it.finalidad)
+                                        "
+                                        class="text-xs"
+                                        >{{ it.finalidad_etiqueta }}</Badge
+                                    >
+                                </dd>
                             </div>
                         </dl>
                         <div
@@ -305,26 +327,31 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                 </ul>
 
                 <!-- Escritorio: tabla. -->
-                <div class="hidden overflow-x-auto sm:block">
-                    <table class="w-full text-sm">
+                <!-- md+: tabla con columnas separadas por padding (nunca
+                     "ConjuntoFinalidad" pegadas) y scroll horizontal propio
+                     si el ancho no alcanza. -->
+                <div class="hidden overflow-x-auto md:block">
+                    <table class="w-full min-w-[760px] text-sm">
                         <thead class="text-muted-foreground text-left">
-                            <tr>
-                                <th class="py-1.5">Activo</th>
-                                <th class="py-1.5">Talla / unidad</th>
-                                <th class="py-1.5">Conjunto</th>
-                                <th class="py-1.5">Finalidad</th>
-                                <th class="py-1.5">Evidencia</th>
-                                <th class="py-1.5 text-right">Cantidad</th>
+                            <tr
+                                class="[&>th]:px-3 [&>th]:py-2 [&>th]:font-medium [&>th]:whitespace-nowrap"
+                            >
+                                <th>Activo</th>
+                                <th>Talla / unidad</th>
+                                <th>Conjunto</th>
+                                <th>Finalidad</th>
+                                <th>Evidencia</th>
+                                <th class="text-right">Cantidad</th>
                             </tr>
                         </thead>
                         <tbody>
                             <tr
                                 v-for="(it, i) in entrega.items"
                                 :key="i"
-                                class="border-t"
+                                class="border-t align-top [&>td]:px-3 [&>td]:py-2"
                             >
-                                <td class="py-1.5">{{ it.activo }}</td>
-                                <td class="py-1.5">
+                                <td class="min-w-40">{{ it.activo }}</td>
+                                <td class="whitespace-nowrap">
                                     <template v-if="it.unidad_codigo">
                                         <span class="font-mono text-xs">{{
                                             it.unidad_codigo
@@ -346,10 +373,10 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                                     </template>
                                     <span v-else>{{ it.talla ?? '—' }}</span>
                                 </td>
-                                <td class="text-muted-foreground py-1.5">
+                                <td class="text-muted-foreground min-w-32">
                                     {{ it.conjunto ?? '—' }}
                                 </td>
-                                <td class="py-1.5">
+                                <td class="whitespace-nowrap">
                                     <Badge
                                         :variant="
                                             varianteBadgeFinalidad(it.finalidad)
@@ -358,7 +385,7 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                                         >{{ it.finalidad_etiqueta }}</Badge
                                     >
                                 </td>
-                                <td class="py-1.5">
+                                <td>
                                     <div
                                         v-if="it.evidencias.length"
                                         class="flex flex-wrap gap-1"
@@ -382,7 +409,7 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                                         >—</span
                                     >
                                 </td>
-                                <td class="py-1.5 text-right">
+                                <td class="text-right tabular-nums">
                                     {{ it.cantidad }}
                                 </td>
                             </tr>
@@ -410,44 +437,77 @@ const itemsConTrazabilidad = props.entrega.items.filter(
                         :key="i"
                         class="rounded-lg border p-3"
                     >
-                        <p class="font-medium">
-                            {{ it.activo
-                            }}<template v-if="it.unidad_codigo">
-                                ·
-                                <span class="font-mono">{{
-                                    it.unidad_codigo
-                                }}</span></template
-                            ><template v-else-if="it.talla">
-                                · {{ it.talla }}</template
-                            >
+                        <p class="font-medium">{{ it.activo }}</p>
+                        <!-- Código de unidad y variante son conceptos distintos: nunca se muestra el código como si fuera una talla. -->
+                        <p
+                            v-if="it.unidad_codigo"
+                            class="text-muted-foreground text-xs"
+                        >
+                            Unidad:
+                            <span class="text-foreground font-mono">{{
+                                it.unidad_codigo
+                            }}</span>
                         </p>
-                        <p v-if="it.recibido_de" class="mt-1">
-                            <span class="text-muted-foreground"
-                                >Recibido de la custodia de:</span
-                            >
-                            {{ it.recibido_de.colaborador ?? '—' }} ·
-                            <Link
-                                :href="`/entregas/${it.recibido_de.entrega_id}`"
-                                class="underline underline-offset-2"
-                                >{{ it.recibido_de.folio }}</Link
-                            >
+                        <p
+                            v-else-if="it.talla"
+                            class="text-muted-foreground text-xs"
+                        >
+                            Talla / variante:
+                            <span class="text-foreground">{{ it.talla }}</span>
                         </p>
-                        <div v-if="it.redistribuido_a.length" class="mt-1">
-                            <p class="text-muted-foreground">
-                                Redistribuido después a:
+                        <dl v-if="it.recibido_de" class="mt-2 grid gap-0.5">
+                            <dt class="text-muted-foreground text-xs">
+                                Recibido de la custodia de
+                            </dt>
+                            <dd>
+                                {{ it.recibido_de.colaborador ?? '—' }} ·
+                                Entrega
+                                <Link
+                                    :href="`/entregas/${it.recibido_de.entrega_id}`"
+                                    class="underline underline-offset-2"
+                                    >{{ it.recibido_de.folio }}</Link
+                                >
+                            </dd>
+                        </dl>
+                        <div v-if="it.redistribuido_a.length" class="mt-2">
+                            <p class="text-muted-foreground text-xs">
+                                Redistribuido después a
                             </p>
-                            <ul class="mt-0.5 flex flex-col gap-0.5">
+                            <ul class="mt-1 flex flex-col gap-1.5">
                                 <li
                                     v-for="r in it.redistribuido_a"
                                     :key="`${r.entrega_id}-${r.cantidad}`"
+                                    class="bg-muted/40 grid gap-x-4 gap-y-0.5 rounded-md px-2 py-1.5 text-xs sm:grid-cols-3"
                                 >
-                                    {{ r.colaborador ?? '—' }} ·
-                                    {{ r.cantidad }} ·
-                                    <Link
-                                        :href="`/entregas/${r.entrega_id}`"
-                                        class="underline underline-offset-2"
-                                        >{{ r.folio }}</Link
-                                    >
+                                    <p>
+                                        <span class="text-muted-foreground"
+                                            >Destinatario:</span
+                                        >
+                                        {{ r.colaborador ?? '—' }}
+                                    </p>
+                                    <p>
+                                        <span class="text-muted-foreground">{{
+                                            it.unidad_codigo
+                                                ? 'Cantidad:'
+                                                : 'Cantidad entregada:'
+                                        }}</span>
+                                        {{ r.cantidad }}
+                                        <template v-if="it.unidad_codigo">{{
+                                            r.cantidad === 1
+                                                ? 'unidad'
+                                                : 'unidades'
+                                        }}</template>
+                                    </p>
+                                    <p>
+                                        <span class="text-muted-foreground"
+                                            >Entrega:</span
+                                        >
+                                        <Link
+                                            :href="`/entregas/${r.entrega_id}`"
+                                            class="underline underline-offset-2"
+                                            >{{ r.folio }}</Link
+                                        >
+                                    </p>
                                 </li>
                             </ul>
                         </div>

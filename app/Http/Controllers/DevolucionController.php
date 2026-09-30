@@ -451,13 +451,15 @@ class DevolucionController extends Controller
                 $request->user()->id,
                 $datos['motivo'] ?? null,
                 $datos['notas'] ?? null,
-                $datos['firma'],
+                // Firma de quien devuelve: dibujada o archivo (nunca ambas).
+                $request->firmaPorArchivo() ? '' : (string) ($datos['firma'] ?? ''),
                 $datos['firma_operador'],
                 true, // aceptación (validada por la regla `accepted`)
                 $request->ip(),
                 $request->userAgent(),
                 $evidencias,
                 $datos['reserva_token'] ?? null,
+                $request->firmaPorArchivo() ? $request->file('firma_archivo') : null,
             );
         } catch (Throwable $e) {
             $evidenciasSvc->descartar($metasEvidencia);
@@ -557,6 +559,11 @@ class DevolucionController extends Controller
                 'folio' => $devolucion->acuse->folio,
                 'firmado_en' => $devolucion->acuse->firmado_en->toIso8601String(),
                 'tiene_pdf' => $devolucion->acuse->tienePdf(),
+                'firma_metodo' => $devolucion->acuse->metodoFirma(),
+                'firma_archivo' => $devolucion->acuse->firmaArchivo === null ? null : [
+                    'nombre' => $devolucion->acuse->firmaArchivo->nombre_original,
+                    'es_pdf' => $devolucion->acuse->firmaArchivo->esPdf(),
+                ],
                 'ver_pdf' => $request->user()->can('verPdf', $devolucion->acuse),
                 'ver_firma' => $request->user()->can('verFirma', $devolucion->acuse),
             ],

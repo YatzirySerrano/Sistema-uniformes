@@ -10,6 +10,8 @@ import CapturaEvidencia from '@/components/sistema/CapturaEvidencia.vue';
 import DocumentoIdentidadColaborador from '@/components/sistema/DocumentoIdentidadColaborador.vue';
 import EncabezadoPagina from '@/components/sistema/EncabezadoPagina.vue';
 import InputError from '@/components/InputError.vue';
+import FirmaColaborador from '@/components/sistema/FirmaColaborador.vue';
+import type { MetodoFirma } from '@/components/sistema/FirmaColaborador.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import { Badge } from '@/components/ui/badge';
@@ -294,6 +296,9 @@ const form = useForm<{
         evidencia_origen: OrigenEvidencia;
     }[];
     firma: string;
+    /** Firma de quien recibe/devuelve: dibujada en el pad o archivo subido. */
+    firma_metodo: MetodoFirma;
+    firma_archivo: File | null;
     firma_operador: string;
     aceptacion: boolean;
 }>({
@@ -306,6 +311,8 @@ const form = useForm<{
     activos: [],
     unidades: [],
     firma: '',
+    firma_metodo: 'dibujada',
+    firma_archivo: null,
     firma_operador: '',
     aceptacion: false,
 });
@@ -453,7 +460,7 @@ const puedeAvanzar2 = computed(
 // ------------------------------------------------------------------
 // Paso 3 — firmas
 // ------------------------------------------------------------------
-const padColaborador = ref<InstanceType<typeof PadFirma> | null>(null);
+const padColaborador = ref<InstanceType<typeof FirmaColaborador> | null>(null);
 const padOperador = ref<InstanceType<typeof PadFirma> | null>(null);
 const firmaColaboradorVacia = ref(true);
 const firmaOperadorVacia = ref(true);
@@ -468,7 +475,11 @@ const faltantesFirma = computed<string[]>(() => {
             'Tu apartado de custodia venció. Vuelve al paso anterior para actualizar los pendientes.',
         );
     if (firmaColaboradorVacia.value)
-        faltan.push('Solicita la firma de quien devuelve para continuar.');
+        faltan.push(
+            form.firma_metodo === 'archivo'
+                ? 'Sube el archivo con la firma de quien devuelve para continuar.'
+                : 'Solicita la firma de quien devuelve para continuar.',
+        );
     if (firmaOperadorVacia.value)
         faltan.push('Falta la firma del encargado que recibe la devolución.');
     if (!form.aceptacion)
@@ -562,7 +573,7 @@ function irAPasoConError(): void {
         claves.some(
             (k) =>
                 k === 'firma' ||
-                k === 'firma_operador' ||
+                k.startsWith('firma_') ||
                 k === 'aceptacion' ||
                 k === 'negocio',
         )
@@ -1277,13 +1288,18 @@ function enviar(): void {
                             identidad y firma es responsabilidad de quien
                             procesa la devolución.
                         </p>
-                        <PadFirma
+                        <FirmaColaborador
                             ref="padColaborador"
+                            v-model:metodo="form.firma_metodo"
+                            v-model:archivo="form.firma_archivo"
+                            quien="quien devuelve"
+                            :error="form.errors.firma_archivo"
                             @cambio="
                                 (v: boolean) => (firmaColaboradorVacia = v)
                             "
                         />
                         <InputError :message="form.errors.firma" />
+                        <InputError :message="form.errors.firma_metodo" />
                     </section>
 
                     <section class="space-y-3 rounded-xl border p-4">

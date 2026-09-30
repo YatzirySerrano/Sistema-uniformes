@@ -135,7 +135,7 @@ function payloadBase(array $datos, int $encargadoId): array
 it('6. un activo con stock 0 no puede entregarse: el backend lo rechaza con un error de negocio, no un 500', function () {
     $respuesta = postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ]);
 
     $respuesta->assertSessionHasErrors('activos.0.cantidad');
@@ -151,7 +151,7 @@ it('7. con stock 3, intentar entregar 4 es rechazado', function () {
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 4]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 4, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('activos.0.cantidad');
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -166,7 +166,7 @@ it('8. con stock 3, entregar 3 es permitido y el saldo final queda en 0', functi
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 3]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 3, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     expect(EntregaUniforme::count())->toBe(1)
@@ -184,7 +184,7 @@ it('9. una variante sin existencia (S=0) no es entregable aunque otra variante d
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $tallaS->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $tallaS->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('activos.0.cantidad');
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -199,7 +199,7 @@ it('10. una variante con existencia (M=5) sí permite entregar hasta 5', functio
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 5]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 5, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     expect(SaldoInventario::first()->cantidad)->toBe(0);
@@ -215,7 +215,7 @@ it('11. existencia en OTRO almacén no habilita el activo en el almacén de la e
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('activos.0.cantidad');
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -231,7 +231,7 @@ it('12. un activo inactivo no puede entregarse', function () {
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('activos.0.activo_id');
 });
 
@@ -251,13 +251,13 @@ it('13-17. sólo una unidad en_almacen+funcionando en el almacén de la entrega 
     foreach ([$asignada, $reparacion, $perdida, $robada] as $unidad) {
         postEntrega($this, [
             ...payloadBase($this->datos, $this->admin->id),
-            'unidades' => [['unidad_activo_id' => $unidad->id]],
+            'unidades' => [['unidad_activo_id' => $unidad->id, 'finalidad' => 'uso_personal']],
         ])->assertSessionHasErrors('unidades.0.unidad_activo_id');
     }
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'unidades' => [['unidad_activo_id' => $funcionando->id]],
+        'unidades' => [['unidad_activo_id' => $funcionando->id, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     expect($funcionando->fresh()->estado)->toBe(EstadoUnidadActivo::Asignada);
@@ -270,7 +270,7 @@ it('18. una unidad de otro almacén es rechazada', function () {
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'unidades' => [['unidad_activo_id' => $unidad->id]],
+        'unidades' => [['unidad_activo_id' => $unidad->id, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('unidades.0.unidad_activo_id');
 });
 
@@ -280,7 +280,7 @@ it('19. una unidad de otra empresa es rechazada', function () {
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'unidades' => [['unidad_activo_id' => $unidadB->id]],
+        'unidades' => [['unidad_activo_id' => $unidadB->id, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('unidades.0.unidad_activo_id');
 });
 
@@ -303,7 +303,7 @@ it('20-21. un conjunto sin disponibilidad de un componente no puede agregarse; l
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('conjuntos.0.cantidad');
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -316,7 +316,7 @@ it('22. un conjunto con un activo inactivo como componente no es entregable', fu
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('conjuntos.0.cantidad');
 });
 
@@ -329,7 +329,7 @@ it('23. un conjunto cuyo componente de seguimiento individual no tiene unidades 
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('conjuntos.0.cantidad');
 });
 
@@ -373,7 +373,7 @@ it('24. con variante libre, solicitar más conjuntos de los que permite la varia
     // agregado hacía que 8 pareciera válido).
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaChica->id], 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('conjuntos.0.cantidad');
 
     expect(EntregaUniforme::count())->toBe(0)
@@ -384,7 +384,7 @@ it('24. con variante libre, solicitar más conjuntos de los que permite la varia
     // Exactamente el límite real de la variante elegida (5) sí es válido.
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 5, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 5, 'variantes' => [$compCamisa->id => $tallaChica->id], 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     expect(EntregaUniforme::count())->toBe(1)
@@ -413,13 +413,13 @@ it('25. cambiar la variante elegida de un componente de talla libre cambia la di
     // 8 con la variante chica (sólo 5) -> rechazado.
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaChica->id], 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('conjuntos.0.cantidad');
 
     // Los mismos 8, pero con la variante grande (10 disponibles) -> válido.
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaGrande->id]]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 8, 'variantes' => [$compCamisa->id => $tallaGrande->id], 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     expect(EntregaUniforme::count())->toBe(1);
@@ -440,7 +440,7 @@ it('26. seleccionar en la entrega una variante que no pertenece al activo del co
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'variantes' => [$compCamisa->id => $tallaAjena->id]]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'variantes' => [$compCamisa->id => $tallaAjena->id], 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors("conjuntos.0.variantes.{$compCamisa->id}");
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -472,7 +472,7 @@ it('27. combina un componente de variante libre con uno de seguimiento individua
         now()->toDateString(),
         [],
         [],
-        [['conjunto_id' => $conjunto->id, 'cantidad' => 4, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+        [['conjunto_id' => $conjunto->id, 'cantidad' => 4, 'variantes' => [$compCamisa->id => $tallaChica->id], 'finalidad' => 'uso_personal']],
     ))->toThrow(ExcepcionDeNegocioSimple::class);
 
     expect(EntregaUniforme::count())->toBe(0)
@@ -487,7 +487,7 @@ it('27. combina un componente de variante libre con uno de seguimiento individua
         now()->toDateString(),
         [],
         [],
-        [['conjunto_id' => $conjunto->id, 'cantidad' => 3, 'variantes' => [$compCamisa->id => $tallaChica->id]]],
+        [['conjunto_id' => $conjunto->id, 'cantidad' => 3, 'variantes' => [$compCamisa->id => $tallaChica->id], 'finalidad' => 'uso_personal']],
     );
 
     expect(EntregaUniforme::count())->toBe(1)
@@ -511,7 +511,7 @@ it('24-25. dos intentos contra el último saldo: sólo uno consume la existencia
     // Primera "petición" gana la última existencia.
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     // Segunda "petición" (otro colaborador) llega tarde: ya no hay existencia.
@@ -519,7 +519,7 @@ it('24-25. dos intentos contra el último saldo: sólo uno consume la existencia
         'colaborador_id' => $otroColaborador->id,
         'almacen_id' => $this->datos['almacenA']->id,
         'fecha_entrega' => now()->toDateString(),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('activos.0.cantidad');
 
     expect(EntregaUniforme::count())->toBe(1)
@@ -552,7 +552,7 @@ it('32. un almacen_id de otra empresa es rechazado', function () {
         'colaborador_id' => $this->datos['colaboradorA']->id,
         'almacen_id' => $this->datos['almacenB']->id,
         'fecha_entrega' => now()->toDateString(),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('almacen_id');
 });
 
@@ -566,7 +566,7 @@ it('33. un colaborador de otra empresa con un almacén/activo que no le correspo
         'colaborador_id' => $colaboradorB->id,
         'almacen_id' => $this->datos['almacenA']->id,
         'fecha_entrega' => now()->toDateString(),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors(['almacen_id', 'activos.0.activo_id']);
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -586,7 +586,7 @@ it('33b. un usuario sin acceso a la empresa del colaborador recibe 403 (defensa 
         'colaborador_id' => $colaboradorB->id,
         'almacen_id' => $this->datos['almacenB']->id,
         'fecha_entrega' => now()->toDateString(),
-        'activos' => [['activo_id' => $activoB->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $activoB->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertForbidden();
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -597,7 +597,7 @@ it('34. un activo de otra empresa es rechazado', function () {
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $activoB->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $activoB->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors('activos.0.activo_id');
 });
 
@@ -631,8 +631,8 @@ it('35. varios activos en una sola entrega son válidos', function () {
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
         'activos' => [
-            ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1],
-            ['activo_id' => $pantalon->id, 'talla_id' => null, 'cantidad' => 1],
+            ['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal'],
+            ['activo_id' => $pantalon->id, 'talla_id' => null, 'cantidad' => 1, 'finalidad' => 'uso_personal'],
         ],
     ])->assertSessionHasNoErrors();
 
@@ -650,7 +650,7 @@ it('36. sólo un conjunto (sin activos ni unidades) con disponibilidad suficient
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     expect(EntregaUniforme::count())->toBe(1);
@@ -673,8 +673,8 @@ it('37. un activo suelto y un conjunto se pueden combinar en la misma entrega', 
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
-        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
+        'conjuntos' => [['conjunto_id' => $conjunto->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasNoErrors();
 
     expect(EntregaUniforme::sole()->detalles)->toHaveCount(2);
@@ -696,12 +696,12 @@ it('39. una fila de conjunto dejada vacía ("+ Agregar conjunto" sin seleccionar
 
     postEntrega($this, [
         ...payloadBase($this->datos, $this->admin->id),
-        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1]],
+        'activos' => [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
         // Simula un cliente que no filtró la fila vacía de "+ Agregar
         // conjunto" antes de enviar (el frontend real ya la filtra en
         // `Crear.vue::enviar()`; esto prueba que el backend, como fuente de
         // verdad, no depende de ese filtrado para dar un mensaje claro).
-        'conjuntos' => [['conjunto_id' => null, 'cantidad' => 1]],
+        'conjuntos' => [['conjunto_id' => null, 'cantidad' => 1, 'finalidad' => 'uso_personal']],
     ])->assertSessionHasErrors(['conjuntos.0.conjunto_id' => 'Selecciona un conjunto.']);
 
     expect(EntregaUniforme::count())->toBe(0);
@@ -723,7 +723,7 @@ it('si el stock baja entre la previsualización y la firma, la acción revierte 
             $this->datos['almacenA']->id,
             $this->admin->id,
             now()->toDateString(),
-            [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 8]],
+            [['activo_id' => $this->datos['activoA']->id, 'talla_id' => $this->datos['tallaA']->id, 'cantidad' => 8, 'finalidad' => 'uso_personal']],
             [], [],
         );
         $this->fail('Se esperaba un error de negocio por stock insuficiente.');
