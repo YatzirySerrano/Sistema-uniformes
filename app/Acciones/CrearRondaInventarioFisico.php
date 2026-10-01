@@ -5,11 +5,14 @@ namespace App\Acciones;
 use App\Enums\CondicionUnidadActivo;
 use App\Enums\EstadoInventarioFisico;
 use App\Enums\EstadoUnidadActivo;
+use App\Enums\FinalidadCustodia;
+use App\Models\Colaborador;
 use App\Models\Empresa;
 use App\Models\InventarioFisico;
 use App\Models\SaldoInventario;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioAuditoria;
+use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioFolios;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +26,10 @@ use Illuminate\Support\Facades\DB;
  *    empresa → `inventario_fisico_existencias`, UN renglón por almacén +
  *    activo + variante (nunca se suman almacenes: la diferencia debe poder
  *    corregirse en el almacén donde ocurrió).
+ *  - Existencias POR CANTIDAD bajo CUSTODIA de colaboradores → también
+ *    `inventario_fisico_existencias` (`colaborador_id` + `finalidad`, sin
+ *    almacén), UN renglón por custodio + activo + variante + finalidad
+ *    (nunca se suman custodios ni finalidades: se pierde la trazabilidad).
  *  - Unidades identificadas verificables → `inventario_fisico_unidades`
  *    (en almacén o asignadas; funcionando, en reparación o inservibles).
  *
@@ -37,6 +44,7 @@ class CrearRondaInventarioFisico
     public function __construct(
         private readonly ServicioFolios $folios,
         private readonly ServicioAuditoria $auditoria,
+        private readonly ServicioCustodiaColaborador $custodia,
     ) {}
 
     public function ejecutar(
@@ -88,9 +96,35 @@ class CrearRondaInventarioFisico
                         $chunk->map(fn (SaldoInventario $s): array => [
                             'inventario_fisico_id' => $ronda->id,
                             'almacen_id' => $s->almacen_id,
+                            'colaborador_id' => null,
+                            'finalidad' => null,
                             'activo_id' => $s->activo_id,
                             'talla_id' => $s->talla_id,
                             'cantidad_esperada' => (int) $s->cantidad,
+                            'cantidad_contada' => null,
+                            'verificada_por' => null,
+                            'verificada_en' => null,
+                            'created_at' => $ahora,
+                            'updated_at' => $ahora,
+                        ])->values()->all()
+                    );
+                });
+
+            // Custodia por cantidad: se congela lo que cada custodio tenía en
+            // este instante; devolver, redistribuir o reclasificar después no
+            // altera la ronda.
+            collect($this->bolsasCustodiaOrdenadas($empresa->id))
+                ->chunk(1000)
+                ->each(function ($chunk) use ($ronda, $ahora): void {
+                    DB::table('inventario_fisico_existencias')->insert(
+                        $chunk->map(fn (array $b): array => [
+                            'inventario_fisico_id' => $ronda->id,
+                            'almacen_id' => null,
+                            'colaborador_id' => $b['colaborador_id'],
+                            'finalidad' => $b['finalidad']?->value,
+                            'activo_id' => $b['activo_id'],
+                            'talla_id' => $b['talla_id'],
+                            'cantidad_esperada' => $b['cantidad'],
                             'cantidad_contada' => null,
                             'verificada_por' => null,
                             'verificada_en' => null,
@@ -104,7 +138,7 @@ class CrearRondaInventarioFisico
                 'empresa_id' => $empresa->id,
                 'tipo_entidad' => InventarioFisico::class,
                 'entidad_id' => $ronda->id,
-                'descripcion' => 'Alta de ronda de inventario físico «'.$ronda->nombre.'» ('.$ronda->folio.') de toda la empresa (existencias por cantidad de sus almacenes y unidades identificadas).',
+                'descripcion' => 'Alta de ronda de inventario físico «'.$ronda->nombre.'» ('.$ronda->folio.') de toda la empresa (existencias por cantidad de sus almacenes y bajo custodia, y unidades identificadas).',
             ]);
 
             return $ronda;
@@ -143,6 +177,35 @@ class CrearRondaInventarioFisico
             ->where('empresa_id', $empresaId)
             ->where('cantidad', '>', 0)
             ->whereIn('almacen_id', DB::table('almacen_empresa')->where('empresa_id', $empresaId)->select('almacen_id'));
+    }
+
+    /**
+     * Bolsas de custodia por cantidad de la empresa en orden estable de
+     * presentación: custodio (nombre), activo, variante y finalidad (uso
+     * personal → para redistribuir → sin clasificar). El `id` del renglón
+     * conserva ese orden.
+     *
+     * @return list<array{colaborador_id: int, activo_id: int, talla_id: int|null, finalidad: FinalidadCustodia|null, cantidad: int}>
+     */
+    private function bolsasCustodiaOrdenadas(int $empresaId): array
+    {
+        $bolsas = $this->custodia->bolsasCantidadDeEmpresa($empresaId);
+
+        if ($bolsas === []) {
+            return [];
+        }
+
+        $nombres = Colaborador::query()->whereIn('id', array_unique(array_column($bolsas, 'colaborador_id')))->pluck('nombre_completo', 'id');
+        $ordenFinalidad = fn (?FinalidadCustodia $f): int => match ($f) {
+            FinalidadCustodia::UsoPersonal => 0,
+            FinalidadCustodia::Redistribucion => 1,
+            null => 2,
+        };
+
+        usort($bolsas, fn (array $a, array $b): int => [$nombres[$a['colaborador_id']] ?? '', $a['colaborador_id'], $a['activo_id'], $a['talla_id'] ?? 0, $ordenFinalidad($a['finalidad'])]
+            <=> [$nombres[$b['colaborador_id']] ?? '', $b['colaborador_id'], $b['activo_id'], $b['talla_id'] ?? 0, $ordenFinalidad($b['finalidad'])]);
+
+        return $bolsas;
     }
 
     /**

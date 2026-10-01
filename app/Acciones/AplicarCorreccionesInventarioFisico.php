@@ -7,6 +7,7 @@ use App\Enums\TipoMovimiento;
 use App\Excepciones\DiferenciasInventarioFisicoDesactualizadasException;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\InventarioFisico;
+use App\Models\InventarioFisicoExistencia;
 use App\Models\SaldoInventario;
 use App\Models\User;
 use App\Servicios\DTO\MovimientoInventarioDatos;
@@ -33,7 +34,11 @@ use Illuminate\Support\Facades\DB;
  * tocar ninguna fila, ni siquiera las que sí coincidían.
  *
  * Nunca toca `UnidadActivo`: sólo `inventario_fisico_existencias` (activos
- * POR CANTIDAD). Las unidades identificadas tienen su propio mecanismo
+ * POR CANTIDAD) de ORIGEN ALMACÉN. Un renglón de CUSTODIA (lo que tenía un
+ * colaborador) nunca se aplica: esas piezas ya habían salido del almacén, así
+ * que su diferencia no es stock faltante/sobrante de ningún saldo — queda
+ * registrada en la ronda como incidencia a revisar, sin inventar devolución,
+ * pérdida ni movimiento, y sin tocar custodio ni finalidad. Las unidades identificadas tienen su propio mecanismo
  * (`MarcarUnidadIncidencia`, `DarDeBajaUnidadActivo`, etc.), fuera de alcance.
  */
 class AplicarCorreccionesInventarioFisico
@@ -71,7 +76,7 @@ class AplicarCorreccionesInventarioFisico
             // distintas rondas que pudieran tocar el mismo almacén.
             // Cada renglón se corrige en SU almacén (rondas integrales tienen
             // renglones de varios); los previos heredaron el de su ronda.
-            $filas = $this->resumen->consultaExistencias($bloqueada, 'con_diferencia')
+            $filas = $this->resumen->consultaExistencias($bloqueada, 'con_diferencia', origen: InventarioFisicoExistencia::ORIGEN_ALMACEN)
                 ->reorder()
                 ->orderBy('almacen_id')->orderBy('activo_id')->orderBy('talla_id')
                 ->get();
@@ -81,7 +86,7 @@ class AplicarCorreccionesInventarioFisico
             }
 
             if ($filas->isEmpty()) {
-                throw new ExcepcionDeNegocioSimple('No hay diferencias por aplicar en esta ronda.');
+                throw new ExcepcionDeNegocioSimple('No hay diferencias de almacén por aplicar en esta ronda. Las diferencias de custodia no se aplican al inventario.');
             }
 
             // Fase 1: verificar TODAS las combinaciones bajo lock antes de

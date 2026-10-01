@@ -8,6 +8,7 @@ import {
     CircleAlert,
     ClipboardList,
     Keyboard,
+    RotateCcw,
     SwitchCamera,
     Undo2,
     XCircle,
@@ -31,10 +32,17 @@ import SelectorVista from '@/components/sistema/SelectorVista.vue';
 import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useEscanerQr } from '@/composables/useEscanerQr';
 import { useVistaPreferida } from '@/composables/useVistaPreferida';
 import { fechaHora } from '@/lib/fecha';
 import { claseEstadoVisibleUnidad } from '@/lib/estadoVisibleUnidad';
+import {
+    ETIQUETA_VARIANTE,
+    etiquetaCantidadEsperada,
+    textoVariante,
+} from '@/lib/etiquetasCantidad';
+import { varianteBadgeFinalidad } from '@/lib/finalidadCustodia';
 
 type Seccion = 'todos' | 'encontrados' | 'faltantes' | 'no_esperados';
 
@@ -48,10 +56,15 @@ type Contadores = {
     cantidad_renglones: number;
     cantidad_verificados: number;
     cantidad_pendientes: number;
+    /** «No fue posible verificar»: resueltos sin cantidad (no son 0). */
+    cantidad_no_verificables: number;
     cantidad_coinciden: number;
     cantidad_con_diferencia: number;
     cantidad_esperada_total: number;
     cantidad_contada_total: number;
+    cantidad_custodia_renglones: number;
+    cantidad_almacen_con_diferencia: number;
+    cantidad_custodia_con_diferencia: number;
 };
 
 type FilaUnidad = {
@@ -81,15 +94,38 @@ type FilaUnidad = {
 
 type FilaExistencia = {
     id: number;
+    /**
+     * `almacen`: saldo de un almacén (su diferencia se puede aplicar).
+     * `custodia`: lo que tenía un colaborador al iniciar la ronda (su
+     * diferencia sólo se registra, nunca toca el inventario).
+     */
+    origen: 'almacen' | 'custodia';
     /** Almacén del renglón: ahí se cuenta y ahí se aplica la corrección. */
     almacen_id: number | null;
     almacen: string | null;
+    custodio: {
+        id: number;
+        nombre_completo: string;
+        numero_empleado: string | null;
+    } | null;
+    custodio_sucursal: string | null;
+    custodio_servicio: string | null;
+    finalidad: 'uso_personal' | 'redistribucion' | null;
+    finalidad_etiqueta: string | null;
     activo: string | null;
     talla: string | null;
     cantidad_esperada: number;
     cantidad_contada: number | null;
+    /** «No fue posible verificar»: sin cantidad contada ni diferencia. */
+    no_verificable: boolean;
+    motivo_no_verificable: string | null;
     diferencia: number | null;
-    resultado: 'pendiente' | 'coincide' | 'faltante' | 'sobrante';
+    resultado:
+        | 'pendiente'
+        | 'coincide'
+        | 'faltante'
+        | 'sobrante'
+        | 'no_verificable';
     verificada_por: string | null;
     verificada_en: string | null;
 };
@@ -99,6 +135,8 @@ type EstadoCorrecciones = 'sin_diferencias' | 'pendientes' | 'aplicadas';
 type Correcciones = {
     estado: EstadoCorrecciones;
     total_diferencias: number;
+    /** Diferencias de custodia: incidencias a revisar, nunca se aplican. */
+    diferencias_custodia: number;
     aplicadas_en: string | null;
     aplicadas_por: string | null;
     total_aplicadas: number | null;
@@ -444,6 +482,57 @@ watch(
         existencias.value = nuevas.map((e) => ({ ...e }));
     },
 );
+// Almacén vs. custodia: ambos orígenes se cuentan igual, pero el encargado
+// necesita separarlos (la custodia se comprueba con cada persona). Filtro
+// local: los renglones ya están todos cargados.
+type FiltroOrigen = 'todos' | 'almacen' | 'custodia';
+const filtroOrigen = ref<FiltroOrigen>('todos');
+const busquedaExistencia = ref('');
+const OPCIONES_ORIGEN: { valor: FiltroOrigen; etiqueta: string }[] = [
+    { valor: 'todos', etiqueta: 'Todos' },
+    { valor: 'almacen', etiqueta: 'En almacén' },
+    { valor: 'custodia', etiqueta: 'Bajo custodia' },
+];
+const hayCustodia = computed(() =>
+    existencias.value.some((e) => e.origen === 'custodia'),
+);
+const existenciasVisibles = computed(() => {
+    const q = busquedaExistencia.value.trim().toLocaleLowerCase('es');
+    return existencias.value.filter(
+        (e) =>
+            (filtroOrigen.value === 'todos' ||
+                e.origen === filtroOrigen.value) &&
+            (q === '' ||
+                [
+                    e.activo,
+                    e.almacen,
+                    e.custodio?.nombre_completo,
+                    e.custodio?.numero_empleado,
+                    e.talla,
+                ].some((v) => v?.toLocaleLowerCase('es').includes(q))),
+    );
+});
+function totalOrigen(origen: FiltroOrigen): number {
+    return origen === 'todos'
+        ? existencias.value.length
+        : existencias.value.filter((e) => e.origen === origen).length;
+}
+function nombreCustodio(c: NonNullable<FilaExistencia['custodio']>): string {
+    return c.numero_empleado
+        ? `${c.nombre_completo} (${c.numero_empleado})`
+        : c.nombre_completo;
+}
+function ubicacionExistencia(e: FilaExistencia): string {
+    return e.custodio ? nombreCustodio(e.custodio) : (e.almacen ?? '—');
+}
+function contextoCustodio(e: FilaExistencia): string | null {
+    const partes = [
+        e.custodio_sucursal ? `Sucursal: ${e.custodio_sucursal}` : null,
+        e.custodio_servicio ? `Servicio: ${e.custodio_servicio}` : null,
+    ].filter(Boolean);
+    return partes.length ? partes.join(' · ') : null;
+}
+
 // Borrador editable del conteo por renglón (input controlado).
 const borrador = reactive<Record<number, number | ''>>({});
 const guardandoExistencia = ref<number | null>(null);
@@ -468,29 +557,40 @@ const ETIQUETA_EXISTENCIA: Record<
         texto: 'Sobrante',
         clase: 'border-amber-500/40 text-amber-700 dark:text-amber-400',
     },
+    no_verificable: {
+        texto: 'No fue posible verificar',
+        clase: 'border-slate-500/40 text-slate-700 dark:text-slate-300',
+    },
 };
 
-async function verificarExistencia(
+/**
+ * Única rutina de escritura de un renglón por cantidad (contar, «No fue
+ * posible verificar», reabrir). Siempre manda la versión que se ve en
+ * pantalla (`verificada_en`): si otro encargado ya cambió el renglón, el
+ * backend responde 409 con el estado real en vez de pisarlo.
+ */
+async function enviarExistencia(
     fila: FilaExistencia,
-    cantidad: number,
-): Promise<void> {
-    if (cantidad < 0 || guardandoExistencia.value !== null) return;
+    ruta: string,
+    method: 'POST' | 'DELETE',
+    datos: Record<string, unknown>,
+    errorPorDefecto: string,
+): Promise<boolean> {
+    if (guardandoExistencia.value !== null) return false;
     guardandoExistencia.value = fila.id;
     try {
         const res = await fetch(
-            `/inventarios-fisicos/${props.ronda.id}/existencias/${fila.id}`,
+            `/inventarios-fisicos/${props.ronda.id}/existencias/${fila.id}${ruta}`,
             {
-                method: 'POST',
+                method,
                 headers: {
                     'Content-Type': 'application/json',
                     Accept: 'application/json',
                     'X-XSRF-TOKEN': xsrf(),
                 },
                 credentials: 'same-origin',
-                // Versión que se ve en pantalla: si otro encargado ya contó
-                // este renglón, el backend lo rechaza en vez de pisarlo.
                 body: JSON.stringify({
-                    cantidad_contada: cantidad,
+                    ...datos,
                     verificada_en_vista: fila.verificada_en,
                 }),
             },
@@ -508,21 +608,22 @@ async function verificarExistencia(
                 detalle: data.message,
                 tono: 'aviso',
             };
-            return;
+            return false;
         }
         if (!res.ok) {
             ultimo.value = {
                 ok: false,
                 titulo: 'No se registró',
-                detalle: data.message ?? 'No se pudo guardar la cantidad.',
+                detalle: data.message ?? errorPorDefecto,
                 tono: 'error',
             };
-            return;
+            return false;
         }
         const i = existencias.value.findIndex((e) => e.id === fila.id);
         if (i !== -1) existencias.value[i] = data.existencia;
         delete borrador[fila.id];
         Object.assign(contadores, data.contadores);
+        return true;
     } catch {
         ultimo.value = {
             ok: false,
@@ -530,9 +631,60 @@ async function verificarExistencia(
             detalle: 'No se pudo contactar al servidor.',
             tono: 'error',
         };
+        return false;
     } finally {
         guardandoExistencia.value = null;
     }
+}
+
+async function verificarExistencia(
+    fila: FilaExistencia,
+    cantidad: number,
+): Promise<void> {
+    if (cantidad < 0) return;
+    await enviarExistencia(
+        fila,
+        '',
+        'POST',
+        { cantidad_contada: cantidad },
+        'No se pudo guardar la cantidad.',
+    );
+}
+
+/* ---------- «No fue posible verificar» (motivo opcional) ----------
+ * Resuelve el renglón para el cierre SIN cantidad: nunca es un 0, no tiene
+ * diferencia y no entra a las correcciones. Se puede reabrir (o sustituir
+ * por un conteo real) mientras la ronda siga abierta. */
+const filaNoVerificable = ref<FilaExistencia | null>(null);
+const motivoNoVerificable = ref('');
+
+function abrirNoVerificable(fila: FilaExistencia): void {
+    filaNoVerificable.value = fila;
+    motivoNoVerificable.value = fila.motivo_no_verificable ?? '';
+}
+
+async function confirmarNoVerificable(): Promise<void> {
+    const fila = filaNoVerificable.value;
+    if (!fila) return;
+    const motivo = motivoNoVerificable.value.trim();
+    const ok = await enviarExistencia(
+        fila,
+        '/no-verificable',
+        'POST',
+        { motivo: motivo === '' ? null : motivo },
+        'No se pudo registrar la resolución.',
+    );
+    if (ok) filaNoVerificable.value = null;
+}
+
+async function reabrirExistencia(fila: FilaExistencia): Promise<void> {
+    await enviarExistencia(
+        fila,
+        '/no-verificable',
+        'DELETE',
+        {},
+        'No se pudo reabrir el renglón.',
+    );
 }
 
 /* ---------- Marcar / desmarcar unidad presente (sin QR) ----------
@@ -667,9 +819,13 @@ const aplicandoCorrecciones = ref(false);
 // Sólo los renglones que de verdad generarían un cambio (coincide/pendiente
 // no aplican nada) — misma regla que ya usa el backend para elegir qué
 // aplicar.
+// Las de CUSTODIA nunca se aplican: esas piezas ya no estaban en un almacén.
 const diferenciasParaAplicar = computed(() =>
     props.existencias.filter(
-        (e) => e.diferencia !== null && e.diferencia !== 0,
+        (e) =>
+            e.origen === 'almacen' &&
+            e.diferencia !== null &&
+            e.diferencia !== 0,
     ),
 );
 
@@ -872,8 +1028,36 @@ onBeforeUnmount(() => {
             class="text-muted-foreground text-sm"
         >
             Sin diferencias por aplicar: el conteo físico coincidió con las
-            existencias registradas.
+            existencias registradas en almacén.
         </p>
+
+        <!-- Diferencias de custodia: se registran en la ronda como
+             incidencias a revisar; nunca se aplican al inventario. -->
+        <div
+            v-if="correcciones.diferencias_custodia > 0"
+            class="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-50/50 p-4 text-sm dark:bg-amber-950/20"
+        >
+            <AlertTriangle
+                class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
+            />
+            <div>
+                <p class="font-medium">
+                    {{ correcciones.diferencias_custodia }}
+                    {{
+                        correcciones.diferencias_custodia === 1
+                            ? 'diferencia de custodia a revisar'
+                            : 'diferencias de custodia a revisar'
+                    }}
+                </p>
+                <p class="text-muted-foreground mt-0.5">
+                    Lo contado con algún colaborador no coincide con lo que
+                    tenía bajo su custodia. Queda registrado en esta ronda, pero
+                    no modifica el inventario, ni la custodia, ni su finalidad:
+                    revísalo y, si corresponde, registra la devolución o el
+                    reporte de robo/pérdida por su flujo habitual.
+                </p>
+            </div>
+        </div>
 
         <!-- Resumen: unidades identificadas / QR -->
         <section class="space-y-2" data-tour="resumen-conteo">
@@ -1433,7 +1617,7 @@ onBeforeUnmount(() => {
             data-tour="cantidad-articulos"
         >
             <h2 class="text-sm font-semibold">Artículos por cantidad</h2>
-            <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                 <div class="rounded-xl border p-3">
                     <p class="text-muted-foreground text-xs">Renglones</p>
                     <p class="text-2xl font-semibold tabular-nums">
@@ -1470,11 +1654,23 @@ onBeforeUnmount(() => {
                         {{ contadores.cantidad_con_diferencia }}
                     </p>
                 </div>
+                <div class="rounded-xl border p-3">
+                    <p class="text-muted-foreground text-xs">
+                        No fue posible verificar
+                    </p>
+                    <p class="text-2xl font-semibold tabular-nums">
+                        {{ contadores.cantidad_no_verificables }}
+                    </p>
+                </div>
             </div>
             <p class="text-muted-foreground text-xs">
                 Esperado total: {{ contadores.cantidad_esperada_total }} ·
                 Contado total:
                 {{ contadores.cantidad_contada_total }}
+                <template v-if="contadores.cantidad_custodia_renglones > 0">
+                    · Incluye {{ contadores.cantidad_custodia_renglones }}
+                    renglón(es) bajo custodia de colaboradores
+                </template>
             </p>
         </section>
 
@@ -1487,31 +1683,89 @@ onBeforeUnmount(() => {
                     Artículos por cantidad · comprobación manual
                 </h2>
                 <p class="text-muted-foreground mt-0.5 text-xs">
-                    Prendas y consumibles sin QR individual. Marca «Coincide» si
-                    el conteo cuadra con lo esperado, o captura la cantidad real
-                    contada. Esto sólo compara: no ajusta el inventario.
+                    Prendas y consumibles sin QR individual, en almacén o bajo
+                    custodia de un colaborador (compruébalo con esa persona:
+                    presencial, llamada o videollamada). Marca «Coincide» si el
+                    conteo cuadra con lo esperado, o captura la cantidad real
+                    contada. Esto sólo compara: no ajusta el inventario ni
+                    cambia la custodia.
                 </p>
             </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <template v-if="hayCustodia">
+                    <Button
+                        v-for="o in OPCIONES_ORIGEN"
+                        :key="o.valor"
+                        size="sm"
+                        :variant="
+                            filtroOrigen === o.valor ? 'default' : 'outline'
+                        "
+                        :aria-pressed="filtroOrigen === o.valor"
+                        @click="filtroOrigen = o.valor"
+                    >
+                        {{ o.etiqueta }} ({{ totalOrigen(o.valor) }})
+                    </Button>
+                </template>
+                <div class="w-full sm:ml-auto sm:w-64">
+                    <label for="buscar-existencia" class="sr-only"
+                        >Buscar por activo, almacén o colaborador</label
+                    >
+                    <Input
+                        id="buscar-existencia"
+                        v-model="busquedaExistencia"
+                        type="search"
+                        placeholder="Buscar activo, almacén o persona"
+                    />
+                </div>
+            </div>
+
+            <p
+                v-if="existenciasVisibles.length === 0"
+                class="text-muted-foreground text-sm"
+            >
+                Ningún renglón coincide con el filtro.
+            </p>
 
             <!-- Móvil: cards (evita el scroll horizontal de la tabla). Misma
                  data/estado/función que la tabla de escritorio, sólo cambia
                  la presentación. -->
             <div class="grid gap-3 md:hidden">
                 <div
-                    v-for="e in existencias"
+                    v-for="e in existenciasVisibles"
                     :key="e.id"
                     class="flex min-w-0 flex-col gap-2 rounded-xl border p-3 text-sm"
                 >
                     <div class="flex items-start justify-between gap-2">
-                        <div class="min-w-0">
-                            <p class="truncate font-medium">
-                                {{ e.activo ?? '—' }}
+                        <div class="min-w-0 space-y-0.5">
+                            <Badge
+                                :variant="
+                                    e.origen === 'custodia'
+                                        ? varianteBadgeFinalidad(e.finalidad)
+                                        : 'success'
+                                "
+                                class="text-xs"
+                                >{{
+                                    e.origen === 'custodia'
+                                        ? e.finalidad_etiqueta
+                                        : 'En almacén'
+                                }}</Badge
+                            >
+                            <p class="font-medium break-words">
+                                {{ ubicacionExistencia(e) }}
                             </p>
-                            <p class="text-muted-foreground truncate text-xs">
-                                {{ e.almacen ?? '—'
-                                }}<template v-if="e.talla">
-                                    · Talla {{ e.talla }}</template
-                                >
+                            <p
+                                v-if="contextoCustodio(e)"
+                                class="text-muted-foreground text-xs"
+                            >
+                                {{ contextoCustodio(e) }}
+                            </p>
+                            <p class="break-words">{{ e.activo ?? '—' }}</p>
+                            <p class="text-muted-foreground text-xs">
+                                {{ ETIQUETA_VARIANTE }}:
+                                <span class="text-foreground font-medium">{{
+                                    textoVariante(e.talla)
+                                }}</span>
                             </p>
                         </div>
                         <Badge
@@ -1526,7 +1780,14 @@ onBeforeUnmount(() => {
                         v-if="e.verificada_por"
                         class="text-muted-foreground text-xs"
                     >
-                        Contado por {{ e.verificada_por }}
+                        {{
+                            e.no_verificable ? 'Registrado por' : 'Contado por'
+                        }}
+                        {{ e.verificada_por }}
+                    </p>
+                    <p v-if="e.motivo_no_verificable" class="text-xs">
+                        <span class="text-muted-foreground">Motivo:</span>
+                        {{ e.motivo_no_verificable }}
                     </p>
 
                     <div
@@ -1534,7 +1795,11 @@ onBeforeUnmount(() => {
                     >
                         <div class="px-2 py-1.5">
                             <p class="text-muted-foreground text-[11px]">
-                                Esperado
+                                {{
+                                    etiquetaCantidadEsperada(
+                                        e.origen === 'custodia',
+                                    )
+                                }}
                             </p>
                             <p class="font-semibold tabular-nums">
                                 {{ e.cantidad_esperada }}
@@ -1542,7 +1807,7 @@ onBeforeUnmount(() => {
                         </div>
                         <div class="px-2 py-1.5">
                             <p class="text-muted-foreground text-[11px]">
-                                Contado
+                                Cantidad contada
                             </p>
                             <p class="font-semibold tabular-nums">
                                 {{ e.cantidad_contada ?? '—' }}
@@ -1610,6 +1875,27 @@ onBeforeUnmount(() => {
                                 Guardar
                             </Button>
                         </div>
+                        <Button
+                            v-if="e.no_verificable"
+                            size="sm"
+                            variant="ghost"
+                            class="h-10 w-full"
+                            :disabled="guardandoExistencia !== null"
+                            @click="reabrirExistencia(e)"
+                        >
+                            <RotateCcw class="size-4" /> Reabrir como pendiente
+                        </Button>
+                        <Button
+                            v-else
+                            size="sm"
+                            variant="ghost"
+                            class="h-10 w-full"
+                            :disabled="guardandoExistencia !== null"
+                            @click="abrirNoVerificable(e)"
+                        >
+                            <CircleAlert class="size-4" /> No fue posible
+                            verificar
+                        </Button>
                     </div>
                 </div>
             </div>
@@ -1620,11 +1906,11 @@ onBeforeUnmount(() => {
                 <table class="w-full min-w-[640px] text-sm">
                     <thead class="text-muted-foreground text-left">
                         <tr>
-                            <th class="py-1.5 pr-3">Almacén</th>
+                            <th class="py-1.5 pr-3">Almacén / custodio</th>
                             <th class="py-1.5">Activo</th>
-                            <th class="py-1.5">Talla</th>
-                            <th class="py-1.5 text-right">Esperado</th>
-                            <th class="py-1.5 text-right">Contado</th>
+                            <th class="py-1.5">{{ ETIQUETA_VARIANTE }}</th>
+                            <th class="py-1.5 text-right">Cantidad esperada</th>
+                            <th class="py-1.5 text-right">Cantidad contada</th>
                             <th class="py-1.5 text-right">Diferencia</th>
                             <th class="py-1.5">Resultado</th>
                             <th v-if="puedeEscanear" class="py-1.5">
@@ -1634,15 +1920,44 @@ onBeforeUnmount(() => {
                     </thead>
                     <tbody>
                         <tr
-                            v-for="e in existencias"
+                            v-for="e in existenciasVisibles"
                             :key="e.id"
-                            class="border-t"
+                            class="border-t align-top"
                         >
-                            <td class="py-1.5 pr-3">{{ e.almacen ?? '—' }}</td>
+                            <td class="py-1.5 pr-3">
+                                <Badge
+                                    :variant="
+                                        e.origen === 'custodia'
+                                            ? varianteBadgeFinalidad(
+                                                  e.finalidad,
+                                              )
+                                            : 'success'
+                                    "
+                                    class="text-xs"
+                                    >{{
+                                        e.origen === 'custodia'
+                                            ? e.finalidad_etiqueta
+                                            : 'En almacén'
+                                    }}</Badge
+                                >
+                                <span class="block">{{
+                                    ubicacionExistencia(e)
+                                }}</span>
+                                <span
+                                    v-if="contextoCustodio(e)"
+                                    class="text-muted-foreground block text-xs"
+                                    >{{ contextoCustodio(e) }}</span
+                                >
+                            </td>
                             <td class="py-1.5">{{ e.activo ?? '—' }}</td>
-                            <td class="py-1.5">{{ e.talla ?? '—' }}</td>
+                            <td class="py-1.5">{{ textoVariante(e.talla) }}</td>
                             <td class="py-1.5 text-right tabular-nums">
                                 {{ e.cantidad_esperada }}
+                                <span
+                                    v-if="e.origen === 'custodia'"
+                                    class="text-muted-foreground block text-xs"
+                                    >en custodia</span
+                                >
                             </td>
                             <td class="py-1.5 text-right tabular-nums">
                                 {{ e.cantidad_contada ?? '—' }}
@@ -1679,6 +1994,14 @@ onBeforeUnmount(() => {
                                     v-if="e.verificada_por"
                                     class="text-muted-foreground block text-xs"
                                     >por {{ e.verificada_por }}</span
+                                >
+                                <span
+                                    v-if="e.motivo_no_verificable"
+                                    class="block max-w-48 text-xs break-words"
+                                    ><span class="text-muted-foreground"
+                                        >Motivo:</span
+                                    >
+                                    {{ e.motivo_no_verificable }}</span
                                 >
                             </td>
                             <td v-if="puedeEscanear" class="py-1.5">
@@ -1721,6 +2044,28 @@ onBeforeUnmount(() => {
                                         Guardar
                                     </Button>
                                 </div>
+                                <Button
+                                    v-if="e.no_verificable"
+                                    size="sm"
+                                    variant="link"
+                                    class="h-auto px-0 text-xs"
+                                    :disabled="guardandoExistencia !== null"
+                                    @click="reabrirExistencia(e)"
+                                >
+                                    <RotateCcw class="size-3.5" /> Reabrir como
+                                    pendiente
+                                </Button>
+                                <Button
+                                    v-else
+                                    size="sm"
+                                    variant="link"
+                                    class="h-auto px-0 text-xs"
+                                    :disabled="guardandoExistencia !== null"
+                                    @click="abrirNoVerificable(e)"
+                                >
+                                    <CircleAlert class="size-3.5" /> No fue
+                                    posible verificar
+                                </Button>
                             </td>
                         </tr>
                     </tbody>
@@ -1749,6 +2094,64 @@ onBeforeUnmount(() => {
             </Button>
         </div>
 
+        <Dialog
+            :open="filaNoVerificable !== null"
+            @update:open="(v: boolean) => !v && (filaNoVerificable = null)"
+        >
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>No fue posible verificar</DialogTitle>
+                    <DialogDescription>
+                        Úsalo cuando no pudiste comprobar este renglón. No
+                        equivale a contar 0: no genera diferencia, no ajusta el
+                        inventario ni la custodia, y permite cerrar la ronda.
+                        Puedes reabrirlo o capturar la cantidad mientras la
+                        ronda siga abierta.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <p v-if="filaNoVerificable" class="text-sm">
+                    <strong>{{ filaNoVerificable.activo ?? '—' }}</strong>
+                    · {{ ETIQUETA_VARIANTE }}:
+                    {{ textoVariante(filaNoVerificable.talla) }}
+                    <span class="text-muted-foreground block">
+                        {{ ubicacionExistencia(filaNoVerificable) }} ·
+                        {{
+                            etiquetaCantidadEsperada(
+                                filaNoVerificable.origen === 'custodia',
+                            )
+                        }}: {{ filaNoVerificable.cantidad_esperada }}
+                    </span>
+                </p>
+
+                <div class="space-y-1.5">
+                    <Label for="motivo-no-verificable">Motivo (opcional)</Label>
+                    <Input
+                        id="motivo-no-verificable"
+                        v-model="motivoNoVerificable"
+                        maxlength="255"
+                        placeholder="Ej. El colaborador no respondió"
+                    />
+                </div>
+
+                <DialogFooter>
+                    <Button
+                        variant="ghost"
+                        :disabled="guardandoExistencia !== null"
+                        @click="filaNoVerificable = null"
+                    >
+                        Cancelar
+                    </Button>
+                    <Button
+                        :disabled="guardandoExistencia !== null"
+                        @click="confirmarNoVerificable"
+                    >
+                        Confirmar
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+
         <Dialog v-model:open="dialogoFinalizar">
             <DialogContent class="max-h-[90dvh] overflow-y-auto">
                 <DialogHeader>
@@ -1761,13 +2164,29 @@ onBeforeUnmount(() => {
                 </DialogHeader>
 
                 <p
+                    v-if="contadores.cantidad_renglones > 0"
+                    class="bg-muted/40 rounded-md border p-2 text-sm"
+                >
+                    Artículos por cantidad que firmas:
+                    <strong>{{ contadores.cantidad_verificados }}</strong>
+                    contado(s) ·
+                    <strong>{{ contadores.cantidad_con_diferencia }}</strong>
+                    con diferencia ·
+                    <strong>{{ contadores.cantidad_no_verificables }}</strong>
+                    no fue posible verificar ·
+                    <strong>{{ contadores.cantidad_pendientes }}</strong>
+                    pendiente(s).
+                </p>
+
+                <p
                     v-if="contadores.cantidad_pendientes > 0"
                     class="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-sm text-amber-700 dark:text-amber-400"
                 >
                     Aún hay {{ contadores.cantidad_pendientes }} renglón(es) de
-                    artículos por cantidad sin verificar. Verifícalos antes de
-                    cerrar la ronda. (Las unidades QR faltantes sí se pueden
-                    dejar así — son un resultado válido.)
+                    artículos por cantidad pendientes. Captura una cantidad o
+                    marca «No fue posible verificar» antes de cerrar la ronda.
+                    (Las unidades QR faltantes sí se pueden dejar así — son un
+                    resultado válido.)
                 </p>
 
                 <div class="space-y-2">
@@ -1833,8 +2252,8 @@ onBeforeUnmount(() => {
                             {{ e.activo ?? '—' }}
                         </p>
                         <p class="text-muted-foreground text-xs">
-                            {{ e.almacen ?? '—' }} ·
-                            {{ e.talla ?? 'Sin variante' }}
+                            {{ e.almacen ?? '—' }} · {{ ETIQUETA_VARIANTE }}:
+                            {{ textoVariante(e.talla) }}
                         </p>
                         <div class="mt-2 grid grid-cols-3 gap-2 text-center">
                             <div>

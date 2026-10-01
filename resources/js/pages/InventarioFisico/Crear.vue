@@ -23,8 +23,8 @@ defineOptions({
 });
 
 // Una ronda es INTEGRAL por empresa: el backend arma el universo completo
-// (existencias por cantidad de sus almacenes + unidades identificadas). No
-// hay "alcance" que elegir.
+// (existencias por cantidad de sus almacenes y bajo custodia + unidades
+// identificadas). No hay "alcance" que elegir.
 const form = useForm<{
     empresa_id: number | null;
     nombre: string;
@@ -62,6 +62,7 @@ const universo = ref<{
     total: number;
     existencias: number;
     almacenes: number;
+    custodias: number;
 } | null>(null);
 const cargandoUniverso = ref(false);
 let universoToken = 0;
@@ -87,6 +88,7 @@ watch(
                     total: data.total ?? 0,
                     existencias: data.existencias ?? 0,
                     almacenes: data.almacenes ?? 0,
+                    custodias: data.custodias ?? 0,
                 };
         } catch {
             if (token === universoToken) universo.value = null;
@@ -117,7 +119,7 @@ function enviar(): void {
     <div class="mx-auto flex w-full max-w-2xl flex-col gap-6 p-4">
         <EncabezadoPagina
             titulo="Nueva ronda de inventario físico"
-            descripcion="Una sola ronda por empresa: incluye las existencias por cantidad de todos sus almacenes (cada renglón con su almacén) y todas sus unidades identificadas, estén en almacén o asignadas a alguien. Varios encargados pueden trabajarla al mismo tiempo. Al iniciar se congela ese universo — lo que cambie después no altera la ronda."
+            descripcion="Una sola ronda por empresa: incluye las existencias por cantidad de todos sus almacenes (cada renglón con su almacén), lo que cada colaborador tiene bajo custodia por cantidad (cada renglón con su custodio y finalidad) y todas sus unidades identificadas, estén en almacén o asignadas a alguien. Varios encargados pueden trabajarla al mismo tiempo. Al iniciar se congela ese universo — lo que cambie después no altera la ronda."
         />
 
         <form class="flex flex-col gap-5" @submit.prevent="enviar">
@@ -196,6 +198,14 @@ function enviar(): void {
                                 universo.almacenes
                             }}</strong>
                             almacén(es).
+                        </li>
+                        <li>
+                            <strong class="tabular-nums">{{
+                                universo.custodias
+                            }}</strong>
+                            renglón(es) de artículos por cantidad bajo custodia
+                            de colaboradores (uno por persona, activo,
+                            talla/variante y finalidad).
                         </li>
                     </ul>
                     <p class="text-muted-foreground mt-1 text-xs">

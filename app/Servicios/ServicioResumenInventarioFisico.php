@@ -3,7 +3,9 @@
 namespace App\Servicios;
 
 use App\Enums\EstadoVisibleUnidad;
+use App\Enums\FinalidadCustodia;
 use App\Models\Almacen;
+use App\Models\BitacoraAuditoria;
 use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
@@ -80,6 +82,34 @@ class ServicioResumenInventarioFisico
     ];
 
     /**
+     * Relaciones de un renglón por cantidad (almacén o custodia) para toda la
+     * lista — eager loading, nunca una consulta por renglón. El custodio trae
+     * su sucursal y servicio ACTUALES sólo como contexto para localizarlo.
+     *
+     * @var list<string>
+     */
+    public const RELACIONES_EXISTENCIA = [
+        'almacen:id,nombre',
+        'colaborador:id,nombre_completo,numero_empleado,sucursal_id,servicio_actual_id',
+        'colaborador.sucursal:id,nombre',
+        'colaborador.servicioActual:id,nombre',
+        'activo:id,nombre',
+        'talla:id,valor',
+        'verificadaPor:id,name',
+    ];
+
+    /**
+     * @var array<string, string>
+     */
+    public const RESULTADO_ETIQUETA = [
+        InventarioFisicoExistencia::RESULTADO_PENDIENTE => 'Pendiente',
+        InventarioFisicoExistencia::RESULTADO_COINCIDE => 'Coincide',
+        InventarioFisicoExistencia::RESULTADO_FALTANTE => 'Faltante',
+        InventarioFisicoExistencia::RESULTADO_SOBRANTE => 'Sobrante',
+        InventarioFisicoExistencia::RESULTADO_NO_VERIFICABLE => 'No fue posible verificar',
+    ];
+
+    /**
      * @return array<string, int>
      */
     public function contadores(InventarioFisico $ronda): array
@@ -106,11 +136,15 @@ class ServicioResumenInventarioFisico
             ->selectRaw('
                 count(*) as renglones,
                 sum(case when cantidad_contada is not null then 1 else 0 end) as verificados,
-                sum(case when cantidad_contada is null then 1 else 0 end) as pendientes,
+                sum(case when cantidad_contada is null and verificada_en is null then 1 else 0 end) as pendientes,
+                sum(case when cantidad_contada is null and verificada_en is not null then 1 else 0 end) as no_verificables,
                 sum(case when cantidad_contada is not null and cantidad_contada = cantidad_esperada then 1 else 0 end) as coinciden,
                 sum(case when cantidad_contada is not null and cantidad_contada <> cantidad_esperada then 1 else 0 end) as con_diferencia,
                 coalesce(sum(cantidad_esperada), 0) as esperada_total,
-                coalesce(sum(cantidad_contada), 0) as contada_total
+                coalesce(sum(cantidad_contada), 0) as contada_total,
+                sum(case when colaborador_id is not null then 1 else 0 end) as custodia_renglones,
+                sum(case when colaborador_id is null and cantidad_contada is not null and cantidad_contada <> cantidad_esperada then 1 else 0 end) as almacen_con_diferencia,
+                sum(case when colaborador_id is not null and cantidad_contada is not null and cantidad_contada <> cantidad_esperada then 1 else 0 end) as custodia_con_diferencia
             ')
             ->first();
 
@@ -127,54 +161,145 @@ class ServicioResumenInventarioFisico
 
             'cantidad_renglones' => (int) ($c->renglones ?? 0),
             'cantidad_verificados' => (int) ($c->verificados ?? 0),
+            // Pendientes REALES (ni contados ni resueltos como no verificables).
             'cantidad_pendientes' => (int) ($c->pendientes ?? 0),
+            // "No fue posible verificar": resueltos sin cantidad (no son 0
+            // ni diferencias; nunca se aplican).
+            'cantidad_no_verificables' => (int) ($c->no_verificables ?? 0),
             'cantidad_coinciden' => (int) ($c->coinciden ?? 0),
             'cantidad_con_diferencia' => (int) ($c->con_diferencia ?? 0),
             'cantidad_esperada_total' => (int) ($c->esperada_total ?? 0),
             'cantidad_contada_total' => (int) ($c->contada_total ?? 0),
+            // Origen de los renglones: sólo las diferencias de ALMACÉN se
+            // pueden aplicar al inventario; las de custodia son incidencias
+            // a revisar.
+            'cantidad_custodia_renglones' => (int) ($c->custodia_renglones ?? 0),
+            'cantidad_almacen_con_diferencia' => (int) ($c->almacen_con_diferencia ?? 0),
+            'cantidad_custodia_con_diferencia' => (int) ($c->custodia_con_diferencia ?? 0),
         ];
     }
 
     /**
      * Renglones de comprobación manual de existencias por cantidad de la ronda.
-     * `$filtro`: `todos` | `pendientes` | `con_diferencia`.
+     * `$filtro`: `todos` | `pendientes` | `con_diferencia`. `$origen`:
+     * `almacen` | `custodia` | null (ambos). Primero los de almacén, luego los
+     * de custodia (en el orden congelado al crear la ronda). Filtrar por
+     * almacén deja fuera la custodia: esas piezas ya no están en él.
      *
      * @return Builder<InventarioFisicoExistencia>
      */
-    public function consultaExistencias(InventarioFisico $ronda, string $filtro = 'todos', ?int $almacenId = null): Builder
+    public function consultaExistencias(InventarioFisico $ronda, string $filtro = 'todos', ?int $almacenId = null, ?string $origen = null): Builder
     {
         $consulta = InventarioFisicoExistencia::query()
             ->where('inventario_fisico_id', $ronda->id)
             ->when($almacenId !== null, fn (Builder $q) => $q->where('almacen_id', $almacenId))
-            ->with(['almacen:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name'])
+            ->when($origen !== null, fn (Builder $q) => $q->deOrigen($origen))
+            ->with(self::RELACIONES_EXISTENCIA)
+            ->orderByRaw('case when colaborador_id is null then 0 else 1 end')
             ->orderBy('almacen_id')
             ->orderBy('id');
 
         return match ($filtro) {
-            'pendientes' => $consulta->whereNull('cantidad_contada'),
+            'pendientes' => $consulta->pendientes(),
             'con_diferencia' => $consulta->whereNotNull('cantidad_contada')->whereColumn('cantidad_contada', '<>', 'cantidad_esperada'),
             default => $consulta,
         };
     }
 
     /**
+     * Motivo vigente de cada renglón «No fue posible verificar», leído de la
+     * bitácora (`existencia_no_verificable`, escrita en la misma transacción
+     * que la resolución). UNA consulta para todos los renglones; el registro
+     * más reciente de cada uno es su resolución actual (marcar de nuevo
+     * siempre escribe otro).
+     *
+     * @param  iterable<InventarioFisicoExistencia>  $filas
+     * @return array<int, string|null> motivo indexado por id de renglón
+     */
+    public function motivosNoVerificables(iterable $filas): array
+    {
+        $ids = [];
+        foreach ($filas as $fila) {
+            if ($fila->esNoVerificable()) {
+                $ids[] = $fila->id;
+            }
+        }
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return BitacoraAuditoria::query()
+            ->where('tipo_entidad', InventarioFisicoExistencia::class)
+            ->where('accion', 'existencia_no_verificable')
+            ->whereIn('entidad_id', $ids)
+            ->orderBy('id')
+            ->get(['id', 'entidad_id', 'valores_nuevos'])
+            // Orden ascendente + keyBy: gana el registro más reciente.
+            ->keyBy('entidad_id')
+            ->map(function (BitacoraAuditoria $b): ?string {
+                $motivo = $b->valores_nuevos['motivo_no_verificable'] ?? null;
+
+                return is_string($motivo) ? $motivo : null;
+            })
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string|null>  $motivos  de `motivosNoVerificables()`
      * @return array<string, mixed>
      */
-    public function filaExistencia(InventarioFisicoExistencia $fila): array
+    public function filaExistencia(InventarioFisicoExistencia $fila, array $motivos = []): array
     {
+        $colaborador = $fila->colaborador;
+
         return [
             'id' => $fila->id,
+            // `almacen` = saldo de un almacén; `custodia` = lo que tenía un
+            // colaborador (su diferencia nunca se aplica al inventario).
+            'origen' => $fila->origen(),
             'almacen_id' => $fila->almacen_id,
             'almacen' => $fila->almacen?->nombre,
+            'custodio' => $colaborador === null ? null : [
+                'id' => $colaborador->id,
+                'nombre_completo' => $colaborador->nombre_completo,
+                'numero_empleado' => $colaborador->numero_empleado,
+            ],
+            'custodio_sucursal' => $colaborador?->sucursal?->nombre,
+            'custodio_servicio' => $colaborador?->servicioActual?->nombre,
+            'finalidad' => $fila->finalidad?->value,
+            'finalidad_etiqueta' => $fila->esCustodia() ? FinalidadCustodia::etiquetaDe($fila->finalidad) : null,
             'activo' => $fila->activo?->nombre,
             'talla' => $fila->talla?->valor,
             'cantidad_esperada' => $fila->cantidad_esperada,
             'cantidad_contada' => $fila->cantidad_contada,
+            'no_verificable' => $fila->esNoVerificable(),
+            'motivo_no_verificable' => $motivos[$fila->id] ?? null,
             'diferencia' => $fila->diferencia(),
             'resultado' => $fila->resultado(),
             'verificada_por' => $fila->verificadaPor?->name,
             'verificada_en' => $fila->verificada_en?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Ubicación legible de un renglón por cantidad: el almacén, o el custodio
+     * con su número de empleado. Fuente única para Excel y acta PDF.
+     */
+    public function ubicacionExistencia(InventarioFisicoExistencia $fila): string
+    {
+        if (! $fila->esCustodia()) {
+            return $fila->almacen->nombre ?? '—';
+        }
+
+        $colaborador = $fila->colaborador;
+
+        if ($colaborador === null) {
+            return 'Custodia: colaborador no disponible';
+        }
+
+        return 'Custodia: '.$colaborador->nombre_completo
+            .($colaborador->numero_empleado ? ' ('.$colaborador->numero_empleado.')' : '');
     }
 
     /**
@@ -271,7 +396,9 @@ class ServicioResumenInventarioFisico
      * diferencias", nunca se mezclan. Única fuente para el detalle y el PDF.
      *
      * @param  array<string, int>  $contadores
-     * @return array{estado: string, total_diferencias: int, aplicadas_en: string|null, aplicadas_por: string|null, total_aplicadas: int|null}
+     *                                          Sólo las diferencias de ALMACÉN son aplicables; las de custodia viajan
+     *                                          aparte (`diferencias_custodia`) como incidencias a revisar.
+     * @return array{estado: string, total_diferencias: int, diferencias_custodia: int, aplicadas_en: string|null, aplicadas_por: string|null, total_aplicadas: int|null}
      */
     public function resumenCorrecciones(InventarioFisico $ronda, array $contadores): array
     {
@@ -280,10 +407,11 @@ class ServicioResumenInventarioFisico
         return [
             'estado' => match (true) {
                 $ronda->tieneCorreccionesAplicadas() => 'aplicadas',
-                $contadores['cantidad_con_diferencia'] === 0 => 'sin_diferencias',
+                $contadores['cantidad_almacen_con_diferencia'] === 0 => 'sin_diferencias',
                 default => 'pendientes',
             },
-            'total_diferencias' => $contadores['cantidad_con_diferencia'],
+            'total_diferencias' => $contadores['cantidad_almacen_con_diferencia'],
+            'diferencias_custodia' => $contadores['cantidad_custodia_con_diferencia'],
             'aplicadas_en' => $ronda->correcciones_aplicadas_en?->toIso8601String(),
             'aplicadas_por' => $ronda->correccionesAplicadasPor?->name,
             'total_aplicadas' => $ronda->tieneCorreccionesAplicadas()
@@ -313,9 +441,9 @@ class ServicioResumenInventarioFisico
      *     ronda: array<string, string|null>,
      *     contadores: array<string, int>,
      *     unidades: array<int, array<string, string|null>>,
-     *     existencias: array<int, array<string, int|string|null>>,
+     *     existencias: array<int, array<string, bool|int|string|null>>,
      *     firma: array<string, string>|null,
-     *     correcciones: array{estado: string, total_diferencias: int, aplicadas_en: string|null, aplicadas_por: string|null, total_aplicadas: int|null},
+     *     correcciones: array{estado: string, total_diferencias: int, diferencias_custodia: int, aplicadas_en: string|null, aplicadas_por: string|null, total_aplicadas: int|null},
      * }
      */
     public function datosActa(InventarioFisico $ronda): array
@@ -340,23 +468,25 @@ class ServicioResumenInventarioFisico
                 'escaneado_por' => $f->escaneadoPor?->name,
             ])->all();
 
-        $etiquetaResultado = [
-            InventarioFisicoExistencia::RESULTADO_PENDIENTE => 'Pendiente',
-            InventarioFisicoExistencia::RESULTADO_COINCIDE => 'Coincide',
-            InventarioFisicoExistencia::RESULTADO_FALTANTE => 'Faltante',
-            InventarioFisicoExistencia::RESULTADO_SOBRANTE => 'Sobrante',
-        ];
+        $filasExistencia = $this->consultaExistencias($ronda)->get();
+        $motivos = $this->motivosNoVerificables($filasExistencia);
 
-        $existencias = $this->consultaExistencias($ronda)->get()
+        $existencias = $filasExistencia
             ->map(fn (InventarioFisicoExistencia $e): array => [
+                'origen' => $e->origen(),
                 'almacen' => $e->almacen?->nombre,
+                'ubicacion' => $this->ubicacionExistencia($e),
+                'finalidad' => $e->esCustodia() ? FinalidadCustodia::etiquetaDe($e->finalidad) : null,
                 'activo' => $e->activo?->nombre,
                 'talla' => $e->talla?->valor,
                 'cantidad_esperada' => $e->cantidad_esperada,
                 'cantidad_contada' => $e->cantidad_contada,
+                'no_verificable' => $e->esNoVerificable(),
+                'motivo_no_verificable' => $motivos[$e->id] ?? null,
                 'diferencia' => $e->diferencia(),
-                'resultado' => $etiquetaResultado[$e->resultado()] ?? $e->resultado(),
+                'resultado' => self::RESULTADO_ETIQUETA[$e->resultado()] ?? $e->resultado(),
                 'verificada_por' => $e->verificadaPor?->name,
+                'verificada_en' => $e->verificada_en !== null ? FechaHora::local($e->verificada_en) : null,
             ])->all();
 
         $firma = $ronda->firma;

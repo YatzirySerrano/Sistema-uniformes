@@ -17,6 +17,12 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+    ETIQUETA_VARIANTE,
+    etiquetaCantidadActual,
+    textoVariante,
+} from '@/lib/etiquetasCantidad';
+import { varianteBadgeFinalidad } from '@/lib/finalidadCustodia';
 
 type PendienteFila = {
     tipo: 'unidad' | 'cantidad';
@@ -133,36 +139,53 @@ function fecha(iso: string | null): string {
                     class="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"
                 >
                     <div class="min-w-0">
-                        <p class="font-medium">
-                            {{ f.activo
-                            }}<span
-                                v-if="f.talla"
-                                class="text-muted-foreground"
-                            >
-                                · {{ f.talla }}</span
-                            >
-                        </p>
-                        <p class="text-muted-foreground text-xs">
+                        <p class="font-medium break-words">{{ f.activo }}</p>
+                        <p class="mt-0.5 flex flex-wrap items-center gap-1.5">
                             <Badge
-                                :variant="
-                                    f.finalidad === 'redistribucion'
-                                        ? 'warning'
-                                        : f.finalidad
-                                          ? 'secondary'
-                                          : 'outline'
-                                "
-                                class="mr-1 text-xs"
+                                :variant="varianteBadgeFinalidad(f.finalidad)"
+                                class="text-xs"
                                 >{{ f.finalidad_etiqueta }}</Badge
                             >
-                            {{ f.tipo_etiqueta }} · Cantidad
-                            {{ f.cantidad }}
-                            <span v-if="f.entrega_folio">
-                                · Entrega {{ f.entrega_folio }}</span
-                            >
-                            <span v-if="f.tipo === 'unidad' && f.referencia">
-                                · {{ f.referencia }}</span
-                            >
+                            <span class="text-muted-foreground text-xs">{{
+                                f.tipo_etiqueta
+                            }}</span>
                         </p>
+                        <dl
+                            class="text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs"
+                        >
+                            <div
+                                v-if="f.tipo === 'cantidad'"
+                                class="flex gap-1"
+                            >
+                                <dt>{{ ETIQUETA_VARIANTE }}:</dt>
+                                <dd class="text-foreground font-medium">
+                                    {{ textoVariante(f.talla) }}
+                                </dd>
+                            </div>
+                            <div
+                                v-if="f.tipo === 'unidad' && f.referencia"
+                                class="flex gap-1"
+                            >
+                                <dt>Código:</dt>
+                                <dd class="text-foreground font-mono">
+                                    {{ f.referencia }}
+                                </dd>
+                            </div>
+                            <div class="flex gap-1">
+                                <dt>{{ etiquetaCantidadActual(true) }}:</dt>
+                                <dd
+                                    class="text-foreground font-semibold tabular-nums"
+                                >
+                                    {{ f.cantidad }}
+                                </dd>
+                            </div>
+                            <div v-if="f.entrega_folio" class="flex gap-1">
+                                <dt>Entrega:</dt>
+                                <dd class="text-foreground">
+                                    {{ f.entrega_folio }}
+                                </dd>
+                            </div>
+                        </dl>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <div
@@ -218,20 +241,22 @@ function fecha(iso: string | null): string {
                     <div
                         class="flex flex-wrap items-start justify-between gap-2"
                     >
-                        <p class="font-medium">
-                            {{ i.activo
-                            }}<span
-                                v-if="i.talla"
-                                class="text-muted-foreground"
-                            >
-                                · {{ i.talla }}</span
-                            >
-                        </p>
+                        <div class="min-w-0">
+                            <p class="font-medium break-words">
+                                {{ i.activo }}
+                            </p>
+                            <p class="text-muted-foreground text-xs">
+                                {{ ETIQUETA_VARIANTE }}:
+                                <span class="text-foreground font-medium">{{
+                                    textoVariante(i.talla)
+                                }}</span>
+                            </p>
+                        </div>
                         <Badge
                             variant="outline"
                             class="border-destructive/30 text-destructive"
                         >
-                            {{ i.tipo_etiqueta }} · {{ i.cantidad }}
+                            {{ i.tipo_etiqueta }} · Cantidad: {{ i.cantidad }}
                         </Badge>
                     </div>
                     <p class="text-muted-foreground mt-1 text-xs">

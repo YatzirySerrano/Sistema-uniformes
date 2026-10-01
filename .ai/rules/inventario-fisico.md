@@ -7,4 +7,4 @@ paths:
 
 ## Universo de inventario físico: ver `pages-inventario-fisico.md` (ronda integral por empresa)
 
-La ronda ya NO es de un almacén. Universo vigente: existencias por cantidad de TODOS los almacenes de la empresa (renglón por almacén) + unidades En almacén o Asignadas en condición Funcionando/EnReparación/Inservible; nunca Perdido/Robado/Baja. `Crear.vue` sólo pide empresa, nombre y observaciones. No ampliar a custodios/servicios sin discutirlo.
+La ronda ya NO es de un almacén. Universo vigente: existencias por cantidad de TODOS los almacenes de la empresa (renglón por almacén) + unidades En almacén o Asignadas en condición Funcionando/EnReparación/Inservible; nunca Perdido/Robado/Baja. `Crear.vue` sólo pide empresa, nombre y observaciones. Desde 2026-10-01 también incluye la custodia por cantidad de colaboradores (ver `js-pages-inventario-fisico.md`); no ampliar a servicios sin discutirlo.

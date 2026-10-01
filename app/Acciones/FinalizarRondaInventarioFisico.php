@@ -60,8 +60,10 @@ class FinalizarRondaInventarioFisico
                     throw new ExcepcionDeNegocioSimple('Esta ronda de inventario ya fue finalizada.');
                 }
 
-                if ($bloqueada->existencias()->whereNull('cantidad_contada')->lockForUpdate()->exists()) {
-                    throw new ExcepcionDeNegocioSimple('Faltan artículos por cantidad por verificar antes de cerrar la ronda.');
+                // Pendiente REAL = ni contado ni resuelto como "No fue posible
+                // verificar" (que es una resolución válida, nunca un 0).
+                if ($bloqueada->existencias()->pendientes()->lockForUpdate()->exists()) {
+                    throw new ExcepcionDeNegocioSimple('Aún hay artículos pendientes de verificar. Captura una cantidad o marca «No fue posible verificar» antes de finalizar la ronda.');
                 }
 
                 $bloqueada->update([

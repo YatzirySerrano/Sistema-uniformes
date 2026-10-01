@@ -227,6 +227,8 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::post('inventarios-fisicos/{inventarioFisico}/unidades/{unidad}/presente', [InventarioFisicoController::class, 'marcarUnidadPresente'])->name('inventarios-fisicos.unidades.presente');
     Route::delete('inventarios-fisicos/{inventarioFisico}/unidades/{unidad}/presente', [InventarioFisicoController::class, 'desmarcarUnidadPresente'])->name('inventarios-fisicos.unidades.desmarcar-presente');
     Route::post('inventarios-fisicos/{inventarioFisico}/existencias/{existencia}', [InventarioFisicoController::class, 'verificarExistencia'])->name('inventarios-fisicos.existencias.verificar');
+    Route::post('inventarios-fisicos/{inventarioFisico}/existencias/{existencia}/no-verificable', [InventarioFisicoController::class, 'marcarExistenciaNoVerificable'])->name('inventarios-fisicos.existencias.no-verificable');
+    Route::delete('inventarios-fisicos/{inventarioFisico}/existencias/{existencia}/no-verificable', [InventarioFisicoController::class, 'reabrirExistencia'])->name('inventarios-fisicos.existencias.reabrir');
     Route::post('inventarios-fisicos/{inventarioFisico}/finalizar', [InventarioFisicoController::class, 'finalizar'])->name('inventarios-fisicos.finalizar');
     Route::post('inventarios-fisicos/{inventarioFisico}/aplicar-correcciones', [InventarioFisicoController::class, 'aplicarCorrecciones'])->name('inventarios-fisicos.aplicar-correcciones');
 

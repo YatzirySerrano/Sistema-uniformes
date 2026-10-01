@@ -4,6 +4,11 @@ import { MapPinned } from '@lucide/vue';
 import { computed } from 'vue';
 import AyudaTooltip from '@/components/sistema/AyudaTooltip.vue';
 import { Badge } from '@/components/ui/badge';
+import {
+    ETIQUETA_VARIANTE,
+    etiquetaCantidadActual,
+    textoVariante,
+} from '@/lib/etiquetasCantidad';
 import { varianteBadgeFinalidad } from '@/lib/finalidadCustodia';
 
 type Grupo = 'almacen' | 'uso_personal' | 'redistribucion' | 'sin_clasificar';
@@ -133,28 +138,41 @@ const sinPiezas = computed(
                         g.etiqueta
                     }}</Badge>
                 </p>
-                <ul class="grid gap-1 text-sm">
+                <ul class="divide-y text-sm">
                     <li
                         v-for="(f, i) in g.filas"
                         :key="`${g.clave}-${i}`"
-                        class="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5"
+                        class="flex flex-col gap-0.5 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                     >
-                        <span class="min-w-0">
+                        <span class="min-w-0 font-medium break-words">
                             <Link
                                 v-if="f.custodio"
                                 :href="`/colaboradores/${f.custodio.id}`"
                                 class="hover:underline"
                                 >{{ nombreCustodio(f.custodio) }}</Link
                             >
-                            <span v-else>{{ f.almacen }}</span>
-                            <span
-                                v-if="usaVariantes"
-                                class="text-muted-foreground"
-                            >
-                                · {{ f.talla ?? 'Sin variante' }}</span
-                            >
+                            <template v-else>{{ f.almacen ?? '—' }}</template>
                         </span>
-                        <span class="font-medium">{{ f.cantidad }}</span>
+                        <dl
+                            class="text-muted-foreground flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs sm:justify-end"
+                        >
+                            <div v-if="usaVariantes" class="flex gap-1">
+                                <dt>{{ ETIQUETA_VARIANTE }}:</dt>
+                                <dd class="text-foreground font-medium">
+                                    {{ textoVariante(f.talla) }}
+                                </dd>
+                            </div>
+                            <div class="flex gap-1">
+                                <dt>
+                                    {{ etiquetaCantidadActual(!!f.custodio) }}:
+                                </dt>
+                                <dd
+                                    class="text-foreground font-semibold tabular-nums"
+                                >
+                                    {{ f.cantidad }}
+                                </dd>
+                            </div>
+                        </dl>
                     </li>
                 </ul>
             </div>

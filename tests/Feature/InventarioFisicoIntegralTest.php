@@ -150,7 +150,7 @@ it('la previsualización cuenta unidades, renglones y almacenes involucrados', f
 
     $this->actingAs($this->admin)->getJson("/inventarios-fisicos/universo?empresa_id={$this->empresa->id}")
         ->assertOk()
-        ->assertExactJson(['total' => 1, 'existencias' => 2, 'almacenes' => 2]);
+        ->assertExactJson(['total' => 1, 'existencias' => 2, 'almacenes' => 2, 'custodias' => 0]);
 });
 
 /*
@@ -388,12 +388,12 @@ it('la exportación por cantidad conserva almacén, resultado y quién verificó
 
     $archivo = Str::slug('Inventario físico '.$ronda->folio).'-dasti-'.now()->toDateString().'.xlsx';
     Excel::assertDownloaded($archivo, function (ListadoExport $export): bool {
-        $filas = collect($export->array())->keyBy(0);
+        $filas = collect($export->array())->keyBy(1);
 
         return isset($filas['Almacén Norte'], $filas['Almacén Sur'])
-            && $filas['Almacén Norte'][6] === 'Faltante'
-            && $filas['Almacén Norte'][7] === $this->encargadoA->name
-            && $filas['Almacén Sur'][7] === '—';
+            && $filas['Almacén Norte'][8] === 'Faltante'
+            && $filas['Almacén Norte'][9] === $this->encargadoA->name
+            && $filas['Almacén Sur'][9] === '—';
     });
 });
 

@@ -18,12 +18,15 @@ use App\Http\Requests\InventarioFisico\AplicarCorreccionesRequest;
 use App\Http\Requests\InventarioFisico\EscanearUnidadRequest;
 use App\Http\Requests\InventarioFisico\FinalizarRondaRequest;
 use App\Http\Requests\InventarioFisico\GuardarInventarioFisicoRequest;
+use App\Http\Requests\InventarioFisico\ResolverExistenciaNoVerificableRequest;
 use App\Http\Requests\InventarioFisico\VerificarExistenciaRequest;
 use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
+use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioResumenInventarioFisico;
 use App\Soporte\ContextoExportacion;
+use App\Soporte\FechaHora;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -112,7 +115,7 @@ class InventarioFisicoController extends Controller
         $empresa = $this->empresaDelFiltro($request);
 
         if ($empresa === null) {
-            return response()->json(['total' => 0, 'existencias' => 0, 'almacenes' => 0]);
+            return response()->json(['total' => 0, 'existencias' => 0, 'almacenes' => 0, 'custodias' => 0]);
         }
 
         // Mismas definiciones exactas que el snapshot (tres conteos, sin
@@ -123,6 +126,8 @@ class InventarioFisicoController extends Controller
             'total' => CrearRondaInventarioFisico::universo($empresa->id)->count(),
             'existencias' => (clone $existencias)->count(),
             'almacenes' => (clone $existencias)->distinct()->count('almacen_id'),
+            // Bolsas de custodia por cantidad (custodio + activo + variante + finalidad).
+            'custodias' => count(app(ServicioCustodiaColaborador::class)->bolsasCantidadDeEmpresa($empresa->id)),
         ]);
     }
 
@@ -163,8 +168,10 @@ class InventarioFisicoController extends Controller
 
         // Los renglones de existencias por cantidad de una ronda son pocos (uno
         // por activo+variante del almacén): se sirven completos, sin paginar.
-        $existencias = $this->resumen->consultaExistencias($inventarioFisico, 'todos', $almacenFiltro)->get()
-            ->map(fn (InventarioFisicoExistencia $e): array => $this->resumen->filaExistencia($e))
+        $filasExistencia = $this->resumen->consultaExistencias($inventarioFisico, 'todos', $almacenFiltro)->get();
+        $motivos = $this->resumen->motivosNoVerificables($filasExistencia);
+        $existencias = $filasExistencia
+            ->map(fn (InventarioFisicoExistencia $e): array => $this->resumen->filaExistencia($e, $motivos))
             ->values();
 
         $correcciones = $this->resumen->resumenCorrecciones($inventarioFisico, $contadores);
@@ -251,9 +258,65 @@ class InventarioFisicoController extends Controller
             return $this->respuestaConflicto($inventarioFisico, $e);
         }
 
+        return $this->respuestaFilaExistencia($inventarioFisico, $fila);
+    }
+
+    /**
+     * «No fue posible verificar» (motivo opcional): resuelve el renglón para
+     * el cierre SIN cantidad contada — nunca es un 0 ni una diferencia.
+     */
+    public function marcarExistenciaNoVerificable(
+        ResolverExistenciaNoVerificableRequest $request,
+        InventarioFisico $inventarioFisico,
+        InventarioFisicoExistencia $existencia,
+        VerificarExistenciaInventarioFisico $accion,
+    ): JsonResponse {
+        try {
+            $fila = $accion->marcarNoVerificable(
+                $inventarioFisico,
+                $existencia,
+                $request->input('motivo'),
+                $request->user(),
+                $request->filled('verificada_en_vista') ? $request->string('verificada_en_vista')->toString() : null,
+            );
+        } catch (VerificacionInventarioFisicoConcurrenteException $e) {
+            return $this->respuestaConflicto($inventarioFisico, $e);
+        }
+
+        return $this->respuestaFilaExistencia($inventarioFisico, $fila);
+    }
+
+    /**
+     * Reabre a Pendiente un renglón marcado como «No fue posible verificar».
+     */
+    public function reabrirExistencia(
+        ResolverExistenciaNoVerificableRequest $request,
+        InventarioFisico $inventarioFisico,
+        InventarioFisicoExistencia $existencia,
+        VerificarExistenciaInventarioFisico $accion,
+    ): JsonResponse {
+        try {
+            $fila = $accion->reabrir(
+                $inventarioFisico,
+                $existencia,
+                $request->user(),
+                $request->filled('verificada_en_vista') ? $request->string('verificada_en_vista')->toString() : null,
+            );
+        } catch (VerificacionInventarioFisicoConcurrenteException $e) {
+            return $this->respuestaConflicto($inventarioFisico, $e);
+        }
+
+        return $this->respuestaFilaExistencia($inventarioFisico, $fila);
+    }
+
+    private function respuestaFilaExistencia(InventarioFisico $ronda, InventarioFisicoExistencia $fila): JsonResponse
+    {
         return response()->json([
-            'existencia' => $this->resumen->filaExistencia($fila->loadMissing(['almacen:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name'])),
-            'contadores' => $this->resumen->contadores($inventarioFisico),
+            'existencia' => $this->resumen->filaExistencia(
+                $fila->loadMissing(ServicioResumenInventarioFisico::RELACIONES_EXISTENCIA),
+                $this->resumen->motivosNoVerificables([$fila]),
+            ),
+            'contadores' => $this->resumen->contadores($ronda),
         ]);
     }
 
@@ -332,7 +395,10 @@ class InventarioFisicoController extends Controller
         if ($fila instanceof InventarioFisicoUnidad) {
             $cuerpo['unidad'] = $this->resumen->filaResumen($fila->load(ServicioResumenInventarioFisico::RELACIONES_FILA), true);
         } elseif ($fila instanceof InventarioFisicoExistencia) {
-            $cuerpo['existencia'] = $this->resumen->filaExistencia($fila->load(['almacen:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name']));
+            $cuerpo['existencia'] = $this->resumen->filaExistencia(
+                $fila->load(ServicioResumenInventarioFisico::RELACIONES_EXISTENCIA),
+                $this->resumen->motivosNoVerificables([$fila]),
+            );
         }
 
         return response()->json($cuerpo, 409);
@@ -511,27 +577,26 @@ class InventarioFisicoController extends Controller
 
     private function exportarCantidad(Request $request, InventarioFisico $inventarioFisico): BinaryFileResponse|HttpResponse
     {
-        $etiquetaResultado = [
-            InventarioFisicoExistencia::RESULTADO_PENDIENTE => 'Pendiente',
-            InventarioFisicoExistencia::RESULTADO_COINCIDE => 'Coincide',
-            InventarioFisicoExistencia::RESULTADO_FALTANTE => 'Faltante',
-            InventarioFisicoExistencia::RESULTADO_SOBRANTE => 'Sobrante',
-        ];
-
         $almacenExport = $request->filled('almacen_id') ? $request->integer('almacen_id') : null;
-        $filas = $this->resumen->consultaExistencias($inventarioFisico, 'todos', $almacenExport)->get()
-            ->map(function (InventarioFisicoExistencia $e) use ($etiquetaResultado): array {
-                $d = $this->resumen->filaExistencia($e);
+        $filasExistencia = $this->resumen->consultaExistencias($inventarioFisico, 'todos', $almacenExport)->get();
+        $motivos = $this->resumen->motivosNoVerificables($filasExistencia);
+        $filas = $filasExistencia
+            ->map(function (InventarioFisicoExistencia $e) use ($motivos): array {
+                $d = $this->resumen->filaExistencia($e, $motivos);
 
                 return [
-                    $d['almacen'] ?? '—',
+                    $e->esCustodia() ? 'Bajo custodia' : 'En almacén',
+                    $this->resumen->ubicacionExistencia($e),
+                    $d['finalidad_etiqueta'] ?? 'No aplica',
                     $d['activo'],
-                    $d['talla'] ?? '—',
+                    $d['talla'] ?? 'Sin variante',
                     $d['cantidad_esperada'],
-                    $d['cantidad_contada'] ?? 'Sin verificar',
+                    $d['no_verificable'] ? '—' : ($d['cantidad_contada'] ?? 'Sin verificar'),
                     $d['diferencia'] ?? '—',
-                    $etiquetaResultado[$d['resultado']] ?? $d['resultado'],
+                    ServicioResumenInventarioFisico::RESULTADO_ETIQUETA[$d['resultado']] ?? $d['resultado'],
                     $d['verificada_por'] ?? '—',
+                    $e->verificada_en !== null ? FechaHora::local($e->verificada_en) : '—',
+                    $d['no_verificable'] ? ($d['motivo_no_verificable'] ?? '—') : '—',
                 ];
             })->all();
 
@@ -540,14 +605,14 @@ class InventarioFisicoController extends Controller
             $inventarioFisico->empresa,
             array_filter([
                 'Ronda' => $inventarioFisico->nombre,
-                'Sección' => 'Artículos por cantidad',
+                'Sección' => 'Artículos por cantidad (almacén y custodia)',
             ]),
             count($filas),
             generadoPor: $request->user()?->name,
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'Almacén', 'Activo', 'Talla', 'Esperado', 'Contado', 'Diferencia', 'Resultado', 'Verificado por',
+            'Origen', 'Almacén / custodio', 'Finalidad', 'Activo', 'Talla / variante', 'Cantidad esperada', 'Cantidad contada', 'Diferencia', 'Resultado', 'Verificado por', 'Verificado en', 'Motivo (no verificable)',
         ], $contexto);
     }
 

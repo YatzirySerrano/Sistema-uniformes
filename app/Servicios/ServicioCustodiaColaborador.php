@@ -485,6 +485,55 @@ class ServicioCustodiaColaborador
     }
 
     /**
+     * Custodia POR CANTIDAD de toda una empresa agrupada en "bolsas" lógicas:
+     * custodio + activo + variante + finalidad (NULL = sin clasificar). Mismo
+     * pendiente que el resto del sistema (`pendientesPorDetalle()`), nunca se
+     * suman custodios ni finalidades entre sí. La usa el snapshot de la ronda
+     * de inventario físico integral. Lotes de 1000 renglones (pocas consultas
+     * agregadas por lote, sin N+1); los custodios dados de baja se omiten,
+     * igual que en "Distribución actual del activo".
+     *
+     * @return list<array{colaborador_id: int, activo_id: int, talla_id: int|null, finalidad: FinalidadCustodia|null, cantidad: int}>
+     */
+    public function bolsasCantidadDeEmpresa(int $empresaId): array
+    {
+        $bolsas = [];
+
+        DetalleEntrega::query()
+            ->whereNull('unidad_activo_id')
+            ->whereHas('entrega', fn (Builder $q) => $q
+                ->where('empresa_id', $empresaId)
+                ->whereIn('estado', [EstadoEntrega::Firmada->value, EstadoEntrega::Corregida->value])
+                ->whereHas('colaborador'))
+            ->with('entrega:id,colaborador_id')
+            ->select(['id', 'entrega_uniforme_id', 'activo_id', 'talla_id', 'cantidad', 'finalidad'])
+            ->chunkById(1000, function (Collection $detalles) use (&$bolsas): void {
+                $pendientes = $this->pendientesPorDetalle($detalles);
+
+                foreach ($detalles as $detalle) {
+                    $pendiente = $pendientes[$detalle->id] ?? 0;
+                    $colaboradorId = $detalle->entrega?->colaborador_id;
+
+                    if ($pendiente <= 0 || $colaboradorId === null) {
+                        continue;
+                    }
+
+                    $clave = $colaboradorId.'|'.$detalle->activo_id.'|'.($detalle->talla_id ?? 0).'|'.($detalle->finalidad->value ?? '');
+                    $bolsas[$clave] ??= [
+                        'colaborador_id' => (int) $colaboradorId,
+                        'activo_id' => (int) $detalle->activo_id,
+                        'talla_id' => $detalle->talla_id,
+                        'finalidad' => $detalle->finalidad,
+                        'cantidad' => 0,
+                    ];
+                    $bolsas[$clave]['cantidad'] += $pendiente;
+                }
+            });
+
+        return array_values($bolsas);
+    }
+
+    /**
      * Piezas que ya salieron de cada renglón hacia OTRO colaborador por
      * redistribución (renglones hijos con `detalle_origen_id`). Cuenta toda
      * redistribución no anulada — incluida una todavía `pendiente_firma`, que

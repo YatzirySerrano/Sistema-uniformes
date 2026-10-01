@@ -83,9 +83,13 @@
             Renglones: <b>{{ $contadores['cantidad_renglones'] }}</b> ·
             Coinciden: <b>{{ $contadores['cantidad_coinciden'] }}</b> ·
             Con diferencia: <b>{{ $contadores['cantidad_con_diferencia'] }}</b> ·
+            No fue posible verificar: <b>{{ $contadores['cantidad_no_verificables'] }}</b> ·
             Sin verificar: <b>{{ $contadores['cantidad_pendientes'] }}</b> ·
             Esperado total: <b>{{ $contadores['cantidad_esperada_total'] }}</b> ·
             Contado total: <b>{{ $contadores['cantidad_contada_total'] }}</b>
+            @if ($contadores['cantidad_custodia_renglones'] > 0)
+                · Bajo custodia: <b>{{ $contadores['cantidad_custodia_renglones'] }}</b> renglón(es)
+            @endif
         </p>
         @if (count($existencias) === 0)
             <p class="vacio">Esta ronda no incluye artículos por cantidad.</p>
@@ -93,9 +97,10 @@
             <table class="datos">
                 <thead>
                     <tr>
-                        <th>Almacén</th>
+                        <th>Almacén / custodio</th>
+                        <th>Finalidad</th>
                         <th>Activo</th>
-                        <th>Variante</th>
+                        <th>Talla / variante</th>
                         <th class="num">Esperado</th>
                         <th class="num">Contado</th>
                         <th class="num">Diferencia</th>
@@ -106,11 +111,12 @@
                 <tbody>
                     @foreach ($existencias as $e)
                         <tr>
-                            <td>{{ $e['almacen'] ?? '—' }}</td>
+                            <td>{{ $e['ubicacion'] }}</td>
+                            <td>{{ $e['finalidad'] ?? 'No aplica' }}</td>
                             <td>{{ $e['activo'] ?? '—' }}</td>
                             <td>{{ $e['talla'] ?? 'Sin variante' }}</td>
                             <td class="num">{{ $e['cantidad_esperada'] }}</td>
-                            <td class="num">{{ $e['cantidad_contada'] ?? 'Sin verificar' }}</td>
+                            <td class="num">{{ $e['no_verificable'] ? '—' : ($e['cantidad_contada'] ?? 'Sin verificar') }}</td>
                             <td class="num">
                                 @if ($e['diferencia'] === null)
                                     —
@@ -118,8 +124,18 @@
                                     {{ $e['diferencia'] > 0 ? '+' : '' }}{{ $e['diferencia'] }}
                                 @endif
                             </td>
-                            <td>{{ $e['resultado'] }}</td>
-                            <td>{{ $e['verificada_por'] ?? '—' }}</td>
+                            <td>
+                                {{ $e['resultado'] }}
+                                @if ($e['no_verificable'])
+                                    <br>Motivo: {{ $e['motivo_no_verificable'] ?? '—' }}
+                                @endif
+                            </td>
+                            <td>
+                                {{ $e['verificada_por'] ?? '—' }}
+                                @if ($e['verificada_en'])
+                                    <br>{{ $e['verificada_en'] }}
+                                @endif
+                            </td>
                         </tr>
                     @endforeach
                 </tbody>
@@ -151,8 +167,11 @@
                 <p>Sin diferencias: no hay correcciones que aplicar.</p>
                 @break
             @default
-                <p>{{ $correcciones['total_diferencias'] }} renglón(es) con diferencia <b>pendientes de aplicar</b>.</p>
+                <p>{{ $correcciones['total_diferencias'] }} renglón(es) de almacén con diferencia <b>pendientes de aplicar</b>.</p>
         @endswitch
+        @if ($correcciones['diferencias_custodia'] > 0)
+            <p>{{ $correcciones['diferencias_custodia'] }} diferencia(s) de custodia <b>a revisar</b>: no se aplican al inventario ni cambian la custodia.</p>
+        @endif
     </div>
 </body>
 </html>
