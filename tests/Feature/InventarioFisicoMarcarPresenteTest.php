@@ -31,7 +31,7 @@ beforeEach(function () {
     ($this->unidad)();
     ($this->unidad)();
     ($this->unidad)();
-    $this->ronda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda de prueba', $this->almacen, null, $this->admin->id);
+    $this->ronda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda de prueba', null, $this->admin->id);
     $this->renglon = fn (): InventarioFisicoUnidad => InventarioFisicoUnidad::query()
         ->where('inventario_fisico_id', $this->ronda->id)->orderBy('id')->firstOrFail();
 
@@ -99,7 +99,7 @@ it('desmarcar limpia escaneado_en / escaneado_por y devuelve la unidad a Faltant
 
     expect($res->json('contadores.encontrados'))->toBe(0)
         ->and($res->json('contadores.pendientes'))->toBe(3)
-        ->and($res->json('unidad.clasificacion'))->toBe('faltante');
+        ->and($res->json('unidad.clasificacion'))->toBe('pendiente');
 
     $renglon->refresh();
     expect($renglon->escaneado_en)->toBeNull()
@@ -134,7 +134,7 @@ it('una ronda finalizada rechaza marcar, desmarcar y escanear', function () {
 
 it('un renglón de otra ronda es rechazado', function () {
     ($this->unidad)();
-    $otraRonda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda de prueba', $this->almacen, null, $this->admin->id);
+    $otraRonda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda de prueba', null, $this->admin->id);
     $renglonAjeno = InventarioFisicoUnidad::query()->where('inventario_fisico_id', $otraRonda->id)->firstOrFail();
 
     ($this->marcar)($renglonAjeno->id)->assertNotFound();

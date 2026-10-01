@@ -384,9 +384,9 @@ it('respeta el alcance por almacén: filtra por un almacén autorizado e ignora 
 
 it('la card de rondas cuenta sólo las rondas en proceso de las empresas autorizadas', function () {
     $usuario = usuarioConPermisos(['inventario-fisico.ver'], [$this->empresa]);
-    app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda', $this->almacen, null, $usuario->id);
+    app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda', null, $usuario->id);
     ['empresa' => $ajena, 'almacen' => $almacenAjeno] = escenarioDashboardPermisos();
-    app(CrearRondaInventarioFisico::class)->ejecutar($ajena, 'Ajena', $almacenAjeno, null, $usuario->id);
+    app(CrearRondaInventarioFisico::class)->ejecutar($ajena, 'Ajena', null, $usuario->id);
 
     expect(resumenDelDashboard($this, $usuario)['kpis']['rondas_inventario_fisico_en_proceso'])->toBe(1);
 });

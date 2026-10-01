@@ -5,13 +5,14 @@ namespace App\Http\Requests\InventarioFisico;
 use App\Http\Requests\Concerns\ResuelveEmpresa;
 use App\Models\InventarioFisico;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 /**
- * Alta de una ronda de inventario físico. La empresa llega en `empresa_id` y
- * se valida contra el alcance del usuario (`ResuelveEmpresa`); nunca se confía
- * en el frontend. El almacén es un alcance OPCIONAL y, si viene, debe abastecer
- * a esa empresa.
+ * Alta de una ronda de inventario físico INTEGRAL de una empresa. La empresa
+ * llega en `empresa_id` y se valida contra el alcance del usuario
+ * (`ResuelveEmpresa`); nunca se confía en el frontend. No hay "alcance" que
+ * elegir: el backend arma el universo completo (existencias por cantidad de
+ * sus almacenes + unidades identificadas). Un `almacen_id` que llegue se
+ * ignora (no está en las reglas).
  */
 class GuardarInventarioFisicoRequest extends FormRequest
 {
@@ -27,15 +28,11 @@ class GuardarInventarioFisicoRequest extends FormRequest
      */
     public function rules(): array
     {
-        $empresaId = $this->empresaResuelta()->getKey();
+        $this->empresaResuelta();
 
         return [
             'empresa_id' => ['required', 'integer'],
             'nombre' => ['required', 'string', 'max:255'],
-            'almacen_id' => [
-                'required', 'integer',
-                Rule::exists('almacen_empresa', 'almacen_id')->where('empresa_id', $empresaId),
-            ],
             'observaciones' => ['nullable', 'string', 'max:2000'],
         ];
     }
@@ -48,8 +45,6 @@ class GuardarInventarioFisicoRequest extends FormRequest
         return [
             'empresa_id.required' => 'Selecciona la empresa de la ronda.',
             'nombre.required' => 'Ponle un nombre a la ronda (por ejemplo «Inventario diciembre 2026 – DASTI»).',
-            'almacen_id.required' => 'Selecciona el almacén que vas a inventariar.',
-            'almacen_id.exists' => 'El almacén seleccionado no abastece a esta empresa.',
         ];
     }
 }

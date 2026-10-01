@@ -49,16 +49,22 @@ beforeEach(function () {
     ));
 
     $this->ronda = fn (): InventarioFisico => app(CrearRondaInventarioFisico::class)->ejecutar(
-        $this->empresa, 'Ronda', $this->almacen, null, $this->admin->id,
+        $this->empresa, 'Ronda', null, $this->admin->id,
     );
-    $this->verificar = fn (InventarioFisico $r, InventarioFisicoExistencia $e, int $contada) => $this->actingAs($this->admin)
-        ->postJson("/inventarios-fisicos/{$r->id}/existencias/{$e->id}", ['cantidad_contada' => $contada]);
+    // `$vista` = la verificación que el usuario tenía en pantalla (null =
+    // pendiente); corregir un conteo ya hecho exige conocerla.
+    $this->verificar = fn (InventarioFisico $r, InventarioFisicoExistencia $e, int $contada, ?string $vista = null) => $this->actingAs($this->admin)
+        ->postJson("/inventarios-fisicos/{$r->id}/existencias/{$e->id}", ['cantidad_contada' => $contada, 'verificada_en_vista' => $vista]);
 });
 
-it('la ronda nueva exige almacén', function () {
+it('la ronda es integral: no pide almacén y congela las existencias de los almacenes de la empresa', function () {
     $this->actingAs($this->admin)
         ->post('/inventarios-fisicos', ['empresa_id' => $this->empresa->id, 'nombre' => 'X'])
-        ->assertSessionHasErrors('almacen_id');
+        ->assertSessionHasNoErrors();
+
+    $ronda = InventarioFisico::query()->sole();
+    expect($ronda->almacen_id)->toBeNull()
+        ->and($ronda->existencias()->pluck('almacen_id')->unique()->all())->toBe([$this->almacen->id]);
 });
 
 it('al iniciar la ronda se congela una fila por (activo, talla) con saldo > 0', function () {
@@ -89,7 +95,7 @@ it('«Coincide» fija contada = esperada; una cantidad distinta calcula la difer
         ->and(SaldoInventario::query()->where('talla_id', $this->s->id)->value('cantidad'))->toBe(15);
 
     // 21 → sobrante.
-    ($this->verificar)($ronda, $filaS->fresh(), 21)->assertOk()->assertJsonPath('existencia.resultado', 'sobrante');
+    ($this->verificar)($ronda, $filaS->fresh(), 21, $filaS->fresh()->verificada_en->toIso8601String())->assertOk()->assertJsonPath('existencia.resultado', 'sobrante');
 });
 
 it('el snapshot de cantidades no se recalcula si el stock cambia después', function () {

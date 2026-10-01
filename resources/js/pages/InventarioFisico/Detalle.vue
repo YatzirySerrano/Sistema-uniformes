@@ -28,6 +28,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import SelectorVista from '@/components/sistema/SelectorVista.vue';
+import SelectSimple from '@/components/sistema/SelectSimple.vue';
 import PadFirma from '@/components/sistema/PadFirma.vue';
 import { Input } from '@/components/ui/input';
 import { useEscanerQr } from '@/composables/useEscanerQr';
@@ -55,7 +56,12 @@ type Contadores = {
 
 type FilaUnidad = {
     id: number;
-    clasificacion: 'encontrado' | 'faltante' | 'no_esperado';
+    /**
+     * Estado de VERIFICACIÓN: `pendiente` (ronda abierta, sin revisar),
+     * `encontrado` (Presente), `faltante` (ronda cerrada sin localizarla),
+     * `no_esperado` (escaneada fuera del universo).
+     */
+    clasificacion: 'encontrado' | 'pendiente' | 'faltante' | 'no_esperado';
     clasificacion_etiqueta: string;
     esperada: boolean;
     escaneado_en: string | null;
@@ -64,12 +70,20 @@ type FilaUnidad = {
     activo: string | null;
     almacen: string | null;
     colaborador: string | null;
+    /** Ubicación OPERATIVA actual: guardada en almacén o con un colaborador. */
+    ubicacion: 'almacen' | 'colaborador';
+    colaborador_sucursal: string | null;
+    colaborador_servicio: string | null;
+    /** Estado OPERATIVO actual (En almacén / Asignado / Reparación…). */
     estado_visible: string | null;
     estado_visible_etiqueta: string | null;
 };
 
 type FilaExistencia = {
     id: number;
+    /** Almacén del renglón: ahí se cuenta y ahí se aplica la corrección. */
+    almacen_id: number | null;
+    almacen: string | null;
     activo: string | null;
     talla: string | null;
     cantidad_esperada: number;
@@ -106,6 +120,8 @@ const props = defineProps<{
         estado_etiqueta: string;
         empresa: string | null;
         almacen: string | null;
+        /** Ronda integral de la empresa (sin almacén único). */
+        general: boolean;
         responsable: string | null;
         observaciones: string | null;
         iniciado_en: string | null;
@@ -118,6 +134,12 @@ const props = defineProps<{
     };
     contadores: Contadores;
     seccion: Seccion;
+    /** Filtro por estado operativo actual de la unidad (vacío = todos). */
+    estadoUnidad: string | null;
+    estadosUnidad: { valor: string; etiqueta: string }[];
+    /** Filtro "trabajar por almacén" (cantidades y unidades hoy guardadas en él). */
+    almacenFiltro: number | null;
+    almacenes: { id: number; nombre: string }[];
     unidades: {
         data: FilaUnidad[];
         links: { url: string | null; label: string; active: boolean }[];
@@ -332,12 +354,18 @@ const SECCIONES: { valor: Seccion; etiqueta: string; total: () => number }[] = [
     { valor: 'todos', etiqueta: 'Todos', total: () => contadores.todos },
     {
         valor: 'encontrados',
-        etiqueta: 'Encontrados',
+        etiqueta: 'Presentes',
         total: () => contadores.encontrados,
     },
     {
+        // Mientras la ronda está abierta nada es "faltante": sólo está
+        // pendiente de verificar. Al cerrarla, lo no verificado sí es "no
+        // localizado".
         valor: 'faltantes',
-        etiqueta: 'Faltantes',
+        etiqueta:
+            props.ronda.estado === 'en_proceso'
+                ? 'Pendientes de verificar'
+                : 'No localizados',
         total: () => contadores.pendientes,
     },
     {
@@ -347,18 +375,59 @@ const SECCIONES: { valor: Seccion; etiqueta: string; total: () => number }[] = [
     },
 ];
 
-function cambiarSeccion(s: Seccion): void {
-    if (s === props.seccion) return;
+function recargarUnidades(
+    seccion: Seccion,
+    estadoUnidad: string,
+    almacenId: number | null = props.almacenFiltro,
+): void {
     router.get(
         `/inventarios-fisicos/${props.ronda.id}`,
-        { seccion: s },
+        {
+            seccion,
+            ...(estadoUnidad ? { estado_unidad: estadoUnidad } : {}),
+            ...(almacenId ? { almacen_id: almacenId } : {}),
+        },
         {
             preserveState: true,
             preserveScroll: true,
             replace: true,
-            only: ['unidades', 'seccion', 'contadores'],
+            only: [
+                'unidades',
+                'existencias',
+                'seccion',
+                'estadoUnidad',
+                'almacenFiltro',
+                'contadores',
+            ],
         },
     );
+}
+
+function cambiarSeccion(s: Seccion): void {
+    if (s === props.seccion) return;
+    recargarUnidades(s, props.estadoUnidad ?? '');
+}
+
+/* ---------- Filtro por almacén (trabajar la ronda por zonas) ---------- */
+const OPCIONES_ALMACEN = computed(() => [
+    { valor: '', etiqueta: 'Todos los almacenes' },
+    ...props.almacenes.map((a) => ({ valor: a.id, etiqueta: a.nombre })),
+]);
+function cambiarAlmacen(valor: string | number | null): void {
+    const id = valor ? Number(valor) : null;
+    if (id === props.almacenFiltro) return;
+    recargarUnidades(props.seccion, props.estadoUnidad ?? '', id);
+}
+
+/* ---------- Filtro por estado OPERATIVO (independiente de la verificación) ---------- */
+const OPCIONES_ESTADO_UNIDAD = computed(() => [
+    { valor: '', etiqueta: 'Todos los estados' },
+    ...props.estadosUnidad,
+]);
+function cambiarEstadoUnidad(valor: string | number | null): void {
+    const nuevo = String(valor ?? '');
+    if (nuevo === (props.estadoUnidad ?? '')) return;
+    recargarUnidades(props.seccion, nuevo);
 }
 
 // Tabla ↔ Tarjetas del detalle: misma query/paginación/filtros, sólo cambia
@@ -418,10 +487,29 @@ async function verificarExistencia(
                     'X-XSRF-TOKEN': xsrf(),
                 },
                 credentials: 'same-origin',
-                body: JSON.stringify({ cantidad_contada: cantidad }),
+                // Versión que se ve en pantalla: si otro encargado ya contó
+                // este renglón, el backend lo rechaza en vez de pisarlo.
+                body: JSON.stringify({
+                    cantidad_contada: cantidad,
+                    verificada_en_vista: fila.verificada_en,
+                }),
             },
         );
         const data = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+            const i = existencias.value.findIndex((e) => e.id === fila.id);
+            if (i !== -1 && data.existencia)
+                existencias.value[i] = data.existencia;
+            delete borrador[fila.id];
+            if (data.contadores) Object.assign(contadores, data.contadores);
+            ultimo.value = {
+                ok: false,
+                titulo: 'Ya lo registró otra persona',
+                detalle: data.message,
+                tono: 'aviso',
+            };
+            return;
+        }
         if (!res.ok) {
             ultimo.value = {
                 ok: false,
@@ -465,11 +553,35 @@ async function mutarPresente(
             `/inventarios-fisicos/${props.ronda.id}/unidades/${fila.id}/presente`,
             {
                 method: metodo,
-                headers: { Accept: 'application/json', 'X-XSRF-TOKEN': xsrf() },
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                    'X-XSRF-TOKEN': xsrf(),
+                },
                 credentials: 'same-origin',
+                // Deshacer revalida contra la verificación que se ve aquí.
+                body:
+                    metodo === 'DELETE'
+                        ? JSON.stringify({
+                              escaneado_en_vista: fila.escaneado_en,
+                          })
+                        : undefined,
             },
         );
         const data = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+            // Otro encargado ya la verificó (gana el primero): se muestra el
+            // estado real, quién y cuándo — nada se sobrescribe.
+            aplicarFilaActualizada(data.unidad);
+            if (data.contadores) Object.assign(contadores, data.contadores);
+            ultimo.value = {
+                ok: false,
+                titulo: 'Ya la verificó otra persona',
+                detalle: data.message,
+                tono: 'aviso',
+            };
+            return;
+        }
         if (!res.ok) {
             ultimo.value = {
                 ok: false,
@@ -600,11 +712,17 @@ watch(
 );
 
 function claseClasificacion(c: FilaUnidad['clasificacion']): string {
-    return c === 'encontrado'
-        ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
-        : c === 'no_esperado'
-          ? 'border-amber-500/40 text-amber-700 dark:text-amber-400'
-          : 'border-red-500/40 text-red-700 dark:text-red-400';
+    switch (c) {
+        case 'encontrado':
+            return 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400';
+        case 'pendiente':
+            // Neutral: todavía no se revisa, no es un problema.
+            return 'border-muted-foreground/30 text-muted-foreground';
+        case 'no_esperado':
+            return 'border-amber-500/40 text-amber-700 dark:text-amber-400';
+        default:
+            return 'border-red-500/40 text-red-700 dark:text-red-400';
+    }
 }
 
 onBeforeUnmount(() => {
@@ -624,7 +742,7 @@ onBeforeUnmount(() => {
             <template #acciones>
                 <BotonesExportar
                     :endpoint="`/inventarios-fisicos/${ronda.id}/exportar`"
-                    :filtros="{ seccion }"
+                    :filtros="{ seccion, estado_unidad: estadoUnidad ?? '' }"
                 />
             </template>
         </EncabezadoPagina>
@@ -644,8 +762,12 @@ onBeforeUnmount(() => {
                     ronda.almacen
                 }}</strong></span
             >
+            <span v-else-if="ronda.general"
+                >Alcance:
+                <strong class="text-foreground">Toda la empresa</strong></span
+            >
             <span
-                >Responsable:
+                >Iniciada por:
                 <strong class="text-foreground">{{
                     ronda.responsable ?? '—'
                 }}</strong></span
@@ -764,7 +886,7 @@ onBeforeUnmount(() => {
                     </p>
                 </div>
                 <div class="rounded-xl border p-3">
-                    <p class="text-muted-foreground text-xs">Encontradas</p>
+                    <p class="text-muted-foreground text-xs">Presentes</p>
                     <p
                         class="text-2xl font-semibold text-emerald-600 tabular-nums dark:text-emerald-400"
                     >
@@ -772,9 +894,20 @@ onBeforeUnmount(() => {
                     </p>
                 </div>
                 <div class="rounded-xl border p-3">
-                    <p class="text-muted-foreground text-xs">Faltantes</p>
+                    <p class="text-muted-foreground text-xs">
+                        {{
+                            enProceso
+                                ? 'Pendientes de verificar'
+                                : 'No localizadas'
+                        }}
+                    </p>
                     <p
-                        class="text-2xl font-semibold text-red-600 tabular-nums dark:text-red-400"
+                        class="text-2xl font-semibold tabular-nums"
+                        :class="
+                            enProceso
+                                ? 'text-foreground'
+                                : 'text-red-600 dark:text-red-400'
+                        "
                     >
                         {{ contadores.pendientes }}
                     </p>
@@ -992,12 +1125,37 @@ onBeforeUnmount(() => {
             >
                 {{ s.etiqueta }} ({{ s.total() }})
             </Button>
+            <div v-if="almacenes.length > 1" class="w-full sm:w-52">
+                <label for="filtro-almacen" class="sr-only"
+                    >Filtrar por almacén</label
+                >
+                <SelectSimple
+                    id="filtro-almacen"
+                    :model-value="almacenFiltro ?? ''"
+                    :opciones="OPCIONES_ALMACEN"
+                    placeholder="Almacén"
+                    @update:model-value="cambiarAlmacen"
+                />
+            </div>
+            <div class="w-full sm:w-52">
+                <label for="filtro-estado-unidad" class="sr-only"
+                    >Filtrar por estado de la unidad</label
+                >
+                <SelectSimple
+                    id="filtro-estado-unidad"
+                    :model-value="estadoUnidad ?? ''"
+                    :opciones="OPCIONES_ESTADO_UNIDAD"
+                    placeholder="Estado de la unidad"
+                    @update:model-value="cambiarEstadoUnidad"
+                />
+            </div>
             <SelectorVista v-model="vista" class="ml-auto" />
         </div>
 
         <p v-if="puedeEscanear" class="text-muted-foreground -mt-1 text-xs">
-            «Presente» marca una unidad faltante como encontrada físicamente
-            (equivale a escanear su QR). «Deshacer» revierte la marca mientras
+            «Presente» confirma que la unidad existe (equivale a escanear su
+            QR), aunque esté asignada a alguien o en reparación: no cambia su
+            custodio, almacén ni estado. «Deshacer» revierte la marca mientras
             la ronda siga abierta.
         </p>
 
@@ -1006,7 +1164,7 @@ onBeforeUnmount(() => {
             titulo="Sin unidades en esta sección"
             :descripcion="
                 seccion === 'faltantes'
-                    ? 'Todas las unidades esperadas fueron escaneadas.'
+                    ? 'No hay unidades pendientes con este filtro.'
                     : seccion === 'no_esperados'
                       ? 'No se ha escaneado ninguna unidad fuera del universo esperado.'
                       : seccion === 'todos'
@@ -1029,9 +1187,8 @@ onBeforeUnmount(() => {
                             Resultado
                         </th>
                         <th class="px-3 py-2 font-medium">Código / Activo</th>
-                        <th class="px-3 py-2 font-medium">Almacén</th>
-                        <th class="px-3 py-2 font-medium">Asignada a</th>
                         <th class="px-3 py-2 font-medium">Estado actual</th>
+                        <th class="px-3 py-2 font-medium">Ubicación actual</th>
                         <th class="px-3 py-2 font-medium">Escaneada</th>
                     </tr>
                 </thead>
@@ -1058,23 +1215,45 @@ onBeforeUnmount(() => {
                                 {{ f.activo ?? '—' }}
                             </p>
                         </td>
-                        <td class="text-muted-foreground px-3 py-2">
-                            {{ f.almacen ?? '—' }}
-                        </td>
-                        <td class="text-muted-foreground px-3 py-2">
-                            {{ f.colaborador ?? '—' }}
-                        </td>
                         <td class="px-3 py-2">
                             <Badge
                                 v-if="f.estado_visible"
                                 variant="outline"
-                                class="text-xs"
+                                class="text-xs whitespace-nowrap"
                                 :class="
                                     claseEstadoVisibleUnidad(f.estado_visible)
                                 "
                             >
                                 {{ f.estado_visible_etiqueta }}
                             </Badge>
+                        </td>
+                        <td class="text-muted-foreground px-3 py-2 text-xs">
+                            <template v-if="f.ubicacion === 'colaborador'">
+                                <p class="text-foreground text-sm">
+                                    {{ f.colaborador }}
+                                </p>
+                                <p
+                                    v-if="
+                                        f.colaborador_sucursal ||
+                                        f.colaborador_servicio
+                                    "
+                                >
+                                    {{
+                                        [
+                                            f.colaborador_sucursal,
+                                            f.colaborador_servicio,
+                                        ]
+                                            .filter(Boolean)
+                                            .join(' · ')
+                                    }}
+                                </p>
+                            </template>
+                            <template v-else>
+                                <p class="text-foreground text-sm">
+                                    {{ f.almacen ?? '—' }}
+                                </p>
+                                <p>En almacén</p>
+                            </template>
                         </td>
                         <td class="text-muted-foreground px-3 py-2 text-xs">
                             <template v-if="f.escaneado_en">
@@ -1104,7 +1283,7 @@ onBeforeUnmount(() => {
                                 v-else-if="
                                     puedeEscanear &&
                                     f.esperada &&
-                                    f.clasificacion === 'faltante'
+                                    f.clasificacion === 'pendiente'
                                 "
                             >
                                 <Button
@@ -1116,6 +1295,9 @@ onBeforeUnmount(() => {
                                     <CheckCircle2 class="size-4" /> Presente
                                 </Button>
                             </div>
+                            <span v-else-if="f.clasificacion === 'pendiente'"
+                                >Pendiente de verificar</span
+                            >
                             <span v-else>No localizada</span>
                         </td>
                     </tr>
@@ -1150,20 +1332,53 @@ onBeforeUnmount(() => {
                     </Badge>
                 </div>
 
+                <Badge
+                    v-if="f.estado_visible"
+                    variant="outline"
+                    class="w-fit text-xs"
+                    :class="claseEstadoVisibleUnidad(f.estado_visible)"
+                >
+                    {{ f.estado_visible_etiqueta }}
+                </Badge>
+
+                <!-- Ubicación operativa actual: sólo lo que aplica, sin "—" de relleno. -->
                 <div
                     class="text-muted-foreground grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs"
                 >
-                    <span>Estado sistema:</span>
-                    <span class="text-foreground">
-                        {{ f.estado_visible_etiqueta ?? '—' }}
-                    </span>
-                    <span>Almacén:</span>
-                    <span class="text-foreground">{{ f.almacen ?? '—' }}</span>
-                    <span>Asignada a:</span>
-                    <span class="text-foreground">
-                        {{ f.colaborador ?? '—' }}
-                    </span>
+                    <template v-if="f.ubicacion === 'colaborador'">
+                        <span>Asignada a:</span>
+                        <span class="text-foreground min-w-0 break-words">{{
+                            f.colaborador
+                        }}</span>
+                        <template v-if="f.colaborador_sucursal">
+                            <span>Sucursal:</span>
+                            <span class="text-foreground">{{
+                                f.colaborador_sucursal
+                            }}</span>
+                        </template>
+                        <template v-if="f.colaborador_servicio">
+                            <span>Servicio:</span>
+                            <span class="text-foreground">{{
+                                f.colaborador_servicio
+                            }}</span>
+                        </template>
+                    </template>
+                    <template v-else>
+                        <span>Almacén:</span>
+                        <span class="text-foreground">{{
+                            f.almacen ?? '—'
+                        }}</span>
+                    </template>
                 </div>
+                <p
+                    v-if="
+                        f.ubicacion === 'colaborador' &&
+                        f.clasificacion === 'pendiente'
+                    "
+                    class="text-xs text-amber-700 dark:text-amber-400"
+                >
+                    No está en un almacén: confírmala con quien la tiene.
+                </p>
 
                 <div class="text-muted-foreground text-xs">
                     <template v-if="f.escaneado_en">
@@ -1172,17 +1387,20 @@ onBeforeUnmount(() => {
                             Por: {{ f.escaneado_por }}
                         </span>
                     </template>
-                    <span v-else>Escaneada: — · Por: —</span>
+                    <span v-else-if="f.clasificacion === 'pendiente'"
+                        >Aún sin verificar.</span
+                    >
+                    <span v-else>Sin verificar.</span>
                 </div>
                 <div
                     v-if="
                         puedeEscanear &&
                         f.esperada &&
-                        (f.clasificacion === 'faltante' || f.escaneado_en)
+                        (f.clasificacion === 'pendiente' || f.escaneado_en)
                     "
                 >
                     <Button
-                        v-if="f.clasificacion === 'faltante'"
+                        v-if="f.clasificacion === 'pendiente'"
                         size="sm"
                         variant="outline"
                         class="w-fit"
@@ -1255,7 +1473,8 @@ onBeforeUnmount(() => {
             </div>
             <p class="text-muted-foreground text-xs">
                 Esperado total: {{ contadores.cantidad_esperada_total }} ·
-                Contado total: {{ contadores.cantidad_contada_total }}
+                Contado total:
+                {{ contadores.cantidad_contada_total }}
             </p>
         </section>
 
@@ -1288,11 +1507,11 @@ onBeforeUnmount(() => {
                             <p class="truncate font-medium">
                                 {{ e.activo ?? '—' }}
                             </p>
-                            <p
-                                v-if="e.talla"
-                                class="text-muted-foreground truncate text-xs"
-                            >
-                                Talla {{ e.talla }}
+                            <p class="text-muted-foreground truncate text-xs">
+                                {{ e.almacen ?? '—'
+                                }}<template v-if="e.talla">
+                                    · Talla {{ e.talla }}</template
+                                >
                             </p>
                         </div>
                         <Badge
@@ -1303,6 +1522,12 @@ onBeforeUnmount(() => {
                             {{ ETIQUETA_EXISTENCIA[e.resultado].texto }}
                         </Badge>
                     </div>
+                    <p
+                        v-if="e.verificada_por"
+                        class="text-muted-foreground text-xs"
+                    >
+                        Contado por {{ e.verificada_por }}
+                    </p>
 
                     <div
                         class="bg-muted/40 grid grid-cols-3 divide-x rounded-lg text-center"
@@ -1395,6 +1620,7 @@ onBeforeUnmount(() => {
                 <table class="w-full min-w-[640px] text-sm">
                     <thead class="text-muted-foreground text-left">
                         <tr>
+                            <th class="py-1.5 pr-3">Almacén</th>
                             <th class="py-1.5">Activo</th>
                             <th class="py-1.5">Talla</th>
                             <th class="py-1.5 text-right">Esperado</th>
@@ -1412,6 +1638,7 @@ onBeforeUnmount(() => {
                             :key="e.id"
                             class="border-t"
                         >
+                            <td class="py-1.5 pr-3">{{ e.almacen ?? '—' }}</td>
                             <td class="py-1.5">{{ e.activo ?? '—' }}</td>
                             <td class="py-1.5">{{ e.talla ?? '—' }}</td>
                             <td class="py-1.5 text-right tabular-nums">
@@ -1448,6 +1675,11 @@ onBeforeUnmount(() => {
                                 >
                                     {{ ETIQUETA_EXISTENCIA[e.resultado].texto }}
                                 </Badge>
+                                <span
+                                    v-if="e.verificada_por"
+                                    class="text-muted-foreground block text-xs"
+                                    >por {{ e.verificada_por }}</span
+                                >
                             </td>
                             <td v-if="puedeEscanear" class="py-1.5">
                                 <div class="flex items-center gap-1.5">
@@ -1588,6 +1820,7 @@ onBeforeUnmount(() => {
                 <p class="text-muted-foreground text-sm">
                     <strong>{{ ronda.empresa }}</strong>
                     <span v-if="ronda.almacen"> · {{ ronda.almacen }}</span>
+                    <span v-else-if="ronda.general"> · Toda la empresa</span>
                 </p>
 
                 <ul class="grid max-h-[50vh] gap-2 overflow-y-auto">
@@ -1600,6 +1833,7 @@ onBeforeUnmount(() => {
                             {{ e.activo ?? '—' }}
                         </p>
                         <p class="text-muted-foreground text-xs">
+                            {{ e.almacen ?? '—' }} ·
                             {{ e.talla ?? 'Sin variante' }}
                         </p>
                         <div class="mt-2 grid grid-cols-3 gap-2 text-center">

@@ -10,6 +10,7 @@ use App\Enums\PerfilTecnicoUnidad;
 use App\Soporte\EspecificacionUnidad;
 use App\Soporte\ResolverPerfilTecnicoUnidad;
 use Database\Factories\UnidadActivoFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -293,6 +294,35 @@ class UnidadActivo extends Model
             'contrato' => $servicio->contrato->nombre,
             'servicio' => $servicio->nombre,
         ];
+    }
+
+    /**
+     * Filtra por estado VISIBLE en SQL — espejo exacto de
+     * `EstadoVisibleUnidad::resolver()` (misma prioridad baja > robado >
+     * perdido > reparación > inservible > asignado > disponible). Única
+     * versión en consulta de esa regla: la usan el listado de Unidades y el
+     * filtro de Inventario físico.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeConEstadoVisible(Builder $query, EstadoVisibleUnidad $estado): Builder
+    {
+        return match ($estado) {
+            EstadoVisibleUnidad::Baja => $query->where('estado', EstadoUnidadActivo::Baja),
+            EstadoVisibleUnidad::Robado => $query->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->where('condicion', CondicionUnidadActivo::Robado),
+            EstadoVisibleUnidad::Perdido => $query->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->where('condicion', CondicionUnidadActivo::Perdido),
+            EstadoVisibleUnidad::Reparacion => $query->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->where('condicion', CondicionUnidadActivo::EnReparacion),
+            EstadoVisibleUnidad::Inservible => $query->where('estado', '!=', EstadoUnidadActivo::Baja)
+                ->where('condicion', CondicionUnidadActivo::Inservible),
+            EstadoVisibleUnidad::Asignado => $query->where('estado', EstadoUnidadActivo::Asignada)
+                ->where('condicion', CondicionUnidadActivo::Funcionando),
+            EstadoVisibleUnidad::Disponible => $query->where('estado', EstadoUnidadActivo::EnAlmacen)
+                ->where('condicion', CondicionUnidadActivo::Funcionando),
+        };
     }
 
     /**

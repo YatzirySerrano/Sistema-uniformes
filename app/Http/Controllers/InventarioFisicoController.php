@@ -10,6 +10,8 @@ use App\Acciones\FinalizarRondaInventarioFisico;
 use App\Acciones\MarcarUnidadPresente;
 use App\Acciones\VerificarExistenciaInventarioFisico;
 use App\Enums\EstadoInventarioFisico;
+use App\Enums\EstadoVisibleUnidad;
+use App\Excepciones\VerificacionInventarioFisicoConcurrenteException;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\InventarioFisico\AplicarCorreccionesRequest;
@@ -17,11 +19,9 @@ use App\Http\Requests\InventarioFisico\EscanearUnidadRequest;
 use App\Http\Requests\InventarioFisico\FinalizarRondaRequest;
 use App\Http\Requests\InventarioFisico\GuardarInventarioFisicoRequest;
 use App\Http\Requests\InventarioFisico\VerificarExistenciaRequest;
-use App\Models\Almacen;
 use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
-use App\Models\SaldoInventario;
 use App\Servicios\ServicioResumenInventarioFisico;
 use App\Soporte\ContextoExportacion;
 use Illuminate\Contracts\Support\Arrayable;
@@ -112,29 +112,17 @@ class InventarioFisicoController extends Controller
         $empresa = $this->empresaDelFiltro($request);
 
         if ($empresa === null) {
-            return response()->json(['total' => 0]);
+            return response()->json(['total' => 0, 'existencias' => 0, 'almacenes' => 0]);
         }
 
-        $almacenId = null;
-
-        if ($request->filled('almacen_id')) {
-            $almacen = Almacen::query()->find((int) $request->query('almacen_id'));
-            $almacenId = ($almacen !== null && $almacen->abasteceEmpresa($empresa->id)) ? $almacen->id : null;
-        }
-
-        // El almacén es obligatorio para las rondas nuevas: sin él no hay
-        // universo que previsualizar.
-        if ($almacenId === null) {
-            return response()->json(['total' => 0, 'existencias' => 0]);
-        }
+        // Mismas definiciones exactas que el snapshot (tres conteos, sin
+        // traer filas).
+        $existencias = CrearRondaInventarioFisico::universoExistencias($empresa->id);
 
         return response()->json([
-            'total' => CrearRondaInventarioFisico::universo($empresa->id, $almacenId)->count(),
-            'existencias' => SaldoInventario::query()
-                ->where('empresa_id', $empresa->id)
-                ->where('almacen_id', $almacenId)
-                ->where('cantidad', '>', 0)
-                ->count(),
+            'total' => CrearRondaInventarioFisico::universo($empresa->id)->count(),
+            'existencias' => (clone $existencias)->count(),
+            'almacenes' => (clone $existencias)->distinct()->count('almacen_id'),
         ]);
     }
 
@@ -142,12 +130,10 @@ class InventarioFisicoController extends Controller
     {
         $empresa = $request->empresaResuelta();
 
-        $almacen = Almacen::query()->findOrFail($request->integer('almacen_id'));
-
+        // Ronda INTEGRAL de la empresa: el universo lo construye el backend.
         $ronda = $accion->ejecutar(
             $empresa,
             $request->string('nombre')->toString(),
-            $almacen,
             $request->input('observaciones'),
             $request->user()?->id,
         );
@@ -161,11 +147,15 @@ class InventarioFisicoController extends Controller
         $this->authorize('view', $inventarioFisico);
 
         $seccion = $this->seccionValida($request);
+        $estadoUnidad = $this->estadoUnidadValido($request);
+        $almacenes = $this->resumen->almacenesDeLaRonda($inventarioFisico);
+        $almacenFiltro = $this->almacenValido($request, $almacenes);
+        $rondaAbierta = $inventarioFisico->estaEnProceso();
 
-        $unidades = $this->resumen->consultaSeccion($inventarioFisico, $seccion)
+        $unidades = $this->resumen->consultaSeccion($inventarioFisico, $seccion, $estadoUnidad, $almacenFiltro)
             ->paginate($this->porPagina(), ['*'], 'pagina')
             ->withQueryString()
-            ->through(fn (InventarioFisicoUnidad $f): array => $this->resumen->filaResumen($f));
+            ->through(fn (InventarioFisicoUnidad $f): array => $this->resumen->filaResumen($f, $rondaAbierta));
 
         $inventarioFisico->load(['empresa:id,nombre_comercial', 'almacen:id,nombre', 'usuario:id,name', 'firma:id,inventario_fisico_id,nombre_firmante,hash_firma,aceptado_en', 'correccionesAplicadasPor:id,name']);
 
@@ -173,7 +163,7 @@ class InventarioFisicoController extends Controller
 
         // Los renglones de existencias por cantidad de una ronda son pocos (uno
         // por activo+variante del almacén): se sirven completos, sin paginar.
-        $existencias = $this->resumen->consultaExistencias($inventarioFisico)->get()
+        $existencias = $this->resumen->consultaExistencias($inventarioFisico, 'todos', $almacenFiltro)->get()
             ->map(fn (InventarioFisicoExistencia $e): array => $this->resumen->filaExistencia($e))
             ->values();
 
@@ -188,6 +178,9 @@ class InventarioFisicoController extends Controller
                 'estado_etiqueta' => $inventarioFisico->estado->etiqueta(),
                 'empresa' => $inventarioFisico->empresa?->nombre_comercial,
                 'almacen' => $inventarioFisico->almacen?->nombre,
+                // Sin almacén = ronda INTEGRAL de la empresa (todos sus
+                // almacenes + unidades identificadas).
+                'general' => $inventarioFisico->almacen_id === null,
                 'responsable' => $inventarioFisico->usuario?->name,
                 'observaciones' => $inventarioFisico->observaciones,
                 'iniciado_en' => $inventarioFisico->created_at?->toIso8601String(),
@@ -200,6 +193,10 @@ class InventarioFisicoController extends Controller
             ],
             'contadores' => $contadores,
             'seccion' => $seccion,
+            'estadoUnidad' => $estadoUnidad?->value,
+            'almacenFiltro' => $almacenFiltro,
+            'almacenes' => $almacenes,
+            'estadosUnidad' => array_map(fn (EstadoVisibleUnidad $e): array => ['valor' => $e->value, 'etiqueta' => $e->etiqueta()], ServicioResumenInventarioFisico::ESTADOS_FILTRABLES),
             'unidades' => $unidades,
             'existencias' => $existencias,
             'textoAceptacion' => FinalizarRondaInventarioFisico::TEXTO_ACEPTACION,
@@ -242,15 +239,20 @@ class InventarioFisicoController extends Controller
         InventarioFisicoExistencia $existencia,
         VerificarExistenciaInventarioFisico $accion,
     ): JsonResponse {
-        $fila = $accion->ejecutar(
-            $inventarioFisico,
-            $existencia,
-            (int) $request->integer('cantidad_contada'),
-            $request->user(),
-        );
+        try {
+            $fila = $accion->ejecutar(
+                $inventarioFisico,
+                $existencia,
+                (int) $request->integer('cantidad_contada'),
+                $request->user(),
+                $request->filled('verificada_en_vista') ? $request->string('verificada_en_vista')->toString() : null,
+            );
+        } catch (VerificacionInventarioFisicoConcurrenteException $e) {
+            return $this->respuestaConflicto($inventarioFisico, $e);
+        }
 
         return response()->json([
-            'existencia' => $this->resumen->filaExistencia($fila),
+            'existencia' => $this->resumen->filaExistencia($fila->loadMissing(['almacen:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name'])),
             'contadores' => $this->resumen->contadores($inventarioFisico),
         ]);
     }
@@ -263,7 +265,11 @@ class InventarioFisicoController extends Controller
     ): JsonResponse {
         abort_unless($request->user()->can('administrar', $inventarioFisico), 403);
 
-        $fila = $accion->ejecutar($inventarioFisico, $unidad, $request->user());
+        try {
+            $fila = $accion->ejecutar($inventarioFisico, $unidad, $request->user());
+        } catch (VerificacionInventarioFisicoConcurrenteException $e) {
+            return $this->respuestaConflicto($inventarioFisico, $e);
+        }
 
         return $this->respuestaFilaUnidad($inventarioFisico, $fila);
     }
@@ -282,7 +288,16 @@ class InventarioFisicoController extends Controller
     ): JsonResponse {
         abort_unless($request->user()->can('administrar', $inventarioFisico), 403);
 
-        $fila = $accion->ejecutar($inventarioFisico, $unidad);
+        try {
+            $fila = $accion->ejecutar(
+                $inventarioFisico,
+                $unidad,
+                $request->user(),
+                $request->filled('escaneado_en_vista') ? (string) $request->input('escaneado_en_vista') : null,
+            );
+        } catch (VerificacionInventarioFisicoConcurrenteException $e) {
+            return $this->respuestaConflicto($inventarioFisico, $e);
+        }
 
         return $this->respuestaFilaUnidad($inventarioFisico, $fila);
     }
@@ -294,12 +309,33 @@ class InventarioFisicoController extends Controller
      */
     private function respuestaFilaUnidad(InventarioFisico $ronda, InventarioFisicoUnidad $fila): JsonResponse
     {
-        $fila->loadMissing(['unidad:id,codigo,activo_id,almacen_id,empresa_id,colaborador_id,estado,condicion', 'unidad.activo:id,nombre', 'unidad.almacen:id,nombre', 'unidad.colaborador:id,nombre_completo', 'escaneadoPor:id,name']);
+        $fila->loadMissing(ServicioResumenInventarioFisico::RELACIONES_FILA);
 
         return response()->json([
-            'unidad' => $this->resumen->filaResumen($fila),
+            // Marcar / desmarcar sólo ocurre con la ronda abierta.
+            'unidad' => $this->resumen->filaResumen($fila, true),
             'contadores' => $this->resumen->contadores($ronda),
         ]);
+    }
+
+    /**
+     * 409 amigable cuando otro encargado ya verificó/cambió el renglón: el
+     * mensaje dice quién y cuándo, y viaja la fila REAL (unidad o existencia)
+     * con los contadores para que la pantalla se refresque sin recargar.
+     */
+    private function respuestaConflicto(InventarioFisico $ronda, VerificacionInventarioFisicoConcurrenteException $e): JsonResponse
+    {
+        $fila = $e->fila->fresh();
+
+        $cuerpo = ['message' => $e->getMessage(), 'contadores' => $this->resumen->contadores($ronda)];
+
+        if ($fila instanceof InventarioFisicoUnidad) {
+            $cuerpo['unidad'] = $this->resumen->filaResumen($fila->load(ServicioResumenInventarioFisico::RELACIONES_FILA), true);
+        } elseif ($fila instanceof InventarioFisicoExistencia) {
+            $cuerpo['existencia'] = $this->resumen->filaExistencia($fila->load(['almacen:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name']));
+        }
+
+        return response()->json($cuerpo, 409);
     }
 
     public function escanear(EscanearUnidadRequest $request, InventarioFisico $inventarioFisico, EscanearUnidadInventarioFisico $accion): JsonResponse
@@ -346,7 +382,7 @@ class InventarioFisicoController extends Controller
                 $r->folio,
                 $r->nombre,
                 $r->empresa?->nombre_comercial,
-                $r->almacen?->nombre,
+                $r->almacen->nombre ?? 'Toda la empresa',
                 $r->created_at?->format('d/m/Y H:i'),
                 $r->usuario?->name,
                 $r->estado->etiqueta(),
@@ -369,7 +405,7 @@ class InventarioFisicoController extends Controller
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'Folio', 'Nombre', 'Empresa', 'Almacén', 'Inicio', 'Responsable', 'Estado',
+            'Folio', 'Nombre', 'Empresa', 'Alcance', 'Inicio', 'Iniciada por', 'Estado',
             'Esperados', 'Escaneados', 'Faltantes', 'No esperados',
         ], $contexto);
     }
@@ -406,9 +442,11 @@ class InventarioFisicoController extends Controller
         $seccion = $request->input('seccion');
         $seccion = in_array($seccion, ServicioResumenInventarioFisico::SECCIONES, true) ? $seccion : 'todos';
 
-        $filas = $this->resumen->consultaSeccion($inventarioFisico, $seccion)->get()
-            ->map(function (InventarioFisicoUnidad $f): array {
-                $d = $this->resumen->filaResumen($f);
+        $rondaAbierta = $inventarioFisico->estaEnProceso();
+        $almacenExport = $request->filled('almacen_id') ? $request->integer('almacen_id') : null;
+        $filas = $this->resumen->consultaSeccion($inventarioFisico, $seccion, $this->estadoUnidadValido($request), $almacenExport)->get()
+            ->map(function (InventarioFisicoUnidad $f) use ($rondaAbierta): array {
+                $d = $this->resumen->filaResumen($f, $rondaAbierta);
 
                 return [
                     $d['clasificacion_etiqueta'],
@@ -480,17 +518,20 @@ class InventarioFisicoController extends Controller
             InventarioFisicoExistencia::RESULTADO_SOBRANTE => 'Sobrante',
         ];
 
-        $filas = $this->resumen->consultaExistencias($inventarioFisico)->get()
+        $almacenExport = $request->filled('almacen_id') ? $request->integer('almacen_id') : null;
+        $filas = $this->resumen->consultaExistencias($inventarioFisico, 'todos', $almacenExport)->get()
             ->map(function (InventarioFisicoExistencia $e) use ($etiquetaResultado): array {
                 $d = $this->resumen->filaExistencia($e);
 
                 return [
+                    $d['almacen'] ?? '—',
                     $d['activo'],
                     $d['talla'] ?? '—',
                     $d['cantidad_esperada'],
                     $d['cantidad_contada'] ?? 'Sin verificar',
                     $d['diferencia'] ?? '—',
                     $etiquetaResultado[$d['resultado']] ?? $d['resultado'],
+                    $d['verificada_por'] ?? '—',
                 ];
             })->all();
 
@@ -506,7 +547,7 @@ class InventarioFisicoController extends Controller
         );
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
-            'Activo', 'Talla', 'Esperado', 'Contado', 'Diferencia', 'Resultado',
+            'Almacén', 'Activo', 'Talla', 'Esperado', 'Contado', 'Diferencia', 'Resultado', 'Verificado por',
         ], $contexto);
     }
 
@@ -538,6 +579,29 @@ class InventarioFisicoController extends Controller
             ))
             ->when($filtros['estado'] ?? null, fn (Builder $q, $v) => $q->where('estado', $v))
             ->orderByDesc('id');
+    }
+
+    /**
+     * Filtro por estado OPERATIVO actual de la unidad (sólo los estados que
+     * una ronda puede esperar); cualquier otro valor se ignora.
+     */
+    private function estadoUnidadValido(Request $request): ?EstadoVisibleUnidad
+    {
+        $estado = EstadoVisibleUnidad::tryFrom((string) $request->input('estado_unidad', ''));
+
+        return in_array($estado, ServicioResumenInventarioFisico::ESTADOS_FILTRABLES, true) ? $estado : null;
+    }
+
+    /**
+     * Filtro por almacén: sólo uno de los que aparecen en la ronda.
+     *
+     * @param  list<array{id: int, nombre: string}>  $almacenes
+     */
+    private function almacenValido(Request $request, array $almacenes): ?int
+    {
+        $id = $request->integer('almacen_id');
+
+        return in_array($id, array_column($almacenes, 'id'), true) ? $id : null;
     }
 
     private function seccionValida(Request $request): string

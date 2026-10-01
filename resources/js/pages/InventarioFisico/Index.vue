@@ -219,7 +219,7 @@ const vista = useVistaPreferida('inventario-fisico', 'cards');
                         <th class="px-3 py-2 font-medium">Folio / Nombre</th>
                         <th class="px-3 py-2 font-medium">Empresa</th>
                         <th class="px-3 py-2 font-medium">Inicio</th>
-                        <th class="px-3 py-2 font-medium">Responsable</th>
+                        <th class="px-3 py-2 font-medium">Iniciada por</th>
                         <th class="px-3 py-2 font-medium">Estado</th>
                         <th class="px-3 py-2 text-right font-medium">
                             Esperados
@@ -250,6 +250,9 @@ const vista = useVistaPreferida('inventario-fisico', 'cards');
                             {{ r.empresa ?? '—' }}
                             <span v-if="r.almacen" class="block text-xs"
                                 >Almacén: {{ r.almacen }}</span
+                            >
+                            <span v-else class="block text-xs"
+                                >Toda la empresa</span
                             >
                         </td>
                         <td class="text-muted-foreground px-3 py-2">
@@ -346,6 +349,7 @@ const vista = useVistaPreferida('inventario-fisico', 'cards');
                 <div class="text-muted-foreground text-sm">
                     <p>{{ r.empresa ?? '—' }}</p>
                     <p v-if="r.almacen">Almacén: {{ r.almacen }}</p>
+                    <p v-else>Toda la empresa</p>
                 </div>
 
                 <dl class="grid min-w-0 grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -382,7 +386,7 @@ const vista = useVistaPreferida('inventario-fisico', 'cards');
                 </dl>
 
                 <div class="text-muted-foreground text-xs">
-                    <p>Responsable: {{ r.responsable ?? '—' }}</p>
+                    <p>Iniciada por: {{ r.responsable ?? '—' }}</p>
                     <p>Inicio: {{ fecha(r.iniciado_en) }}</p>
                 </div>
 

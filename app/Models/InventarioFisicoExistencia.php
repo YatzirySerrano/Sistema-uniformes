@@ -18,6 +18,7 @@ use Illuminate\Support\Carbon;
  *
  * @property int $id
  * @property int $inventario_fisico_id
+ * @property int|null $almacen_id almacén del renglón (rondas integrales: uno por almacén + activo + variante)
  * @property int $activo_id
  * @property int|null $talla_id
  * @property int $cantidad_esperada
@@ -42,6 +43,7 @@ class InventarioFisicoExistencia extends Model
 
     protected $fillable = [
         'inventario_fisico_id',
+        'almacen_id',
         'activo_id',
         'talla_id',
         'cantidad_esperada',
@@ -84,6 +86,17 @@ class InventarioFisicoExistencia extends Model
             $diferencia < 0 => self::RESULTADO_FALTANTE,
             default => self::RESULTADO_SOBRANTE,
         };
+    }
+
+    /**
+     * Almacén al que pertenece el renglón: ahí se cuenta y ahí se aplica la
+     * corrección. Los renglones previos lo heredaron de su ronda.
+     *
+     * @return BelongsTo<Almacen, $this>
+     */
+    public function almacen(): BelongsTo
+    {
+        return $this->belongsTo(Almacen::class);
     }
 
     /**

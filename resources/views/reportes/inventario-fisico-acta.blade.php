@@ -32,8 +32,8 @@
         <div><p class="etiqueta">Ronda</p><p class="valor">{{ $ronda['nombre'] }}</p></div>
         <div><p class="etiqueta">Estado</p><p class="valor">{{ $ronda['estado'] }}</p></div>
         <div><p class="etiqueta">Empresa</p><p class="valor">{{ $ronda['empresa'] ?? '—' }}</p></div>
-        <div><p class="etiqueta">Almacén</p><p class="valor">{{ $ronda['almacen'] ?? '—' }}</p></div>
-        <div><p class="etiqueta">Responsable</p><p class="valor">{{ $ronda['responsable'] ?? '—' }}</p></div>
+        <div><p class="etiqueta">Alcance</p><p class="valor">{{ $ronda['almacen'] !== null ? 'Almacén '.$ronda['almacen'] : 'Toda la empresa' }}</p></div>
+        <div><p class="etiqueta">Iniciada por</p><p class="valor">{{ $ronda['responsable'] ?? '—' }}</p></div>
         <div><p class="etiqueta">Inicio</p><p class="valor">{{ $ronda['iniciado_en'] ?? '—' }}</p></div>
         <div><p class="etiqueta">Cierre</p><p class="valor">{{ $ronda['finalizado_en'] ?? 'En proceso' }}</p></div>
         @if ($ronda['observaciones'])
@@ -93,6 +93,7 @@
             <table class="datos">
                 <thead>
                     <tr>
+                        <th>Almacén</th>
                         <th>Activo</th>
                         <th>Variante</th>
                         <th class="num">Esperado</th>
@@ -105,6 +106,7 @@
                 <tbody>
                     @foreach ($existencias as $e)
                         <tr>
+                            <td>{{ $e['almacen'] ?? '—' }}</td>
                             <td>{{ $e['activo'] ?? '—' }}</td>
                             <td>{{ $e['talla'] ?? 'Sin variante' }}</td>
                             <td class="num">{{ $e['cantidad_esperada'] }}</td>

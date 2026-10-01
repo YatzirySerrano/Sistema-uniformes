@@ -63,7 +63,7 @@ beforeEach(function () {
     // `$conteos` se indexa por "activo_id-talla_id" ('null' sin variante).
     $this->crearYFirmar = function (array $conteos = []): InventarioFisico {
         $ronda = app(CrearRondaInventarioFisico::class)->ejecutar(
-            $this->empresa, 'Ronda', $this->almacen, null, $this->admin->id,
+            $this->empresa, 'Ronda', null, $this->admin->id,
         );
 
         foreach (InventarioFisicoExistencia::query()->where('inventario_fisico_id', $ronda->id)->get() as $fila) {
@@ -83,7 +83,7 @@ beforeEach(function () {
 });
 
 it('1. una ronda EnProceso no puede aplicar correcciones', function () {
-    $ronda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda', $this->almacen, null, $this->admin->id);
+    $ronda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda', null, $this->admin->id);
 
     expect(fn () => app(AplicarCorreccionesInventarioFisico::class)->ejecutar($ronda, $this->admin))
         ->toThrow(ExcepcionDeNegocioSimple::class);
@@ -96,7 +96,7 @@ it('1. una ronda EnProceso no puede aplicar correcciones', function () {
 });
 
 it('2. una ronda Finalizada sin firma no puede aplicar correcciones', function () {
-    $ronda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda', $this->almacen, null, $this->admin->id);
+    $ronda = app(CrearRondaInventarioFisico::class)->ejecutar($this->empresa, 'Ronda', null, $this->admin->id);
     foreach (InventarioFisicoExistencia::query()->where('inventario_fisico_id', $ronda->id)->get() as $f) {
         app(VerificarExistenciaInventarioFisico::class)->ejecutar($ronda, $f, $f->cantidad_esperada, $this->admin);
     }

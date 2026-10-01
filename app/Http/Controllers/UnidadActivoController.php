@@ -328,21 +328,8 @@ class UnidadActivoController extends Controller
      */
     private function aplicarFiltroEstadoVisible(Builder $q, string $valor): void
     {
-        match (EstadoVisibleUnidad::from($valor)) {
-            EstadoVisibleUnidad::Baja => $q->where('estado', EstadoUnidadActivo::Baja),
-            EstadoVisibleUnidad::Robado => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
-                ->where('condicion', CondicionUnidadActivo::Robado),
-            EstadoVisibleUnidad::Perdido => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
-                ->where('condicion', CondicionUnidadActivo::Perdido),
-            EstadoVisibleUnidad::Reparacion => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
-                ->where('condicion', CondicionUnidadActivo::EnReparacion),
-            EstadoVisibleUnidad::Inservible => $q->where('estado', '!=', EstadoUnidadActivo::Baja)
-                ->where('condicion', CondicionUnidadActivo::Inservible),
-            EstadoVisibleUnidad::Asignado => $q->where('estado', EstadoUnidadActivo::Asignada)
-                ->where('condicion', CondicionUnidadActivo::Funcionando),
-            EstadoVisibleUnidad::Disponible => $q->where('estado', EstadoUnidadActivo::EnAlmacen)
-                ->where('condicion', CondicionUnidadActivo::Funcionando),
-        };
+        // Única regla SQL del estado visible: `UnidadActivo::scopeConEstadoVisible`.
+        $q->conEstadoVisible(EstadoVisibleUnidad::from($valor));
     }
 
     public function show(Request $request, UnidadActivo $unidad): Response

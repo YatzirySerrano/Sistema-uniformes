@@ -30,6 +30,9 @@ class InventarioFisicoUnidad extends Model
 
     public const CLASIFICACION_FALTANTE = 'faltante';
 
+    /** Esperada y aún sin verificar mientras la ronda sigue abierta. */
+    public const CLASIFICACION_PENDIENTE = 'pendiente';
+
     public const CLASIFICACION_NO_ESPERADO = 'no_esperado';
 
     protected $table = 'inventario_fisico_unidades';
@@ -52,16 +55,23 @@ class InventarioFisicoUnidad extends Model
 
     /**
      * Clasificación derivada para el resumen. Nunca se persiste.
+     *
+     * Una esperada sin verificar es PENDIENTE mientras la ronda está abierta
+     * (todavía nadie la revisó: no es un faltante) y FALTANTE / no localizada
+     * sólo cuando la ronda ya se cerró sin verificarla. Mismas columnas de
+     * siempre (`esperada`, `escaneado_en`); el estado de la ronda decide.
      */
-    public function clasificacion(): string
+    public function clasificacion(bool $rondaAbierta = false): string
     {
         if (! $this->esperada) {
             return self::CLASIFICACION_NO_ESPERADO;
         }
 
-        return $this->escaneado_en !== null
-            ? self::CLASIFICACION_ENCONTRADO
-            : self::CLASIFICACION_FALTANTE;
+        if ($this->escaneado_en !== null) {
+            return self::CLASIFICACION_ENCONTRADO;
+        }
+
+        return $rondaAbierta ? self::CLASIFICACION_PENDIENTE : self::CLASIFICACION_FALTANTE;
     }
 
     /**

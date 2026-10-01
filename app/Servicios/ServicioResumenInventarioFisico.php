@@ -2,10 +2,13 @@
 
 namespace App\Servicios;
 
+use App\Enums\EstadoVisibleUnidad;
+use App\Models\Almacen;
 use App\Models\InventarioFisico;
 use App\Models\InventarioFisicoExistencia;
 use App\Models\InventarioFisicoUnidad;
 use App\Models\MovimientoInventario;
+use App\Models\UnidadActivo;
 use App\Soporte\FechaHora;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -14,8 +17,9 @@ use Illuminate\Support\Facades\DB;
  * Deriva el resumen de una ronda de inventario físico SIEMPRE desde el
  * snapshot (`inventario_fisico_unidades`), sin columnas redundantes:
  *
- *   esperada && escaneado_en  → Encontrado
- *   esperada && !escaneado_en → Faltante / no localizado
+ *   esperada && escaneado_en  → Presente (encontrado)
+ *   esperada && !escaneado_en → Pendiente de verificar (ronda abierta) /
+ *                               Faltante, no localizado (ronda finalizada)
  *   !esperada (siempre escaneado) → Encontrado no esperado
  *
  * Los contadores son UNA sola consulta agregada; las secciones se pagina y se
@@ -36,9 +40,43 @@ class ServicioResumenInventarioFisico
      * @var array<string, string>
      */
     private const CLASIFICACION_ETIQUETA = [
-        InventarioFisicoUnidad::CLASIFICACION_ENCONTRADO => 'Encontrado',
-        InventarioFisicoUnidad::CLASIFICACION_FALTANTE => 'Faltante',
+        InventarioFisicoUnidad::CLASIFICACION_ENCONTRADO => 'Presente',
+        InventarioFisicoUnidad::CLASIFICACION_PENDIENTE => 'Pendiente de verificar',
+        InventarioFisicoUnidad::CLASIFICACION_FALTANTE => 'Faltante (no localizado)',
         InventarioFisicoUnidad::CLASIFICACION_NO_ESPERADO => 'No esperado',
+    ];
+
+    /**
+     * Estados operativos por los que se puede filtrar una ronda: los que una
+     * unidad verificable puede tener (el universo nunca espera perdidas,
+     * robadas ni de baja).
+     *
+     * @var list<EstadoVisibleUnidad>
+     */
+    public const ESTADOS_FILTRABLES = [
+        EstadoVisibleUnidad::Disponible,
+        EstadoVisibleUnidad::Asignado,
+        EstadoVisibleUnidad::Reparacion,
+        EstadoVisibleUnidad::Inservible,
+    ];
+
+    /**
+     * Relaciones de un renglón de unidad para la tarjeta: estado operativo
+     * y ubicación ACTUALES (almacén o colaborador con su sucursal y servicio),
+     * cargadas por eager loading para toda la página — nunca una consulta por
+     * tarjeta ni el historial de la unidad.
+     *
+     * @var list<string>
+     */
+    public const RELACIONES_FILA = [
+        'unidad:id,codigo,activo_id,almacen_id,empresa_id,colaborador_id,estado,condicion',
+        'unidad.activo:id,nombre',
+        'unidad.almacen:id,nombre',
+        'unidad.colaborador:id,nombre_completo,sucursal_id,servicio_actual_id',
+        'unidad.colaborador.sucursal:id,nombre',
+        'unidad.colaborador.servicioActual:id,nombre',
+        'unidad.especificacion',
+        'escaneadoPor:id,name',
     ];
 
     /**
@@ -103,11 +141,13 @@ class ServicioResumenInventarioFisico
      *
      * @return Builder<InventarioFisicoExistencia>
      */
-    public function consultaExistencias(InventarioFisico $ronda, string $filtro = 'todos'): Builder
+    public function consultaExistencias(InventarioFisico $ronda, string $filtro = 'todos', ?int $almacenId = null): Builder
     {
         $consulta = InventarioFisicoExistencia::query()
             ->where('inventario_fisico_id', $ronda->id)
-            ->with(['activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name'])
+            ->when($almacenId !== null, fn (Builder $q) => $q->where('almacen_id', $almacenId))
+            ->with(['almacen:id,nombre', 'activo:id,nombre', 'talla:id,valor', 'verificadaPor:id,name'])
+            ->orderBy('almacen_id')
             ->orderBy('id');
 
         return match ($filtro) {
@@ -124,6 +164,8 @@ class ServicioResumenInventarioFisico
     {
         return [
             'id' => $fila->id,
+            'almacen_id' => $fila->almacen_id,
+            'almacen' => $fila->almacen?->nombre,
             'activo' => $fila->activo?->nombre,
             'talla' => $fila->talla?->valor,
             'cantidad_esperada' => $fila->cantidad_esperada,
@@ -136,20 +178,29 @@ class ServicioResumenInventarioFisico
     }
 
     /**
+     * `$seccion` es el estado de VERIFICACIÓN (todos / encontrados = presentes
+     * / faltantes = pendientes mientras la ronda está abierta, no localizados
+     * al cerrarla / no esperados). `$estadoUnidad` filtra además por el estado
+     * OPERATIVO actual de la unidad (En almacén, Asignada, En reparación,
+     * Inservible) — dos ejes independientes.
+     *
      * @return Builder<InventarioFisicoUnidad>
      */
-    public function consultaSeccion(InventarioFisico $ronda, string $seccion): Builder
+    public function consultaSeccion(InventarioFisico $ronda, string $seccion, ?EstadoVisibleUnidad $estadoUnidad = null, ?int $almacenId = null): Builder
     {
         $consulta = InventarioFisicoUnidad::query()
             ->where('inventario_fisico_id', $ronda->id)
-            ->with([
-                'unidad:id,codigo,activo_id,almacen_id,empresa_id,colaborador_id,estado,condicion',
-                'unidad.activo:id,nombre',
-                'unidad.almacen:id,nombre',
-                'unidad.colaborador:id,nombre_completo',
-                'unidad.especificacion',
-                'escaneadoPor:id,name',
-            ]);
+            // Por almacén = lo que HOY está guardado en él (no las asignadas
+            // que sólo salieron de ahí): para recorrer la ronda por zonas.
+            ->when($almacenId !== null, fn (Builder $q) => $q->whereIn(
+                'unidad_activo_id',
+                UnidadActivo::query()->where('almacen_id', $almacenId)->whereNull('colaborador_id')->select('id'),
+            ))
+            ->when($estadoUnidad !== null, fn (Builder $q) => $q->whereIn(
+                'unidad_activo_id',
+                UnidadActivo::query()->conEstadoVisible($estadoUnidad)->select('id'),
+            ))
+            ->with(self::RELACIONES_FILA);
 
         return match ($seccion) {
             'todos' => $consulta->orderByRaw('escaneado_en is null desc')->orderByDesc('escaneado_en')->orderBy('id'),
@@ -162,14 +213,21 @@ class ServicioResumenInventarioFisico
     /**
      * @return array<string, mixed>
      */
-    public function filaResumen(InventarioFisicoUnidad $fila): array
+    public function filaResumen(InventarioFisicoUnidad $fila, bool $rondaAbierta = false): array
     {
         $unidad = $fila->unidad;
+        $clasificacion = $fila->clasificacion($rondaAbierta);
+        $colaborador = $unidad?->colaborador;
 
         return [
             'id' => $fila->id,
-            'clasificacion' => $fila->clasificacion(),
-            'clasificacion_etiqueta' => self::CLASIFICACION_ETIQUETA[$fila->clasificacion()] ?? $fila->clasificacion(),
+            'clasificacion' => $clasificacion,
+            'clasificacion_etiqueta' => self::CLASIFICACION_ETIQUETA[$clasificacion] ?? $clasificacion,
+            // Ubicación OPERATIVA actual (no la de la ronda): en almacén o en
+            // custodia de un colaborador — para saber con quién confirmar.
+            'ubicacion' => $colaborador !== null ? 'colaborador' : 'almacen',
+            'colaborador_sucursal' => $colaborador?->sucursal?->nombre,
+            'colaborador_servicio' => $colaborador?->servicioActual?->nombre,
             'esperada' => $fila->esperada,
             'escaneado_en' => $fila->escaneado_en?->toIso8601String(),
             'escaneado_por' => $fila->escaneadoPor?->name,
@@ -183,6 +241,27 @@ class ServicioResumenInventarioFisico
             'marca_modelo' => $unidad?->especificacion?->marcaModelo(),
             'imei_mascara' => $unidad?->especificacion?->imeiMascara(),
         ];
+    }
+
+    /**
+     * Almacenes que aparecen en la ronda (renglones por cantidad + unidades
+     * hoy guardadas en ellos) para el filtro "trabajar por almacén". Dos
+     * consultas acotadas, nunca una por renglón.
+     *
+     * @return list<array{id: int, nombre: string}>
+     */
+    public function almacenesDeLaRonda(InventarioFisico $ronda): array
+    {
+        $ids = InventarioFisicoExistencia::query()->where('inventario_fisico_id', $ronda->id)->whereNotNull('almacen_id')->distinct()->pluck('almacen_id')
+            ->merge(UnidadActivo::query()
+                ->whereIn('id', InventarioFisicoUnidad::query()->where('inventario_fisico_id', $ronda->id)->select('unidad_activo_id'))
+                ->whereNull('colaborador_id')
+                ->distinct()
+                ->pluck('almacen_id'))
+            ->unique()->values();
+
+        return array_values(Almacen::query()->whereIn('id', $ids)->orderBy('nombre')->get(['id', 'nombre'])
+            ->map(fn (Almacen $a): array => ['id' => $a->id, 'nombre' => $a->nombre])->all());
     }
 
     /**
@@ -254,7 +333,7 @@ class ServicioResumenInventarioFisico
             ->orderBy('id')
             ->get()
             ->map(fn (InventarioFisicoUnidad $f): array => [
-                'clasificacion' => self::CLASIFICACION_ETIQUETA[$f->clasificacion()] ?? $f->clasificacion(),
+                'clasificacion' => self::CLASIFICACION_ETIQUETA[$f->clasificacion($ronda->estaEnProceso())] ?? $f->clasificacion($ronda->estaEnProceso()),
                 'codigo' => $f->unidad?->codigo,
                 'activo' => $f->unidad?->activo?->nombre,
                 'escaneado_en' => $f->escaneado_en !== null ? FechaHora::local($f->escaneado_en) : null,
@@ -270,6 +349,7 @@ class ServicioResumenInventarioFisico
 
         $existencias = $this->consultaExistencias($ronda)->get()
             ->map(fn (InventarioFisicoExistencia $e): array => [
+                'almacen' => $e->almacen?->nombre,
                 'activo' => $e->activo?->nombre,
                 'talla' => $e->talla?->valor,
                 'cantidad_esperada' => $e->cantidad_esperada,

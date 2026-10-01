@@ -8,6 +8,7 @@ use App\Models\InventarioFisicoUnidad;
 use App\Models\UnidadActivo;
 use App\Models\User;
 use App\Servicios\ServicioResumenInventarioFisico;
+use App\Soporte\FechaHora;
 use App\Soporte\ResolvedorUnidadEscaneada;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -62,14 +63,21 @@ class EscanearUnidadInventarioFisico
 
         [$resultado, $fila] = $this->registrarEscaneo($ronda, $unidad, $usuario);
 
+        $fila->loadMissing('escaneadoPor:id,name');
         $fila->setRelation('unidad', $unidad->loadMissing([
-            'activo:id,nombre', 'almacen:id,nombre', 'colaborador:id,nombre_completo',
+            'activo:id,nombre', 'almacen:id,nombre',
+            'colaborador:id,nombre_completo,sucursal_id,servicio_actual_id',
+            'colaborador.sucursal:id,nombre', 'colaborador.servicioActual:id,nombre',
         ]));
 
         return [
             'resultado' => $resultado,
-            'contexto' => $this->contextoHumano($resultado, $ronda, $unidad, $usuario),
-            'unidad' => $this->resumen->filaResumen($fila),
+            'contexto' => $resultado === 'ya_escaneada' && $fila->escaneado_en !== null
+                // Otro encargado (o tú mismo) ya la verificó: gana la primera.
+                ? sprintf('Ya verificada por %s el %s.', $fila->escaneadoPor->name ?? 'otro usuario', FechaHora::local($fila->escaneado_en))
+                : $this->contextoHumano($resultado, $ronda, $unidad, $usuario),
+            // Un escaneo sólo ocurre con la ronda abierta.
+            'unidad' => $this->resumen->filaResumen($fila, true),
             'contadores' => $this->resumen->contadores($ronda),
         ];
     }

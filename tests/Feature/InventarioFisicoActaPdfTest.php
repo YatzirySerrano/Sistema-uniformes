@@ -47,7 +47,7 @@ beforeEach(function () {
         activoId: $this->camisa->id, tallaId: $this->talla->id, tipo: TipoMovimiento::Inicial, cantidad: $cantidad,
     ));
     $this->ronda = fn (): InventarioFisico => app(CrearRondaInventarioFisico::class)->ejecutar(
-        $this->empresa, 'Ronda trimestral', $this->almacen, 'Revisión de cierre', $this->admin->id,
+        $this->empresa, 'Ronda trimestral', 'Revisión de cierre', $this->admin->id,
     );
     $this->verificarTodo = function (InventarioFisico $ronda, int $diferencia = 0): void {
         foreach (InventarioFisicoExistencia::query()->where('inventario_fisico_id', $ronda->id)->get() as $fila) {
@@ -68,7 +68,7 @@ it('una ronda sólo con unidades genera el acta con sus unidades', function () {
     ($this->pedirPdf)($ronda);
 
     Pdf::assertViewIs('reportes.inventario-fisico-acta');
-    Pdf::assertSee([$ronda->folio, 'Ronda trimestral', 'Revisión de cierre', $unidad->codigo, 'Laptop Dell', 'Faltante',
+    Pdf::assertSee([$ronda->folio, 'Ronda trimestral', 'Revisión de cierre', $unidad->codigo, 'Laptop Dell', 'Pendiente de verificar',
         'Esta ronda no incluye artículos por cantidad.']);
 });
 
@@ -92,7 +92,7 @@ it('una ronda mixta genera ambos bloques, aunque la sección de la pantalla no t
 
     ($this->pedirPdf)($ronda);
 
-    Pdf::assertSee([$unidad->codigo, 'Encontrado', 'Camisa polo', '<td class="num">20</td>']);
+    Pdf::assertSee([$unidad->codigo, 'Presente', 'Camisa polo', '<td class="num">20</td>']);
     Pdf::assertDontSee(['Esta ronda no incluye unidades identificadas.', 'Esta ronda no incluye artículos por cantidad.']);
 });
 

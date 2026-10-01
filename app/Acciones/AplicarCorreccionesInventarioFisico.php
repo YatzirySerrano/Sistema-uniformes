@@ -64,18 +64,21 @@ class AplicarCorreccionesInventarioFisico
                 throw new ExcepcionDeNegocioSimple('Las correcciones de esta ronda ya fueron aplicadas anteriormente.');
             }
 
-            if ($bloqueada->almacen_id === null) {
-                throw new ExcepcionDeNegocioSimple('Esta ronda no tiene un almacén asociado; no se pueden aplicar correcciones.');
-            }
-
             // Mismo criterio "con_diferencia" que ya usa la pantalla de la
             // ronda: `cantidad_contada` verificada y distinta de la esperada.
             // Orden estable (activo, talla) para que el orden de locks de
             // saldo sea SIEMPRE el mismo entre aplicaciones concurrentes de
             // distintas rondas que pudieran tocar el mismo almacén.
+            // Cada renglón se corrige en SU almacén (rondas integrales tienen
+            // renglones de varios); los previos heredaron el de su ronda.
             $filas = $this->resumen->consultaExistencias($bloqueada, 'con_diferencia')
-                ->orderBy('activo_id')->orderBy('talla_id')
+                ->reorder()
+                ->orderBy('almacen_id')->orderBy('activo_id')->orderBy('talla_id')
                 ->get();
+
+            if ($filas->contains(fn ($f): bool => ($f->almacen_id ?? $bloqueada->almacen_id) === null)) {
+                throw new ExcepcionDeNegocioSimple('Hay renglones de esta ronda sin almacén asociado; no se pueden aplicar correcciones.');
+            }
 
             if ($filas->isEmpty()) {
                 throw new ExcepcionDeNegocioSimple('No hay diferencias por aplicar en esta ronda.');
@@ -87,11 +90,11 @@ class AplicarCorreccionesInventarioFisico
             $conflictos = [];
 
             foreach ($filas as $fila) {
-                $actual = $this->saldoActualBloqueado($bloqueada->empresa_id, $bloqueada->almacen_id, $fila->activo_id, $fila->talla_id);
+                $actual = $this->saldoActualBloqueado($bloqueada->empresa_id, (int) ($fila->almacen_id ?? $bloqueada->almacen_id), $fila->activo_id, $fila->talla_id);
 
                 if ($actual !== $fila->cantidad_esperada) {
                     $conflictos[] = [
-                        'activo' => $fila->activo->nombre,
+                        'activo' => ($fila->almacen !== null ? $fila->almacen->nombre.' · ' : '').$fila->activo->nombre,
                         'talla' => $fila->talla?->valor,
                         'esperada' => $fila->cantidad_esperada,
                         'actual' => $actual,
@@ -115,7 +118,7 @@ class AplicarCorreccionesInventarioFisico
 
                 $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
                     empresaId: $bloqueada->empresa_id,
-                    almacenId: $bloqueada->almacen_id,
+                    almacenId: (int) ($fila->almacen_id ?? $bloqueada->almacen_id),
                     activoId: $fila->activo_id,
                     tallaId: $fila->talla_id,
                     tipo: $diferencia > 0 ? TipoMovimiento::AjusteEntrada : TipoMovimiento::AjusteSalida,

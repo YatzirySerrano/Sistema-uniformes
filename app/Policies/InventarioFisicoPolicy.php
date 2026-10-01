@@ -41,9 +41,10 @@ class InventarioFisicoPolicy
      * de verdad — poder ADMINISTRAR la ronda (escanear/finalizar) no basta.
      * Exige el mismo permiso que cualquier corrección manual de inventario
      * (`inventario.ajustar`, usado por Existencias globales) + acceso a la
-     * empresa Y al almacén concretos de la ronda (un almacén compartido puede
-     * abastecer a varias empresas; el usuario debe poder operar ESE almacén
-     * para ESA empresa, no sólo tener el permiso en abstracto).
+     * empresa Y a CADA almacén de los renglones de la ronda (un almacén
+     * compartido puede abastecer a varias empresas; el usuario debe poder
+     * operar ESOS almacenes para ESA empresa, no sólo tener el permiso en
+     * abstracto).
      */
     public function aplicarCorrecciones(User $user, InventarioFisico $ronda): bool
     {
@@ -51,12 +52,19 @@ class InventarioFisicoPolicy
             return false;
         }
 
-        if ($ronda->almacen_id === null) {
+        // Rondas integrales: renglones de VARIOS almacenes (los históricos
+        // heredan el de su ronda). El usuario debe poder operar TODOS los
+        // almacenes cuyo saldo se corregiría — nunca basta con uno.
+        $almacenesDeLaRonda = $ronda->existencias()->whereNotNull('almacen_id')->distinct()->pluck('almacen_id')
+            ->when($ronda->almacen_id !== null, fn ($ids) => $ids->push($ronda->almacen_id))
+            ->unique();
+
+        if ($almacenesDeLaRonda->isEmpty()) {
             return false;
         }
 
-        return app(AccesoEmpresa::class)
-            ->almacenesAutorizados($user, $ronda->empresa_id)
-            ->contains('id', $ronda->almacen_id);
+        $autorizados = app(AccesoEmpresa::class)->almacenesAutorizados($user, $ronda->empresa_id)->pluck('id');
+
+        return $almacenesDeLaRonda->diff($autorizados)->isEmpty();
     }
 }
