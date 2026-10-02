@@ -485,9 +485,6 @@ class ColaboradorController extends Controller
             // servicio: mismo criterio que la pantalla destino
             // (`DevolucionController::create` → `DevolucionPolicy::create`).
             'puedeRegistrarDevoluciones' => $usuario->can('create', Devolucion::class),
-            // Clasificar la finalidad de la custodia (cada renglón revalida la
-            // empresa en `EntregaUniformePolicy::clasificarFinalidad`).
-            'puedeClasificarFinalidad' => $usuario->can('entregas.crear') && $usuario->puedeAccederEmpresa($colaborador->empresa_id),
             'expediente' => $puedeVerExpediente ? [
                 'id' => $colaborador->id,
                 'nombre_completo' => $colaborador->nombre_completo,

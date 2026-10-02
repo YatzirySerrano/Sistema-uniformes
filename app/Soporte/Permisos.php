@@ -175,6 +175,7 @@ final class Permisos
             'permisos' => [
                 'devoluciones.ver' => 'Ver devoluciones',
                 'devoluciones.crear' => 'Registrar devoluciones',
+                'devoluciones.procesar-custodia-propia' => 'Registrar la devolución de activos que están bajo mi propia custodia',
                 'devoluciones.confirmar' => 'Capturar la firma de doble conformidad de una devolución',
                 'devoluciones.ver-pdf' => 'Ver y descargar comprobantes de devolución en PDF',
                 'devoluciones.ver-firma' => 'Ver la imagen de las firmas de devolución',

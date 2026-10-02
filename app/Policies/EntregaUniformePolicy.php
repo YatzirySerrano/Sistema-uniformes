@@ -49,17 +49,6 @@ class EntregaUniformePolicy
     }
 
     /**
-     * Clasificar / reclasificar la FINALIDAD (uso personal / para
-     * redistribuir) de un renglón que sigue bajo custodia — p. ej. los
-     * históricos "sin clasificar". Es la misma autoridad que decide la
-     * finalidad al entregar desde almacén (`entregas.crear`) y queda auditada.
-     */
-    public function clasificarFinalidad(User $user, EntregaUniforme $entrega): bool
-    {
-        return $user->can('entregas.crear') && $user->puedeAccederEmpresa($entrega->empresa_id);
-    }
-
-    /**
      * Además de lo recibido "para redistribuir", puede reasignar bienes de su
      * custodia de USO PERSONAL (o sin clasificar): capacidad explícita y
      * separada para que nadie entregue por error su laptop o su vehículo.

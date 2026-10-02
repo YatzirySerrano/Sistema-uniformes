@@ -26,6 +26,12 @@ import { useDisponibilidadViva } from '@/composables/useDisponibilidadViva';
 import { fechaNegocio } from '@/lib/fecha';
 import { varianteBadgeFinalidad } from '@/lib/finalidadCustodia';
 import { mensajeDisponibilidadInsuficiente } from '@/lib/mensajesDisponibilidad';
+import {
+    estadoReparto,
+    partesParaEnviar,
+    type Reparto,
+    repartoInicial,
+} from '@/lib/repartoCondicion';
 
 type OpcionEntrega = {
     id: number;
@@ -53,6 +59,13 @@ type Renglon = {
     unidad_disponible: boolean;
     unidad_estado_visible: string | null;
     unidad_estado_visible_etiqueta: string | null;
+    /**
+     * Regla por renglón del backend (`DevolucionPolicy::recibirRenglon`):
+     * uso personal / sin clasificar de la PROPIA custodia sin el permiso
+     * especial → visible pero no seleccionable.
+     */
+    puede_devolver: boolean;
+    motivo_bloqueo: string | null;
 };
 
 /** Respuesta de `POST /devoluciones/reserva` (ver `App\Acciones\ReservarCustodiaDevolucion`). */
@@ -110,6 +123,12 @@ const props = defineProps<{
     condiciones: { valor: string; etiqueta: string }[];
     condicionesUnidad: { valor: string; etiqueta: string }[];
     textoConsentimiento: string;
+    /**
+     * Mensaje cuando quien opera representa al colaborador que devuelve y no
+     * tiene `devoluciones.procesar-custodia-propia` (el backend vuelve a
+     * validarlo al apartar y al confirmar).
+     */
+    bloqueoCustodiaPropia: string | null;
     /**
      * Fecha de negocio "de hoy" ("Y-m-d"), calculada en el servidor con la
      * zona de presentación de la aplicación — nunca `new Date().toISOString()`
@@ -227,6 +246,9 @@ type FilaCantidad = {
     incluir: boolean;
     cantidad: number;
     condicion: string;
+    /** "Dividir por condición": el mismo renglón en varias condiciones. */
+    dividir: boolean;
+    reparto: Reparto;
     evidencia: File | null;
     evidencia_origen: OrigenEvidencia;
 };
@@ -246,6 +268,8 @@ const filasCantidad = ref<FilaCantidad[]>(
             incluir: false,
             cantidad: r.pendiente ?? 0,
             condicion: 'reutilizable',
+            dividir: false,
+            reparto: {},
             evidencia: null,
             evidencia_origen: null,
         })),
@@ -287,7 +311,8 @@ const form = useForm<{
     activos: {
         detalle_entrega_id: number;
         cantidad: number;
-        condicion: string;
+        condicion?: string;
+        condiciones?: { condicion: string; cantidad: number }[];
         evidencia: File | null;
         evidencia_origen: OrigenEvidencia;
     }[];
@@ -393,7 +418,7 @@ function construirPayloadReserva(): Record<string, unknown> {
 watch(
     [filasCantidad, filasUnidad],
     () => {
-        if (!props.entrega) return;
+        if (!props.entrega || props.bloqueoCustodiaPropia) return;
         reserva.reservarConRetraso(construirPayloadReserva());
     },
     { deep: true },
@@ -455,6 +480,7 @@ function fusionarCustodia(renglones: RespuestaCustodiaViva['renglones']): void {
 const custodiaEnVivo = useDisponibilidadViva<RespuestaCustodiaViva>({
     habilitado: () =>
         !!props.entrega &&
+        !props.bloqueoCustodiaPropia &&
         paso.value === 2 &&
         !reserva.confirmando.value &&
         !form.processing,
@@ -574,6 +600,16 @@ const problemasPaso2 = computed<string[]>(() => {
         }
     });
 
+    filasCantidadIncluidas.value.forEach((f) => {
+        if (!f.dividir || !(f.cantidad > 0)) return;
+        const mensaje = estadoRepartoDe(f).mensaje;
+        if (mensaje) {
+            problemas.push(
+                `${renglonDe(f.detalle_entrega_id)?.activo ?? 'Renglón'}: ${mensaje}`,
+            );
+        }
+    });
+
     const res = reserva.resultado.value;
     const unidadesRechazadas = new Set(
         (res?.lineas_unidad ?? [])
@@ -606,8 +642,38 @@ const problemasPaso2 = computed<string[]>(() => {
 
 const puedeAvanzar1 = computed(
     () =>
-        !!props.entrega && form.almacen_id !== null && form.fecha.trim() !== '',
+        !!props.entrega &&
+        !props.bloqueoCustodiaPropia &&
+        form.almacen_id !== null &&
+        form.fecha.trim() !== '',
 );
+
+// ------------------------------------------------------------------
+// Dividir por condición (sólo renglones por cantidad)
+// ------------------------------------------------------------------
+function alternarDivision(fila: FilaCantidad): void {
+    if (!fila.dividir && Object.keys(fila.reparto).length === 0) {
+        fila.reparto = repartoInicial(
+            props.condiciones.map((c) => c.valor),
+            fila.condicion,
+            fila.cantidad,
+        );
+    }
+    fila.dividir = !fila.dividir;
+}
+
+function estadoRepartoDe(fila: FilaCantidad) {
+    return estadoReparto(fila.cantidad, fila.reparto);
+}
+
+function textoReparto(fila: FilaCantidad): string {
+    return partesParaEnviar(fila.reparto)
+        .map(
+            (p) =>
+                `${props.condiciones.find((c) => c.valor === p.condicion)?.etiqueta ?? p.condicion} ${p.cantidad}`,
+        )
+        .join(' · ');
+}
 const puedeAvanzar2 = computed(
     () => hayAlgoIncluido.value && problemasPaso2.value.length === 0,
 );
@@ -753,7 +819,9 @@ function enviar(): void {
     form.activos = filasCantidadIncluidas.value.map((f) => ({
         detalle_entrega_id: f.detalle_entrega_id,
         cantidad: f.cantidad,
-        condicion: f.condicion,
+        ...(f.dividir
+            ? { condiciones: partesParaEnviar(f.reparto) }
+            : { condicion: f.condicion }),
         evidencia: f.evidencia,
         evidencia_origen: f.evidencia_origen,
     }));
@@ -932,6 +1000,14 @@ function enviar(): void {
                 </li>
             </ol>
 
+            <p
+                v-if="bloqueoCustodiaPropia"
+                role="alert"
+                class="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 text-sm"
+            >
+                {{ bloqueoCustodiaPropia }}
+            </p>
+
             <form class="space-y-6" @submit.prevent="enviar">
                 <!-- ============ PASO 1 · Datos ============ -->
                 <section
@@ -1072,8 +1148,18 @@ function enviar(): void {
                         <input
                             v-model="fila.incluir"
                             type="checkbox"
-                            class="mt-2.5 size-4"
+                            class="mt-2.5 size-4 disabled:cursor-not-allowed disabled:opacity-50"
+                            :disabled="
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.puede_devolver === false
+                            "
                             :aria-label="`Incluir ${renglonDe(fila.detalle_entrega_id)?.activo}`"
+                            :aria-describedby="
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.motivo_bloqueo
+                                    ? `bloqueo-${fila.detalle_entrega_id}`
+                                    : undefined
+                            "
                         />
                         <div
                             class="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2"
@@ -1183,18 +1269,116 @@ function enviar(): void {
                             />
                         </div>
                         <div>
-                            <Label class="text-xs">Condición al recibir</Label>
-                            <SelectSimple
-                                v-model="fila.condicion"
-                                :opciones="
-                                    condiciones.map((c) => ({
-                                        valor: c.valor,
-                                        etiqueta: c.etiqueta,
-                                    }))
-                                "
-                                :disabled="!fila.incluir"
-                            />
+                            <template v-if="!fila.dividir">
+                                <Label class="text-xs"
+                                    >Condición al recibir</Label
+                                >
+                                <SelectSimple
+                                    v-model="fila.condicion"
+                                    :opciones="
+                                        condiciones.map((c) => ({
+                                            valor: c.valor,
+                                            etiqueta: c.etiqueta,
+                                        }))
+                                    "
+                                    :disabled="!fila.incluir"
+                                />
+                            </template>
+                            <p
+                                v-else
+                                class="text-muted-foreground pt-5 text-xs"
+                            >
+                                Repartida por condición (abajo).
+                            </p>
+                            <Button
+                                v-if="fila.incluir"
+                                type="button"
+                                variant="link"
+                                size="sm"
+                                class="h-auto px-0 py-1 text-xs"
+                                :aria-expanded="fila.dividir"
+                                :aria-controls="`reparto-${fila.detalle_entrega_id}`"
+                                @click="alternarDivision(fila)"
+                            >
+                                {{
+                                    fila.dividir
+                                        ? 'Usar una sola condición'
+                                        : 'Dividir por condición'
+                                }}
+                            </Button>
                         </div>
+                        <fieldset
+                            v-if="fila.incluir && fila.dividir"
+                            :id="`reparto-${fila.detalle_entrega_id}`"
+                            class="rounded-md border p-3 sm:col-span-full"
+                        >
+                            <legend class="px-1 text-xs font-medium">
+                                Cantidad por condición
+                            </legend>
+                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <div
+                                    v-for="c in condiciones"
+                                    :key="c.valor"
+                                    class="space-y-1"
+                                >
+                                    <Label
+                                        :for="`reparto-${fila.detalle_entrega_id}-${c.valor}`"
+                                        class="text-xs"
+                                        >{{ c.etiqueta }}</Label
+                                    >
+                                    <Input
+                                        :id="`reparto-${fila.detalle_entrega_id}-${c.valor}`"
+                                        v-model.number="fila.reparto[c.valor]"
+                                        type="number"
+                                        min="0"
+                                        step="1"
+                                        inputmode="numeric"
+                                        class="h-10 sm:h-9"
+                                        :aria-invalid="
+                                            !!estadoRepartoDe(fila).mensaje
+                                        "
+                                    />
+                                </div>
+                            </div>
+                            <p
+                                class="mt-2 text-xs"
+                                :class="
+                                    estadoRepartoDe(fila).mensaje
+                                        ? 'text-destructive'
+                                        : 'text-muted-foreground'
+                                "
+                                aria-live="polite"
+                            >
+                                Total asignado:
+                                <span class="font-medium tabular-nums"
+                                    >{{ estadoRepartoDe(fila).asignado }} de
+                                    {{ fila.cantidad || 0 }}</span
+                                >
+                                <template v-if="estadoRepartoDe(fila).mensaje">
+                                    · {{ estadoRepartoDe(fila).mensaje }}
+                                </template>
+                            </p>
+                            <InputError
+                                :message="
+                                    erroresLaxos[
+                                        `activos.${filasCantidadIncluidas.indexOf(fila)}.condiciones`
+                                    ]
+                                "
+                            />
+                        </fieldset>
+                        <p
+                            v-if="
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.motivo_bloqueo
+                            "
+                            :id="`bloqueo-${fila.detalle_entrega_id}`"
+                            class="text-destructive text-xs sm:col-span-full"
+                        >
+                            {{
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.motivo_bloqueo
+                            }}
+                        </p>
                         <div v-if="fila.incluir" class="sm:col-span-full">
                             <CapturaEvidencia
                                 v-model="fila.evidencia"
@@ -1212,8 +1396,18 @@ function enviar(): void {
                         <input
                             v-model="fila.incluir"
                             type="checkbox"
-                            class="mt-2.5 size-4"
+                            class="mt-2.5 size-4 disabled:cursor-not-allowed disabled:opacity-50"
+                            :disabled="
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.puede_devolver === false
+                            "
                             :aria-label="`Incluir ${renglonDe(fila.detalle_entrega_id)?.activo}`"
+                            :aria-describedby="
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.motivo_bloqueo
+                                    ? `bloqueo-${fila.detalle_entrega_id}`
+                                    : undefined
+                            "
                         />
                         <div class="text-sm">
                             <p class="font-medium">
@@ -1276,6 +1470,19 @@ function enviar(): void {
                                 :disabled="!fila.incluir"
                             />
                         </div>
+                        <p
+                            v-if="
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.motivo_bloqueo
+                            "
+                            :id="`bloqueo-${fila.detalle_entrega_id}`"
+                            class="text-destructive text-xs sm:col-span-full"
+                        >
+                            {{
+                                renglonDe(fila.detalle_entrega_id)
+                                    ?.motivo_bloqueo
+                            }}
+                        </p>
                         <div v-if="fila.incluir" class="sm:col-span-full">
                             <CapturaEvidencia
                                 v-model="fila.evidencia"
@@ -1393,9 +1600,13 @@ function enviar(): void {
                                     </td>
                                     <td class="py-1.5">
                                         {{
-                                            condiciones.find(
-                                                (c) => c.valor === f.condicion,
-                                            )?.etiqueta ?? f.condicion
+                                            f.dividir
+                                                ? textoReparto(f)
+                                                : (condiciones.find(
+                                                      (c) =>
+                                                          c.valor ===
+                                                          f.condicion,
+                                                  )?.etiqueta ?? f.condicion)
                                         }}
                                     </td>
                                     <td class="py-1.5 text-right">

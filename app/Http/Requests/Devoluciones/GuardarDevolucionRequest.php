@@ -79,7 +79,14 @@ class GuardarDevolucionRequest extends FormRequest
             // desde el stock disponible de un almacén (`MarcarCondicionInventario`)
             // — nunca aplica a una devolución (no se puede "devolver" algo
             // que se reporta como robado o extraviado).
-            'activos.*.condicion' => ['required', Rule::enum(CondicionDevolucion::class)->except([CondicionDevolucion::RoboExtravio])],
+            'activos.*.condicion' => ['required_without:activos.*.condiciones', 'nullable', Rule::enum(CondicionDevolucion::class)->except([CondicionDevolucion::RoboExtravio])],
+            // "Dividir por condición": el MISMO renglón repartido entre varias
+            // condiciones dentro de esta misma devolución. La suma exacta y
+            // las condiciones repetidas se validan en `withValidator()` (por
+            // renglón; `distinct` compararía entre renglones distintos).
+            'activos.*.condiciones' => ['nullable', 'array', 'max:'.count(CondicionDevolucion::cases())],
+            'activos.*.condiciones.*.condicion' => ['required', Rule::enum(CondicionDevolucion::class)->except([CondicionDevolucion::RoboExtravio])],
+            'activos.*.condiciones.*.cantidad' => ['required', 'integer', 'min:0'],
             // Evidencia fotográfica OPCIONAL por renglón devuelto.
             'activos.*.evidencia' => ['nullable', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
             'activos.*.evidencia_origen' => ['nullable', 'in:camara,archivo'],
@@ -105,6 +112,10 @@ class GuardarDevolucionRequest extends FormRequest
                 $validator->errors()->add('items', 'Agrega al menos un renglón a devolver.');
             }
 
+            foreach ($activos as $i => $fila) {
+                $this->validarDistribucionPorCondicion($validator, (int) $i, is_array($fila) ? $fila : []);
+            }
+
             foreach ($unidades as $i => $fila) {
                 $condicion = CondicionUnidadActivo::tryFrom((string) ($fila['condicion'] ?? ''));
 
@@ -113,6 +124,43 @@ class GuardarDevolucionRequest extends FormRequest
                 }
             }
         });
+    }
+
+    /**
+     * Con desglose, las cantidades por condición deben sumar EXACTAMENTE la
+     * cantidad a devolver del renglón, sin repetir condición. Los errores de
+     * tipo (no entero, negativo, condición inválida) ya los marcan las reglas.
+     *
+     * @param  array<string, mixed>  $fila
+     */
+    private function validarDistribucionPorCondicion(Validator $validator, int $i, array $fila): void
+    {
+        $desglose = $fila['condiciones'] ?? null;
+        if (! is_array($desglose) || $desglose === [] || $validator->errors()->has("activos.{$i}.condiciones.*")) {
+            return;
+        }
+
+        $condiciones = array_map(fn ($parte): string => (string) (is_array($parte) ? ($parte['condicion'] ?? '') : ''), $desglose);
+        if (count($condiciones) !== count(array_unique($condiciones))) {
+            $validator->errors()->add("activos.{$i}.condiciones", 'Cada condición sólo puede aparecer una vez en la distribución.');
+
+            return;
+        }
+
+        $asignado = array_sum(array_map(fn ($parte): int => is_array($parte) ? (int) ($parte['cantidad'] ?? 0) : 0, $desglose));
+        $total = filter_var($fila['cantidad'] ?? null, FILTER_VALIDATE_INT);
+        if ($total === false || $asignado === $total) {
+            return;
+        }
+
+        $diferencia = abs($total - $asignado);
+        $piezas = $diferencia === 1 ? '1 pieza' : "{$diferencia} piezas";
+        $validator->errors()->add(
+            "activos.{$i}.condiciones",
+            $asignado < $total
+                ? "Falta asignar condición a {$piezas}."
+                : "La distribución por condición supera la cantidad a devolver por {$piezas}.",
+        );
     }
 
     /**
@@ -129,6 +177,10 @@ class GuardarDevolucionRequest extends FormRequest
             'firma_operador.required' => 'Falta la firma del encargado que recibe la devolución.',
             'aceptacion.accepted' => 'Debes confirmar la aceptación antes de finalizar la devolución.',
             'activos.*.detalle_entrega_id.exists' => 'Ese renglón no pertenece a esta entrega.',
+            'activos.*.condicion.required_without' => 'Elige la condición al recibir.',
+            'activos.*.condiciones.*.cantidad.integer' => 'Las cantidades por condición deben ser números enteros.',
+            'activos.*.condiciones.*.cantidad.min' => 'Las cantidades por condición no pueden ser negativas.',
+            'activos.*.condiciones.*.condicion.enum' => 'Esa condición no es válida para una devolución.',
             'unidades.*.detalle_entrega_id.exists' => 'Esa unidad no pertenece a esta entrega.',
             'unidades.*.detalle_entrega_id.distinct' => 'No puedes devolver la misma unidad dos veces en un mismo movimiento.',
         ];

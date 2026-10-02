@@ -39,7 +39,7 @@ class RegistrarDevolucionFirmada
     ) {}
 
     /**
-     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}>  $activos
+     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion?: string|null, condiciones?: array<int, array{condicion: string, cantidad: int|string}>|null}>  $activos
      * @param  array<int, array{detalle_entrega_id: int|string, condicion: string}>  $unidades
      * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias
      */

@@ -12,16 +12,19 @@ use App\Enums\EstadoUnidadActivo;
 use App\Enums\FinalidadCustodia;
 use App\Enums\TipoGrafica;
 use App\Enums\TipoReserva;
+use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Http\Controllers\Concerns\ConEmpresa;
 use App\Http\Controllers\Concerns\ExportaListado;
 use App\Http\Requests\Devoluciones\GuardarDevolucionRequest;
 use App\Http\Requests\Devoluciones\GuardarIdentidadDevolucionRequest;
 use App\Models\Colaborador;
 use App\Models\DetalleDevolucion;
+use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Models\User;
+use App\Policies\DevolucionPolicy;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
@@ -274,8 +277,18 @@ class DevolucionController extends Controller
             }
         }
 
+        $presentacion = $entrega === null ? null : $this->presentarEntrega($entrega, $request->user());
+        $renglonesDevolvibles = ($presentacion['renglones'] ?? null) instanceof Collection ? $presentacion['renglones'] : collect();
+
         return Inertia::render('Devoluciones/Crear', [
-            'entrega' => $entrega === null ? null : $this->presentarEntrega($entrega),
+            'entrega' => $presentacion,
+            // Aviso GENERAL sólo si ningún renglón ofrecido se puede recibir
+            // (todo es uso personal / sin clasificar de la propia custodia).
+            // Si hay al menos uno permitido, cada fila lleva su propia marca
+            // (`puede_devolver` + `motivo_bloqueo`) y la página sigue usable.
+            'bloqueoCustodiaPropia' => $renglonesDevolvibles->isNotEmpty() && $renglonesDevolvibles->every(fn (array $r): bool => ! $r['puede_devolver'])
+                ? $renglonesDevolvibles->first()['motivo_bloqueo']
+                : null,
             'colaboradorContexto' => $colaboradorContexto,
             // "Robo / extravío" sólo existe para marcar condición directo
             // desde el stock disponible de un almacén, nunca para una
@@ -295,7 +308,7 @@ class DevolucionController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function presentarEntrega(EntregaUniforme $entrega): array
+    private function presentarEntrega(EntregaUniforme $entrega, User $usuario): array
     {
         $pendientePorDetalle = $this->custodia->pendientesPorDetalle(
             $entrega->detalles->whereNull('unidad_activo_id')
@@ -342,6 +355,10 @@ class DevolucionController extends Controller
                         && $d->unidadActivo->colaborador_id === $entrega->colaborador_id,
                     'unidad_estado_visible' => $d->unidadActivo?->estadoVisible()->value,
                     'unidad_estado_visible_etiqueta' => $d->unidadActivo?->estadoVisible()->etiqueta(),
+                    // Regla por renglón (`DevolucionPolicy::recibirRenglon`):
+                    // uso personal / sin clasificar de la PROPIA custodia
+                    // requiere permiso especial; lo demás, permisos normales.
+                    ...$this->recepcionPermitida($usuario, $d),
                 ]),
         ];
     }
@@ -401,6 +418,16 @@ class DevolucionController extends Controller
     }
 
     /**
+     * @return array{puede_devolver: bool, motivo_bloqueo: ?string}
+     */
+    private function recepcionPermitida(User $usuario, DetalleEntrega $detalle): array
+    {
+        $motivo = DevolucionPolicy::motivoRechazoRenglones($usuario, [$detalle]);
+
+        return ['puede_devolver' => $motivo === null, 'motivo_bloqueo' => $motivo];
+    }
+
+    /**
      * Recalcula, de forma atómica, el apartado temporal de custodia de TODO
      * el borrador de Devolución actual (ver
      * `App\Acciones\ReservarCustodiaDevolucion`). NUNCA aparta stock de
@@ -425,6 +452,23 @@ class DevolucionController extends Controller
 
         $entrega = EntregaUniforme::query()->findOrFail((int) $datos['entrega_uniforme_id']);
         abort_unless($request->user()->puedeAccederEmpresa($entrega->empresa_id), 403);
+
+        // Ningún renglón que este usuario no pueda recibir se aparta (por
+        // renglón: lo de redistribución propia sí; uso personal / sin
+        // clasificar propio sólo con permiso). Respuesta controlada, nunca
+        // un 403 crudo.
+        $idsSeleccionados = collect([...($datos['activos'] ?? []), ...($datos['unidades'] ?? [])])
+            ->pluck('detalle_entrega_id')
+            ->filter(fn ($id) => $id !== '' && $id !== null)
+            ->map(fn ($id) => (int) $id)
+            ->all();
+        $rechazo = DevolucionPolicy::motivoRechazoRenglones(
+            $request->user(),
+            $entrega->detalles()->whereIn('id', $idsSeleccionados)->get(),
+        );
+        if ($rechazo !== null) {
+            throw new ExcepcionDeNegocioSimple($rechazo);
+        }
 
         $resultado = $accion->ejecutar(
             $datos['token'],

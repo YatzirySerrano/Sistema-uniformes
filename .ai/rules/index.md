@@ -38,6 +38,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Acciones/CrearRondaInventarioFisico.php,resources/js/pages/InventarioFisico/Crear.vue | .ai/rules/inventario-fisico.md |
 | resources/js/pages/Activos/Detalle.vue,resources/js/pages/Inventario/Index.vue,resources/js/components/sistema/AgregarExistenciasDialog.vue | .ai/rules/inventario-js-components-sistema.md |
 | app/Acciones/RedistribuirCustodia.php,app/Enums/TipoMovimiento.php,app/Enums/DireccionMovimiento.php,app/Servicios/ServicioInventario.php,app/Http/Controllers/MovimientoInventarioController.php,resources/js/pages/Inventario/Movimientos.vue | .ai/rules/inventario.md |
+| app/Policies/DevolucionPolicy.php,app/Acciones/RegistrarDevolucion.php,app/Http/Requests/Devoluciones/GuardarDevolucionRequest.php,app/Http/Controllers/DevolucionController.php,resources/js/pages/Devoluciones/Crear.vue,resources/js/components/colaboradores/CustodiaPanel.vue | .ai/rules/js-components-colaboradores.md |
 | resources/js/composables/useVistaPreferida.ts,resources/js/components/sistema/SelectorVista.vue | .ai/rules/js-components-sistema.md |
 | resources/js/pages/auth/Login.vue,resources/js/components/PasskeyVerify.vue | .ai/rules/js-components.md |
 | app/Enums/EstadoVisibleUnidad.php,app/Http/Controllers/UnidadActivoController.php,app/Soporte/PaletaGraficas.php,resources/js/lib/estadoVisibleUnidad.ts,resources/js/composables/useGraficasDashboard.ts | .ai/rules/js-composables.md |

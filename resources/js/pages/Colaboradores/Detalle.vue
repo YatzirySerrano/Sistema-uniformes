@@ -125,7 +125,6 @@ const props = defineProps<{
     puedeVerDevoluciones: boolean;
     puedeReportarIncidenciaCustodia: boolean;
     puedeRegistrarDevoluciones: boolean;
-    puedeClasificarFinalidad: boolean;
     expediente: ExpedientePayload | null;
     custodia: {
         pendientes: PendienteFila[];
@@ -619,7 +618,6 @@ const modalEmpresa = ref(false);
                 :pendientes="custodia.pendientes"
                 :incidencias="custodia.incidencias"
                 :puede-reportar="puedeReportarIncidenciaCustodia"
-                :puede-clasificar-finalidad="puedeClasificarFinalidad"
             />
         </section>
 

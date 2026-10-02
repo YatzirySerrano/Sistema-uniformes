@@ -14,6 +14,8 @@ use App\Models\Devolucion;
 use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\UnidadActivo;
+use App\Models\User;
+use App\Policies\DevolucionPolicy;
 use App\Servicios\ResolverAlmacenOperativo;
 use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCustodiaColaborador;
@@ -47,7 +49,7 @@ class RegistrarDevolucion
     ) {}
 
     /**
-     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}>  $activos
+     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion?: string|null, condiciones?: array<int, array{condicion: string, cantidad: int|string}>|null}>  $activos  `condiciones` = mismo renglón repartido entre varias condiciones (suma exacta = `cantidad`)
      * @param  array<int, array{detalle_entrega_id: int|string, condicion: string}>  $unidades
      * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias  claves "activo:{i}" / "unidad:{i}"
      */
@@ -76,7 +78,7 @@ class RegistrarDevolucion
      * `Evidencia` y audita. NO toca inventario ni `UnidadActivo` (eso es
      * `ConfirmarAcuseDevolucion`).
      *
-     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}>  $activos
+     * @param  array<int, array{detalle_entrega_id: int|string, cantidad: int|string, condicion?: string|null, condiciones?: array<int, array{condicion: string, cantidad: int|string}>|null}>  $activos  `condiciones` = mismo renglón repartido entre varias condiciones (suma exacta = `cantidad`)
      * @param  array<int, array{detalle_entrega_id: int|string, condicion: string}>  $unidades
      * @param  array<string, array{ruta: string, nombre_original: string, mime: string, extension: string, peso_bytes: int, hash_sha256: string, origen: string}>  $evidencias
      */
@@ -98,6 +100,27 @@ class RegistrarDevolucion
 
         if ($activos === [] && $unidades === []) {
             throw new ExcepcionDeNegocioSimple('Agrega al menos un renglón a devolver.');
+        }
+
+        // Nadie se recibe a sí mismo lo de USO PERSONAL / sin clasificar de
+        // su propia custodia (`DevolucionPolicy::recibirRenglon`, por cada
+        // renglón/unidad seleccionado). Se revalida aquí, antes de crear
+        // nada, aunque la pantalla y el apartado ya lo hayan impedido: una
+        // petición manipulada no deja devolución, movimientos ni reserva
+        // consumida.
+        $receptor = $registradaPor !== null ? User::query()->find($registradaPor) : null;
+        if ($receptor !== null) {
+            $idsSeleccionados = array_map(
+                fn (array $fila): int => (int) $fila['detalle_entrega_id'],
+                [...$activos, ...$unidades],
+            );
+            $rechazo = DevolucionPolicy::motivoRechazoRenglones(
+                $receptor,
+                $entrega->detalles()->whereIn('id', $idsSeleccionados)->get(),
+            );
+            if ($rechazo !== null) {
+                throw new ExcepcionDeNegocioSimple($rechazo);
+            }
         }
 
         // Capa previa de UX/concurrencia: si viene token, se valida que la
@@ -123,9 +146,11 @@ class RegistrarDevolucion
         ]);
 
         foreach ($activos as $i => $item) {
-            $detalle = $this->procesarLineaCantidad($devolucion, $entrega, $item);
-            if ($detalle !== null && isset($evidencias["activo:{$i}"])) {
-                $this->evidenciasSvc->adjuntar($detalle, $evidencias["activo:{$i}"], $registradaPor);
+            $detalles = $this->procesarLineaCantidad($devolucion, $entrega, $item);
+            // Repartido por condición: la foto sigue siendo del renglón
+            // devuelto y queda en su primera parte.
+            if ($detalles !== [] && isset($evidencias["activo:{$i}"])) {
+                $this->evidenciasSvc->adjuntar($detalles[0], $evidencias["activo:{$i}"], $registradaPor);
             }
         }
 
@@ -150,9 +175,17 @@ class RegistrarDevolucion
     }
 
     /**
-     * @param  array{detalle_entrega_id: int|string, cantidad: int|string, condicion: string}  $item
+     * Un renglón por cantidad, con UNA condición (flujo de siempre) o
+     * repartido entre varias (`condiciones`): una fila `DetalleDevolucion`
+     * por condición, todas del mismo `DetalleEntrega` y de esta misma
+     * devolución. El tope contra lo pendiente se aplica UNA vez sobre el
+     * total, y cada parte conserva su propio efecto al confirmar (sólo
+     * "Reutilizable" reingresa a stock).
+     *
+     * @param  array{detalle_entrega_id: int|string, cantidad: int|string, condicion?: string|null, condiciones?: array<int, array{condicion: string, cantidad: int|string}>|null}  $item
+     * @return list<DetalleDevolucion>
      */
-    private function procesarLineaCantidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): ?DetalleDevolucion
+    private function procesarLineaCantidad(Devolucion $devolucion, EntregaUniforme $entrega, array $item): array
     {
         $detalleOriginal = DetalleEntrega::query()
             ->where('entrega_uniforme_id', $entrega->getKey())
@@ -163,7 +196,7 @@ class RegistrarDevolucion
         $cantidad = (int) $item['cantidad'];
 
         if ($cantidad <= 0) {
-            return null;
+            return [];
         }
 
         // OJO: este tope cuenta TODA devolución ya solicitada de este renglón
@@ -192,19 +225,78 @@ class RegistrarDevolucion
             ));
         }
 
-        $condicion = CondicionDevolucion::from($item['condicion']);
-
         // El reingreso real al saldo se aplica al confirmar el acuse
-        // (`ConfirmarAcuseDevolucion`); aquí sólo se deja constancia de que
-        // esta línea reingresará cuando eso ocurra.
-        return $devolucion->detalles()->create([
-            'detalle_entrega_id' => $detalleOriginal->getKey(),
-            'activo_id' => $detalleOriginal->activo_id,
-            'talla_id' => $detalleOriginal->talla_id,
-            'cantidad' => $cantidad,
-            'condicion' => $condicion,
-            'reingresa_inventario' => $condicion->reingresaInventario(),
-        ]);
+        // (`ConfirmarAcuseDevolucion`); aquí sólo se deja constancia de qué
+        // parte reingresará cuando eso ocurra.
+        $detalles = [];
+        foreach ($this->partesPorCondicion($item, $cantidad, $detalleOriginal->activo_nombre_snapshot) as [$condicion, $parte]) {
+            $detalles[] = $devolucion->detalles()->create([
+                'detalle_entrega_id' => $detalleOriginal->getKey(),
+                'activo_id' => $detalleOriginal->activo_id,
+                'talla_id' => $detalleOriginal->talla_id,
+                'cantidad' => $parte,
+                'condicion' => $condicion,
+                'reingresa_inventario' => $condicion->reingresaInventario(),
+            ]);
+        }
+
+        return $detalles;
+    }
+
+    /**
+     * Normaliza el renglón a pares [condición, cantidad]. Sin desglose: una
+     * sola parte con la condición única (compatibilidad total con el flujo
+     * anterior). Con desglose: cada condición válida para devolución, sin
+     * repetir, enteros ≥ 0 (los ceros se omiten) y suma EXACTA al total —
+     * revalidado aquí aunque el Form Request ya lo haya hecho.
+     *
+     * @param  array{cantidad: int|string, condicion?: string|null, condiciones?: array<int, array{condicion: string, cantidad: int|string}>|null}  $item
+     * @return list<array{0: CondicionDevolucion, 1: int}>
+     */
+    private function partesPorCondicion(array $item, int $cantidad, ?string $nombreActivo): array
+    {
+        $desglose = $item['condiciones'] ?? null;
+
+        if (! is_array($desglose) || $desglose === []) {
+            $condicion = CondicionDevolucion::tryFrom((string) ($item['condicion'] ?? ''));
+            if ($condicion === null || $condicion === CondicionDevolucion::RoboExtravio) {
+                throw new ExcepcionDeNegocioSimple('Elige la condición en que se recibe «'.$nombreActivo.'».');
+            }
+
+            return [[$condicion, $cantidad]];
+        }
+
+        $partes = [];
+        $vistas = [];
+        $suma = 0;
+        foreach ($desglose as $fila) {
+            $condicion = CondicionDevolucion::tryFrom($fila['condicion']);
+            $parte = filter_var($fila['cantidad'], FILTER_VALIDATE_INT);
+
+            if ($condicion === null || $condicion === CondicionDevolucion::RoboExtravio || in_array($condicion, $vistas, true)) {
+                throw new ExcepcionDeNegocioSimple('La distribución por condición de «'.$nombreActivo.'» tiene una condición inválida o repetida.');
+            }
+            if ($parte === false || $parte < 0) {
+                throw new ExcepcionDeNegocioSimple('La distribución por condición de «'.$nombreActivo.'» sólo admite cantidades enteras no negativas.');
+            }
+
+            $vistas[] = $condicion;
+            $suma += $parte;
+            if ($parte > 0) {
+                $partes[] = [$condicion, $parte];
+            }
+        }
+
+        if ($suma !== $cantidad) {
+            throw new ExcepcionDeNegocioSimple(sprintf(
+                'La distribución por condición de «%s» suma %d, pero la cantidad a devolver es %d.',
+                $nombreActivo,
+                $suma,
+                $cantidad,
+            ));
+        }
+
+        return $partes;
     }
 
     /**

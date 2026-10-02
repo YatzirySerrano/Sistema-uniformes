@@ -245,7 +245,6 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('entregas/custodia/unidades', [EntregaController::class, 'custodiaUnidades'])->name('entregas.custodia.unidades');
     Route::get('entregas/custodia/disponibilidad', [EntregaController::class, 'custodiaDisponibilidad'])->name('entregas.custodia.disponibilidad');
     Route::get('entregas/custodia/conjuntos', [EntregaController::class, 'custodiaConjuntos'])->name('entregas.custodia.conjuntos');
-    Route::put('entregas/renglones/{detalle}/finalidad', [EntregaController::class, 'clasificarFinalidad'])->name('entregas.renglones.finalidad');
     // Apartado temporal (TTL) del borrador de Entrega — ver ReservarInventarioEntrega.
     Route::post('entregas/reserva', [EntregaController::class, 'reservar'])->name('entregas.reserva');
     Route::delete('entregas/reserva/{token}', [EntregaController::class, 'liberarReserva'])->name('entregas.reserva.liberar');

@@ -21,7 +21,6 @@ use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Models\UnidadActivo;
 use App\Models\User;
-use App\Servicios\ServicioAuditoria;
 use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioEvidencias;
 use App\Servicios\ServicioIdentidadColaborador;
@@ -37,7 +36,6 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -487,55 +485,6 @@ class EntregaController extends Controller
             ->values();
 
         return response()->json(['activos' => $resultado]);
-    }
-
-    /**
-     * Clasifica la finalidad de un renglón que SIGUE bajo custodia (uso
-     * personal / para redistribuir). Pensado para los históricos "sin
-     * clasificar"; no mueve inventario ni custodia, sólo la intención.
-     */
-    public function clasificarFinalidad(Request $request, DetalleEntrega $detalle, ServicioCustodiaColaborador $custodia, ServicioAuditoria $auditoria): RedirectResponse
-    {
-        $detalle->loadMissing(['entrega.colaborador', 'unidadActivo']);
-        abort_if($detalle->entrega === null, 404);
-        $this->authorize('clasificarFinalidad', $detalle->entrega);
-
-        $datos = $request->validate(
-            ['finalidad' => ['required', Rule::enum(FinalidadCustodia::class)]],
-            ['finalidad.required' => 'Elige la finalidad.'],
-        );
-
-        $sigueEnCustodia = $detalle->unidad_activo_id !== null
-            ? $detalle->unidadActivo?->colaborador_id === $detalle->entrega->colaborador_id
-                && $custodia->entregaActualDeUnidad($detalle->unidadActivo)?->getKey() === $detalle->getKey()
-            : $custodia->pendienteDeDetalle($detalle) > 0;
-
-        if (! $sigueEnCustodia) {
-            throw new ExcepcionDeNegocioSimple('Ese renglón ya no está bajo la custodia del colaborador.');
-        }
-
-        $anterior = $detalle->finalidad;
-        $nueva = FinalidadCustodia::from($datos['finalidad']);
-        $detalle->update(['finalidad' => $nueva]);
-
-        $auditoria->registrar('entregas', 'clasificar_finalidad', [
-            'tipo_entidad' => EntregaUniforme::class,
-            'entidad_id' => $detalle->entrega->id,
-            'empresa_id' => $detalle->entrega->empresa_id,
-            'descripcion' => sprintf(
-                'Finalidad de «%s»%s en la custodia de %s (%s): %s → %s.',
-                $detalle->activo_nombre_snapshot,
-                $detalle->unidadActivo !== null ? ' '.$detalle->unidadActivo->codigo : '',
-                $detalle->entrega->colaborador->nombre_completo,
-                $detalle->entrega->folio,
-                FinalidadCustodia::etiquetaDe($anterior),
-                $nueva->etiqueta(),
-            ),
-            'valores_anteriores' => ['finalidad' => FinalidadCustodia::etiquetaDe($anterior)],
-            'valores_nuevos' => ['finalidad' => $nueva->etiqueta()],
-        ]);
-
-        return back()->with('toast', ['type' => 'success', 'message' => 'Finalidad actualizada.']);
     }
 
     /**

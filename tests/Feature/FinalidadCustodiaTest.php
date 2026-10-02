@@ -169,7 +169,7 @@ it('la devolución funciona igual para lo personal y lo redistribuible y reingre
         ->and(app(ServicioCustodiaColaborador::class)->totalPiezasPendientes($this->yatziri))->toBe(6);
 });
 
-it('lo histórico sin clasificar sigue en la custodia, no se ofrece para redistribuir y puede clasificarse con auditoría', function () {
+it('lo histórico sin clasificar sigue en la custodia, no se ofrece para redistribuir y su finalidad ya no se puede reclasificar', function () {
     $sinClasificar = $this->entrega->detalles()->where('finalidad', 'redistribucion')->first();
     $sinClasificar->update(['finalidad' => null]);
 
@@ -178,15 +178,13 @@ it('lo histórico sin clasificar sigue en la custodia, no se ofrece para redistr
         ->assertExactJson(['activos' => []]);
     expect(app(ServicioCustodiaColaborador::class)->totalPiezasPendientes($this->yatziri))->toBe(13);
 
-    // Sin `entregas.crear` no se puede clasificar.
-    $this->actingAs($this->supervisor)
-        ->put("/entregas/renglones/{$sinClasificar->id}/finalidad", ['finalidad' => 'redistribucion'])
-        ->assertForbidden();
-
+    // La finalidad se decide al entregar y queda como trazabilidad: el
+    // endpoint de reclasificación desde la custodia ya no existe, ni siquiera
+    // para quien puede registrar entregas.
     $this->actingAs($this->admin)
         ->put("/entregas/renglones/{$sinClasificar->id}/finalidad", ['finalidad' => 'redistribucion'])
-        ->assertSessionHasNoErrors();
+        ->assertNotFound();
 
-    expect($sinClasificar->fresh()->finalidad)->toBe(FinalidadCustodia::Redistribucion)
-        ->and(BitacoraAuditoria::query()->where('accion', 'clasificar_finalidad')->value('descripcion'))->toContain('Sin clasificar → Para redistribuir');
+    expect($sinClasificar->fresh()->finalidad)->toBeNull()
+        ->and(BitacoraAuditoria::query()->where('accion', 'clasificar_finalidad')->exists())->toBeFalse();
 });
