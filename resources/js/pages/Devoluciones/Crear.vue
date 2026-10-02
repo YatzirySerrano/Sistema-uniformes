@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { Calendar, ChevronLeft, ChevronRight } from '@lucide/vue';
+import {
+    Calendar,
+    ChevronLeft,
+    ChevronRight,
+    Combine,
+    Split,
+} from '@lucide/vue';
 import { useMediaQuery } from '@vueuse/core';
 import { computed, nextTick, ref, watch } from 'vue';
 import AlertaProblemasMovil from '@/components/sistema/AlertaProblemasMovil.vue';
@@ -1293,13 +1299,23 @@ function enviar(): void {
                             <Button
                                 v-if="fila.incluir"
                                 type="button"
-                                variant="link"
+                                variant="outline"
                                 size="sm"
-                                class="h-auto px-0 py-1 text-xs"
+                                class="mt-2 h-8 w-full gap-1.5 text-xs sm:w-auto"
                                 :aria-expanded="fila.dividir"
                                 :aria-controls="`reparto-${fila.detalle_entrega_id}`"
                                 @click="alternarDivision(fila)"
                             >
+                                <Combine
+                                    v-if="fila.dividir"
+                                    class="size-3.5"
+                                    aria-hidden="true"
+                                />
+                                <Split
+                                    v-else
+                                    class="size-3.5"
+                                    aria-hidden="true"
+                                />
                                 {{
                                     fila.dividir
                                         ? 'Usar una sola condición'
