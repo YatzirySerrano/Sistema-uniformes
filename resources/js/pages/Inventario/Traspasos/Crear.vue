@@ -24,6 +24,11 @@ import {
     type RespuestaReserva,
     useReservaBorrador,
 } from '@/composables/useReservaBorrador';
+import { useDisponibilidadViva } from '@/composables/useDisponibilidadViva';
+import {
+    mensajeDisponibilidadInsuficiente,
+    textoDisponibles,
+} from '@/lib/mensajesDisponibilidad';
 import type { EmpresaAutorizada } from '@/types/sistema';
 
 /** Respuesta de `POST /inventario/traspasos/reserva` (`ReservarInventarioTraspaso`). */
@@ -34,6 +39,8 @@ type RespuestaReservaTraspaso = RespuestaReserva & {
         activo_nombre: string | null;
         talla_valor: string | null;
         disponible_efectivo: number;
+        /** > 0 = parte del saldo la apartaron OTRAS operaciones. */
+        apartado_por_otros: number;
         solicitado: number;
         suficiente: boolean;
     }[];
@@ -180,6 +187,8 @@ const preview = ref<Record<number, PreviewRenglon>>({});
 function limpiarRenglones(): void {
     filas.splice(0, filas.length);
     preview.value = {};
+    disponibilidadOrigen.value = {};
+    clavesReducidas.value = new Set();
     // Cambió el origen: el apartado anterior ya no aplica.
     reserva.reiniciarToken();
 }
@@ -220,7 +229,12 @@ watch(
         ]),
     () => {
         if (empresaOrigenId.value === null || !almacenOrigen.value) return;
-        if (!filas.some((f) => f.activoSel)) return;
+        // Sin renglones elegidos (p. ej. se quitó el último): no debe quedar
+        // apartado nada del borrador.
+        if (!filas.some((f) => f.activoSel)) {
+            reserva.liberar();
+            return;
+        }
         reserva.reservarConRetraso(payloadReserva());
     },
     { deep: true },
@@ -419,13 +433,157 @@ function necesitaTalla(f: FilaRenglon): boolean {
 function disponibleFila(f: FilaRenglon): number | null {
     if (!f.activoSel) return null;
     if (f.control === 'individual') return f.activoSel.disponible ?? null;
+    if (necesitaTalla(f) && f.talla_id === null) return null;
+    const clave = claveSaldo(f.activoSel.id, f.talla_id);
+    if (clave in disponibilidadOrigen.value) {
+        return disponibilidadOrigen.value[clave];
+    }
+    return disponibleAlElegir(f);
+}
+
+/** La cifra que trajo el buscador al elegir el activo (puede estar vieja). */
+function disponibleAlElegir(f: FilaRenglon): number {
+    if (!f.activoSel) return 0;
     if (necesitaTalla(f)) {
-        if (f.talla_id === null) return null;
         return (
             f.activoSel.tallas.find((t) => t.id === f.talla_id)?.disponible ?? 0
         );
     }
     return f.activoSel.disponible ?? 0;
+}
+
+// ------------------------------------- Disponibilidad viva del ORIGEN
+// Igual que Entregas: sin recargar la página, la existencia del almacén
+// origen se relee cada ~8 s (pestaña visible, paso 2, sin confirmar) con el
+// token propio — el apartado de este borrador nunca se descuenta a sí
+// mismo — y SÓLO por lectura (nunca toca el apartado ni su TTL). El destino
+// no se consulta: no participa de la concurrencia.
+const disponibilidadOrigen = ref<Record<string, number>>({});
+const clavesReducidas = ref(new Set<string>());
+
+type SaldoEfectivo = {
+    activo_id: number;
+    talla_id: number | null;
+    disponible: number;
+};
+
+function claveSaldo(activoId: number, tallaId: number | null): string {
+    return `${activoId}-${tallaId ?? '0'}`;
+}
+
+function fusionarDisponibilidad(saldos: SaldoEfectivo[]): void {
+    const mapa = { ...disponibilidadOrigen.value };
+    const reducidas = new Set(clavesReducidas.value);
+    for (const s of saldos) {
+        const clave = claveSaldo(s.activo_id, s.talla_id);
+        const fila = filas.find(
+            (f) =>
+                f.control === 'cantidad' &&
+                f.activoSel &&
+                claveSaldo(f.activoSel.id, f.talla_id) === clave,
+        );
+        const previo =
+            mapa[clave] ?? (fila ? disponibleAlElegir(fila) : undefined);
+        if (previo !== undefined && s.disponible < previo) reducidas.add(clave);
+        if (previo !== undefined && s.disponible > previo)
+            reducidas.delete(clave);
+        mapa[clave] = s.disponible;
+    }
+    disponibilidadOrigen.value = mapa;
+    clavesReducidas.value = reducidas;
+}
+
+const activoIdsCantidad = computed(() => [
+    ...new Set(
+        filas
+            .filter((f) => f.control === 'cantidad' && f.activoSel)
+            .map((f) => f.activoSel!.id),
+    ),
+]);
+
+const disponibilidadViva = useDisponibilidadViva<{ saldos: SaldoEfectivo[] }>({
+    habilitado: () =>
+        paso.value === 2 &&
+        empresaOrigenId.value !== null &&
+        almacenOrigen.value !== null &&
+        !reserva.confirmando.value &&
+        !form.processing &&
+        activoIdsCantidad.value.length > 0,
+    consultar: async (signal) => {
+        const params = new URLSearchParams({
+            empresa_origen_id: String(empresaOrigenId.value),
+            almacen_origen_id: String(almacenOrigen.value?.id),
+            token: reserva.token.value,
+        });
+        for (const id of activoIdsCantidad.value) {
+            params.append('activo_ids[]', String(id));
+        }
+        const res = await fetch(
+            `/inventario/traspasos/disponibilidad?${params.toString()}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal,
+            },
+        );
+        return res.ok
+            ? ((await res.json()) as { saldos: SaldoEfectivo[] })
+            : null;
+    },
+    aplicar: (json) => fusionarDisponibilidad(json.saldos),
+});
+
+watch(paso, (p) => {
+    if (p === 2) void disponibilidadViva.refrescar();
+});
+
+// La respuesta de apartar es la lectura más fresca: actualiza la pantalla
+// de inmediato (también tras un rechazo) y descarta un sondeo en vuelo.
+watch(
+    () => reserva.resultado.value,
+    (res) => {
+        if (!res) return;
+        disponibilidadViva.invalidar();
+        fusionarDisponibilidad(
+            res.lineas_cantidad.map((l) => ({
+                activo_id: l.activo_id,
+                talla_id: l.talla_id,
+                disponible: l.disponible_efectivo,
+            })),
+        );
+    },
+);
+
+function faltaPorOtros(f: FilaRenglon): boolean {
+    if (!f.activoSel) return false;
+    const clave = claveSaldo(f.activoSel.id, f.talla_id);
+    return (
+        clavesReducidas.value.has(clave) ||
+        (reserva.resultado.value?.lineas_cantidad.some(
+            (l) =>
+                claveSaldo(l.activo_id, l.talla_id) === clave &&
+                l.apartado_por_otros > 0,
+        ) ??
+            false)
+    );
+}
+
+function varianteFila(f: FilaRenglon): string | null {
+    return necesitaTalla(f)
+        ? (f.activoSel?.tallas.find((t) => t.id === f.talla_id)?.valor ?? null)
+        : null;
+}
+
+/** Mensaje de "no alcanza" de un renglón por cantidad, con la cifra viva. */
+function mensajeFaltaFila(f: FilaRenglon): string {
+    return mensajeDisponibilidadInsuficiente({
+        operacion: 'traspaso',
+        nombre: f.activoSel?.nombre ?? 'Activo',
+        variante: varianteFila(f),
+        solicitado: f.cantidad,
+        disponible: disponibleFila(f) ?? 0,
+        porOtros: faltaPorOtros(f),
+    });
 }
 
 const filaValida = (f: FilaRenglon): boolean => {
@@ -459,13 +617,7 @@ const problemasPaso2 = computed<string[]>(() => {
         if (f.cantidad <= 0) {
             msgs.push(`Renglón ${n}: la cantidad debe ser mayor a cero.`);
         } else if (disp !== null && f.cantidad > disp) {
-            msgs.push(
-                `Renglón ${n}: sólo hay ${disp} disponibles de ${f.activoSel.nombre}${
-                    necesitaTalla(f)
-                        ? ` talla ${f.activoSel.tallas.find((t) => t.id === f.talla_id)?.valor ?? ''}`
-                        : ''
-                }.`,
-            );
+            msgs.push(`Renglón ${n}: ${mensajeFaltaFila(f)}`);
         }
         if (ambiguoSinResolver(i)) {
             msgs.push(
@@ -480,8 +632,27 @@ const problemasPaso2 = computed<string[]>(() => {
     if (res && !res.ok) {
         for (const l of res.lineas_cantidad) {
             if (l.suficiente) continue;
+            const clave = claveSaldo(l.activo_id, l.talla_id);
+            const renglones = filas.filter(
+                (f) =>
+                    f.control === 'cantidad' &&
+                    f.activoSel &&
+                    claveSaldo(f.activoSel.id, f.talla_id) === clave,
+            );
+            // Un único renglón ya quedó explicado arriba con la cifra fresca.
+            if (renglones.length <= 1) continue;
             msgs.push(
-                `«${l.activo_nombre ?? 'Activo'}»${l.talla_valor ? ` talla ${l.talla_valor}` : ''}: pediste ${l.solicitado} y hay ${l.disponible_efectivo} disponibles (otras operaciones tienen apartado el resto).`,
+                mensajeDisponibilidadInsuficiente({
+                    operacion: 'traspaso',
+                    nombre: l.activo_nombre ?? 'Activo',
+                    variante: l.talla_valor,
+                    solicitado: l.solicitado,
+                    disponible: l.disponible_efectivo,
+                    porOtros:
+                        l.apartado_por_otros > 0 ||
+                        clavesReducidas.value.has(clave),
+                    origen: 'varios-renglones',
+                }),
             );
         }
         for (const l of res.lineas_unidad) {
@@ -553,8 +724,12 @@ function enviar(): void {
     }));
     form.firma = firma;
     form.reserva_token = reserva.token.value;
+    // La transacción de confirmación consume el apartado: ninguna limpieza
+    // automática (desmontar/pagehide) debe liberarlo mientras tanto.
+    reserva.iniciarConfirmacion();
     form.post('/inventario/traspasos', {
         preserveScroll: true,
+        onFinish: () => reserva.finalizarConfirmacion(),
         onError: () => {
             const claves = Object.keys(form.errors);
             if (claves.some((k) => k.startsWith('renglones'))) paso.value = 2;
@@ -889,21 +1064,20 @@ function enviar(): void {
                                     fila.cantidad > (disponibleFila(fila) ?? 0)
                                 "
                                 class="text-destructive text-xs"
+                                aria-live="polite"
                             >
-                                Sólo hay {{ disponibleFila(fila) }} unidades
-                                disponibles de {{ fila.activoSel?.nombre
-                                }}{{
-                                    necesitaTalla(fila)
-                                        ? ` talla ${fila.activoSel?.tallas.find((t) => t.id === fila.talla_id)?.valor ?? ''}`
-                                        : ''
-                                }}
-                                en el almacén
-                                {{ almacenOrigen?.nombre }}.
+                                {{ mensajeFaltaFila(fila) }}
                             </p>
-                            <p v-else class="text-muted-foreground text-[11px]">
+                            <p
+                                v-else
+                                class="text-muted-foreground text-[11px]"
+                                aria-live="polite"
+                            >
                                 {{ fila.cantidad }} de
-                                {{ disponibleFila(fila) }} disponibles ·
-                                quedarán
+                                {{
+                                    textoDisponibles(disponibleFila(fila) ?? 0)
+                                }}
+                                · quedarán
                                 {{
                                     (disponibleFila(fila) ?? 0) - fila.cantidad
                                 }}
@@ -1192,7 +1366,11 @@ function enviar(): void {
                     }}
                 </Button>
                 <Button variant="ghost" as-child>
-                    <Link href="/inventario/traspasos">Cancelar</Link>
+                    <Link
+                        href="/inventario/traspasos"
+                        @click="reserva.liberar()"
+                        >Cancelar</Link
+                    >
                 </Button>
             </div>
         </form>

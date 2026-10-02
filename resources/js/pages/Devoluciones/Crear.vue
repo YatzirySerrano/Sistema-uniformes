@@ -22,8 +22,10 @@ import {
     type RespuestaReserva,
     useReservaBorrador,
 } from '@/composables/useReservaBorrador';
+import { useDisponibilidadViva } from '@/composables/useDisponibilidadViva';
 import { fechaNegocio } from '@/lib/fecha';
 import { varianteBadgeFinalidad } from '@/lib/finalidadCustodia';
+import { mensajeDisponibilidadInsuficiente } from '@/lib/mensajesDisponibilidad';
 
 type OpcionEntrega = {
     id: number;
@@ -404,11 +406,140 @@ function lineaReservaDe(detalleEntregaId: number) {
     );
 }
 
+// ------------------------------------------------------------------
+// Custodia devolvible "viva": sin recargar la página, cada ~8 s (pestaña
+// visible, paso 2, sin confirmar) se relee cuánto de cada renglón sigue
+// pendiente y cuánto apartó OTRA devolución — con el token propio, así lo
+// apartado por este borrador nunca se descuenta a sí mismo. Es CUSTODIA,
+// nunca stock de almacén, y SÓLO lectura: no toca el apartado, su TTL, la
+// custodia real ni el inventario.
+// ------------------------------------------------------------------
+type CustodiaViva = {
+    pendiente_real: number;
+    apartado_por_otros: number;
+    disponible: number;
+};
+type UnidadViva = { unidad_disponible: boolean; apartada_por_otro: boolean };
+type RespuestaCustodiaViva = {
+    renglones: (CustodiaViva & { detalle_entrega_id: number })[];
+    unidades: (UnidadViva & { detalle_entrega_id: number })[];
+};
+
+const custodiaViva = ref<Record<number, CustodiaViva>>({});
+const unidadesVivas = ref<Record<number, UnidadViva>>({});
+/** Renglones cuya cantidad devolvible BAJÓ con el formulario abierto. */
+const renglonesReducidos = ref(new Set<number>());
+
+function fusionarCustodia(renglones: RespuestaCustodiaViva['renglones']): void {
+    const mapa = { ...custodiaViva.value };
+    const reducidos = new Set(renglonesReducidos.value);
+    for (const r of renglones) {
+        const previo =
+            mapa[r.detalle_entrega_id]?.disponible ??
+            renglonDe(r.detalle_entrega_id)?.pendiente ??
+            undefined;
+        if (previo !== undefined && previo !== null) {
+            if (r.disponible < previo) reducidos.add(r.detalle_entrega_id);
+            if (r.disponible > previo) reducidos.delete(r.detalle_entrega_id);
+        }
+        mapa[r.detalle_entrega_id] = {
+            pendiente_real: r.pendiente_real,
+            apartado_por_otros: r.apartado_por_otros,
+            disponible: r.disponible,
+        };
+    }
+    custodiaViva.value = mapa;
+    renglonesReducidos.value = reducidos;
+}
+
+const custodiaEnVivo = useDisponibilidadViva<RespuestaCustodiaViva>({
+    habilitado: () =>
+        !!props.entrega &&
+        paso.value === 2 &&
+        !reserva.confirmando.value &&
+        !form.processing,
+    consultar: async (signal) => {
+        const params = new URLSearchParams({
+            entrega_uniforme_id: String(props.entrega?.id),
+            token: reserva.token.value,
+        });
+        const res = await fetch(
+            `/devoluciones/disponibilidad?${params.toString()}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal,
+            },
+        );
+        return res.ok ? ((await res.json()) as RespuestaCustodiaViva) : null;
+    },
+    aplicar: (json) => {
+        fusionarCustodia(json.renglones);
+        unidadesVivas.value = Object.fromEntries(
+            json.unidades.map((u) => [
+                u.detalle_entrega_id,
+                {
+                    unidad_disponible: u.unidad_disponible,
+                    apartada_por_otro: u.apartada_por_otro,
+                },
+            ]),
+        );
+    },
+});
+
+watch(paso, (p) => {
+    if (p === 2) void custodiaEnVivo.refrescar();
+});
+
+// La respuesta de apartar es la lectura más fresca: actualiza la pantalla
+// de inmediato (también tras un rechazo) y descarta un sondeo en vuelo.
+watch(
+    () => reserva.resultado.value,
+    (res) => {
+        if (!res) return;
+        custodiaEnVivo.invalidar();
+        fusionarCustodia(
+            res.lineas_cantidad.map((l) => ({
+                detalle_entrega_id: l.detalle_entrega_id,
+                pendiente_real: l.pendiente_real,
+                apartado_por_otros: Math.max(
+                    0,
+                    l.pendiente_real - l.disponible_efectivo,
+                ),
+                disponible: l.disponible_efectivo,
+            })),
+        );
+    },
+);
+
+/** Pendiente REAL del renglón (vivo si ya se consultó; si no, el de la carga). */
+function pendienteDe(detalleEntregaId: number): number {
+    return (
+        custodiaViva.value[detalleEntregaId]?.pendiente_real ??
+        renglonDe(detalleEntregaId)?.pendiente ??
+        0
+    );
+}
+
 /** Cuánto tiene apartado OTRA devolución activa de este renglón (0 si no hay conflicto o aún no se calculó). */
 function apartadoPorOtrosDe(detalleEntregaId: number): number {
+    const vivo = custodiaViva.value[detalleEntregaId];
+    if (vivo) return vivo.apartado_por_otros;
     const linea = lineaReservaDe(detalleEntregaId);
     if (!linea) return 0;
     return Math.max(0, linea.pendiente_real - linea.disponible_efectivo);
+}
+
+/** Lo que este borrador puede devolver ahora: pendiente real − apartado por otros. */
+function disponibleParaDevolver(detalleEntregaId: number): number {
+    return (
+        custodiaViva.value[detalleEntregaId]?.disponible ??
+        Math.max(
+            0,
+            pendienteDe(detalleEntregaId) -
+                apartadoPorOtrosDe(detalleEntregaId),
+        )
+    );
 }
 
 const problemasPaso2 = computed<string[]>(() => {
@@ -416,35 +547,59 @@ const problemasPaso2 = computed<string[]>(() => {
     if (!hayAlgoIncluido.value) {
         problemas.push('Marca al menos un renglón para devolver.');
     }
+    // La cifra devolvible ya descuenta lo apartado por OTRAS devoluciones
+    // activas (sondeo + respuesta de apartar, ver
+    // `App\Acciones\ReservarCustodiaDevolucion`): un renglón puede parecer
+    // pendiente y ya estar apartado por otro usuario.
     filasCantidadIncluidas.value.forEach((f) => {
         const r = renglonDe(f.detalle_entrega_id);
-        const pendiente = r?.pendiente ?? 0;
+        const disponible = disponibleParaDevolver(f.detalle_entrega_id);
         if (!(f.cantidad > 0)) {
             problemas.push(
                 `${r?.activo ?? 'Renglón'}: indica una cantidad mayor a 0.`,
             );
-        } else if (f.cantidad > pendiente) {
+        } else if (f.cantidad > disponible) {
             problemas.push(
-                `${r?.activo ?? 'Renglón'}: sólo quedan ${pendiente} por devolver.`,
+                mensajeDisponibilidadInsuficiente({
+                    operacion: 'devolucion',
+                    nombre: r?.activo ?? 'Renglón',
+                    variante: r?.talla,
+                    solicitado: f.cantidad,
+                    disponible,
+                    porOtros:
+                        apartadoPorOtrosDe(f.detalle_entrega_id) > 0 ||
+                        renglonesReducidos.value.has(f.detalle_entrega_id),
+                }),
             );
         }
     });
 
-    // Apartado por OTRAS devoluciones activas (ver
-    // `App\Acciones\ReservarCustodiaDevolucion`): un renglón puede parecer
-    // disponible localmente y ya estar apartado por otro usuario.
     const res = reserva.resultado.value;
+    const unidadesRechazadas = new Set(
+        (res?.lineas_unidad ?? [])
+            .filter((l) => !l.ok)
+            .map((l) => l.detalle_entrega_id),
+    );
     if (res && !res.ok) {
-        for (const l of res.lineas_cantidad) {
-            if (l.suficiente) continue;
-            problemas.push(
-                `${l.activo_nombre ?? 'Renglón'}${l.talla_valor ? ` · ${l.talla_valor}` : ''}: solicitaste ${l.solicitado}, pero sólo hay ${l.disponible_efectivo} disponibles para devolver ahora (otra devolución ya apartó el resto).`,
-            );
-        }
         for (const l of res.lineas_unidad) {
             if (!l.ok && l.motivo) problemas.push(l.motivo);
         }
     }
+    filasUnidadIncluidas.value.forEach((f) => {
+        const viva = unidadesVivas.value[f.detalle_entrega_id];
+        if (!viva || unidadesRechazadas.has(f.detalle_entrega_id)) return;
+        const r = renglonDe(f.detalle_entrega_id);
+        const nombre = `«${r?.activo ?? 'Unidad'}» (${r?.unidad_codigo ?? 's/c'})`;
+        if (!viva.unidad_disponible) {
+            problemas.push(
+                `${nombre}: ya no está asignada a este colaborador; no se puede devolver.`,
+            );
+        } else if (viva.apartada_por_otro) {
+            problemas.push(
+                `${nombre}: otra devolución apartó esta unidad mientras capturabas. Quítala o espera a que se libere.`,
+            );
+        }
+    });
 
     return problemas;
 });
@@ -609,6 +764,9 @@ function enviar(): void {
         evidencia_origen: f.evidencia_origen,
     }));
 
+    // La transacción de confirmación consume el apartado: ninguna limpieza
+    // automática (desmontar/pagehide) debe liberarlo mientras tanto.
+    reserva.iniciarConfirmacion();
     form.transform((datos) => ({
         ...datos,
         reserva_token: reserva.token.value,
@@ -616,6 +774,7 @@ function enviar(): void {
         forceFormData: true,
         preserveScroll: true,
         onError: () => irAPasoConError(),
+        onFinish: () => reserva.finalizarConfirmacion(),
     });
 }
 </script>
@@ -961,8 +1120,7 @@ function enviar(): void {
                             <p class="text-muted-foreground text-xs">
                                 Pendiente por devolver:
                                 <span class="text-foreground font-medium">{{
-                                    renglonDe(fila.detalle_entrega_id)
-                                        ?.pendiente
+                                    pendienteDe(fila.detalle_entrega_id)
                                 }}</span>
                             </p>
                             <template
@@ -987,8 +1145,9 @@ function enviar(): void {
                                 >
                                     Disponible para devolver ahora:
                                     <span class="font-medium">{{
-                                        lineaReservaDe(fila.detalle_entrega_id)
-                                            ?.disponible_efectivo
+                                        disponibleParaDevolver(
+                                            fila.detalle_entrega_id,
+                                        )
                                     }}</span>
                                 </p>
                             </template>
@@ -1004,12 +1163,16 @@ function enviar(): void {
                                 v-model.number="fila.cantidad"
                                 type="number"
                                 min="1"
-                                :max="
-                                    renglonDe(fila.detalle_entrega_id)
-                                        ?.pendiente ?? undefined
-                                "
+                                :max="pendienteDe(fila.detalle_entrega_id)"
                                 class="h-9"
                                 :disabled="!fila.incluir"
+                                :aria-invalid="
+                                    fila.incluir &&
+                                    fila.cantidad >
+                                        disponibleParaDevolver(
+                                            fila.detalle_entrega_id,
+                                        )
+                                "
                             />
                             <InputError
                                 :message="

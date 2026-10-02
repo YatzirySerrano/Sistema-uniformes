@@ -529,13 +529,43 @@ class MovimientoInventarioController extends Controller
     }
 
     /**
+     * Existencia EFECTIVA del almacén ORIGEN para los activos del borrador
+     * (`?activo_ids[]=`): saldo real menos lo apartado por otras entregas y
+     * traspasos activos, sin descontar el propio `token`. El formulario la
+     * consulta periódicamente: es una LECTURA pura — nunca crea, renueva ni
+     * libera apartados.
+     */
+    public function disponibilidadTraspaso(Request $request, ServicioReservas $reservas): JsonResponse
+    {
+        abort_unless($request->user()->can('inventario.transferir'), 403);
+
+        $datos = $request->validate([
+            'empresa_origen_id' => ['required', 'integer'],
+            'almacen_origen_id' => ['required', 'integer'],
+            'token' => ['nullable', 'uuid'],
+            'activo_ids' => ['required', 'array', 'max:200'],
+            'activo_ids.*' => ['integer'],
+        ]);
+
+        abort_unless($request->user()->puedeAccederEmpresa((int) $datos['empresa_origen_id']), 403);
+
+        return response()->json(['saldos' => $reservas->disponibilidadEfectivaEnAlmacen(
+            TipoReserva::Traspaso,
+            (int) $datos['empresa_origen_id'],
+            (int) $datos['almacen_origen_id'],
+            array_map('intval', $datos['activo_ids']),
+            $datos['token'] ?? null,
+        )]);
+    }
+
+    /**
      * Libera el apartado del borrador (cancelar, cambiar de almacén…). Liberar
      * algo ya vencido o inexistente es un no-op válido.
      */
     public function liberarReservaTraspaso(Request $request, string $token, ServicioReservas $reservas): JsonResponse
     {
         abort_unless($request->user()->can('inventario.transferir'), 403);
-        $reservas->liberar($token, $request->user()->id);
+        $reservas->liberar($token, $request->user()->id, TipoReserva::Traspaso);
 
         return response()->json(['ok' => true]);
     }

@@ -19,7 +19,6 @@ use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
 use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
-use App\Models\SaldoInventario;
 use App\Models\UnidadActivo;
 use App\Models\User;
 use App\Servicios\ServicioAuditoria;
@@ -300,11 +299,13 @@ class EntregaController extends Controller
     }
 
     /**
-     * Existencias EFECTIVAS por cantidad (empresa+almacén, sin variante
-     * desglosada): saldo real menos lo que otras reservas activas ya
-     * apartaron (la propia reserva del borrador, si se manda `token`, nunca
-     * se descuenta de sí misma). Aviso de UX; el backend siempre revalida con
-     * bloqueo al registrar/reservar.
+     * Existencias EFECTIVAS por cantidad (empresa+almacén, por activo+talla):
+     * saldo real menos lo que otras reservas activas ya apartaron (la propia
+     * reserva del borrador, si se manda `token`, nunca se descuenta de sí
+     * misma). El formulario la consulta periódicamente (`?activo_ids[]=`
+     * acota a los activos en pantalla): es una LECTURA pura — nunca crea,
+     * renueva ni libera apartados. Aviso de UX; el backend siempre revalida
+     * con bloqueo al registrar/reservar.
      */
     public function disponibilidad(Request $request, ServicioReservas $reservas): JsonResponse
     {
@@ -314,27 +315,21 @@ class EntregaController extends Controller
             'empresa_id' => ['required', 'integer'],
             'almacen_id' => ['required', 'integer'],
             'token' => ['nullable', 'uuid'],
+            'activo_ids' => ['nullable', 'array', 'max:200'],
+            'activo_ids.*' => ['integer'],
         ]);
 
         if (! $request->user()->puedeAccederEmpresa((int) $datos['empresa_id'])) {
             return response()->json(['saldos' => []]);
         }
 
-        $token = $datos['token'] ?? null;
-
-        $saldos = SaldoInventario::query()
-            ->where('empresa_id', $datos['empresa_id'])
-            ->where('almacen_id', $datos['almacen_id'])
-            ->get(['activo_id', 'talla_id', 'cantidad'])
-            ->map(function ($s) use ($reservas, $datos, $token): array {
-                $reservado = $reservas->demandaCantidadDeOtros(TipoReserva::Entrega, (int) $datos['empresa_id'], (int) $datos['almacen_id'], $s->activo_id, $s->talla_id, $token);
-
-                return [
-                    'activo_id' => $s->activo_id,
-                    'talla_id' => $s->talla_id,
-                    'disponible' => max(0, (int) $s->cantidad - $reservado),
-                ];
-            });
+        $saldos = $reservas->disponibilidadEfectivaEnAlmacen(
+            TipoReserva::Entrega,
+            (int) $datos['empresa_id'],
+            (int) $datos['almacen_id'],
+            isset($datos['activo_ids']) ? array_map('intval', $datos['activo_ids']) : null,
+            $datos['token'] ?? null,
+        );
 
         return response()->json(['saldos' => $saldos]);
     }
@@ -400,7 +395,7 @@ class EntregaController extends Controller
         // limpieza al salir del formulario no devuelve 403 a quien sólo
         // redistribuye desde su custodia.
         $this->authorize('create', EntregaUniforme::class);
-        $reservas->liberar($token, $request->user()->id);
+        $reservas->liberar($token, $request->user()->id, TipoReserva::Entrega);
 
         return response()->json(['ok' => true]);
     }

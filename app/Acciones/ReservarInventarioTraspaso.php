@@ -35,7 +35,7 @@ class ReservarInventarioTraspaso
      * @param  array<int, array{control?: string|null, activo_origen_id?: int|string|null, talla_id?: int|string|null, cantidad?: int|string|null, unidad_ids?: array<int, int|string>|null}>  $renglones  reglas laxas: un renglón a medio llenar se ignora
      * @return array{
      *     token: string, expira_en: string, ok: bool,
-     *     lineas_cantidad: list<array{activo_id: int, talla_id: ?int, activo_nombre: ?string, talla_valor: ?string, disponible_efectivo: int, solicitado: int, suficiente: bool}>,
+     *     lineas_cantidad: list<array{activo_id: int, talla_id: ?int, activo_nombre: ?string, talla_valor: ?string, disponible_efectivo: int, apartado_por_otros: int, solicitado: int, suficiente: bool}>,
      *     lineas_unidad: list<array{unidad_activo_id: int, ok: bool, motivo: ?string}>,
      * }
      */
@@ -105,6 +105,10 @@ class ReservarInventarioTraspaso
                     'activo_nombre' => Activo::query()->whereKey($item['activo_id'])->value('nombre'),
                     'talla_valor' => $item['talla_id'] !== null ? Talla::query()->whereKey($item['talla_id'])->value('valor') : null,
                     'disponible_efectivo' => $disponible,
+                    // > 0 = la diferencia contra el saldo real la causan
+                    // apartados de OTRAS operaciones (concurrencia), no
+                    // falta de stock: el frontend lo explica así al usuario.
+                    'apartado_por_otros' => min($deOtros, (int) $saldo->cantidad),
                     'solicitado' => $item['cantidad'],
                     'suficiente' => $item['cantidad'] <= $disponible,
                 ];

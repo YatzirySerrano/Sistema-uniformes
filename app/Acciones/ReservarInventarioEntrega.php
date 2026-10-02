@@ -49,7 +49,7 @@ class ReservarInventarioEntrega
      * @param  array<int, array{conjunto_id: int|string|null, cantidad: int|string|null, variantes?: array<int|string, int|string|null>}>  $conjuntos
      * @return array{
      *     token: string, expira_en: string, ok: bool,
-     *     lineas_cantidad: array<int, array{activo_id: int, talla_id: ?int, activo_nombre: ?string, talla_valor: ?string, disponible_efectivo: int, solicitado_combinado: int, suficiente: bool}>,
+     *     lineas_cantidad: array<int, array{activo_id: int, talla_id: ?int, activo_nombre: ?string, talla_valor: ?string, disponible_efectivo: int, apartado_por_otros: int, solicitado_combinado: int, suficiente: bool}>,
      *     lineas_unidad: array<int, array{unidad_activo_id: int, ok: bool, motivo: ?string}>,
      *     conjuntos: array<int, array{indice: int, conjunto_id: int, suficiente: bool, requiere_seleccion_variante: bool}>,
      * }
@@ -169,6 +169,9 @@ class ReservarInventarioEntrega
                     'activo_nombre' => Activo::query()->whereKey($item['activo_id'])->value('nombre'),
                     'talla_valor' => $item['talla_id'] !== null ? Talla::query()->whereKey($item['talla_id'])->value('valor') : null,
                     'disponible_efectivo' => $disponibleEfectivo,
+                    // > 0 = parte del saldo real la tienen apartada OTRAS
+                    // operaciones (concurrencia), no falta de stock.
+                    'apartado_por_otros' => min($reservadoOtros, (int) $saldo->cantidad),
                     'solicitado_combinado' => $item['cantidad'],
                     'suficiente' => $item['cantidad'] <= $disponibleEfectivo,
                 ];

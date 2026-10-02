@@ -71,6 +71,8 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Http/Controllers/Concerns/ExportaListado.php,app/Exports/ListadoExport.php,resources/views/reportes/listado-generico.blade.php,resources/js/components/sistema/BotonesExportar.vue | .ai/rules/sistema.md |
 | app/Http/Controllers/{Almacen,TipoActivo,Sucursal,Area,Activo}Controller.php,app/Soporte/ServicioGeneradorCodigos*.php | .ai/rules/soporte.md |
 | tests/** | .ai/rules/tests.md |
+| resources/js/composables/useDisponibilidadViva.ts,resources/js/pages/{Entregas,Devoluciones,Inventario/Traspasos}/Crear.vue,app/Servicios/ServicioReservas.php | .ai/rules/traspasos-servicios.md |
+| resources/js/composables/useReservaBorrador.ts,app/Servicios/ServicioReservas.php,resources/js/pages/{Entregas,Devoluciones,Inventario/Traspasos}/Crear.vue | .ai/rules/traspasos.md |
 | resources/js/pages/**, resources/js/components/**, resources/js/components/AppLogoIcon.vue,public/favicon.svg,public/favicon.ico,public/apple-touch-icon.png | .ai/rules/ux.md |
 | resources/js/pages/Entregas/Crear.vue,app/Acciones/ConfirmarAcuseRecepcion.php,resources/views/acuses/comprobante.blade.php | .ai/rules/views-acuses.md |
 | app/Http/Controllers/InventarioFisicoController.php,app/Servicios/ServicioResumenInventarioFisico.php,resources/views/reportes/inventario-fisico-acta.blade.php | .ai/rules/views-reportes.md |

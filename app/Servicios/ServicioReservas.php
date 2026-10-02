@@ -6,12 +6,14 @@ use App\Enums\TipoReserva;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\RenglonReserva;
 use App\Models\Reserva;
+use App\Models\SaldoInventario;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Lectura/escritura de bajo nivel de `Reserva`/`RenglonReserva`, compartida
+ * Lectura/escritura de bajo nivel de `Reserva`/`RenglonReserva` (y la
+ * lectura de existencia efectiva que resulta de ellas), compartida
  * por `ReservarInventarioEntrega`, `ReservarInventarioTraspaso` y
  * `ReservarCustodiaDevolucion` sin mezclar
  * sus reglas de negocio (cada Acción decide QUÉ demanda agregar y contra qué
@@ -147,6 +149,91 @@ class ServicioReservas
     }
 
     /**
+     * Existencia EFECTIVA por `activo + talla` de un almacén: saldo real
+     * menos lo que otras reservas activas que compiten por ese stock ya
+     * apartaron (nunca la del propio `$excluirToken`), en DOS consultas fijas
+     * sin importar cuántas filas haya — es la lectura que el formulario
+     * consulta periódicamente. Sólo LEE: nunca crea, renueva ni libera
+     * reservas. Nunca negativa.
+     *
+     * @param  array<int, int>|null  $activoIds  null = todo el almacén
+     * @return array<int, array{activo_id: int, talla_id: ?int, disponible: int}>
+     */
+    public function disponibilidadEfectivaEnAlmacen(TipoReserva $tipo, int $empresaId, int $almacenId, ?array $activoIds = null, ?string $excluirToken = null): array
+    {
+        $saldos = SaldoInventario::query()
+            ->where('empresa_id', $empresaId)
+            ->where('almacen_id', $almacenId)
+            ->when($activoIds !== null, fn (Builder $q) => $q->whereIn('activo_id', $activoIds))
+            ->get(['activo_id', 'talla_id', 'cantidad']);
+
+        $apartado = $this->demandaCantidadPorActivos(
+            $tipo,
+            $empresaId,
+            $almacenId,
+            $saldos->pluck('activo_id')->unique()->values()->all(),
+            $excluirToken,
+        );
+
+        return $saldos
+            ->map(fn (SaldoInventario $s): array => [
+                'activo_id' => $s->activo_id,
+                'talla_id' => $s->talla_id,
+                'disponible' => max(0, (int) $s->cantidad - ($apartado[$s->activo_id.'-'.($s->talla_id ?? '0')] ?? 0)),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Igual que `custodiaApartadaDeOtros()` pero para VARIOS `DetalleEntrega`
+     * en una sola consulta agrupada (lectura periódica de Devoluciones).
+     *
+     * @param  array<int, int>  $detalleEntregaIds
+     * @return array<int, int> cantidad apartada por `detalle_entrega_id`
+     */
+    public function custodiaApartadaPorDetalles(array $detalleEntregaIds, ?string $excluirToken = null): array
+    {
+        if ($detalleEntregaIds === []) {
+            return [];
+        }
+
+        return RenglonReserva::query()
+            ->whereIn('detalle_entrega_id', $detalleEntregaIds)
+            ->whereNotNull('cantidad')
+            ->whereHas('reserva', function (Builder $q) use ($excluirToken): void {
+                $this->filtrarActivaExcluyendoPropia($q, $excluirToken)->where('tipo', TipoReserva::Devolucion);
+            })
+            ->selectRaw('detalle_entrega_id, SUM(cantidad) as total')
+            ->groupBy('detalle_entrega_id')
+            ->pluck('total', 'detalle_entrega_id')
+            ->map(fn ($v) => (int) $v)
+            ->all();
+    }
+
+    /**
+     * De un conjunto de unidades, cuáles ya apartó OTRA reserva activa (de
+     * cualquier tipo), en una sola consulta.
+     *
+     * @param  array<int, int>  $unidadActivoIds
+     * @return array<int, int>
+     */
+    public function unidadesApartadasPorOtrosEntre(array $unidadActivoIds, ?string $excluirToken = null): array
+    {
+        if ($unidadActivoIds === []) {
+            return [];
+        }
+
+        return RenglonReserva::query()
+            ->whereIn('unidad_activo_id', $unidadActivoIds)
+            ->whereHas('reserva', fn (Builder $q) => $this->filtrarActivaExcluyendoPropia($q, $excluirToken))
+            ->distinct()
+            ->pluck('unidad_activo_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
      * ¿Alguna reserva ACTIVA de otro borrador ya apartó esta unidad
      * concreta? Aplica igual a Entrega (unidad de almacén) y a Devolución
      * (unidad actualmente asignada que se va a devolver): una unidad física
@@ -204,9 +291,16 @@ class ServicioReservas
 
     /**
      * Cabecera de reserva para un token dado: reutiliza la fila si ya existe
-     * y sigue activa (recalcula sus líneas desde cero), o crea una nueva.
-     * Bloquea la fila para serializar dos recálculos concurrentes del MISMO
-     * borrador (p. ej. doble click). Debe llamarse dentro de una transacción.
+     * (recalcula sus líneas desde cero; una VENCIDA se renueva porque el
+     * borrador sigue abierto), o crea una nueva. Bloquea la fila para
+     * serializar dos recálculos concurrentes del MISMO borrador (p. ej. doble
+     * click). Debe llamarse dentro de una transacción.
+     *
+     * Un token ya CONSUMIDO (la operación se confirmó) o LIBERADO (el borrador
+     * se canceló/abandonó) está cerrado para siempre: un recálculo tardío —
+     * una petición debounced o en vuelo que llega después de liberar o de
+     * confirmar — NUNCA lo reactiva. Antes se reabría (`consumida_en`/
+     * `liberada_en` = null) y dejaba un apartado fantasma hasta el TTL.
      */
     public function obtenerOCrearCabecera(
         string $token,
@@ -221,6 +315,10 @@ class ServicioReservas
 
         if ($reserva !== null && ($reserva->user_id !== $userId || $reserva->tipo !== $tipo)) {
             throw new ExcepcionDeNegocioSimple('Esa reserva no existe o no te pertenece.');
+        }
+
+        if ($reserva !== null && ($reserva->consumida_en !== null || $reserva->liberada_en !== null)) {
+            throw new ExcepcionDeNegocioSimple('Este apartado ya se cerró (se confirmó o se canceló). Vuelve a capturar los artículos para apartarlos de nuevo.');
         }
 
         $expiraEn = now()->addMinutes(Reserva::DURACION_MINUTOS);
@@ -246,8 +344,6 @@ class ServicioReservas
             'colaborador_id' => $colaboradorId,
             'entrega_uniforme_id' => $entregaId,
             'expira_en' => $expiraEn,
-            'consumida_en' => null,
-            'liberada_en' => null,
         ]);
 
         $reserva->renglones()->delete();
@@ -255,10 +351,23 @@ class ServicioReservas
         return $reserva;
     }
 
-    public function liberar(string $token, int $userId): void
+    /**
+     * Quita SÓLO el bloqueo lógico: marca `liberada_en`. Nunca toca
+     * `saldos_inventario`, custodia ni unidades (reservar tampoco los tocó) y
+     * nunca crea movimientos. Idempotente: un token inexistente, ajeno (otro
+     * usuario u otro tipo), vencido, ya liberado o ya CONSUMIDO es un no-op —
+     * así Cancelar + `pagehide` + desmontar pueden llegar en cualquier orden,
+     * y una limpieza tardía nunca deshace una operación ya confirmada.
+     */
+    public function liberar(string $token, int $userId, ?TipoReserva $tipo = null): void
     {
-        DB::transaction(function () use ($token, $userId): void {
-            $reserva = Reserva::query()->where('token', $token)->where('user_id', $userId)->lockForUpdate()->first();
+        DB::transaction(function () use ($token, $userId, $tipo): void {
+            $reserva = Reserva::query()
+                ->where('token', $token)
+                ->where('user_id', $userId)
+                ->when($tipo !== null, fn (Builder $q) => $q->where('tipo', $tipo))
+                ->lockForUpdate()
+                ->first();
 
             if ($reserva === null || ! $reserva->estaActiva()) {
                 return;

@@ -347,6 +347,60 @@ class DevolucionController extends Controller
     }
 
     /**
+     * Custodia DEVOLVIBLE ahora de los renglones de una entrega: pendiente
+     * real (con devoluciones/incidencias/redistribuciones ya confirmadas)
+     * menos lo que otras devoluciones activas ya apartaron — sin descontar el
+     * propio `token`. Nunca es stock de almacén. El formulario la consulta
+     * periódicamente: es una LECTURA pura — nunca crea, renueva ni libera
+     * apartados, ni toca custodia o inventario.
+     */
+    public function disponibilidad(Request $request, ServicioReservas $reservas): JsonResponse
+    {
+        $this->authorize('create', Devolucion::class);
+
+        $datos = $request->validate([
+            'entrega_uniforme_id' => ['required', 'integer'],
+            'token' => ['nullable', 'uuid'],
+        ]);
+
+        $entrega = EntregaUniforme::query()
+            ->with('detalles.unidadActivo:id,estado,colaborador_id')
+            ->findOrFail((int) $datos['entrega_uniforme_id']);
+        abort_unless($request->user()->puedeAccederEmpresa($entrega->empresa_id), 403);
+
+        $token = $datos['token'] ?? null;
+        $detallesCantidad = $entrega->detalles->whereNull('unidad_activo_id');
+        $pendientes = $this->custodia->pendientesPorDetalle($detallesCantidad);
+        $apartadoOtros = $reservas->custodiaApartadaPorDetalles($detallesCantidad->modelKeys(), $token);
+
+        $detallesUnidad = $entrega->detalles->whereNotNull('unidad_activo_id');
+        $unidadesApartadas = $reservas->unidadesApartadasPorOtrosEntre(
+            $detallesUnidad->pluck('unidad_activo_id')->map(fn ($id) => (int) $id)->all(),
+            $token,
+        );
+
+        return response()->json([
+            'renglones' => $detallesCantidad->values()->map(function ($d) use ($pendientes, $apartadoOtros): array {
+                $pendiente = $pendientes[$d->id] ?? 0;
+                $apartado = $apartadoOtros[$d->id] ?? 0;
+
+                return [
+                    'detalle_entrega_id' => $d->id,
+                    'pendiente_real' => $pendiente,
+                    'apartado_por_otros' => min($apartado, $pendiente),
+                    'disponible' => max(0, $pendiente - $apartado),
+                ];
+            })->all(),
+            'unidades' => $detallesUnidad->values()->map(fn ($d): array => [
+                'detalle_entrega_id' => $d->id,
+                'unidad_disponible' => $d->unidadActivo?->estado === EstadoUnidadActivo::Asignada
+                    && $d->unidadActivo->colaborador_id === $entrega->colaborador_id,
+                'apartada_por_otro' => in_array((int) $d->unidad_activo_id, $unidadesApartadas, true),
+            ])->all(),
+        ]);
+    }
+
+    /**
      * Recalcula, de forma atómica, el apartado temporal de custodia de TODO
      * el borrador de Devolución actual (ver
      * `App\Acciones\ReservarCustodiaDevolucion`). NUNCA aparta stock de
@@ -392,7 +446,7 @@ class DevolucionController extends Controller
     public function liberarReserva(Request $request, string $token, ServicioReservas $reservas): JsonResponse
     {
         $this->authorize('create', Devolucion::class);
-        $reservas->liberar($token, $request->user()->id);
+        $reservas->liberar($token, $request->user()->id, TipoReserva::Devolucion);
 
         return response()->json(['ok' => true]);
     }

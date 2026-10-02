@@ -191,6 +191,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('inventario/traspasos/exportar', [MovimientoInventarioController::class, 'exportarTraspasos'])->name('inventario.traspasos.exportar');
     Route::get('inventario/traspasos/crear', [MovimientoInventarioController::class, 'nuevoTraspaso'])->name('inventario.traspasos.create');
     Route::get('inventario/traspasos/previsualizar', [MovimientoInventarioController::class, 'previsualizarTraspaso'])->name('inventario.traspasos.previsualizar');
+    Route::get('inventario/traspasos/disponibilidad', [MovimientoInventarioController::class, 'disponibilidadTraspaso'])->name('inventario.traspasos.disponibilidad');
     Route::post('inventario/traspasos/reserva', [MovimientoInventarioController::class, 'reservarTraspaso'])->name('inventario.traspasos.reserva');
     Route::delete('inventario/traspasos/reserva/{token}', [MovimientoInventarioController::class, 'liberarReservaTraspaso'])->name('inventario.traspasos.reserva.liberar');
     Route::post('inventario/traspasos/reserva/{token}/extender', [MovimientoInventarioController::class, 'extenderReservaTraspaso'])->name('inventario.traspasos.reserva.extender');
@@ -277,6 +278,7 @@ Route::middleware(['auth', 'verified', 'usuario.activo'])->group(function (): vo
     Route::get('devoluciones/exportar', [DevolucionController::class, 'exportar'])->name('devoluciones.exportar');
     Route::get('devoluciones/evidencias/{evidencia}', [DevolucionController::class, 'verEvidencia'])->name('devoluciones.evidencias.ver');
     // Apartado temporal (TTL) del borrador de Devolución — ver ReservarCustodiaDevolucion.
+    Route::get('devoluciones/disponibilidad', [DevolucionController::class, 'disponibilidad'])->name('devoluciones.disponibilidad');
     Route::post('devoluciones/reserva', [DevolucionController::class, 'reservar'])->name('devoluciones.reserva');
     Route::delete('devoluciones/reserva/{token}', [DevolucionController::class, 'liberarReserva'])->name('devoluciones.reserva.liberar');
     Route::post('devoluciones/reserva/{token}/extender', [DevolucionController::class, 'extenderReserva'])->name('devoluciones.reserva.extender');

@@ -685,11 +685,22 @@ class GuardarEntregaRequest extends FormRequest
                         if ($solicitado <= $disponible) {
                             continue;
                         }
-                        [$activoId] = explode('-', $clave);
+                        [$activoId, $tallaId] = explode('-', $clave);
                         $nombreActivo = Activo::query()->whereKey((int) $activoId)->value('nombre') ?? 'un activo';
+                        $tallaValor = $tallaId !== '0' ? Talla::query()->whereKey((int) $tallaId)->value('valor') : null;
+                        $piezas = $solicitado === 1 ? '1 pieza' : "{$solicitado} piezas";
+                        $variante = $tallaValor !== null ? " talla {$tallaValor}" : '';
+                        $quedan = match (true) {
+                            $disponible <= 0 => 'ya no quedan existencias disponibles en este almacén',
+                            $disponible === 1 => 'sólo queda 1 disponible en este almacén',
+                            default => "sólo quedan {$disponible} disponibles en este almacén",
+                        };
+                        // La demanda es MIXTA por construcción (artículo
+                        // suelto + conjunto): aquí sí hace falta decirlo,
+                        // porque ningún renglón por separado la excede.
                         $validator->errors()->add(
                             'items',
-                            "Solicitaste {$solicitado} piezas de {$nombreActivo} combinando artículos sueltos y conjuntos, pero sólo hay {$disponible} disponibles en este almacén.",
+                            "Sumando artículos sueltos y conjuntos solicitaste {$piezas} de «{$nombreActivo}»{$variante}, pero {$quedan}.",
                         );
                     }
                 }

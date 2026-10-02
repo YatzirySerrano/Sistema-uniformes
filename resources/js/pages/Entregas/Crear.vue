@@ -23,7 +23,12 @@ import {
     type RespuestaReserva,
     useReservaBorrador,
 } from '@/composables/useReservaBorrador';
+import { useDisponibilidadViva } from '@/composables/useDisponibilidadViva';
 import { fechaNegocio } from '@/lib/fecha';
+import {
+    mensajeDisponibilidadInsuficiente,
+    textoDisponibles,
+} from '@/lib/mensajesDisponibilidad';
 
 type OpcionEmpresa = {
     id: number;
@@ -212,6 +217,8 @@ type RespuestaReservaEntrega = RespuestaReserva & {
         activo_nombre: string | null;
         talla_valor: string | null;
         disponible_efectivo: number;
+        /** > 0 = parte del saldo la apartaron OTRAS operaciones. */
+        apartado_por_otros: number;
         solicitado_combinado: number;
         suficiente: boolean;
     }[];
@@ -663,6 +670,170 @@ async function cargarDisponibilidad(): Promise<void> {
             s.disponible;
     }
     disponibilidad.value = mapa;
+}
+
+// --- Disponibilidad viva (dos sesiones concurrentes) ----------------
+// Sin esto, la cifra quedaba congelada desde que se eligió el almacén y
+// otro usuario que apartaba existencias no se veía hasta recargar (QA
+// 2026-10). Se relee sólo lo de los activos en pantalla, con el token propio
+// (el apartado de este borrador nunca se descuenta a sí mismo) y SÓLO por
+// lectura: nunca toca el apartado ni su TTL. La redistribución (custodia) no
+// participa: no compite por stock de almacén.
+
+/** Claves activo+talla cuya disponibilidad BAJÓ con el formulario abierto. */
+const clavesReducidas = ref(new Set<string>());
+
+type SaldoEfectivo = {
+    activo_id: number;
+    talla_id: number | null;
+    disponible: number;
+};
+
+/** Fusiona cifras frescas del backend; nunca toca lo capturado por el usuario. */
+function fusionarDisponibilidad(saldos: SaldoEfectivo[]): void {
+    const mapa = { ...disponibilidad.value };
+    const reducidas = new Set(clavesReducidas.value);
+    for (const s of saldos) {
+        const clave = claveDisponible(s.activo_id, s.talla_id, null);
+        const previo = mapa[clave];
+        if (previo !== undefined && s.disponible < previo) reducidas.add(clave);
+        if (previo !== undefined && s.disponible > previo)
+            reducidas.delete(clave);
+        mapa[clave] = s.disponible;
+    }
+    disponibilidad.value = mapa;
+    clavesReducidas.value = reducidas;
+}
+
+const activoIdsEnPantalla = computed(() => [
+    ...new Set(
+        form.activos
+            .filter((f) => f.activo_id !== '')
+            .map((f) => Number(f.activo_id)),
+    ),
+]);
+
+const disponibilidadViva = useDisponibilidadViva<{ saldos: SaldoEfectivo[] }>({
+    habilitado: () =>
+        !esCustodia.value &&
+        paso.value === 2 &&
+        empresaId.value !== null &&
+        almacenSel.value !== null &&
+        !reserva.confirmando.value &&
+        !form.processing &&
+        (activoIdsEnPantalla.value.length > 0 ||
+            form.conjuntos.some((f) => f.conjunto_id !== '')),
+    consultar: async (signal) => {
+        if (activoIdsEnPantalla.value.length === 0) return { saldos: [] };
+        const params = new URLSearchParams({
+            empresa_id: String(empresaId.value),
+            almacen_id: String(almacenSel.value?.id),
+            token: reserva.token.value,
+        });
+        for (const id of activoIdsEnPantalla.value) {
+            params.append('activo_ids[]', String(id));
+        }
+        const res = await fetch(
+            `/entregas/disponibilidad?${params.toString()}`,
+            {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+                signal,
+            },
+        );
+        return res.ok
+            ? ((await res.json()) as { saldos: SaldoEfectivo[] })
+            : null;
+    },
+    aplicar: (json) => {
+        fusionarDisponibilidad(json.saldos);
+        // Los conjuntos consumen el mismo stock: se recalculan con él.
+        form.conjuntos.forEach((f, idx) => {
+            if (f.conjunto_id !== '')
+                void recalcularDisponibilidadConjunto(idx);
+        });
+    },
+});
+
+watch(paso, (p) => {
+    if (p === 2) void disponibilidadViva.refrescar();
+});
+
+// La respuesta de reservar es la lectura MÁS fresca (calculada bajo lock):
+// actualiza la pantalla de inmediato — también tras un rechazo — y descarta
+// una lectura periódica en vuelo que traería datos anteriores.
+watch(
+    () => reserva.resultado.value,
+    (res) => {
+        if (!res || esCustodia.value) return;
+        disponibilidadViva.invalidar();
+        fusionarDisponibilidad(
+            res.lineas_cantidad.map((l) => ({
+                activo_id: l.activo_id,
+                talla_id: l.talla_id,
+                disponible: l.disponible_efectivo,
+            })),
+        );
+        if (!res.ok) {
+            form.conjuntos.forEach((f, idx) => {
+                if (f.conjunto_id !== '')
+                    void recalcularDisponibilidadConjunto(idx);
+            });
+        }
+    },
+);
+
+/** ¿La falta de esta clave se debe a apartados de otras operaciones? */
+function faltaPorOtros(activoId: number | '', tallaId: number | null): boolean {
+    const clave = claveDisponible(activoId, tallaId, null);
+    if (clavesReducidas.value.has(clave)) return true;
+    return (
+        reserva.resultado.value?.lineas_cantidad.some(
+            (l) =>
+                claveDisponible(l.activo_id, l.talla_id, null) === clave &&
+                l.apartado_por_otros > 0,
+        ) ?? false
+    );
+}
+
+/** ¿Algún conjunto del borrador consume esta clave activo+talla? */
+function conjuntoConsumeClave(clave: string): boolean {
+    return Object.values(disponibilidadConjuntos).some((d) =>
+        d?.componentes.some(
+            (c) =>
+                c.tipo_control !== 'individual' &&
+                claveDisponible(c.activo_id, c.talla_id, null) === clave,
+        ),
+    );
+}
+
+/** Pista bajo la cantidad: "3 de 9 disponibles · quedarán 6" o por qué no alcanza. */
+function textoCantidadFila(fila: FilaActivo, i: number): string {
+    const disp = disponibleDe(fila.activo_id, fila.talla_id, fila.bolsa) ?? 0;
+    if (fila.cantidad >= 1 && fila.cantidad <= disp) {
+        return `${fila.cantidad} de ${textoDisponibles(disp)} · quedarán ${disp - fila.cantidad}`;
+    }
+    const sel = activosUI[i]?.sel;
+
+    return mensajeDisponibilidadInsuficiente({
+        operacion: 'entrega',
+        nombre: sel?.nombre ?? 'Artículo',
+        variante:
+            sel?.talla_fija?.valor ??
+            sel?.tallas.find((t) => t.id === fila.talla_id)?.valor,
+        solicitado: fila.cantidad,
+        disponible: disp,
+        porOtros:
+            !esCustodia.value && faltaPorOtros(fila.activo_id, fila.talla_id),
+    });
+}
+
+/** Disponible de una talla para la etiqueta del selector: la cifra viva si ya la hay. */
+function disponibleTalla(
+    activoId: number | '',
+    talla: { id: number; disponible?: number },
+): number {
+    return disponibleDe(activoId, talla.id) ?? talla.disponible ?? 0;
 }
 
 // --- Activos sueltos (por cantidad) --------------------------------
@@ -1166,11 +1337,19 @@ const problemasPaso2 = computed<string[]>(() => {
         }
         const disp = disponibleDe(fila.activo_id, fila.talla_id, fila.bolsa);
         if (disp !== null && fila.cantidad > disp) {
-            const talla = sel?.tallas.find(
-                (t) => t.id === fila.talla_id,
-            )?.valor;
             problemas.push(
-                `«${nombre}»${talla ? ` ${talla}` : ''}: solicitaste ${fila.cantidad} y sólo hay ${disp} disponibles.`,
+                mensajeDisponibilidadInsuficiente({
+                    operacion: 'entrega',
+                    nombre,
+                    variante:
+                        sel?.talla_fija?.valor ??
+                        sel?.tallas.find((t) => t.id === fila.talla_id)?.valor,
+                    solicitado: fila.cantidad,
+                    disponible: disp,
+                    porOtros:
+                        !esCustodia.value &&
+                        faltaPorOtros(fila.activo_id, fila.talla_id),
+                }),
             );
         }
     });
@@ -1225,10 +1404,32 @@ const problemasPaso2 = computed<string[]>(() => {
     if (res && !res.ok) {
         for (const l of res.lineas_cantidad) {
             if (l.suficiente) continue;
-            const nombre = l.activo_nombre ?? 'un activo';
-            const talla = l.talla_valor ? ` ${l.talla_valor}` : '';
+            const clave = claveDisponible(l.activo_id, l.talla_id, null);
+            const sueltas = form.activos.filter(
+                (f) =>
+                    f.activo_id !== '' &&
+                    claveDisponible(f.activo_id, f.talla_id, null) === clave,
+            );
+            const conConjuntos = conjuntoConsumeClave(clave);
+            // Un único renglón suelto ya quedó explicado arriba con la misma
+            // cifra fresca: repetirlo sólo confunde.
+            if (!conConjuntos && sueltas.length <= 1) continue;
             problemas.push(
-                `«${nombre}»${talla}: solicitaste ${l.solicitado_combinado} piezas combinando artículos sueltos y conjuntos, pero sólo hay ${l.disponible_efectivo} disponibles.`,
+                mensajeDisponibilidadInsuficiente({
+                    operacion: 'entrega',
+                    nombre: l.activo_nombre ?? 'un activo',
+                    variante: l.talla_valor,
+                    solicitado: l.solicitado_combinado,
+                    disponible: l.disponible_efectivo,
+                    porOtros:
+                        l.apartado_por_otros > 0 ||
+                        clavesReducidas.value.has(clave),
+                    origen: conConjuntos
+                        ? sueltas.length > 0
+                            ? 'mixto'
+                            : 'conjuntos'
+                        : 'varios-renglones',
+                }),
             );
         }
         for (const l of res.lineas_unidad) {
@@ -1364,6 +1565,9 @@ function enviar(): void {
         return;
     }
 
+    // La transacción de confirmación consume el apartado: ninguna limpieza
+    // automática (desmontar/pagehide) debe liberarlo mientras tanto.
+    reserva.iniciarConfirmacion();
     form.transform((datos) => ({
         ...datos,
         origen: modo.value,
@@ -1380,6 +1584,7 @@ function enviar(): void {
     })).post('/entregas', {
         preserveScroll: true,
         onError: () => irAPasoConError(),
+        onFinish: () => reserva.finalizarConfirmacion(),
     });
 }
 
@@ -1898,8 +2103,13 @@ onMounted(() => {
                                     (activosUI[i].sel?.tallas ?? []).map(
                                         (t) => ({
                                             valor: t.id,
-                                            etiqueta: `Talla ${t.valor} · ${(t.disponible ?? 0) > 0 ? `${t.disponible} disponibles` : 'Sin existencias'}`,
-                                            disabled: (t.disponible ?? 0) <= 0,
+                                            etiqueta: `Talla ${t.valor} · ${disponibleTalla(fila.activo_id, t) > 0 ? textoDisponibles(disponibleTalla(fila.activo_id, t)) : 'Sin existencias'}`,
+                                            disabled:
+                                                disponibleTalla(
+                                                    fila.activo_id,
+                                                    t,
+                                                ) <= 0 &&
+                                                t.id !== fila.talla_id,
                                         }),
                                     )
                                 "
@@ -1928,6 +2138,13 @@ onMounted(() => {
                                     ) ?? undefined
                                 "
                                 class="h-9"
+                                :aria-invalid="
+                                    (disponibleDe(
+                                        fila.activo_id,
+                                        fila.talla_id,
+                                        fila.bolsa,
+                                    ) ?? Infinity) < fila.cantidad
+                                "
                             />
                             <p
                                 v-if="
@@ -1947,61 +2164,9 @@ onMounted(() => {
                                         ? 'text-destructive'
                                         : 'text-muted-foreground'
                                 "
+                                aria-live="polite"
                             >
-                                <template
-                                    v-if="
-                                        fila.cantidad >= 1 &&
-                                        fila.cantidad <=
-                                            (disponibleDe(
-                                                fila.activo_id,
-                                                fila.talla_id,
-                                                fila.bolsa,
-                                            ) ?? 0)
-                                    "
-                                >
-                                    {{ fila.cantidad }} de
-                                    {{
-                                        disponibleDe(
-                                            fila.activo_id,
-                                            fila.talla_id,
-                                            fila.bolsa,
-                                        )
-                                    }}
-                                    disponibles · quedarán
-                                    {{
-                                        (disponibleDe(
-                                            fila.activo_id,
-                                            fila.talla_id,
-                                            fila.bolsa,
-                                        ) ?? 0) - fila.cantidad
-                                    }}
-                                </template>
-                                <template v-else>
-                                    Solo hay
-                                    {{
-                                        disponibleDe(
-                                            fila.activo_id,
-                                            fila.talla_id,
-                                            fila.bolsa,
-                                        )
-                                    }}
-                                    unidades disponibles de
-                                    {{ activosUI[i]?.sel?.nombre }}
-                                    <template
-                                        v-if="
-                                            activosUI[i]?.sel?.tallas.find(
-                                                (t) => t.id === fila.talla_id,
-                                            )
-                                        "
-                                    >
-                                        talla
-                                        {{
-                                            activosUI[i]?.sel?.tallas.find(
-                                                (t) => t.id === fila.talla_id,
-                                            )?.valor
-                                        }} </template
-                                    >en este almacén.
-                                </template>
+                                {{ textoCantidadFila(fila, i) }}
                             </p>
                             <InputError
                                 :message="erroresLaxos[`activos.${i}.cantidad`]"

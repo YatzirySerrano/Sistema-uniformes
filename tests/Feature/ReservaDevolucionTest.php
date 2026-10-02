@@ -12,6 +12,7 @@ use App\Models\Reserva;
 use App\Models\SaldoInventario;
 use App\Models\UnidadActivo;
 use App\Servicios\DTO\MovimientoInventarioDatos;
+use App\Servicios\ServicioCustodiaColaborador;
 use App\Servicios\ServicioInventario;
 use App\Servicios\ServicioReservas;
 use Illuminate\Support\Facades\Mail;
@@ -210,4 +211,39 @@ it('el token de otro usuario es rechazado al reservar custodia', function () {
 
     expect(fn () => reservarDevolucion(['token' => $token, 'user_id' => $this->otro->id, 'items_cantidad' => [['detalle_entrega_id' => $this->detalle->id, 'cantidad' => 1]]]))
         ->toThrow(ExcepcionDeNegocioSimple::class);
+});
+
+it('abandonar una devolución deja la custodia intacta y disponible; confirmar la reduce UNA vez y la reserva no revive', function () {
+    $custodia = app(ServicioCustodiaColaborador::class);
+    $item = [['detalle_entrega_id' => $this->detalle->id, 'cantidad' => 3]];
+
+    // Abandonar: la custodia real nunca cambió y otro borrador puede tomarla.
+    $abandonado = (string) Str::uuid();
+    reservarDevolucion(['token' => $abandonado, 'items_cantidad' => $item]);
+    expect($custodia->pendienteDeDetalle($this->detalle->fresh()))->toBe(3);
+    $this->actingAs($this->admin)->deleteJson("/devoluciones/reserva/{$abandonado}")->assertOk();
+    expect($custodia->pendienteDeDetalle($this->detalle->fresh()))->toBe(3)
+        ->and(reservarDevolucion(['user_id' => $this->otro->id, 'items_cantidad' => $item])['ok'])->toBeTrue();
+
+    // El apartado de `otro` vence; confirmar con un borrador nuevo.
+    $this->travel(11)->minutes();
+    $token = (string) Str::uuid();
+    reservarDevolucion(['token' => $token, 'items_cantidad' => $item]);
+    $saldoAntes = (int) SaldoInventario::query()->where('almacen_id', $this->datos['almacenA']->id)->value('cantidad');
+
+    $this->actingAs($this->admin)->post('/devoluciones', [
+        'entrega_uniforme_id' => $this->entrega->id, 'almacen_id' => $this->datos['almacenA']->id,
+        'fecha' => now()->toDateString(), 'firma' => firmaDemoBase64(), 'firma_operador' => firmaDemoBase64(),
+        'aceptacion' => true, 'reserva_token' => $token,
+        'activos' => [['detalle_entrega_id' => $this->detalle->id, 'cantidad' => 3, 'condicion' => 'reutilizable']],
+    ])->assertSessionHasNoErrors();
+
+    // Limpieza y recálculo tardíos tras confirmar.
+    $this->actingAs($this->admin)->deleteJson("/devoluciones/reserva/{$token}")->assertOk();
+    expect(fn () => reservarDevolucion(['token' => $token, 'items_cantidad' => $item]))->toThrow(ExcepcionDeNegocioSimple::class);
+
+    expect(Devolucion::count())->toBe(1)
+        ->and($custodia->pendienteDeDetalle($this->detalle->fresh()))->toBe(0)
+        ->and((int) SaldoInventario::query()->where('almacen_id', $this->datos['almacenA']->id)->value('cantidad'))->toBe($saldoAntes + 3)
+        ->and(Reserva::query()->where('token', $token)->sole()->consumida_en)->not->toBeNull();
 });
