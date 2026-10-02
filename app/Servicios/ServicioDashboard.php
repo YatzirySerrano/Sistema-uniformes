@@ -10,11 +10,15 @@ use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\CategoriaActivo;
 use App\Models\Colaborador;
+use App\Models\Contrato;
 use App\Models\Devolucion;
+use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\InventarioFisico;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
+use App\Models\Servicio;
+use App\Models\Sucursal;
 use App\Models\UnidadActivo;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
@@ -46,6 +50,7 @@ class ServicioDashboard
      *
      * @param  list<SeccionDashboard>  $secciones
      * @param  array<int, int>  $empresaIds
+     * @param  array<int, int>  $sucursalesAlcance  sucursales visibles para el usuario (ver `SeccionDashboard::usaAlcanceSucursales()`)
      * @return array{
      *     secciones: list<string>,
      *     kpis: array<string, int>,
@@ -54,7 +59,7 @@ class ServicioDashboard
      *     stock_bajo_detalle?: array<int, array<string, mixed>>,
      * }
      */
-    public function resumen(array $secciones, array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId): array
+    public function resumen(array $secciones, array $empresaIds, Carbon $desde, Carbon $hasta, ?int $sucursalId, ?int $almacenId, array $sucursalesAlcance = []): array
     {
         $tiene = fn (SeccionDashboard $seccion): bool => in_array($seccion, $secciones, true);
 
@@ -65,8 +70,46 @@ class ServicioDashboard
         ];
 
         if ($tiene(SeccionDashboard::Colaboradores)) {
-            $resumen['kpis']['colaboradores_activos'] = Colaborador::query()
+            // Ambos KPIs con el MISMO alcance: empresas del filtro, sólo las
+            // sucursales que el usuario puede ver (un perfil restringido no
+            // cuenta personal de otras sucursales de su empresa) y, si se
+            // eligió una, únicamente ésa (ya validada por `PanelController`).
+            $colaboradoresActivos = fn (): Builder => Colaborador::query()
                 ->whereIn('empresa_id', $empresaIds)->where('activo', true)
+                ->whereIn('sucursal_id', $sucursalesAlcance)
+                ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v));
+
+            $resumen['kpis']['colaboradores_activos'] = $colaboradoresActivos()->count();
+            // Personal activo sin servicio vigente asignado (mismo criterio
+            // que "Servicio → Asignar colaboradores": `servicio_actual_id`
+            // nulo).
+            $resumen['kpis']['colaboradores_sin_servicio'] = $colaboradoresActivos()
+                ->whereNull('servicio_actual_id')
+                ->count();
+        }
+
+        // Estructura de la organización: estado actual, sin rango de fechas.
+        if ($tiene(SeccionDashboard::Empresas)) {
+            $resumen['kpis']['empresas_activas'] = Empresa::query()
+                ->whereIn('id', $empresaIds)->where('activa', true)->count();
+        }
+
+        if ($tiene(SeccionDashboard::Sucursales)) {
+            $resumen['kpis']['sucursales_activas'] = Sucursal::query()
+                ->whereIn('empresa_id', $empresaIds)->whereIn('id', $sucursalesAlcance)
+                ->where('activa', true)->count();
+        }
+
+        if ($tiene(SeccionDashboard::Contratos)) {
+            $resumen['kpis']['contratos_activos'] = Contrato::query()
+                ->whereIn('empresa_id', $empresaIds)->activos()->count();
+        }
+
+        if ($tiene(SeccionDashboard::Servicios)) {
+            $resumen['kpis']['servicios_activos'] = Servicio::query()
+                ->activos()
+                ->whereIn('sucursal_id', $sucursalesAlcance)
+                ->whereHas('contrato', fn (Builder $q) => $q->whereIn('empresa_id', $empresaIds))
                 ->when($sucursalId, fn (Builder $q, int $v) => $q->where('sucursal_id', $v))
                 ->count();
         }

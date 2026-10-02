@@ -76,8 +76,14 @@ class PanelController extends Controller
                 : $this->acceso()->almacenesAutorizadosGlobal($usuario)->firstWhere('id', $datos['almacen_id']);
         }
 
+        // Sucursales que el usuario puede ver (restringido: sólo las suyas),
+        // calculadas sólo si alguna sección visible depende de ellas.
+        $sucursalesAlcance = collect($secciones)->contains(fn (SeccionDashboard $s): bool => $s->usaAlcanceSucursales())
+            ? $this->acceso()->sucursalesAutorizadasGlobal($usuario)->pluck('id')->map(fn ($id): int => (int) $id)->values()->all()
+            : [];
+
         return Inertia::render('Panel', [
-            'resumen' => $dashboard->resumen($secciones, $empresaIds, $desde, $hasta, $sucursal?->id, $almacen?->id),
+            'resumen' => $dashboard->resumen($secciones, $empresaIds, $desde, $hasta, $sucursal?->id, $almacen?->id, $sucursalesAlcance),
             'filtros' => [
                 'empresa_id' => $empresaFiltrada?->id,
                 'sucursal_id' => $sucursal?->id,

@@ -9,6 +9,7 @@ use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Servicios\DTO\MovimientoInventarioDatos;
 use App\Servicios\ServicioInventario;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
@@ -206,4 +207,59 @@ it('rechaza en el Form Request una extensión no admitida', function () {
     ])->assertSessionHasErrors('firma_archivo');
 
     expect(EntregaUniforme::count())->toBe(0);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Comprobante: el bloque de "documento adjunto" cabe en su recuadro
+|--------------------------------------------------------------------------
+| QA 2026-10: el nombre (UUID) y el SHA-256 de 64 caracteres no tenían
+| dónde partirse, el bloque reutilizaba la altura fija de la imagen de firma
+| y la tabla de firmas tenía ancho automático, así que el texto invadía
+| "Firma de quien entrega". El solapamiento real se revisa en QA manual
+| sobre el PDF; aquí se fija la estructura que lo evita.
+*/
+
+it('el comprobante muestra completos el nombre largo y el SHA-256 del documento adjunto, en una caja que los parte y sin invadir la otra firma', function (string $vista) {
+    $nombre = '085a1853-5f9e-44c1-9ab5-001e4467fa7b-firma-remota-del-colaborador-con-nombre-muy-largo.pdf';
+    $hash = '007d7590941804b5e69d3198b3fc8b439b0d2bfc5e680bb51f095a6fe96b0054';
+    ($this->entregar)(['firma' => firmaDemoBase64()])->assertSessionHasNoErrors();
+    $acuse = AcuseRecepcion::query()->sole();
+
+    $datos = [
+        'acuse' => $acuse, 'snapshot' => $acuse->snapshot_entrega, 'firmaDataUri' => null,
+        'firmaArchivo' => (object) ['created_at' => now()],
+        'firmaDocumentoAdjunto' => (object) ['nombre_original' => $nombre, 'hash_sha256' => $hash],
+        'firmaOperadorDataUri' => null, 'logoDataUri' => null, 'evidenciasPorItem' => [],
+    ];
+    $html = view($vista, $datos)->render();
+
+    expect($html)
+        ->toContain($nombre)
+        ->toContain($hash)
+        ->toContain('Firma: documento adjunto')
+        ->toContain('<div class="firma-documento">')
+        ->toContain('<table class="firmas">')
+        ->toContain('table.firmas { width: 100%; table-layout: fixed; }')
+        ->toMatch('/\.firma-documento \{[^}]*overflow-wrap: anywhere/')
+        ->toMatch('/\.valor-largo \{[^}]*overflow-wrap: anywhere/')
+        // La caja del documento ya no usa la altura fija de la imagen.
+        ->not->toMatch('/class="firma-img"[^>]*>\s*<strong>Firma: documento adjunto/');
+
+    // Y el motor real (Dompdf) lo genera sin errores.
+    expect(Pdf::loadView($vista, $datos)->setPaper('letter')->output())->toStartWith('%PDF');
+})->with(['acuses.comprobante', 'acuses.comprobante-devolucion']);
+
+it('la firma dibujada se sigue imprimiendo como imagen en su recuadro', function () {
+    ($this->entregar)(['firma' => firmaDemoBase64()])->assertSessionHasNoErrors();
+    $acuse = AcuseRecepcion::query()->sole();
+
+    $html = view('acuses.comprobante', [
+        'acuse' => $acuse, 'snapshot' => $acuse->snapshot_entrega, 'firmaDataUri' => firmaDemoBase64(),
+        'firmaOperadorDataUri' => firmaDemoBase64(), 'logoDataUri' => null, 'evidenciasPorItem' => [],
+    ])->render();
+
+    expect($html)->toContain('<img class="firma-img" src="data:image/png;base64,')
+        ->not->toContain('<div class="firma-documento">')
+        ->toContain($acuse->hash_firma);
 });

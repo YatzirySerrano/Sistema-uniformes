@@ -5,6 +5,7 @@ import { computed } from 'vue';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { usePermisos } from '@/composables/usePermisos';
+import { clasesAccesoNavInferior } from '@/lib/navegacionMovil';
 
 // Menú inferior fijo, sólo en móvil (`md:hidden`): la navegación principal
 // del sistema al alcance del pulgar, sin tener que subir hasta el sidebar de
@@ -55,23 +56,33 @@ const enlaces = computed(() =>
             v-for="enlace in enlaces"
             :key="enlace.href"
             :href="enlace.href"
-            class="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px]"
             :class="
-                isCurrentOrParentUrl(enlace.href)
-                    ? 'text-primary'
-                    : 'text-muted-foreground'
+                clasesAccesoNavInferior(isCurrentOrParentUrl(enlace.href))
+                    .enlace
+            "
+            :aria-current="
+                isCurrentOrParentUrl(enlace.href) ? 'page' : undefined
             "
         >
-            <component :is="enlace.icono" class="size-5" />
+            <span
+                :class="
+                    clasesAccesoNavInferior(isCurrentOrParentUrl(enlace.href))
+                        .icono
+                "
+            >
+                <component :is="enlace.icono" class="size-5" />
+            </span>
             {{ enlace.titulo }}
         </Link>
         <button
             type="button"
-            class="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px]"
+            :class="clasesAccesoNavInferior(false).enlace"
             aria-label="Ver más secciones"
             @click="toggleSidebar"
         >
-            <Menu class="size-5" />
+            <span :class="clasesAccesoNavInferior(false).icono">
+                <Menu class="size-5" />
+            </span>
             Más
         </button>
     </nav>

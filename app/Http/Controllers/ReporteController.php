@@ -60,7 +60,7 @@ class ReporteController extends Controller
 
         if ($tab === 'inventario') {
             $metricasInventario = $this->reportes->metricasInventario($empresaIds, $almacenes, $filtros);
-            $metricasUnidades = $this->reportes->metricasUnidades($empresaIds, $almacenes, $filtros);
+            $metricasUnidades = $this->reportes->metricasUnidades($empresaIds, $filtros);
 
             $datos['kpis'] = $this->kpisInventario($metricasInventario, $metricasUnidades);
             $datos['graficas'] = [
@@ -286,7 +286,7 @@ class ReporteController extends Controller
         // el scope por empresa/almacén ya viaja dentro, no se reconstruye.
         $saldos = $this->reportes->consultaInventario($empresaIds, $almacenes, $filtros)->get();
         $metricasInventario = $this->reportes->metricasInventario($empresaIds, $almacenes, $filtros);
-        $metricasUnidades = $this->reportes->metricasUnidades($empresaIds, $almacenes, $filtros);
+        $metricasUnidades = $this->reportes->metricasUnidades($empresaIds, $filtros);
 
         $contexto = new ContextoExportacion(
             'Inventario',

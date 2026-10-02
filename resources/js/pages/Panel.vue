@@ -5,12 +5,17 @@ import type { ApexFormatterOpts, ApexOptions } from 'apexcharts';
 import {
     AlertTriangle,
     Boxes,
+    Briefcase,
+    Building2,
     CheckCircle2,
     ClipboardList,
+    FileText,
+    MapPin,
     Package,
     RotateCcw,
     ScanLine,
     Users,
+    UserX,
     Warehouse,
     Wrench,
     X,
@@ -53,7 +58,11 @@ type SeccionDashboard =
     | 'devoluciones'
     | 'almacenes'
     | 'unidades'
-    | 'inventario_fisico';
+    | 'inventario_fisico'
+    | 'empresas'
+    | 'sucursales'
+    | 'contratos'
+    | 'servicios';
 
 type Resumen = {
     secciones: SeccionDashboard[];
@@ -71,6 +80,11 @@ type Resumen = {
         unidades_perdidas?: number;
         unidades_robadas?: number;
         rondas_inventario_fisico_en_proceso?: number;
+        colaboradores_sin_servicio?: number;
+        empresas_activas?: number;
+        sucursales_activas?: number;
+        contratos_activos?: number;
+        servicios_activos?: number;
     };
     series: {
         entregas_por_periodo?: { fecha: string; total: number }[];
@@ -287,6 +301,21 @@ const hrefRondasEnProceso = computed(
     () =>
         `/inventarios-fisicos${qs({ empresa_id: props.filtros.empresa_id, estado: 'en_proceso' })}`,
 );
+const hrefEmpresasActivas = computed(
+    () => `/empresas${qs({ estado: 'activas' })}`,
+);
+const hrefSucursalesActivas = computed(
+    () =>
+        `/sucursales${qs({ empresa_id: props.filtros.empresa_id, estado: 'activas' })}`,
+);
+const hrefContratosActivos = computed(
+    () =>
+        `/contratos${qs({ empresa_id: props.filtros.empresa_id, estado: 'activos' })}`,
+);
+const hrefServiciosActivos = computed(
+    () =>
+        `/servicios${qs({ empresa_id: props.filtros.empresa_id, estado: 'activos' })}`,
+);
 function hrefUnidades(estadoVisible: string): string {
     return `/activos/unidades${qs({
         empresa_id: props.filtros.empresa_id,
@@ -500,6 +529,59 @@ const tarjetasSecundarias = computed(() => {
             icono: ScanLine,
             href: hrefRondasEnProceso.value,
             tonoClase: 'bg-teal-500/10 text-teal-600 dark:text-teal-400',
+        },
+    ]);
+});
+
+// Estructura de la organización (perfiles administrativos): una fila
+// compacta aparte para no mezclarla con la operación. Mismo principio:
+// sólo llegan los KPIs de secciones autorizadas.
+const tarjetasEstructura = computed(() => {
+    const k = props.resumen.kpis;
+
+    return soloPresentes([
+        {
+            clave: 'empresas',
+            titulo: 'Empresas activas',
+            valor: k.empresas_activas,
+            icono: Building2,
+            href: hrefEmpresasActivas.value,
+            tonoClase: 'bg-slate-500/10 text-slate-600 dark:text-slate-400',
+        },
+        {
+            clave: 'sucursales',
+            titulo: 'Sucursales activas',
+            valor: k.sucursales_activas,
+            icono: MapPin,
+            href: hrefSucursalesActivas.value,
+            tonoClase: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
+        },
+        {
+            clave: 'contratos',
+            titulo: 'Contratos activos',
+            valor: k.contratos_activos,
+            icono: FileText,
+            href: hrefContratosActivos.value,
+            tonoClase: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400',
+        },
+        {
+            clave: 'servicios',
+            titulo: 'Servicios activos',
+            valor: k.servicios_activos,
+            icono: Briefcase,
+            href: hrefServiciosActivos.value,
+            tonoClase: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
+        },
+        {
+            clave: 'colaboradores-sin-servicio',
+            titulo: 'Colaboradores sin servicio',
+            valor: k.colaboradores_sin_servicio,
+            icono: UserX,
+            // Sin enlace: el listado de Colaboradores no filtra por esto.
+            href: '',
+            tonoClase: k.colaboradores_sin_servicio
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                : 'bg-muted text-muted-foreground',
         },
     ]);
 });
@@ -978,6 +1060,34 @@ function claseGrafica(clave: ClaveGrafica): string {
                     :ayuda="t.ayuda"
                 />
             </div>
+
+            <section
+                v-if="tarjetasEstructura.length"
+                aria-labelledby="titulo-estructura"
+                class="space-y-2"
+            >
+                <h2
+                    id="titulo-estructura"
+                    class="text-muted-foreground text-xs font-medium tracking-wide uppercase"
+                >
+                    Estructura de la organización
+                </h2>
+                <div
+                    class="grid gap-3"
+                    :class="COLUMNAS_SECUNDARIAS[tarjetasEstructura.length]"
+                >
+                    <TarjetaKpi
+                        v-for="t in tarjetasEstructura"
+                        :key="t.clave"
+                        compacto
+                        :titulo="t.titulo"
+                        :valor="t.valor"
+                        :icono="t.icono"
+                        :href="t.href || undefined"
+                        :tono-clase="t.tonoClase"
+                    />
+                </div>
+            </section>
 
             <div
                 v-if="tarjetasSecundarias.length"

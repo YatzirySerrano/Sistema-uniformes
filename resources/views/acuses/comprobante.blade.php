@@ -19,6 +19,15 @@
         table.items th { background: #f1f5f9; }
         .firma-caja { margin-top: 24px; }
         .firma-img { border: 1px solid #cbd5e1; height: 110px; width: 100%; max-width: 260px; object-fit: contain; }
+        /* Dos columnas de firma de ancho FIJO: un texto largo nunca ensancha
+           una columna sobre la otra (layout automático de tabla). */
+        table.firmas { width: 100%; table-layout: fixed; }
+        table.firmas td { vertical-align: top; }
+        /* Firma por documento adjunto: caja que CRECE con su contenido (sin
+           la altura fija de la imagen) y parte nombres/hashes largos. */
+        .firma-documento { border: 1px solid #cbd5e1; padding: 8px; min-height: 92px; max-width: 242px; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; word-wrap: break-word; }
+        .firma-documento .etiqueta { margin-top: 5px; color: #64748b; }
+        .valor-largo { font-size: 9px; overflow-wrap: anywhere; word-wrap: break-word; }
         .pie { margin-top: 28px; font-size: 9px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 8px; }
         .folio { font-size: 12px; font-weight: bold; }
         .evidencia-fila td { background: #f8fafc; }
@@ -180,16 +189,19 @@
         </div>
     @endif
 
-    <table style="width:100%">
+    <table class="firmas">
         <tr>
             <td style="width:50%; padding-right:8px">
                 <div class="firma-caja">
                     <h2>Firma de quien recibe</h2>
                     @if (! empty($firmaDocumentoAdjunto))
-                        <div class="firma-img" style="padding:8px; font-size:10px">
-                            <strong>Firma: documento adjunto</strong><br>
-                            Archivo PDF «{{ $firmaDocumentoAdjunto->nombre_original }}» subido como firma a distancia; se conserva íntegro en el expediente del acuse.<br>
-                            SHA-256: {{ $firmaDocumentoAdjunto->hash_sha256 }}
+                        <div class="firma-documento">
+                            <strong>Firma: documento adjunto</strong>
+                            <div class="etiqueta">Archivo:</div>
+                            <div class="valor-largo">{{ $firmaDocumentoAdjunto->nombre_original }}</div>
+                            <div class="etiqueta">Documento adjunto utilizado como firma a distancia; se conserva íntegro en el expediente del acuse.</div>
+                            <div class="etiqueta">SHA-256:</div>
+                            <div class="valor-largo">{{ $firmaDocumentoAdjunto->hash_sha256 }}</div>
                         </div>
                     @elseif ($firmaDataUri)
                         <img class="firma-img" src="{{ $firmaDataUri }}" alt="Firma de quien recibe">

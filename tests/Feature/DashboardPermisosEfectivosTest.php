@@ -6,11 +6,13 @@ use App\Enums\RolSistema;
 use App\Models\Activo;
 use App\Models\Almacen;
 use App\Models\Colaborador;
+use App\Models\Contrato;
 use App\Models\Devolucion;
 use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\MovimientoInventario;
 use App\Models\SaldoInventario;
+use App\Models\Servicio;
 use App\Models\Sucursal;
 use App\Models\UnidadActivo;
 use App\Models\User;
@@ -32,7 +34,7 @@ use Tests\TestCase;
  * @var array<string, list<string>>
  */
 const CLAVES_POR_SECCION_DASHBOARD = [
-    'colaboradores' => ['kpis.colaboradores_activos'],
+    'colaboradores' => ['kpis.colaboradores_activos', 'kpis.colaboradores_sin_servicio'],
     'activos' => ['kpis.activos_activos'],
     'inventario' => [
         'kpis.existencias_disponibles', 'kpis.activos_stock_bajo',
@@ -47,6 +49,10 @@ const CLAVES_POR_SECCION_DASHBOARD = [
         'kpis.unidades_perdidas', 'kpis.unidades_robadas', 'series.unidades_por_estado',
     ],
     'inventario_fisico' => ['kpis.rondas_inventario_fisico_en_proceso'],
+    'empresas' => ['kpis.empresas_activas'],
+    'sucursales' => ['kpis.sucursales_activas'],
+    'contratos' => ['kpis.contratos_activos'],
+    'servicios' => ['kpis.servicios_activos'],
 ];
 
 /**
@@ -61,6 +67,8 @@ const TABLAS_POR_SECCION_DASHBOARD = [
     'devoluciones' => ['devoluciones'],
     'unidades' => ['unidades_activo'],
     'inventario_fisico' => ['inventarios_fisicos'],
+    'contratos' => ['contratos'],
+    'servicios' => ['servicios'],
 ];
 
 /**
@@ -91,6 +99,13 @@ function escenarioDashboardPermisos(): array
         'almacen_id' => $almacen->id, 'colaborador_id' => $colaborador->id,
         'registrada_por' => $registra->id, 'fecha' => now()->toDateString(),
     ]);
+
+    // Estructura: 1 contrato activo + 1 inactivo, 1 servicio activo + 1
+    // inactivo. El colaborador de arriba no tiene servicio asignado.
+    $contrato = Contrato::factory()->for($empresa)->create(['activo' => true]);
+    Contrato::factory()->for($empresa)->create(['activo' => false]);
+    Servicio::factory()->for($contrato)->for($sucursal)->create(['activo' => true]);
+    Servicio::factory()->for($contrato)->for($sucursal)->create(['activo' => false]);
 
     return compact('empresa', 'almacen', 'sucursal');
 }
@@ -307,7 +322,7 @@ it('reproduce los roles reales por su combinación de permisos', function (array
         'colaboradores.desactivar', 'colaboradores.importar', 'colaboradores.expediente-ver',
         'colaboradores.expediente-administrar', 'colaboradores.expediente-descargar',
         'areas.ver', 'areas.crear', 'areas.editar', 'areas.desactivar',
-    ], ['colaboradores']],
+    ], ['colaboradores', 'empresas', 'sucursales', 'contratos', 'servicios']],
     'Inspector' => [[
         'activos.ver', 'activos.administrar', 'inventario.ajustar',
         'unidades-activo.ver', 'unidades-activo.administrar',
@@ -327,7 +342,7 @@ it('reproduce los roles reales por su combinación de permisos', function (array
         'entregas.ver', 'entregas.crear',
         'acuses.ver', 'acuses.firmar', 'acuses.ver-pdf', 'acuses.ver-firma',
         'devoluciones.ver', 'devoluciones.crear', 'devoluciones.confirmar', 'devoluciones.ver-pdf', 'devoluciones.ver-firma',
-    ], ['colaboradores', 'activos', 'inventario', 'entregas', 'devoluciones', 'almacenes', 'unidades', 'inventario_fisico']],
+    ], ['colaboradores', 'activos', 'inventario', 'entregas', 'devoluciones', 'almacenes', 'unidades', 'inventario_fisico', 'empresas', 'sucursales', 'contratos', 'servicios']],
 ]);
 
 it('los filtros visibles dependen de las secciones y del acceso a sus buscadores', function () {
@@ -389,4 +404,155 @@ it('la card de rondas cuenta sólo las rondas en proceso de las empresas autoriz
     app(CrearRondaInventarioFisico::class)->ejecutar($ajena, 'Ajena', null, $usuario->id);
 
     expect(resumenDelDashboard($this, $usuario)['kpis']['rondas_inventario_fisico_en_proceso'])->toBe(1);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Estructura de la organización (perfiles administrativos)
+|--------------------------------------------------------------------------
+*/
+
+const PERMISOS_ESTRUCTURA = ['colaboradores.ver', 'empresas.ver', 'sucursales.ver', 'contratos.ver', 'servicios.ver'];
+
+it('con permisos de estructura recibe empresas, sucursales, contratos, servicios y colaboradores sin servicio', function () {
+    $resumen = resumenDelDashboard($this, usuarioConPermisos(PERMISOS_ESTRUCTURA, [$this->empresa]));
+
+    assertSeccionesDashboard($resumen, ['colaboradores', 'empresas', 'sucursales', 'contratos', 'servicios']);
+    expect($resumen['kpis'])->toMatchArray([
+        'colaboradores_activos' => 1,
+        'colaboradores_sin_servicio' => 1,
+        'empresas_activas' => 1,
+        'sucursales_activas' => 1,
+        'contratos_activos' => 1,
+        'servicios_activos' => 1,
+    ]);
+});
+
+it('quitar contratos.ver retira sólo lo de contratos, sin cambiar de rol, y ya no consulta la tabla', function () {
+    $usuario = usuarioConPermisos(PERMISOS_ESTRUCTURA, [$this->empresa]);
+    $usuario->roles()->first()->revokePermissionTo('contratos.ver');
+    $usuario = $usuario->fresh();
+
+    $this->actingAs($usuario);
+    DB::enableQueryLog();
+    $resumen = resumenDelDashboard($this, $usuario);
+    $sql = collect(DB::getQueryLog())->pluck('query')->implode("\n");
+
+    assertSeccionesDashboard($resumen, ['colaboradores', 'empresas', 'sucursales', 'servicios']);
+    expect($sql)->not->toContain('from "contratos" where "empresa_id"');
+});
+
+it('dos roles distintos con los mismos permisos efectivos reciben el mismo dashboard', function () {
+    $a = resumenDelDashboard($this, usuarioConPermisos(PERMISOS_ESTRUCTURA, [$this->empresa]));
+    $b = resumenDelDashboard($this, usuarioConPermisos(PERMISOS_ESTRUCTURA, [$this->empresa]));
+
+    expect($b)->toEqual($a);
+});
+
+it('el filtro de empresa acota las métricas de estructura y nunca suma una empresa no autorizada', function () {
+    ['empresa' => $otra] = escenarioDashboardPermisos();
+    ['empresa' => $ajena] = escenarioDashboardPermisos();
+    $usuario = usuarioConPermisos(PERMISOS_ESTRUCTURA, [$this->empresa, $otra]);
+
+    $todas = resumenDelDashboard($this, $usuario)['kpis'];
+    $una = resumenDelDashboard($this, $usuario, "?empresa_id={$otra->id}")['kpis'];
+    $forzada = resumenDelDashboard($this, $usuario, "?empresa_id={$ajena->id}")['kpis'];
+
+    expect($todas)->toMatchArray(['empresas_activas' => 2, 'contratos_activos' => 2, 'servicios_activos' => 2, 'sucursales_activas' => 2])
+        ->and($una)->toMatchArray(['empresas_activas' => 1, 'contratos_activos' => 1, 'servicios_activos' => 1, 'sucursales_activas' => 1])
+        ->and($forzada)->toMatchArray($todas);
+});
+
+it('el filtro de sucursal acota servicios y colaboradores sin servicio', function () {
+    $otraSucursal = Sucursal::factory()->for($this->empresa)->create();
+    Colaborador::factory()->for($this->empresa)->for($otraSucursal)->count(2)->create(['activo' => true, 'servicio_actual_id' => null]);
+    Servicio::factory()->for(Contrato::factory()->for($this->empresa))->for($otraSucursal)->count(3)->create(['activo' => true]);
+    $usuario = usuarioConPermisos(PERMISOS_ESTRUCTURA, [$this->empresa]);
+
+    $kpis = resumenDelDashboard($this, $usuario, "?sucursal_id={$otraSucursal->id}")['kpis'];
+
+    expect($kpis['servicios_activos'])->toBe(3)
+        ->and($kpis['colaboradores_sin_servicio'])->toBe(2);
+});
+
+it('un perfil restringido a una sucursal sólo cuenta sus sucursales y servicios', function () {
+    $otraSucursal = Sucursal::factory()->for($this->empresa)->create();
+    Servicio::factory()->for(Contrato::factory()->for($this->empresa))->for($otraSucursal)->count(3)->create(['activo' => true]);
+    $usuario = usuarioConPermisos(PERMISOS_ESTRUCTURA, [$this->empresa]);
+    $usuario->sucursales()->sync([$this->sucursal->id]);
+
+    $kpis = resumenDelDashboard($this, $usuario->fresh())['kpis'];
+
+    expect($kpis['sucursales_activas'])->toBe(1)
+        ->and($kpis['servicios_activos'])->toBe(1);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Colaboradores: alcance de sucursales autorizadas
+|--------------------------------------------------------------------------
+| Ambos KPIs de colaboradores ("activos" y "sin servicio") contaban personal
+| de sucursales NO autorizadas de una empresa autorizada cuando no había una
+| sucursal elegida. Ahora usan el mismo `$sucursalesAlcance` que Sucursales
+| y Servicios.
+*/
+
+describe('colaboradores por sucursal autorizada', function () {
+    beforeEach(function () {
+        $this->sucursalA = Sucursal::factory()->for($this->empresa)->create();
+        $this->sucursalB = Sucursal::factory()->for($this->empresa)->create();
+        Colaborador::factory()->for($this->empresa)->for($this->sucursalA)->count(10)->create(['activo' => true, 'servicio_actual_id' => null]);
+        Colaborador::factory()->for($this->empresa)->for($this->sucursalB)->count(20)->create(['activo' => true, 'servicio_actual_id' => null]);
+
+        $this->restringido = function (array $sucursales): User {
+            $usuario = usuarioConPermisos(['colaboradores.ver', 'sucursales.ver'], [$this->empresa]);
+            $usuario->sucursales()->sync(collect($sucursales)->pluck('id'));
+
+            return $usuario->fresh();
+        };
+    });
+
+    it('A: autorizado sólo para A, sin filtro → cuenta 10, no 30', function () {
+        $kpis = resumenDelDashboard($this, ($this->restringido)([$this->sucursalA]))['kpis'];
+
+        expect($kpis['colaboradores_activos'])->toBe(10)
+            ->and($kpis['colaboradores_sin_servicio'])->toBe(10);
+    });
+
+    it('B: autorizado sólo para A, eligiendo A → 10', function () {
+        $kpis = resumenDelDashboard($this, ($this->restringido)([$this->sucursalA]), "?sucursal_id={$this->sucursalA->id}")['kpis'];
+
+        expect($kpis['colaboradores_activos'])->toBe(10)
+            ->and($kpis['colaboradores_sin_servicio'])->toBe(10);
+    });
+
+    it('C: autorizado para A y B, sin filtro → 30', function () {
+        $kpis = resumenDelDashboard($this, ($this->restringido)([$this->sucursalA, $this->sucursalB]))['kpis'];
+
+        expect($kpis['colaboradores_activos'])->toBe(30)
+            ->and($kpis['colaboradores_sin_servicio'])->toBe(30);
+    });
+
+    it('D: forzar por URL una sucursal no autorizada no cuenta a su personal', function () {
+        $kpis = resumenDelDashboard($this, ($this->restringido)([$this->sucursalA]), "?sucursal_id={$this->sucursalB->id}")['kpis'];
+
+        expect($kpis['colaboradores_activos'])->toBe(10)
+            ->and($kpis['colaboradores_sin_servicio'])->toBe(10);
+    });
+
+    it('E: "activos" y "sin servicio" comparten el mismo alcance (sin servicio ⊆ activos en cada escenario)', function () {
+        // 4 de A ya tienen servicio: dejan de contar como "sin servicio" pero
+        // siguen siendo activos; los de B nunca entran para quien sólo ve A.
+        $servicio = Servicio::factory()->for(Contrato::factory()->for($this->empresa))->for($this->sucursalA)->create();
+        Colaborador::query()->where('sucursal_id', $this->sucursalA->id)->limit(4)->get()
+            ->each(fn (Colaborador $c) => $c->update(['servicio_actual_id' => $servicio->id]));
+
+        foreach ([[$this->sucursalA], [$this->sucursalA, $this->sucursalB]] as $i => $sucursales) {
+            $kpis = resumenDelDashboard($this, ($this->restringido)($sucursales))['kpis'];
+            [$activos, $sinServicio] = $i === 0 ? [10, 6] : [30, 26];
+
+            expect($kpis['colaboradores_activos'])->toBe($activos)
+                ->and($kpis['colaboradores_sin_servicio'])->toBe($sinServicio);
+        }
+    });
 });

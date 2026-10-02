@@ -301,16 +301,23 @@ class ServicioReportes
      * acoplar Reportes al Panel). Cardinalidad acotada (estado × condición),
      * nunca se traen las unidades una por una.
      *
+     * Mismo ALCANCE que el listado de unidades
+     * (`UnidadActivoController::consultaUnidades()`): la empresa DUEÑA de la
+     * unidad (autorizadas ∩ filtro de empresa) y los filtros explícitos de
+     * almacén/activo. Antes ignoraba el filtro de empresa (con "DASTI"
+     * contaba también las unidades de INMAG) y además exigía que el almacén
+     * de la unidad siguiera abasteciendo a la empresa, cosa que el listado no
+     * hace (en una unidad asignada el almacén es sólo procedencia).
+     *
      * @param  array<string, mixed>  $filtros
      * @param  Collection<int, int>|array<int, int>  $empresaIds
-     * @param  Collection<int, int>|array<int, int>  $almacenesPermitidos
      * @return array<string, int> clave = `EstadoVisibleUnidad::value`
      */
-    public function metricasUnidades($empresaIds, $almacenesPermitidos, array $filtros): array
+    public function metricasUnidades($empresaIds, array $filtros): array
     {
         $agrupadas = UnidadActivo::query()
             ->whereIn('empresa_id', $empresaIds)
-            ->whereIn('almacen_id', $almacenesPermitidos)
+            ->when($filtros['empresa_id'] ?? null, fn ($q, $v) => $q->where('empresa_id', $v))
             ->when($filtros['almacen_id'] ?? null, fn ($q, $v) => $q->where('almacen_id', $v))
             ->when($filtros['activo_id'] ?? null, fn ($q, $v) => $q->where('activo_id', $v))
             ->selectRaw('estado, condicion, count(*) as total')

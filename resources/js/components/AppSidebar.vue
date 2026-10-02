@@ -42,12 +42,15 @@ import {
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
+    useSidebar,
 } from '@/components/ui/sidebar';
 import { usePermisos } from '@/composables/usePermisos';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
+import { cerrarSidebarSiMovil } from '@/lib/navegacionMovil';
 
 const { puede } = usePermisos();
 const { isCurrentOrParentUrl } = useCurrentUrl();
+const sidebar = useSidebar();
 const name = usePage().props.name;
 const { puedeInstalar, instalar } = usePwaInstall();
 
@@ -273,7 +276,10 @@ const grupos = computed<Grupo[]>(() =>
             <SidebarMenu>
                 <SidebarMenuItem>
                     <SidebarMenuButton size="lg" as-child>
-                        <Link href="/dashboard">
+                        <Link
+                            href="/dashboard"
+                            @success="cerrarSidebarSiMovil(sidebar)"
+                        >
                             <div
                                 class="flex aspect-square size-8 items-center justify-center"
                             >
@@ -314,7 +320,10 @@ const grupos = computed<Grupo[]>(() =>
                             :is-active="isCurrentOrParentUrl(enlace.href)"
                             :tooltip="enlace.titulo"
                         >
-                            <Link :href="enlace.href">
+                            <Link
+                                :href="enlace.href"
+                                @success="cerrarSidebarSiMovil(sidebar)"
+                            >
                                 <component :is="enlace.icono" />
                                 <span>{{ enlace.titulo }}</span>
                             </Link>

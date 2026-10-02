@@ -8,6 +8,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/pages/Inventario/Movimientos.vue,resources/js/pages/Entregas/Crear.vue,app/Policies/EntregaUniformePolicy.php,app/Acciones/CorregirEntrega.php | .ai/rules/acciones.md |
 | app/Http/Requests/Activos/GuardarActivoRequest.php,resources/js/pages/Activos/Formulario.vue,app/Http/Controllers/CategoriaActivoController.php | .ai/rules/activos-http-controllers.md |
 | app/Servicios/ServicioDistribucionActivo.php,app/Servicios/ServicioEstadoInventario.php,resources/js/components/sistema/DistribucionActualActivo.vue,resources/js/pages/Activos/Detalle.vue | .ai/rules/activos.md |
+| resources/views/acuses/comprobante.blade.php,resources/views/acuses/comprobante-devolucion.blade.php | .ai/rules/acuses-views-acuses.md |
 | app/Servicios/ServicioEvidencias.php,app/Servicios/ServicioAcusePdf.php,app/Servicios/ServicioAcuseDevolucionPdf.php,resources/views/acuses/comprobante.blade.php,resources/views/acuses/comprobante-devolucion.blade.php | .ai/rules/acuses.md |
 | resources/js/components/almacenes/FormularioAlmacen.vue | .ai/rules/almacenes.md |
 | bootstrap/app.php,app/Providers/AppServiceProvider.php | .ai/rules/bootstrap-providers.md |
@@ -21,6 +22,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Acciones/{DesmarcarUnidadPresente,MarcarUnidadPresente}.php,resources/js/pages/InventarioFisico/Detalle.vue,resources/js/composables/{useCamaraFoto,useEscanerQr}.ts | .ai/rules/composables.md |
 | app/Servicios/ServicioCascadaSuspension.php,app/Servicios/ServicioOperatividad.php,app/Models/Suspension.php,app/Http/Controllers/{Empresa,Sucursal,Activo}Controller.php,app/Http/Controllers/Concerns/ReactivaSuspendidos.php | .ai/rules/concerns.md |
 | app/Models/MovimientoInventario.php,app/Http/Controllers/MovimientoInventarioController.php,app/Acciones/{MarcarCondicionInventario,RestaurarCondicionInventario,MarcarUnidadIncidencia,DarDeBajaUnidadActivo,RecuperarUnidadActivo}.php | .ai/rules/controllers-acciones.md |
+| app/Servicios/ServicioReportes.php,app/Http/Controllers/ReporteController.php,app/Http/Controllers/UnidadActivoController.php | .ai/rules/controllers-http-controllers.md |
 | app/Http/Controllers/EntregaController.php,resources/js/pages/Entregas/Crear.vue | .ai/rules/controllers-js-pages-entregas.md |
 | app/Http/Controllers/EntregaController.php,app/Models/DocumentoExpediente.php | .ai/rules/controllers-models.md |
 | app/Acciones/AjustarMinimoInventario.php,app/Http/Controllers/InventarioController.php,app/Servicios/ServicioInventario.php | .ai/rules/controllers-servicios.md |
@@ -67,6 +69,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Http/Controllers/ServicioController.php,app/Acciones/AsignarColaboradoresServicio.php,app/Http/Requests/Servicios/AsignarColaboradoresServicioRequest.php | .ai/rules/requests-servicios.md |
 | app/Models/BitacoraAuditoria.php,app/Servicios/ServicioAuditoria.php,app/Http/Controllers/BitacoraController.php | .ai/rules/servicios-http-controllers.md |
 | app/Acciones/{VerificarExistenciaInventarioFisico,FinalizarRondaInventarioFisico}.php,app/Models/InventarioFisicoExistencia.php,app/Servicios/ServicioResumenInventarioFisico.php,resources/js/pages/InventarioFisico/Detalle.vue | .ai/rules/servicios-js-pages-inventario-fisico.md |
+| app/Enums/SeccionDashboard.php,app/Servicios/ServicioDashboard.php,resources/js/pages/Panel.vue | .ai/rules/servicios-js-pages.md |
 | resources/js/pages/Activos/Formulario.vue,app/Http/Requests/Activos/{GuardarActivoRequest,AgregarExistenciasRequest}.php,app/Servicios/ServicioEtiquetasQr.php | .ai/rules/servicios.md |
 | app/Servicios/ServicioFirmaColaborador.php,app/Soporte/ValidadorFirma.php,app/Acciones/ConfirmarAcuse*.php,app/Http/Requests/Concerns/ValidaFirmaColaborador.php,resources/js/components/sistema/FirmaColaborador.vue,resources/js/components/sistema/PadFirma.vue | .ai/rules/sistema-js-components-sistema.md |
 | app/Http/Controllers/Concerns/ExportaListado.php,app/Exports/ListadoExport.php,resources/views/reportes/listado-generico.blade.php,resources/js/components/sistema/BotonesExportar.vue | .ai/rules/sistema.md |
