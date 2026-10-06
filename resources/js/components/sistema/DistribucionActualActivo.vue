@@ -17,6 +17,10 @@ type Custodio = {
     id: number;
     nombre_completo: string;
     numero_empleado: string | null;
+    empresa: string | null;
+    sucursal: string | null;
+    /** Custodio de otra empresa (redistribución): la propiedad no cambia. */
+    otra_empresa: boolean;
 };
 
 export type DistribucionActivo = {
@@ -72,6 +76,12 @@ function varianteGrupo(grupo: Grupo) {
     return grupo === 'almacen'
         ? 'success'
         : varianteBadgeFinalidad(grupo === 'sin_clasificar' ? null : grupo);
+}
+
+/** "Empresa · Sucursal" del custodio, sólo si no es la dueña del activo. */
+function ubicacionCustodio(c: Custodio): string | null {
+    if (!c.otra_empresa) return null;
+    return [c.empresa, c.sucursal].filter(Boolean).join(' · ') || null;
 }
 
 function nombreCustodio(c: Custodio): string {
@@ -152,6 +162,13 @@ const sinPiezas = computed(
                                 >{{ nombreCustodio(f.custodio) }}</Link
                             >
                             <template v-else>{{ f.almacen ?? '—' }}</template>
+                            <span
+                                v-if="
+                                    f.custodio && ubicacionCustodio(f.custodio)
+                                "
+                                class="text-muted-foreground block text-xs font-normal"
+                                >{{ ubicacionCustodio(f.custodio) }}</span
+                            >
                         </span>
                         <dl
                             class="text-muted-foreground flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs sm:justify-end"
@@ -202,6 +219,10 @@ const sinPiezas = computed(
                         <template v-if="u.custodio"
                             >{{ nombreCustodio(u.custodio) }} ·
                         </template>
+                        <template
+                            v-if="u.custodio && ubicacionCustodio(u.custodio)"
+                            >{{ ubicacionCustodio(u.custodio) }} ·
+                        </template>
                         <template v-if="u.almacen">{{ u.almacen }} · </template>
                         {{ u.condicion }}
                     </p>
@@ -248,6 +269,14 @@ const sinPiezas = computed(
                                 >
                                 <span v-else class="text-muted-foreground"
                                     >No asignada</span
+                                >
+                                <span
+                                    v-if="
+                                        u.custodio &&
+                                        ubicacionCustodio(u.custodio)
+                                    "
+                                    class="text-muted-foreground block text-xs"
+                                    >{{ ubicacionCustodio(u.custodio) }}</span
                                 >
                             </td>
                             <td class="py-1.5">{{ u.almacen ?? '—' }}</td>

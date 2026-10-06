@@ -438,3 +438,75 @@ it('un conjunto de JSIG en custodia se redistribuye a otra empresa sólo si est�
         ->and(($this->custodia)($this->arturo))->toBe(20)
         ->and(($this->saldos)())->toBe($saldosAntes);
 });
+
+/*
+ * "Distribución actual del activo" (detalle del activo de JSIG): responde
+ * DÓNDE están hoy sus piezas, aunque el custodio sea de otra empresa.
+ */
+describe('distribución actual del activo con custodia en otra empresa', function () {
+    beforeEach(function () {
+        $this->empresaB->update(['nombre_comercial' => 'Estrategias']);
+        $this->sucursalB->update(['nombre' => 'Legionarios']);
+        $this->colaboradorB->update(['nombre_completo' => 'Miguel Aguilar Mondragón']);
+
+        $this->distribucion = fn (Activo $activo): array => $this->actingAs($this->admin)
+            ->get("/activos/{$activo->id}")->assertOk()->viewData('page')['props']['distribucion'];
+
+        $this->filaDe = fn (array $distribucion, Colaborador $colaborador): array => collect($distribucion['filas'])
+            ->where('custodio.id', $colaborador->id)->values()->all();
+    });
+
+    it('muestra a Miguel con sus 2 piezas en el grupo de su finalidad real, sin duplicar', function (string $finalidad, string $grupo) {
+        ($this->redistribuir)($this->arturoUsuario, $this->colaboradorB, ($this->camisas)(2, $finalidad))->assertSessionHasNoErrors();
+
+        $distribucion = ($this->distribucion)($this->camisa);
+        $miguel = ($this->filaDe)($distribucion, $this->colaboradorB);
+
+        expect($miguel)->toHaveCount(1)
+            ->and($miguel[0])->toMatchArray(['grupo' => $grupo, 'talla' => 'M', 'cantidad' => 2])
+            ->and($miguel[0]['custodio'])->toMatchArray([
+                'nombre_completo' => 'Miguel Aguilar Mondragón',
+                'empresa' => 'Estrategias',
+                'sucursal' => 'Legionarios',
+                'otra_empresa' => true,
+            ])
+            ->and(($this->filaDe)($distribucion, $this->arturo)[0])->toMatchArray(['grupo' => 'redistribucion', 'cantidad' => 18])
+            ->and(($this->filaDe)($distribucion, $this->arturo)[0]['custodio']['otra_empresa'])->toBeFalse()
+            ->and($distribucion['totales'][$grupo])->toBe($grupo === 'redistribucion' ? 20 : 2)
+            // Almacén + custodias vigentes = existencia lógica (100 iniciales).
+            ->and(array_sum($distribucion['totales']))->toBe(100)
+            ->and($distribucion['totales']['almacen'])->toBe(80)
+            ->and($this->camisa->fresh()->empresa_id)->toBe($this->jsig->id);
+    })->with([
+        'uso personal' => ['uso_personal', 'uso_personal'],
+        'para redistribuir' => ['redistribucion', 'redistribucion'],
+    ]);
+
+    it('un renglón histórico sin finalidad cuenta en "Sin clasificar"', function () {
+        ($this->redistribuir)($this->arturoUsuario, $this->colaboradorB, ($this->camisas)(2))->assertSessionHasNoErrors();
+        EntregaUniforme::query()->where('colaborador_id', $this->colaboradorB->id)->sole()->detalles()->update(['finalidad' => null]);
+
+        $distribucion = ($this->distribucion)($this->camisa);
+
+        expect(($this->filaDe)($distribucion, $this->colaboradorB)[0])->toMatchArray(['grupo' => 'sin_clasificar', 'cantidad' => 2])
+            ->and($distribucion['totales'])->toBe(['almacen' => 80, 'uso_personal' => 0, 'redistribucion' => 18, 'sin_clasificar' => 2]);
+    });
+
+    it('una unidad de JSIG asignada a Miguel figura con su custodio real y sin cambiar de dueña', function () {
+        ($this->redistribuir)($this->arturoUsuario, $this->colaboradorB, [], [['unidad_activo_id' => $this->unidad->id, 'finalidad' => 'uso_personal']])
+            ->assertSessionHasNoErrors();
+
+        $distribucion = ($this->distribucion)($this->celular);
+
+        expect($distribucion['unidades'])->toHaveCount(1)
+            ->and($distribucion['unidades'][0])->toMatchArray(['codigo' => $this->unidad->codigo, 'grupo' => 'uso_personal'])
+            ->and($distribucion['unidades'][0]['custodio'])->toMatchArray([
+                'id' => $this->colaboradorB->id,
+                'empresa' => 'Estrategias',
+                'sucursal' => 'Legionarios',
+                'otra_empresa' => true,
+            ])
+            ->and($distribucion['totales'])->toBe(['almacen' => 0, 'uso_personal' => 1, 'redistribucion' => 0, 'sin_clasificar' => 0])
+            ->and($this->unidad->fresh()->empresa_id)->toBe($this->jsig->id);
+    });
+});

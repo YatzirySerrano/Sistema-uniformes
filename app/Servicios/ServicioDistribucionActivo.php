@@ -39,8 +39,8 @@ class ServicioDistribucionActivo
     /**
      * @return array{
      *     totales: array{almacen: int, uso_personal: int, redistribucion: int, sin_clasificar: int},
-     *     filas: list<array{grupo: 'almacen'|'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, almacen: string|null, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null}|null, talla: string|null, cantidad: int}>,
-     *     unidades: list<array{codigo: string, public_token: string, grupo: 'almacen'|'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null}|null, almacen: string|null, condicion: string, finalidad_etiqueta: string|null}>,
+     *     filas: list<array{grupo: 'almacen'|'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, almacen: string|null, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null, empresa: string|null, sucursal: string|null, otra_empresa: bool}|null, talla: string|null, cantidad: int}>,
+     *     unidades: list<array{codigo: string, public_token: string, grupo: 'almacen'|'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null, empresa: string|null, sucursal: string|null, otra_empresa: bool}|null, almacen: string|null, condicion: string, finalidad_etiqueta: string|null}>,
      *     unidades_total: int
      * }
      */
@@ -92,18 +92,22 @@ class ServicioDistribucionActivo
     }
 
     /**
-     * @return list<array{grupo: 'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, almacen: null, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null}, talla: string|null, cantidad: int}>
+     * @return list<array{grupo: 'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, almacen: null, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null, empresa: string|null, sucursal: string|null, otra_empresa: bool}, talla: string|null, cantidad: int}>
      */
     private function filasCustodia(Activo $activo): array
     {
+        // Sin filtrar por la empresa de la ENTREGA: tras una redistribución
+        // hacia otra empresa autorizada, la entrega es de la empresa destino
+        // pero las piezas siguen siendo de este activo (su dueña no cambia).
+        // Filtrarla las hacía desaparecer, porque el renglón del custodio
+        // anterior ya las descuenta como redistribuidas.
         /** @var Collection<int, DetalleEntrega> $detalles */
         $detalles = DetalleEntrega::query()
             ->where('activo_id', $activo->id)
             ->whereNull('unidad_activo_id')
             ->whereHas('entrega', fn ($q) => $q
-                ->where('empresa_id', $activo->empresa_id)
                 ->whereIn('estado', [EstadoEntrega::Firmada->value, EstadoEntrega::Corregida->value]))
-            ->with('entrega:id,colaborador_id', 'entrega.colaborador:id,nombre_completo,numero_empleado')
+            ->with('entrega:id,colaborador_id', 'entrega.colaborador:id,nombre_completo,numero_empleado,empresa_id,sucursal_id', 'entrega.colaborador.empresa:id,nombre_comercial', 'entrega.colaborador.sucursal:id,nombre')
             ->orderBy('id')
             ->get();
 
@@ -124,7 +128,7 @@ class ServicioDistribucionActivo
                 'grupo' => $grupo,
                 'grupo_etiqueta' => FinalidadCustodia::etiquetaDe($detalle->finalidad),
                 'almacen' => null,
-                'custodio' => $this->custodio($colaborador),
+                'custodio' => $this->custodio($colaborador, $activo),
                 'talla' => $detalle->talla_valor_snapshot,
                 'cantidad' => 0,
             ];
@@ -144,7 +148,7 @@ class ServicioDistribucionActivo
      * Unidades de seguimiento individual que hoy están en almacén o bajo
      * custodia (las de baja ya no forman parte de la distribución).
      *
-     * @return array{0: list<array{codigo: string, public_token: string, grupo: 'almacen'|'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null}|null, almacen: string|null, condicion: string, finalidad_etiqueta: string|null}>, 1: int}
+     * @return array{0: list<array{codigo: string, public_token: string, grupo: 'almacen'|'uso_personal'|'redistribucion'|'sin_clasificar', grupo_etiqueta: string, custodio: array{id: int, nombre_completo: string, numero_empleado: string|null, empresa: string|null, sucursal: string|null, otra_empresa: bool}|null, almacen: string|null, condicion: string, finalidad_etiqueta: string|null}>, 1: int}
      */
     private function unidades(Activo $activo): array
     {
@@ -159,14 +163,14 @@ class ServicioDistribucionActivo
         }
 
         $unidades = $consulta
-            ->with(['almacen:id,nombre', 'colaborador:id,nombre_completo,numero_empleado'])
+            ->with(['almacen:id,nombre', 'colaborador:id,nombre_completo,numero_empleado,empresa_id,sucursal_id', 'colaborador.empresa:id,nombre_comercial', 'colaborador.sucursal:id,nombre'])
             ->orderBy('codigo')
             ->limit(self::LIMITE_UNIDADES)
             ->get();
 
         $finalidades = $this->finalidadesVigentes($unidades->where('estado', EstadoUnidadActivo::Asignada)->pluck('id')->all());
 
-        $filas = array_values($unidades->map(function (UnidadActivo $u) use ($finalidades): array {
+        $filas = array_values($unidades->map(function (UnidadActivo $u) use ($finalidades, $activo): array {
             $asignada = $u->estado === EstadoUnidadActivo::Asignada && $u->colaborador !== null;
             $finalidad = $finalidades[$u->id] ?? null;
 
@@ -175,7 +179,7 @@ class ServicioDistribucionActivo
                 'public_token' => $u->public_token,
                 'grupo' => $asignada ? $this->grupoDeFinalidad($finalidad) : 'almacen',
                 'grupo_etiqueta' => $asignada ? FinalidadCustodia::etiquetaDe($finalidad) : 'En almacén',
-                'custodio' => $asignada ? $this->custodio($u->colaborador) : null,
+                'custodio' => $asignada ? $this->custodio($u->colaborador, $activo) : null,
                 'almacen' => $u->almacen?->nombre,
                 'condicion' => $u->condicion->etiqueta(),
                 'finalidad_etiqueta' => $asignada ? FinalidadCustodia::etiquetaDe($finalidad) : null,
@@ -229,14 +233,21 @@ class ServicioDistribucionActivo
     }
 
     /**
-     * @return array{id: int, nombre_completo: string, numero_empleado: string|null}
+     * Custodio actual. `otra_empresa`: pertenece a una empresa distinta de la
+     * DUEÑA del activo (custodia recibida por redistribución entre empresas);
+     * la propiedad no cambia, sólo dónde están las piezas.
+     *
+     * @return array{id: int, nombre_completo: string, numero_empleado: string|null, empresa: string|null, sucursal: string|null, otra_empresa: bool}
      */
-    private function custodio(Colaborador $colaborador): array
+    private function custodio(Colaborador $colaborador, Activo $activo): array
     {
         return [
             'id' => $colaborador->id,
             'nombre_completo' => $colaborador->nombre_completo,
             'numero_empleado' => $colaborador->numero_empleado,
+            'empresa' => $colaborador->empresa?->nombre_comercial,
+            'sucursal' => $colaborador->sucursal?->nombre,
+            'otra_empresa' => $colaborador->empresa_id !== $activo->empresa_id,
         ];
     }
 }

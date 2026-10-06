@@ -115,7 +115,10 @@ it('las unidades individuales muestran código, estado, custodio, almacén, cond
 
     expect($unidades[$asignada->codigo])->toMatchArray([
         'grupo' => 'redistribucion', 'grupo_etiqueta' => 'Para redistribuir', 'finalidad_etiqueta' => 'Para redistribuir',
-        'custodio' => ['id' => $this->yatziri->id, 'nombre_completo' => 'Yatziri Custodia', 'numero_empleado' => $this->yatziri->numero_empleado],
+        'custodio' => [
+            'id' => $this->yatziri->id, 'nombre_completo' => 'Yatziri Custodia', 'numero_empleado' => $this->yatziri->numero_empleado,
+            'empresa' => 'Empresa A', 'sucursal' => $this->datos['sucursalA']->nombre, 'otra_empresa' => false,
+        ],
         'condicion' => 'Funcionando',
     ])->and($unidades[$libre->codigo])->toMatchArray([
         'grupo' => 'almacen', 'grupo_etiqueta' => 'En almacén', 'custodio' => null, 'almacen' => 'Almacén A', 'finalidad_etiqueta' => null,
