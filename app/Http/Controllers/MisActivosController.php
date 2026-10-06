@@ -64,10 +64,12 @@ class MisActivosController extends Controller
             $cantidades[$clave]['cantidad'] += $fila['cantidad'];
         }
 
-        $unidades = UnidadActivo::query()
+        // Por la empresa de la entrega que se la asignó, no sólo por su dueña:
+        // una unidad de otra empresa recibida por redistribución también es
+        // custodia de este colaborador.
+        $unidades = $custodia->acotarUnidadesAsignadasAEmpresas(UnidadActivo::query()
             ->where('colaborador_id', $colaborador->getKey())
-            ->where('estado', EstadoUnidadActivo::Asignada)
-            ->where('empresa_id', $colaborador->empresa_id)
+            ->where('estado', EstadoUnidadActivo::Asignada), [$colaborador->empresa_id])
             ->with(['activo:id,nombre', 'especificacion'])
             ->orderBy('codigo')
             ->get()

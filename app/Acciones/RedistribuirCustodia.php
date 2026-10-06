@@ -142,10 +142,10 @@ class RedistribuirCustodia
                 throw new ExcepcionDeNegocioSimple('El colaborador está inactivo y no puede recibir entregas.');
             }
 
-            if ($destinatario->empresa_id !== $custodio->empresa_id) {
-                throw new ExcepcionDeNegocioSimple('Sólo puedes redistribuir tu custodia a colaboradores de la misma empresa.');
-            }
-
+            // El DESTINO (empresa/sucursal) es el del destinatario y puede
+            // ser cualquier empresa autorizada del usuario (lo valida
+            // `GuardarEntregaRequest`); el ORIGEN sigue siendo sólo la
+            // custodia real del custodio, revalidada bajo lock abajo.
             $entrega = EntregaUniforme::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA),
                 'empresa_id' => $destinatario->empresa_id,
@@ -222,6 +222,8 @@ class RedistribuirCustodia
                 }
             }
 
+            $this->exigirUnaEmpresaPropietaria($entrega);
+
             $destinatario->loadMissing(['empresa:id,nombre_comercial', 'servicioActual:id,nombre']);
 
             $this->auditoria->registrar('entregas', 'redistribuir', [
@@ -254,6 +256,24 @@ class RedistribuirCustodia
     }
 
     /**
+     * Una entrega lleva bienes de UNA sola empresa propietaria
+     * (`activos.empresa_id`). Al devolverlos, el reingreso va al inventario
+     * de esa empresa (`EntregaUniforme::empresaInventarioId()`); mezclar
+     * propietarios dejaría sin almacén válido a la devolución.
+     */
+    private function exigirUnaEmpresaPropietaria(EntregaUniforme $entrega): void
+    {
+        $propietarias = Activo::query()
+            ->whereIn('id', $entrega->detalles()->select('activo_id'))
+            ->distinct()
+            ->count('empresa_id');
+
+        if ($propietarias > 1) {
+            throw new ExcepcionDeNegocioSimple('Una entrega sólo puede incluir bienes de una misma empresa propietaria. Registra los de cada empresa en entregas separadas.');
+        }
+    }
+
+    /**
      * Toma `$cantidad` piezas de los renglones de la custodia del origen
      * (más antiguos primero) y crea los renglones hijos correspondientes.
      * Recalcula el pendiente DESPUÉS de bloquear los renglones de origen.
@@ -266,11 +286,13 @@ class RedistribuirCustodia
             throw new ExcepcionDeNegocioSimple('No tienes permiso para reasignar activos de uso personal de tu custodia.');
         }
 
+        // La pertenencia la prueba la custodia (renglones de origen de
+        // abajo), no la empresa del custodio: pudo recibir bienes de otra
+        // empresa propietaria por una redistribución previa.
         $activo = Activo::query()
-            ->where('empresa_id', $custodio->empresa_id)
             ->where('tipo_control', TipoControlActivo::Cantidad)
             ->where('activo', true)
-            ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a esta empresa o ya no está disponible.'));
+            ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados ya no está disponible.'));
 
         /** @var Collection<int, DetalleEntrega> $origenes */
         $origenes = DetalleEntrega::query()
@@ -364,9 +386,8 @@ class RedistribuirCustodia
     private function redistribuirConjunto(EntregaUniforme $entrega, Colaborador $custodio, Colaborador $destinatario, int $conjuntoId, int $cantidad, array &$unidadesVistas, ?FinalidadCustodia $finalidadDestino = null): array
     {
         $conjunto = Conjunto::query()
-            ->where('empresa_id', $custodio->empresa_id)
             ->with('componentes.activo')
-            ->findOr($conjuntoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los conjuntos seleccionados no pertenece a esta empresa.'));
+            ->findOr($conjuntoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los conjuntos seleccionados ya no existe.'));
 
         $incompleto = fn (string $activo): ExcepcionDeNegocioSimple => new ExcepcionDeNegocioSimple(
             "El conjunto «{$conjunto->nombre}» está incompleto en tu custodia (falta {$activo} para {$cantidad} conjunto(s)). Entrega sus piezas por separado."
@@ -439,7 +460,6 @@ class RedistribuirCustodia
         $unidad = UnidadActivo::query()->whereKey($unidadId)->lockForUpdate()->first();
 
         if (! $unidad instanceof UnidadActivo
-            || $unidad->empresa_id !== $custodio->empresa_id
             || $unidad->colaborador_id !== $custodio->getKey()
             || $unidad->estado !== EstadoUnidadActivo::Asignada
         ) {

@@ -38,8 +38,11 @@ class GuardarDevolucionRequest extends FormRequest
             return ['entrega_uniforme_id' => ['required', 'integer', 'exists:entregas_uniformes,id']];
         }
 
-        $empresaId = $entrega->empresa_id;
         $entregaId = $entrega->id;
+        // El almacén destino abastece a la empresa DUEÑA de los bienes (su
+        // inventario), que sólo difiere de la de la entrega cuando se
+        // redistribuyeron hacia otra empresa autorizada.
+        $empresaInventarioId = $entrega->empresaInventarioId();
 
         return [
             'entrega_uniforme_id' => ['required', 'integer'],
@@ -50,7 +53,7 @@ class GuardarDevolucionRequest extends FormRequest
             'colaborador_id' => ['nullable', 'integer'],
             'almacen_id' => [
                 'required', 'integer',
-                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaInventarioId)),
             ],
             'fecha' => ['required', 'date', 'before_or_equal:today'],
             'motivo' => ['nullable', 'string', 'max:255'],

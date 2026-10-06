@@ -7,6 +7,7 @@ use App\Enums\EstadoUnidadActivo;
 use App\Enums\TipoMovimiento;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Mail\ComprobanteDevolucionMail;
+use App\Models\Activo;
 use App\Models\AcuseDevolucion;
 use App\Models\DetalleDevolucion;
 use App\Models\Devolucion;
@@ -172,7 +173,14 @@ class ConfirmarAcuseDevolucion
 
                 // Reingreso real al inventario: sólo hasta este punto, con
                 // ambas firmas y el consentimiento ya validados, el activo
-                // vuelve a estar disponible.
+                // vuelve a estar disponible. El saldo es el de la empresa
+                // DUEÑA del activo (`activos.empresa_id`), no el de quien lo
+                // devuelve: tras una redistribución hacia otra empresa
+                // autorizada difieren, y el stock por empresa nunca se mezcla.
+                $empresaDeActivo = Activo::query()
+                    ->whereIn('id', $detalles->pluck('activo_id')->unique())
+                    ->pluck('empresa_id', 'id');
+
                 foreach ($detalles as $detalle) {
                     if ($detalle->unidad_activo_id !== null) {
                         $this->unidadesActivo->devolver(
@@ -194,7 +202,7 @@ class ConfirmarAcuseDevolucion
                     }
 
                     $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-                        empresaId: $bloqueada->empresa_id,
+                        empresaId: (int) ($empresaDeActivo[$detalle->activo_id] ?? $bloqueada->empresa_id),
                         almacenId: $bloqueada->almacen_id,
                         activoId: $detalle->activo_id,
                         tallaId: $detalle->talla_id,

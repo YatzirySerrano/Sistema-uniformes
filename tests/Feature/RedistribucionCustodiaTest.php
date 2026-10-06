@@ -264,7 +264,7 @@ it('un usuario sin ficha de colaborador no tiene custodia que redistribuir', fun
     $sinFicha = ($this->usuarioConPermisos)(['entregas.ver', 'entregas.redistribuir']);
 
     ($this->redistribuir)($sinFicha, $this->juan, ($this->camisas)(1))
-        ->assertSessionHasErrors(['origen' => 'Tu cuenta no está vinculada a una ficha de colaborador de esta empresa, así que no tienes activos bajo custodia que redistribuir.']);
+        ->assertSessionHasErrors(['origen' => 'Tu cuenta no está vinculada a una ficha de colaborador activa, así que no tienes activos bajo custodia que redistribuir.']);
 
     expect(EntregaUniforme::count())->toBe(0);
 });

@@ -604,9 +604,11 @@ class EntregaController extends Controller
     }
 
     /**
-     * Custodio del usuario autenticado en la empresa `?empresa_id=` (su
-     * propio registro de colaborador). Nunca se acepta un colaborador
-     * arbitrario desde el request.
+     * Custodio (origen) del usuario autenticado: su propio registro de
+     * colaborador, sea cual sea la empresa DESTINO `?empresa_id=` elegida
+     * (debe estar autorizada). Cambiar la empresa destino nunca cambia de
+     * quién salen los bienes. Nunca se acepta un colaborador arbitrario desde
+     * el request.
      */
     private function custodioDesdeRequest(Request $request, ServicioCustodiaColaborador $custodia): ?Colaborador
     {

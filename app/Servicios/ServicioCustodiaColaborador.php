@@ -143,14 +143,18 @@ class ServicioCustodiaColaborador
     }
 
     /**
-     * El colaborador vinculado, sólo si pertenece a la empresa indicada (la
-     * del destinatario: la custodia nunca cruza de empresa).
+     * Custodia de ORIGEN al redistribuir hacia la empresa DESTINO indicada:
+     * siempre el colaborador vinculado a la cuenta (los bienes salen de SU
+     * custodia), siempre que el usuario esté autorizado en esa empresa
+     * destino. La empresa a la que pertenece el custodio como colaborador NO
+     * limita el destino: "de quién provienen los bienes" y "a quién se
+     * entregan" son preguntas distintas.
      */
-    public function custodioDeUsuario(User $usuario, int $empresaId): ?Colaborador
+    public function custodioDeUsuario(User $usuario, int $empresaDestinoId): ?Colaborador
     {
         $colaborador = $this->colaboradorVinculado($usuario);
 
-        return $colaborador?->empresa_id === $empresaId ? $colaborador : null;
+        return $colaborador !== null && $usuario->puedeAccederEmpresa($empresaDestinoId) ? $colaborador : null;
     }
 
     /**
@@ -190,9 +194,10 @@ class ServicioCustodiaColaborador
             return [];
         }
 
+        // Sin filtro por la empresa del custodio: los ids salen de SU
+        // custodia real, y pudo recibirlos de otra empresa propietaria.
         $conjuntos = Conjunto::query()
             ->whereIn('id', array_keys($porConjunto))
-            ->where('empresa_id', $custodio->empresa_id)
             ->with(['componentes.activo:id,nombre,tipo_control', 'componentes.talla:id,valor'])
             ->orderBy('nombre')
             ->get();
@@ -254,9 +259,11 @@ class ServicioCustodiaColaborador
             return [];
         }
 
+        // La custodia (renglones recibidos y no devueltos) ya prueba qué
+        // bienes tiene; el activo puede ser de otra empresa propietaria si
+        // se los redistribuyeron desde ahí.
         $activosValidos = Activo::query()
             ->whereIn('id', array_unique(array_column($filas, 'activo_id')))
-            ->where('empresa_id', $custodio->empresa_id)
             ->where('tipo_control', TipoControlActivo::Cantidad)
             ->where('activo', true)
             ->pluck('nombre', 'id');
@@ -294,7 +301,6 @@ class ServicioCustodiaColaborador
     public function unidadesRedistribuibles(Colaborador $custodio, bool $incluirPersonales = false): Builder
     {
         return UnidadActivo::query()
-            ->where('empresa_id', $custodio->empresa_id)
             ->where('colaborador_id', $custodio->getKey())
             ->where('estado', EstadoUnidadActivo::Asignada)
             ->where('condicion', CondicionUnidadActivo::Funcionando)
@@ -352,7 +358,7 @@ class ServicioCustodiaColaborador
         $unidades = UnidadActivo::query()
             ->where('colaborador_id', $colaborador->getKey())
             ->where('estado', EstadoUnidadActivo::Asignada)
-            ->when($idsEmpresasAutorizadas !== null, fn (Builder $q) => $q->whereIn('empresa_id', $idsEmpresasAutorizadas))
+            ->when($idsEmpresasAutorizadas !== null, fn (Builder $q) => $this->acotarUnidadesAsignadasAEmpresas($q, $idsEmpresasAutorizadas))
             ->with('activo:id,nombre')
             ->orderBy('codigo')
             ->get()
@@ -628,6 +634,26 @@ class ServicioCustodiaColaborador
     }
 
     /**
+     * Aislamiento histórico de unidades ASIGNADAS por empresa: visible si su
+     * empresa DUEÑA está en `$idsEmpresas` o si la entrega vigente con la que
+     * se asignó es de una de ellas — mismo criterio que los renglones por
+     * cantidad (`entregas_uniformes.empresa_id`). Una unidad de JSIG
+     * redistribuida a un colaborador de otra empresa autorizada sigue siendo
+     * de JSIG, pero su custodia se ve desde la empresa que la recibió.
+     *
+     * @param  Builder<UnidadActivo>  $consulta
+     * @param  array<int, int>  $idsEmpresas
+     * @return Builder<UnidadActivo>
+     */
+    public function acotarUnidadesAsignadasAEmpresas(Builder $consulta, array $idsEmpresas): Builder
+    {
+        return $consulta->where(function (Builder $q) use ($idsEmpresas): void {
+            $q->whereIn('empresa_id', $idsEmpresas)
+                ->orWhereHas('detalleEntrega.entrega', fn (Builder $e) => $e->whereIn('empresa_id', $idsEmpresas));
+        });
+    }
+
+    /**
      * KPI "Activos asignados": total de PIEZAS FÍSICAS que el colaborador
      * tiene actualmente bajo custodia — una unidad identificada cuenta como 1
      * pieza; un renglón de cantidad cuenta su saldo pendiente (entregado −
@@ -644,7 +670,7 @@ class ServicioCustodiaColaborador
         $unidades = UnidadActivo::query()
             ->where('colaborador_id', $colaborador->getKey())
             ->where('estado', EstadoUnidadActivo::Asignada)
-            ->when($idsEmpresasAutorizadas !== null, fn (Builder $q) => $q->whereIn('empresa_id', $idsEmpresasAutorizadas))
+            ->when($idsEmpresasAutorizadas !== null, fn (Builder $q) => $this->acotarUnidadesAsignadasAEmpresas($q, $idsEmpresasAutorizadas))
             ->count();
 
         $cantidad = array_sum(array_column($this->cantidadesPendientes($colaborador, $idsEmpresasAutorizadas), 'pendiente'));

@@ -21,6 +21,7 @@ use App\Models\Colaborador;
 use App\Models\DetalleDevolucion;
 use App\Models\DetalleEntrega;
 use App\Models\Devolucion;
+use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\Evidencia;
 use App\Models\User;
@@ -319,6 +320,13 @@ class DevolucionController extends Controller
             'folio' => $entrega->folio,
             'empresa_id' => $entrega->empresa_id,
             'empresa' => $entrega->empresa?->nombre_comercial,
+            // Empresa DUEÑA de los bienes: su inventario es al que reingresan
+            // (difiere de `empresa_id` sólo si se redistribuyeron hacia otra
+            // empresa autorizada). El almacén destino debe abastecerla.
+            'empresa_inventario_id' => $empresaInventarioId = $entrega->empresaInventarioId(),
+            'empresa_inventario' => $empresaInventarioId === $entrega->empresa_id
+                ? $entrega->empresa?->nombre_comercial
+                : Empresa::query()->whereKey($empresaInventarioId)->value('nombre_comercial'),
             'colaborador' => $entrega->colaborador?->nombre_completo,
             'almacen_id' => $entrega->almacen_id,
             'almacen' => $entrega->almacen?->nombre,

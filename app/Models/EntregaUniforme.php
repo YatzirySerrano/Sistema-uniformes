@@ -136,6 +136,23 @@ class EntregaUniforme extends Model
     }
 
     /**
+     * Empresa PROPIETARIA de los bienes de esta entrega (`activos.empresa_id`)
+     * — la del inventario al que reingresan al devolverlos. Coincide con
+     * `empresa_id` (destino) salvo en una redistribución hacia otra empresa
+     * autorizada: ahí el destino es otra razón social pero los bienes siguen
+     * siendo de su dueña. Una entrega lleva bienes de una sola propietaria
+     * (`RedistribuirCustodia::exigirUnaEmpresaPropietaria`).
+     */
+    public function empresaInventarioId(): int
+    {
+        $propietaria = Activo::query()
+            ->whereIn('id', $this->detalles()->select('activo_id'))
+            ->value('empresa_id');
+
+        return $propietaria !== null ? (int) $propietaria : $this->empresa_id;
+    }
+
+    /**
      * @return HasOne<AcuseRecepcion, $this>
      */
     public function acuse(): HasOne

@@ -13,6 +13,7 @@ use App\Models\Colaborador;
 use App\Models\Conjunto;
 use App\Models\EntregaUniforme;
 use App\Models\SaldoInventario;
+use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioCustodiaColaborador;
@@ -197,7 +198,7 @@ class GuardarEntregaRequest extends FormRequest
         }
 
         if ($this->esRedistribucion()) {
-            return [...$this->reglasComunes($empresaId), ...$this->reglasCustodia($empresaId), ...$this->reglasFinalidad()];
+            return [...$this->reglasComunes($empresaId), ...$this->reglasCustodia(), ...$this->reglasFinalidad()];
         }
 
         return [
@@ -289,26 +290,36 @@ class GuardarEntregaRequest extends FormRequest
      *
      * @return array<string, mixed>
      */
-    private function reglasCustodia(int $empresaId): array
+    private function reglasCustodia(): array
     {
         $custodioId = $this->custodio()?->getKey() ?? 0;
 
         return [
             'cambio_servicio_id' => ['nullable', 'integer'],
 
+            // DESTINO elegido en el formulario (el wizard siempre lo manda):
+            // cualquier empresa/sucursal autorizada del usuario, no la del
+            // custodio como colaborador. Se contrasta con el destinatario real
+            // en `validarDestino()`. Sin ellos, el destino es el del
+            // destinatario, igualmente sujeto al alcance del usuario.
+            'empresa_id' => ['nullable', 'integer', 'required_with:sucursal_id'],
+            'sucursal_id' => ['nullable', 'integer', 'required_with:empresa_id'],
+
+            // Los bienes salen de la CUSTODIA del origen (puede tener bienes
+            // de otra empresa propietaria): la pertenencia no se filtra por
+            // la empresa destino, la prueba `validarContraCustodia()` y
+            // `RedistribuirCustodia` bajo lock.
+
             // Conjuntos que el custodio recibió como tal: sólo contexto, se
             // expanden a los componentes REALES de su custodia.
             'conjuntos' => ['nullable', 'array'],
-            'conjuntos.*.conjunto_id' => [
-                'required', 'integer',
-                Rule::exists('conjuntos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
-            ],
+            'conjuntos.*.conjunto_id' => ['required', 'integer', Rule::exists('conjuntos', 'id')],
             'conjuntos.*.cantidad' => ['required', 'integer', 'min:1', 'max:100'],
 
             'activos' => ['nullable', 'array'],
             'activos.*.activo_id' => [
                 'required', 'integer',
-                Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)->where('tipo_control', 'cantidad')->where('activo', true)),
+                Rule::exists('activos', 'id')->where(fn ($q) => $q->where('tipo_control', 'cantidad')->where('activo', true)),
             ],
             // La variante es la que TIENE la pieza en custodia (aunque hoy
             // esté retirada del catálogo): sólo se exige que exista.
@@ -325,7 +336,6 @@ class GuardarEntregaRequest extends FormRequest
             'unidades.*.unidad_activo_id' => [
                 'required', 'integer', 'distinct',
                 Rule::exists('unidades_activo', 'id')->where(fn ($q) => $q
-                    ->where('empresa_id', $empresaId)
                     ->where('colaborador_id', $custodioId)
                     ->where('estado', EstadoUnidadActivo::Asignada->value)
                     ->where('condicion', CondicionUnidadActivo::Funcionando->value)),
@@ -350,7 +360,7 @@ class GuardarEntregaRequest extends FormRequest
         if ($custodio === null) {
             $validator->errors()->add('origen', $this->filled('cambio_servicio_id')
                 ? 'No puedes redistribuir la custodia de ese colaborador (la revisión ya terminó, es de otra empresa o no tienes permiso).'
-                : 'Tu cuenta no está vinculada a una ficha de colaborador de esta empresa, así que no tienes activos bajo custodia que redistribuir.');
+                : 'Tu cuenta no está vinculada a una ficha de colaborador activa, así que no tienes activos bajo custodia que redistribuir.');
 
             return;
         }
@@ -450,6 +460,54 @@ class GuardarEntregaRequest extends FormRequest
     }
 
     /**
+     * Redistribución: el DESTINO (empresa + sucursal) lo elige el formulario
+     * dentro del alcance del usuario — nunca se deriva de la empresa del
+     * custodio. Nada se confía al frontend: la empresa debe estar autorizada,
+     * la sucursal ser de esa empresa y autorizada, y el destinatario
+     * pertenecer exactamente a ambas.
+     */
+    private function validarDestino(Validator $validator, Colaborador $destinatario): bool
+    {
+        if ($validator->errors()->hasAny(['empresa_id', 'sucursal_id'])) {
+            return false;
+        }
+
+        if (! $this->filled('empresa_id') && ! $this->filled('sucursal_id')) {
+            return true;
+        }
+
+        $usuario = $this->user();
+        $empresaId = $this->integer('empresa_id');
+        $sucursal = Sucursal::query()->find($this->integer('sucursal_id'));
+
+        if ($usuario === null || $empresaId <= 0 || ! $usuario->puedeAccederEmpresa($empresaId)) {
+            $validator->errors()->add('empresa_id', 'No tienes acceso a la empresa destino seleccionada.');
+
+            return false;
+        }
+
+        if ($sucursal === null || $sucursal->empresa_id !== $empresaId) {
+            $validator->errors()->add('sucursal_id', 'La sucursal no pertenece a la empresa destino seleccionada.');
+
+            return false;
+        }
+
+        if (! $usuario->puedeAccederSucursal($sucursal)) {
+            $validator->errors()->add('sucursal_id', 'No tienes acceso a la sucursal destino seleccionada.');
+
+            return false;
+        }
+
+        if ($destinatario->empresa_id !== $empresaId || $destinatario->sucursal_id !== $sucursal->id) {
+            $validator->errors()->add('colaborador_id', 'El colaborador no pertenece a la empresa y sucursal destino seleccionadas.');
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
      * Reglas que no se expresan bien con `Rule::exists`: al menos un renglón
      * en total, y coherencia de variante por componente de conjunto (fija /
      * libre / ninguna — igual que en `GuardarConjuntoRequest`).
@@ -508,7 +566,9 @@ class GuardarEntregaRequest extends FormRequest
             }
 
             if ($this->esRedistribucion()) {
-                $this->validarContraCustodia($validator, $colaborador, $activos, $conjuntos);
+                if ($this->validarDestino($validator, $colaborador)) {
+                    $this->validarContraCustodia($validator, $colaborador, $activos, $conjuntos);
+                }
 
                 return;
             }

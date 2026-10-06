@@ -98,6 +98,9 @@ type Entrega = {
     folio: string;
     empresa_id: number;
     empresa: string | null;
+    /** Empresa dueña de los bienes: su inventario es al que reingresan. */
+    empresa_inventario_id: number;
+    empresa_inventario: string | null;
     colaborador: string | null;
     almacen_id: number | null;
     almacen: string | null;
@@ -361,7 +364,7 @@ async function buscarAlmacenes(
 ): Promise<OpcionAlmacen[]> {
     if (!props.entrega) return [];
     const res = await fetch(
-        `/almacenes/buscar?empresa_id=${props.entrega.empresa_id}&q=${encodeURIComponent(q)}`,
+        `/almacenes/buscar?empresa_id=${props.entrega.empresa_inventario_id}&q=${encodeURIComponent(q)}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -1064,6 +1067,18 @@ function enviar(): void {
                                         )
                                 "
                             />
+                            <p
+                                v-if="
+                                    entrega.empresa_inventario_id !==
+                                    entrega.empresa_id
+                                "
+                                class="text-muted-foreground text-xs"
+                            >
+                                Estos bienes son de
+                                «{{ entrega.empresa_inventario ?? '—' }}»:
+                                regresan al inventario de esa empresa, en un
+                                almacén que la abastezca.
+                            </p>
                             <InputError :message="form.errors.almacen_id" />
                         </div>
                         <div class="grid gap-1.5">

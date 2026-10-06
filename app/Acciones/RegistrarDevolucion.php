@@ -96,7 +96,10 @@ class RegistrarDevolucion
     ): Devolucion {
         $entrega = EntregaUniforme::query()->findOr($entregaId, fn () => throw new ExcepcionDeNegocioSimple('La entrega indicada no existe.'));
 
-        $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($entrega->empresa_id), $almacenId);
+        // Reingresan al inventario de la empresa DUEÑA de los bienes (ver
+        // `EntregaUniforme::empresaInventarioId()`), no necesariamente la
+        // del destinatario.
+        $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($entrega->empresaInventarioId()), $almacenId);
 
         if ($activos === [] && $unidades === []) {
             throw new ExcepcionDeNegocioSimple('Agrega al menos un renglón a devolver.');

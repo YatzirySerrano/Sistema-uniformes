@@ -313,14 +313,23 @@ const ambosOrigenes = computed(
 // vinculada a una ficha y no puede entregar desde almacén).
 const sinOrigen = !props.origenes.almacen && !props.origenes.custodia;
 
-// Custodia de la que salen los bienes en la empresa elegida. En modo custodia
-// es el ÚNICO origen posible; el backend lo vuelve a resolver por su cuenta —
-// nunca confía en esto.
-const custodioActual = computed<CustodiaPropia | null>(() =>
-    custodioEfectivo !== null && custodioEfectivo.empresa.id === empresaId.value
+// En redistribución la Empresa/Sucursal elegidas son el DESTINO (cualquiera
+// autorizada del usuario); los bienes salen SIEMPRE de la custodia del
+// usuario, pertenezca él como colaborador a la empresa que sea. Sólo la
+// revisión de un cambio de servicio (misma empresa por definición) ata la
+// empresa a la del custodio.
+const empresaFijaPorContexto = props.contextoCambioServicio !== null;
+
+// Custodia de la que salen los bienes. En modo custodia es el ÚNICO origen
+// posible; el backend lo vuelve a resolver por su cuenta — nunca confía en
+// esto.
+const custodioActual = computed<CustodiaPropia | null>(() => {
+    if (custodioEfectivo === null || empresaId.value === null) return null;
+    return !empresaFijaPorContexto ||
+        custodioEfectivo.empresa.id === empresaId.value
         ? custodioEfectivo
-        : null,
-);
+        : null;
+});
 
 /** Parámetro extra de los buscadores de custodia (revisión de servicio). */
 const paramContexto = props.contextoCambioServicio
@@ -338,7 +347,8 @@ const origenListo = computed(() =>
 // Clave para descartar respuestas de buscadores al cambiar de origen.
 const claveOrigen = computed(() =>
     esCustodia.value
-        ? `custodia-${empresaId.value ?? ''}`
+        ? // La custodia no depende de la empresa destino elegida.
+          `custodia-${custodioEfectivo?.colaborador_id ?? ''}`
         : `${empresaId.value ?? ''}-${almacenSel.value?.id ?? ''}`,
 );
 
@@ -346,7 +356,7 @@ function cambiarModo(m: OrigenEntrega): void {
     if (modo.value === m) return;
     modo.value = m;
     form.origen = m;
-    alElegirEmpresa(
+    reiniciarConEmpresa(
         m === 'custodia' ? (custodioEfectivo?.empresa ?? null) : null,
     );
 }
@@ -363,8 +373,8 @@ async function buscarEmpresas(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionEmpresa[]> {
-    if (esCustodia.value) {
-        // La custodia es de UNA ficha (1:1): sólo su empresa.
+    if (esCustodia.value && empresaFijaPorContexto) {
+        // Revisión de cambio de servicio: misma empresa del custodio.
         const termino = q.trim().toLowerCase();
         return (custodioEfectivo ? [custodioEfectivo.empresa] : []).filter(
             (e) =>
@@ -433,7 +443,30 @@ async function buscarAlmacenes(
     return (await res.json()).almacenes ?? [];
 }
 
+/**
+ * Empresa elegida en el selector. En redistribución es sólo el DESTINO:
+ * limpia sucursal y colaborador (ya no corresponden) pero conserva intactos
+ * la custodia de origen, sus disponibles y los renglones ya capturados.
+ */
 function alElegirEmpresa(o: OpcionEmpresa | null): void {
+    if (!esCustodia.value) {
+        reiniciarConEmpresa(o);
+        return;
+    }
+    if (o?.id !== empresaSel.value?.id) {
+        sucursalSel.value = null;
+        colaboradorSel.value = null;
+        form.colaborador_id = '';
+    }
+    empresaSel.value = o;
+    form.clearErrors('colaborador_id');
+    if (o !== null && Object.keys(disponibilidad.value).length === 0) {
+        void cargarDisponibilidad();
+    }
+}
+
+/** Empieza de cero con otra empresa (salida de almacén o cambio de origen). */
+function reiniciarConEmpresa(o: OpcionEmpresa | null): void {
     empresaSel.value = o;
     sucursalSel.value = null;
     colaboradorSel.value = null;
@@ -1574,6 +1607,11 @@ function enviar(): void {
         reserva_token: esCustodia.value ? null : reserva.token.value,
         almacen_id: esCustodia.value ? null : datos.almacen_id,
         cambio_servicio_id: esCustodia.value ? datos.cambio_servicio_id : null,
+        // Redistribución: destino elegido (el backend lo valida contra el
+        // alcance del usuario y el colaborador destinatario).
+        ...(esCustodia.value
+            ? { empresa_id: empresaId.value, sucursal_id: sucursalId.value }
+            : {}),
         activos: datos.activos.filter((fila) => fila.activo_id !== ''),
         // Un renglón con activo pero sin unidad NO se descarta en silencio:
         // viaja para que el backend también lo rechace.
@@ -1748,20 +1786,25 @@ onMounted(() => {
                         id="empresa"
                         :model-value="empresaSel"
                         :buscar="buscarEmpresas"
-                        :disabled="esCustodia"
+                        :disabled="esCustodia && empresaFijaPorContexto"
+                        :invalido="!!erroresLaxos['empresa_id']"
                         :etiqueta="(e) => (e as OpcionEmpresa).nombre_comercial"
                         :descripcion="(e) => (e as OpcionEmpresa).codigo ?? ''"
                         placeholder="Selecciona una empresa"
                         placeholder-busqueda="Buscar por nombre o código"
-                        :sin-resultados="
-                            esCustodia
-                                ? 'No tienes custodia propia en ninguna empresa activa.'
-                                : 'No tienes empresas activas autorizadas.'
-                        "
+                        sin-resultados="No tienes empresas activas autorizadas."
                         @update:model-value="
                             (v) => alElegirEmpresa(v as OpcionEmpresa | null)
                         "
                     />
+                    <p
+                        v-if="esCustodia && !empresaFijaPorContexto"
+                        class="text-muted-foreground text-xs"
+                    >
+                        Empresa que recibe. Puede ser cualquiera de tus
+                        empresas autorizadas: los bienes salen de tu custodia.
+                    </p>
+                    <InputError :message="erroresLaxos['empresa_id']" />
                 </div>
 
                 <div class="grid gap-1.5">
@@ -1772,6 +1815,7 @@ onMounted(() => {
                         :buscar="buscarSucursales"
                         :dependencia="empresaId"
                         :disabled="empresaId === null"
+                        :invalido="!!erroresLaxos['sucursal_id']"
                         :etiqueta="(s) => (s as OpcionSucursal).nombre"
                         placeholder="Selecciona una sucursal"
                         placeholder-busqueda="Buscar sucursal por nombre"
@@ -1786,6 +1830,7 @@ onMounted(() => {
                     >
                         Selecciona primero una empresa.
                     </p>
+                    <InputError :message="erroresLaxos['sucursal_id']" />
                 </div>
 
                 <div class="grid gap-1.5 sm:col-span-2">
@@ -1893,11 +1938,12 @@ onMounted(() => {
                             </p>
                             <p class="text-muted-foreground mt-0.5 text-xs">
                                 Sólo se ofrecen los activos que hoy tienes a tu
-                                cargo en esta empresa.
+                                cargo; la empresa y sucursal de arriba son el
+                                destino.
                             </p>
                         </template>
                         <span v-else class="text-muted-foreground">
-                            Selecciona la empresa de tu custodia.
+                            Selecciona la empresa destino.
                         </span>
                     </div>
                     <InputError :message="erroresLaxos['origen']" />
