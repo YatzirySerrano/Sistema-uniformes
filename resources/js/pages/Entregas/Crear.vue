@@ -298,7 +298,14 @@ const sucursalSel = ref<OpcionSucursal | null>(
 );
 const colaboradorSel = ref<OpcionColaborador | null>(destinatarioSugerido);
 const almacenSel = ref<OpcionAlmacen | null>(null);
+// DESTINO: empresa laboral del colaborador que recibe.
 const empresaId = computed(() => empresaSel.value?.id ?? null);
+// ORIGEN (salida de almacén): empresa PROPIETARIA del inventario del que
+// salen los bienes. Puede ser distinta del destino; la propiedad nunca cambia.
+const empresaInventarioSel = ref<OpcionEmpresa | null>(null);
+const empresaInventarioId = computed(
+    () => empresaInventarioSel.value?.id ?? null,
+);
 const sucursalId = computed(() => sucursalSel.value?.id ?? null);
 
 const modo = ref<OrigenEntrega>(
@@ -349,7 +356,7 @@ const claveOrigen = computed(() =>
     esCustodia.value
         ? // La custodia no depende de la empresa destino elegida.
           `custodia-${custodioEfectivo?.colaborador_id ?? ''}`
-        : `${empresaId.value ?? ''}-${almacenSel.value?.id ?? ''}`,
+        : `${empresaInventarioId.value ?? ''}-${almacenSel.value?.id ?? ''}`,
 );
 
 function cambiarModo(m: OrigenEntrega): void {
@@ -383,6 +390,14 @@ async function buscarEmpresas(
                     .includes(termino),
         );
     }
+    return buscarEmpresasAutorizadas(q, signal);
+}
+
+/** Empresas activas autorizadas del usuario (destino o propietaria). */
+async function buscarEmpresasAutorizadas(
+    q: string,
+    signal?: AbortSignal,
+): Promise<OpcionEmpresa[]> {
     const res = await fetch(`/empresas/buscar?q=${encodeURIComponent(q)}`, {
         headers: { Accept: 'application/json' },
         credentials: 'same-origin',
@@ -430,9 +445,10 @@ async function buscarAlmacenes(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionAlmacen[]> {
-    if (empresaId.value === null) return [];
+    // Sólo almacenes que abastecen a la empresa PROPIETARIA elegida.
+    if (empresaInventarioId.value === null) return [];
     const res = await fetch(
-        `/almacenes/buscar?empresa_id=${empresaId.value}&q=${encodeURIComponent(q)}`,
+        `/almacenes/buscar?empresa_id=${empresaInventarioId.value}&q=${encodeURIComponent(q)}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -444,15 +460,11 @@ async function buscarAlmacenes(
 }
 
 /**
- * Empresa elegida en el selector. En redistribución es sólo el DESTINO:
- * limpia sucursal y colaborador (ya no corresponden) pero conserva intactos
- * la custodia de origen, sus disponibles y los renglones ya capturados.
+ * Empresa DESTINO elegida. Limpia sucursal y colaborador (ya no
+ * corresponden) pero nunca toca el ORIGEN: ni la custodia (redistribución)
+ * ni la empresa propietaria / almacén / renglones (salida de almacén).
  */
 function alElegirEmpresa(o: OpcionEmpresa | null): void {
-    if (!esCustodia.value) {
-        reiniciarConEmpresa(o);
-        return;
-    }
     if (o?.id !== empresaSel.value?.id) {
         sucursalSel.value = null;
         colaboradorSel.value = null;
@@ -460,14 +472,50 @@ function alElegirEmpresa(o: OpcionEmpresa | null): void {
     }
     empresaSel.value = o;
     form.clearErrors('colaborador_id');
-    if (o !== null && Object.keys(disponibilidad.value).length === 0) {
-        void cargarDisponibilidad();
+    if (esCustodia.value) {
+        if (o !== null && Object.keys(disponibilidad.value).length === 0) {
+            void cargarDisponibilidad();
+        }
+        return;
     }
+    // Sólo se PROPONE la misma empresa como propietaria mientras no se haya
+    // elegido ninguna; una ya elegida se respeta.
+    if (o !== null && empresaInventarioSel.value === null) {
+        alElegirEmpresaInventario(o);
+    }
+}
+
+/**
+ * Empresa PROPIETARIA del inventario (salida de almacén). El almacén y los
+ * renglones dependen de ella: si cambia, se limpian y se reinicia el
+ * apartado temporal (lo apartado era stock de la anterior).
+ */
+function alElegirEmpresaInventario(o: OpcionEmpresa | null): void {
+    if (o?.id === empresaInventarioSel.value?.id) return;
+    const habiaRenglones =
+        form.activos.length > 0 ||
+        form.unidades.length > 0 ||
+        form.conjuntos.length > 0;
+
+    empresaInventarioSel.value = o;
+    form.empresa_inventario_id = o?.id ?? null;
+    almacenSel.value = null;
+    form.almacen_id = null;
+    disponibilidad.value = {};
+    form.clearErrors('empresa_inventario_id', 'almacen_id');
+
+    if (habiaRenglones) {
+        limpiarRenglones();
+        avisoAlmacenCambiado.value = true;
+    }
+    reserva.reiniciarToken();
 }
 
 /** Empieza de cero con otra empresa (salida de almacén o cambio de origen). */
 function reiniciarConEmpresa(o: OpcionEmpresa | null): void {
     empresaSel.value = o;
+    empresaInventarioSel.value = null;
+    form.empresa_inventario_id = null;
     sucursalSel.value = null;
     colaboradorSel.value = null;
     almacenSel.value = null;
@@ -572,6 +620,8 @@ const form = useForm<{
     origen: OrigenEntrega;
     cambio_servicio_id: number | null;
     colaborador_id: number | '';
+    /** Salida de almacén: empresa PROPIETARIA del inventario (origen). */
+    empresa_inventario_id: number | null;
     almacen_id: number | null;
     fecha_entrega: string;
     notas: string;
@@ -589,6 +639,7 @@ const form = useForm<{
     origen: modo.value,
     cambio_servicio_id: props.contextoCambioServicio?.id ?? null,
     colaborador_id: destinatarioSugerido?.id ?? '',
+    empresa_inventario_id: null,
     almacen_id: null,
     fecha_entrega: hoy,
     notas: '',
@@ -629,7 +680,8 @@ const reserva = useReservaBorrador<RespuestaReservaEntrega>({
 
 function construirPayloadReserva(): Record<string, unknown> {
     return {
-        empresa_id: empresaId.value,
+        // El apartado es de stock: empresa PROPIETARIA + almacén.
+        empresa_id: empresaInventarioId.value,
         almacen_id: almacenSel.value?.id ?? null,
         colaborador_id: colaboradorSel.value?.id ?? null,
         activos: form.activos.map((f) => ({
@@ -657,7 +709,7 @@ watch(
     () => {
         // La redistribución no aparta inventario de almacén: no hay reserva.
         if (esCustodia.value) return;
-        if (empresaId.value === null || !almacenSel.value) return;
+        if (empresaInventarioId.value === null || !almacenSel.value) return;
         reserva.reservarConRetraso(construirPayloadReserva());
     },
     { deep: true },
@@ -675,10 +727,18 @@ const disponibilidad = ref<Record<string, number>>({});
 
 async function cargarDisponibilidad(): Promise<void> {
     disponibilidad.value = {};
-    if (empresaId.value === null || !origenListo.value) return;
+    if (!origenListo.value) return;
+    if (
+        esCustodia.value
+            ? empresaId.value === null
+            : empresaInventarioId.value === null
+    )
+        return;
+    // Custodia: `empresa_id` = destino (el origen es la custodia). Almacén:
+    // `empresa_id` = empresa propietaria del stock.
     const url = esCustodia.value
         ? `/entregas/custodia/disponibilidad?empresa_id=${empresaId.value}${paramContexto}`
-        : `/entregas/disponibilidad?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&token=${reserva.token.value}`;
+        : `/entregas/disponibilidad?empresa_id=${empresaInventarioId.value}&almacen_id=${almacenSel.value?.id}&token=${reserva.token.value}`;
     const res = await fetch(url, {
         headers: { Accept: 'application/json' },
         credentials: 'same-origin',
@@ -750,7 +810,7 @@ const disponibilidadViva = useDisponibilidadViva<{ saldos: SaldoEfectivo[] }>({
     habilitado: () =>
         !esCustodia.value &&
         paso.value === 2 &&
-        empresaId.value !== null &&
+        empresaInventarioId.value !== null &&
         almacenSel.value !== null &&
         !reserva.confirmando.value &&
         !form.processing &&
@@ -759,7 +819,7 @@ const disponibilidadViva = useDisponibilidadViva<{ saldos: SaldoEfectivo[] }>({
     consultar: async (signal) => {
         if (activoIdsEnPantalla.value.length === 0) return { saldos: [] };
         const params = new URLSearchParams({
-            empresa_id: String(empresaId.value),
+            empresa_id: String(empresaInventarioId.value),
             almacen_id: String(almacenSel.value?.id),
             token: reserva.token.value,
         });
@@ -876,11 +936,19 @@ async function buscarActivosCantidad(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionActivo[]> {
-    if (empresaId.value === null || !origenListo.value) return [];
+    if (!origenListo.value) return [];
+    if (
+        esCustodia.value
+            ? empresaId.value === null
+            : empresaInventarioId.value === null
+    )
+        return [];
+    // Almacén: sólo bienes de la empresa PROPIETARIA en el almacén elegido,
+    // nunca filtrados por la empresa del colaborador que recibe.
     const res = await fetch(
         esCustodia.value
             ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=cantidad&q=${encodeURIComponent(q)}${paramContexto}`
-            : `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&control=cantidad&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
+            : `/activos/buscar?empresa_id=${empresaInventarioId.value}&almacen_id=${almacenSel.value?.id}&control=cantidad&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -977,11 +1045,19 @@ async function buscarActivosIndividual(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionActivo[]> {
-    if (empresaId.value === null || !origenListo.value) return [];
+    if (!origenListo.value) return [];
+    if (
+        esCustodia.value
+            ? empresaId.value === null
+            : empresaInventarioId.value === null
+    )
+        return [];
+    // Almacén: sólo bienes de la empresa PROPIETARIA en el almacén elegido,
+    // nunca filtrados por la empresa del colaborador que recibe.
     const res = await fetch(
         esCustodia.value
             ? `/entregas/custodia/activos?empresa_id=${empresaId.value}&control=individual&q=${encodeURIComponent(q)}${paramContexto}`
-            : `/activos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value?.id}&control=individual&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
+            : `/activos/buscar?empresa_id=${empresaInventarioId.value}&almacen_id=${almacenSel.value?.id}&control=individual&q=${encodeURIComponent(q)}&token=${reserva.token.value}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -1072,9 +1148,9 @@ async function buscarConjuntos(
     q: string,
     signal?: AbortSignal,
 ): Promise<OpcionConjunto[]> {
-    if (empresaId.value === null || !almacenSel.value) return [];
+    if (empresaInventarioId.value === null || !almacenSel.value) return [];
     const res = await fetch(
-        `/conjuntos/buscar?empresa_id=${empresaId.value}&almacen_id=${almacenSel.value.id}&q=${encodeURIComponent(q)}`,
+        `/conjuntos/buscar?empresa_id=${empresaInventarioId.value}&almacen_id=${almacenSel.value.id}&q=${encodeURIComponent(q)}`,
         {
             headers: { Accept: 'application/json' },
             credentials: 'same-origin',
@@ -1609,9 +1685,11 @@ function enviar(): void {
         cambio_servicio_id: esCustodia.value ? datos.cambio_servicio_id : null,
         // Redistribución: destino elegido (el backend lo valida contra el
         // alcance del usuario y el colaborador destinatario).
+        // Salida de almacén: empresa propietaria del inventario (ORIGEN),
+        // distinta del destino; el backend valida que esté autorizada.
         ...(esCustodia.value
             ? { empresa_id: empresaId.value, sucursal_id: sucursalId.value }
-            : {}),
+            : { empresa_inventario_id: datos.empresa_inventario_id }),
         activos: datos.activos.filter((fila) => fila.activo_id !== ''),
         // Un renglón con activo pero sin unidad NO se descarta en silencio:
         // viaja para que el backend también lo rechace.
@@ -1780,6 +1858,14 @@ onMounted(() => {
                 v-show="paso === 1"
                 class="grid gap-4 rounded-xl border p-4 sm:grid-cols-2"
             >
+                <div class="sm:col-span-2">
+                    <h2 class="text-sm font-semibold">Destino de la entrega</h2>
+                    <p class="text-muted-foreground text-xs">
+                        A quién se entregan los bienes: su empresa, sucursal y
+                        colaborador.
+                    </p>
+                </div>
+
                 <div class="grid gap-1.5">
                     <Label for="empresa">Empresa</Label>
                     <BuscadorAsync
@@ -1801,8 +1887,8 @@ onMounted(() => {
                         v-if="esCustodia && !empresaFijaPorContexto"
                         class="text-muted-foreground text-xs"
                     >
-                        Empresa que recibe. Puede ser cualquiera de tus
-                        empresas autorizadas: los bienes salen de tu custodia.
+                        Empresa que recibe. Puede ser cualquiera de tus empresas
+                        autorizadas: los bienes salen de tu custodia.
                     </p>
                     <InputError :message="erroresLaxos['empresa_id']" />
                 </div>
@@ -1925,8 +2011,16 @@ onMounted(() => {
                     <InputError :message="form.errors.fecha_entrega" />
                 </div>
 
+                <div class="border-t pt-4 sm:col-span-2">
+                    <h2 class="text-sm font-semibold">Origen de los bienes</h2>
+                    <p class="text-muted-foreground text-xs">
+                        De dónde salen los bienes. Nunca cambian de empresa
+                        propietaria al entregarse.
+                    </p>
+                </div>
+
                 <div v-if="esCustodia" class="grid gap-1.5">
-                    <Label>Origen de los bienes</Label>
+                    <Label>Custodia de origen</Label>
                     <div
                         class="bg-muted/40 rounded-md border px-3 py-2 text-sm"
                         aria-live="polite"
@@ -1949,19 +2043,47 @@ onMounted(() => {
                     <InputError :message="erroresLaxos['origen']" />
                 </div>
 
-                <div v-else class="grid gap-1.5">
+                <div v-if="!esCustodia" class="grid gap-1.5">
+                    <Label for="empresa-inventario">Empresa propietaria</Label>
+                    <BuscadorAsync
+                        id="empresa-inventario"
+                        :model-value="empresaInventarioSel"
+                        :buscar="buscarEmpresasAutorizadas"
+                        :invalido="!!erroresLaxos['empresa_inventario_id']"
+                        :etiqueta="(e) => (e as OpcionEmpresa).nombre_comercial"
+                        :descripcion="(e) => (e as OpcionEmpresa).codigo ?? ''"
+                        placeholder="Selecciona la empresa dueña del inventario"
+                        placeholder-busqueda="Buscar por nombre o código"
+                        sin-resultados="No tienes empresas activas autorizadas."
+                        @update:model-value="
+                            (v) =>
+                                alElegirEmpresaInventario(
+                                    v as OpcionEmpresa | null,
+                                )
+                        "
+                    />
+                    <p class="text-muted-foreground text-xs">
+                        Dueña del inventario del que salen los bienes. Puede ser
+                        distinta de la empresa del colaborador.
+                    </p>
+                    <InputError
+                        :message="erroresLaxos['empresa_inventario_id']"
+                    />
+                </div>
+
+                <div v-if="!esCustodia" class="grid gap-1.5">
                     <Label for="almacen">Almacén de origen</Label>
                     <BuscadorAsync
                         id="almacen"
                         :model-value="almacenSel"
                         :buscar="buscarAlmacenes"
-                        :dependencia="empresaId"
-                        :disabled="empresaId === null"
+                        :dependencia="empresaInventarioId"
+                        :disabled="empresaInventarioId === null"
                         :etiqueta="(a) => (a as OpcionAlmacen).nombre"
                         :descripcion="(a) => (a as OpcionAlmacen).codigo ?? ''"
                         placeholder="Selecciona el almacén"
                         placeholder-busqueda="Buscar almacén por nombre"
-                        sin-resultados="Ningún almacén abastece a esta empresa."
+                        sin-resultados="Ningún almacén activo abastece a esta empresa propietaria."
                         :invalido="!!form.errors.almacen_id"
                         @update:model-value="
                             (v) => alElegirAlmacen(v as OpcionAlmacen | null)
@@ -1969,10 +2091,10 @@ onMounted(() => {
                     />
                     <InputError :message="form.errors.almacen_id" />
                     <p
-                        v-if="empresaId === null"
+                        v-if="empresaInventarioId === null"
                         class="text-muted-foreground text-xs"
                     >
-                        Selecciona primero una empresa.
+                        Selecciona primero la empresa propietaria.
                     </p>
                 </div>
 
@@ -2004,8 +2126,8 @@ onMounted(() => {
                     class="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
                 >
                     Se limpiaron los elementos de la entrega porque cambió el
-                    almacén de origen: la disponibilidad correspondía al almacén
-                    anterior.
+                    origen (empresa propietaria o almacén): la disponibilidad
+                    correspondía al origen anterior.
                 </p>
 
                 <InputError :message="erroresLaxos['items']" />
@@ -2976,6 +3098,17 @@ onMounted(() => {
                                 {{ custodioActual?.nombre_completo ?? '—' }}
                             </dd>
                             <dd v-else>{{ almacenSel?.nombre ?? '—' }}</dd>
+                        </div>
+                        <div v-if="!esCustodia">
+                            <dt class="text-muted-foreground text-xs">
+                                Empresa propietaria de los bienes
+                            </dt>
+                            <dd>
+                                {{
+                                    empresaInventarioSel?.nombre_comercial ??
+                                    '—'
+                                }}
+                            </dd>
                         </div>
                         <div>
                             <dt class="text-muted-foreground text-xs">

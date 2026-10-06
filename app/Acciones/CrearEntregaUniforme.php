@@ -67,6 +67,7 @@ class CrearEntregaUniforme
         ?int $servicioId = null,
         array $evidencias = [],
         ?string $reservaToken = null,
+        ?int $empresaInventarioId = null,
     ): EntregaUniforme {
         // Validación rápida (NO autoritativa): existencia + que el colaborador
         // esté activo. La empresa/sucursal definitivas se leen de la fila
@@ -89,7 +90,7 @@ class CrearEntregaUniforme
             throw new ExcepcionDeNegocioSimple('Agrega al menos un activo, unidad identificada o conjunto a la entrega.');
         }
 
-        return DB::transaction(function () use ($colaboradorId, $almacenId, $encargadoId, $fechaEntrega, $activosConsolidados, $activosConEvidencia, $unidades, $conjuntos, $notas, $servicioId, $evidencias, $reservaToken): EntregaUniforme {
+        return DB::transaction(function () use ($colaboradorId, $almacenId, $encargadoId, $fechaEntrega, $activosConsolidados, $activosConEvidencia, $unidades, $conjuntos, $notas, $servicioId, $evidencias, $reservaToken, $empresaInventarioId): EntregaUniforme {
             // La reserva es UNA CAPA PREVIA de UX/concurrencia: si viene un
             // token, se valida que exista, pertenezca a este usuario y siga
             // vigente (nunca reemplaza lo que sigue abajo). Todo lo que sigue
@@ -108,9 +109,16 @@ class CrearEntregaUniforme
                 throw new ExcepcionDeNegocioSimple('El colaborador está inactivo y no puede recibir entregas.');
             }
 
+            // DESTINO (empresa/sucursal laboral del colaborador) ≠ ORIGEN de
+            // los bienes: la empresa PROPIETARIA del inventario del que salen
+            // (por defecto la misma del colaborador). Su acceso lo valida
+            // `GuardarEntregaRequest`; aquí todo lo de inventario (almacén,
+            // activos, unidades, conjuntos, saldo) se acota a ella, y la
+            // propiedad de los bienes nunca cambia.
             $empresaId = $colaborador->empresa_id;
             $sucursalId = $colaborador->sucursal_id;
-            $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaId), $almacenId);
+            $empresaInventarioId ??= $empresaId;
+            $almacen = $this->resolverAlmacen->paraEmpresa(Empresa::query()->findOrFail($empresaInventarioId), $almacenId);
 
             $entrega = EntregaUniforme::query()->create([
                 'folio' => $this->folios->siguiente(ServicioFolios::ENTREGA),
@@ -132,7 +140,7 @@ class CrearEntregaUniforme
             $unidadesUsadas = [];
 
             foreach ($activosConsolidados as $item) {
-                $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, $item['activo_id'], $item['talla_id'], $item['cantidad'], finalidad: $item['finalidad']);
+                $this->registrarComponenteCantidad($entrega, $empresaInventarioId, $sucursalId, $almacen->getKey(), $encargadoId, $item['activo_id'], $item['talla_id'], $item['cantidad'], finalidad: $item['finalidad']);
             }
 
             foreach ($activosConEvidencia as $i => $fila) {
@@ -141,7 +149,7 @@ class CrearEntregaUniforme
                     continue;
                 }
                 $tallaId = ($fila['talla_id'] ?? null) !== null ? (int) $fila['talla_id'] : null;
-                $detalle = $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, (int) $fila['activo_id'], $tallaId, $cantidad, finalidad: FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? '')));
+                $detalle = $this->registrarComponenteCantidad($entrega, $empresaInventarioId, $sucursalId, $almacen->getKey(), $encargadoId, (int) $fila['activo_id'], $tallaId, $cantidad, finalidad: FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? '')));
                 $this->evidenciasSvc->adjuntar($detalle, $evidencias["activo:{$i}"], $encargadoId);
             }
 
@@ -154,7 +162,7 @@ class CrearEntregaUniforme
                 $unidadesVistas[] = $unidadId;
 
                 $unidad = $this->unidadesActivo->bloquearYVerificarEntregable($unidadId);
-                $this->validarUnidadParaEntrega($unidad, $empresaId, $almacen->getKey());
+                $this->validarUnidadParaEntrega($unidad, $empresaInventarioId, $almacen->getKey());
                 $detalle = $this->registrarComponenteUnidad($entrega, $sucursalId, $encargadoId, $unidad, finalidad: FinalidadCustodia::tryFrom((string) ($fila['finalidad'] ?? '')));
                 if (isset($evidencias["unidad:{$i}"])) {
                     $this->evidenciasSvc->adjuntar($detalle, $evidencias["unidad:{$i}"], $encargadoId);
@@ -163,7 +171,7 @@ class CrearEntregaUniforme
             }
 
             foreach ($conjuntos as $fila) {
-                $this->expandirConjunto($entrega, $empresaId, $sucursalId, $almacen->getKey(), $encargadoId, $fila, $unidadesUsadas);
+                $this->expandirConjunto($entrega, $empresaInventarioId, $sucursalId, $almacen->getKey(), $encargadoId, $fila, $unidadesUsadas);
             }
 
             // Todo se registró: la reserva ya cumplió su propósito. Si algo de
@@ -185,10 +193,10 @@ class CrearEntregaUniforme
         });
     }
 
-    private function registrarComponenteCantidad(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, int $activoId, ?int $tallaId, int $cantidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null, ?FinalidadCustodia $finalidad = null): DetalleEntrega
+    private function registrarComponenteCantidad(EntregaUniforme $entrega, int $empresaInventarioId, int $sucursalId, int $almacenId, int $encargadoId, int $activoId, ?int $tallaId, int $cantidad, ?int $conjuntoId = null, ?string $conjuntoNombre = null, ?FinalidadCustodia $finalidad = null): DetalleEntrega
     {
-        $activo = Activo::query()->where('empresa_id', $empresaId)->where('tipo_control', TipoControlActivo::Cantidad)->where('activo', true)
-            ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a esta empresa o ya no está disponible.'));
+        $activo = Activo::query()->where('empresa_id', $empresaInventarioId)->where('tipo_control', TipoControlActivo::Cantidad)->where('activo', true)
+            ->findOr($activoId, fn () => throw new ExcepcionDeNegocioSimple('Uno de los activos seleccionados no pertenece a la empresa propietaria elegida o ya no está disponible.'));
 
         $tallaValor = null;
         if ($tallaId !== null) {
@@ -208,7 +216,7 @@ class CrearEntregaUniforme
 
         try {
             $this->inventario->registrarMovimiento(new MovimientoInventarioDatos(
-                empresaId: $empresaId,
+                empresaId: $empresaInventarioId,
                 almacenId: $almacenId,
                 activoId: $activo->id,
                 tallaId: $tallaId,
@@ -257,10 +265,10 @@ class CrearEntregaUniforme
         return $detalle;
     }
 
-    private function validarUnidadParaEntrega(UnidadActivo $unidad, int $empresaId, int $almacenId): void
+    private function validarUnidadParaEntrega(UnidadActivo $unidad, int $empresaInventarioId, int $almacenId): void
     {
-        if ($unidad->empresa_id !== $empresaId) {
-            throw new ExcepcionDeNegocioSimple('Una de las unidades seleccionadas no pertenece a esta empresa.');
+        if ($unidad->empresa_id !== $empresaInventarioId) {
+            throw new ExcepcionDeNegocioSimple('Una de las unidades seleccionadas no pertenece a la empresa propietaria elegida.');
         }
 
         if ($unidad->almacen_id !== $almacenId) {
@@ -272,9 +280,9 @@ class CrearEntregaUniforme
      * @param  array{conjunto_id: int|string, cantidad: int|string, variantes?: array<int|string, int|string|null>, finalidad?: string|null, finalidades?: array<int|string, string|null>}  $fila
      * @param  array<int, int>  $unidadesUsadas
      */
-    private function expandirConjunto(EntregaUniforme $entrega, int $empresaId, int $sucursalId, int $almacenId, int $encargadoId, array $fila, array &$unidadesUsadas): void
+    private function expandirConjunto(EntregaUniforme $entrega, int $empresaInventarioId, int $sucursalId, int $almacenId, int $encargadoId, array $fila, array &$unidadesUsadas): void
     {
-        $conjunto = Conjunto::query()->where('empresa_id', $empresaId)->where('activo', true)->with('componentes')
+        $conjunto = Conjunto::query()->where('empresa_id', $empresaInventarioId)->where('activo', true)->with('componentes')
             ->findOr((int) $fila['conjunto_id'], fn () => throw new ExcepcionDeNegocioSimple('Uno de los conjuntos seleccionados no pertenece a esta empresa.'));
 
         $cantidadConjuntos = (int) $fila['cantidad'];
@@ -302,7 +310,7 @@ class CrearEntregaUniforme
             $finalidad = FinalidadCustodia::tryFrom((string) ($finalidadesPorComponente[$componente->id] ?? '')) ?? $finalidadConjunto;
 
             if ($activo->tipo_control === TipoControlActivo::Cantidad) {
-                $this->registrarComponenteCantidad($entrega, $empresaId, $sucursalId, $almacenId, $encargadoId, $activo->id, $tallaId, $cantidadNecesaria, $conjunto->id, $conjunto->nombre, $finalidad);
+                $this->registrarComponenteCantidad($entrega, $empresaInventarioId, $sucursalId, $almacenId, $encargadoId, $activo->id, $tallaId, $cantidadNecesaria, $conjunto->id, $conjunto->nombre, $finalidad);
 
                 continue;
             }

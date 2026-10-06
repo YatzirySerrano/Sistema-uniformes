@@ -773,6 +773,9 @@ class EntregaController extends Controller
                 $custodioOrigenId,
                 $request->incluirPersonales(),
                 $request->firmaPorArchivo() ? $request->file('firma_archivo') : null,
+                // Salida de almacén: empresa PROPIETARIA del inventario (puede
+                // no ser la del colaborador destino; ya autorizada en el request).
+                $custodioOrigenId === null ? $request->empresaInventarioId() : null,
             );
         } catch (Throwable $e) {
             // Falló: se libera la clave para permitir un reintento legítimo y se

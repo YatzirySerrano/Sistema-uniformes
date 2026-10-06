@@ -68,12 +68,13 @@ class RegistrarEntregaFirmada
         ?int $custodioOrigenId = null,
         bool $incluirPersonales = false,
         ?UploadedFile $archivoFirmaColaborador = null,
+        ?int $empresaInventarioId = null,
     ): AcuseRecepcion {
         /** @var array{entrega: EntregaUniforme, acuse: AcuseRecepcion} $resultado */
         $resultado = DB::transaction(function () use (
             $colaboradorId, $almacenId, $encargadoId, $fechaEntrega,
             $activos, $unidades, $conjuntos, $notas, $servicioId, $evidencias,
-            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId, $incluirPersonales, $archivoFirmaColaborador,
+            $firmaColaboradorBase64, $firmaOperadorBase64, $aceptacion, $ip, $userAgent, $reservaToken, $custodioOrigenId, $incluirPersonales, $archivoFirmaColaborador, $empresaInventarioId,
         ): array {
             if ($custodioOrigenId !== null) {
                 $entrega = $this->redistribuir->ejecutar(
@@ -104,6 +105,7 @@ class RegistrarEntregaFirmada
                     $servicioId,
                     $evidencias,
                     $reservaToken,
+                    $empresaInventarioId,
                 );
             }
 

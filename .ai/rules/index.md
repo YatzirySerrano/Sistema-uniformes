@@ -31,6 +31,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Acciones/RegistrarDevolucionFirmada.php,app/Acciones/ConfirmarAcuseDevolucion.php,app/Acciones/RegistrarDevolucion.php,app/Http/Controllers/DevolucionController.php,resources/js/pages/Devoluciones/Crear.vue | .ai/rules/devoluciones.md |
 | app/{Acciones/RedistribuirCustodia.php,Acciones/RegistrarEntregaFirmada.php,Servicios/ServicioCustodiaColaborador.php,Http/Requests/Entregas/GuardarEntregaRequest.php,Http/Controllers/EntregaController.php,Acciones/CambiarServicioColaborador.php} | .ai/rules/entregas-controllers.md |
 | app/Http/Requests/Entregas/GuardarEntregaRequest.php,resources/js/pages/Entregas/Crear.vue,app/Http/Controllers/EntregaController.php | .ai/rules/entregas-http-controllers.md |
+| app/{Http/Requests/Entregas/GuardarEntregaRequest.php,Acciones/CrearEntregaUniforme.php,Acciones/RedistribuirCustodia.php,Models/EntregaUniforme.php,Servicios/ServicioDistribucionActivo.php},resources/js/pages/Entregas/Crear.vue | .ai/rules/entregas-js-pages-entregas.md |
 | app/Models/Conjunto.php,app/Acciones/CrearEntregaUniforme.php,app/Http/Requests/Entregas/GuardarEntregaRequest.php | .ai/rules/entregas.md |
 | app/{Enums/PerfilTecnicoUnidad.php,Soporte/ResolverPerfilTecnicoUnidad.php,Models/UnidadActivoEspecificacion.php} | .ai/rules/enums.md |
 | bootstrap/app.php,app/Soporte/AccesoNoAutorizado.php,resources/js/lib/avisoSinPermiso.ts,resources/js/pages/Errores/SinPermiso.vue | .ai/rules/errores.md |

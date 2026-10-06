@@ -11,20 +11,24 @@ use App\Models\Activo;
 use App\Models\CambioServicioColaborador;
 use App\Models\Colaborador;
 use App\Models\Conjunto;
+use App\Models\Empresa;
 use App\Models\EntregaUniforme;
 use App\Models\SaldoInventario;
 use App\Models\Sucursal;
 use App\Models\Talla;
 use App\Models\UnidadActivo;
 use App\Servicios\ServicioCustodiaColaborador;
+use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
- * Alta de entrega. La empresa y la sucursal se DERIVAN del colaborador
- * seleccionado; el almacén de origen se elige explícitamente (debe abastecer
- * a esa empresa y estar activo). La entrega combina, en cualquier mezcla:
+ * Alta de entrega. La empresa y la sucursal DESTINO se DERIVAN del
+ * colaborador seleccionado. En salida de almacén el ORIGEN de los bienes es
+ * aparte: la empresa propietaria del inventario (`empresa_inventario_id`,
+ * autorizada para el usuario; por defecto la del colaborador) y un almacén
+ * que la abastezca y esté activo. Los bienes nunca cambian de dueña. La entrega combina, en cualquier mezcla:
  * activos sueltos por cantidad+variante, unidades de seguimiento individual
  * elegidas explícitamente, y conjuntos (que expanden a sus componentes reales
  * — el stock se valida por componente, nunca "stock del conjunto").
@@ -54,6 +58,10 @@ class GuardarEntregaRequest extends FormRequest
 
     private bool $custodioYaResuelto = false;
 
+    private ?int $empresaInventarioResuelta = null;
+
+    private bool $empresaInventarioYaResuelta = false;
+
     public function authorize(): bool
     {
         $usuario = $this->user();
@@ -70,6 +78,35 @@ class GuardarEntregaRequest extends FormRequest
     public function esRedistribucion(): bool
     {
         return $this->input('origen') === self::ORIGEN_CUSTODIA;
+    }
+
+    /**
+     * Salida de almacén: empresa PROPIETARIA del inventario del que salen los
+     * bienes (ORIGEN), separada de la empresa laboral del colaborador
+     * (DESTINO, que sigue siendo `entregas_uniformes.empresa_id`). Sin
+     * `empresa_inventario_id` es la del colaborador, como siempre. `null` si
+     * la elegida no existe o el usuario no tiene acceso a ella — nunca se
+     * acepta inventario de una empresa fuera de su alcance.
+     */
+    public function empresaInventarioId(): ?int
+    {
+        if ($this->empresaInventarioYaResuelta) {
+            return $this->empresaInventarioResuelta;
+        }
+
+        $this->empresaInventarioYaResuelta = true;
+
+        if (! $this->filled('empresa_inventario_id')) {
+            return $this->empresaInventarioResuelta = Colaborador::query()->whereKey($this->integer('colaborador_id'))->value('empresa_id');
+        }
+
+        $idElegido = $this->integer('empresa_inventario_id');
+
+        return $this->empresaInventarioResuelta = $idElegido > 0
+            && Empresa::query()->whereKey($idElegido)->exists()
+            && ($this->user()?->puedeAccederEmpresa($idElegido) ?? false)
+                ? $idElegido
+                : null;
     }
 
     /**
@@ -191,22 +228,34 @@ class GuardarEntregaRequest extends FormRequest
     public function rules(): array
     {
         $colaborador = Colaborador::query()->find($this->integer('colaborador_id'));
-        $empresaId = $colaborador?->empresa_id;
+        $empresaDestinoId = $colaborador?->empresa_id;
 
-        if ($colaborador === null || ! $this->user()?->puedeAccederEmpresa($empresaId)) {
+        if ($colaborador === null || ! $this->user()?->puedeAccederEmpresa($empresaDestinoId)) {
             return ['colaborador_id' => ['required', 'integer', 'exists:colaboradores,id']];
         }
 
         if ($this->esRedistribucion()) {
-            return [...$this->reglasComunes($empresaId), ...$this->reglasCustodia(), ...$this->reglasFinalidad()];
+            return [...$this->reglasComunes($empresaDestinoId), ...$this->reglasCustodia(), ...$this->reglasFinalidad()];
         }
 
+        // ORIGEN de los bienes: todo lo de inventario se acota a la empresa
+        // propietaria elegida (0 si no está autorizada: nada coincide).
+        $empresaInventarioId = $this->empresaInventarioId() ?? 0;
+
         return [
-            ...$this->reglasComunes($empresaId),
+            ...$this->reglasComunes($empresaDestinoId),
             ...$this->reglasFinalidad(),
+            'empresa_inventario_id' => [
+                'nullable', 'integer',
+                function (string $atributo, mixed $valor, Closure $fallar): void {
+                    if ($this->empresaInventarioId() === null) {
+                        $fallar('No tienes acceso a la empresa propietaria seleccionada.');
+                    }
+                },
+            ],
             'almacen_id' => [
                 'required', 'integer',
-                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaId)),
+                Rule::exists('almacen_empresa', 'almacen_id')->where(fn ($q) => $q->where('empresa_id', $empresaInventarioId)),
             ],
             // Token del apartado temporal armado en el paso 2 (ver
             // `App\Acciones\ReservarInventarioEntrega`). Opcional por
@@ -217,7 +266,7 @@ class GuardarEntregaRequest extends FormRequest
             'activos' => ['nullable', 'array'],
             'activos.*.activo_id' => [
                 'required', 'integer',
-                Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)->where('tipo_control', 'cantidad')->where('activo', true)),
+                Rule::exists('activos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaInventarioId)->where('tipo_control', 'cantidad')->where('activo', true)),
             ],
             'activos.*.talla_id' => ['nullable', 'integer', Rule::exists('tallas', 'id')->where(fn ($q) => $q->where('activa', true))],
             'activos.*.cantidad' => ['required', 'integer', 'min:1', 'max:1000'],
@@ -231,7 +280,7 @@ class GuardarEntregaRequest extends FormRequest
             'unidades.*.unidad_activo_id' => [
                 'required', 'integer', 'distinct',
                 Rule::exists('unidades_activo', 'id')->where(fn ($q) => $q
-                    ->where('empresa_id', $empresaId)
+                    ->where('empresa_id', $empresaInventarioId)
                     ->where('almacen_id', $this->integer('almacen_id'))
                     ->where('estado', EstadoUnidadActivo::EnAlmacen->value)
                     ->where('condicion', CondicionUnidadActivo::Funcionando->value)),
@@ -242,7 +291,7 @@ class GuardarEntregaRequest extends FormRequest
             'conjuntos' => ['nullable', 'array'],
             'conjuntos.*.conjunto_id' => [
                 'required', 'integer',
-                Rule::exists('conjuntos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaId)->where('activo', true)),
+                Rule::exists('conjuntos', 'id')->where(fn ($q) => $q->where('empresa_id', $empresaInventarioId)->where('activo', true)),
             ],
             'conjuntos.*.cantidad' => ['required', 'integer', 'min:1', 'max:100'],
             'conjuntos.*.variantes' => ['nullable', 'array'],
@@ -548,7 +597,8 @@ class GuardarEntregaRequest extends FormRequest
 
                 return;
             }
-            $empresaId = $colaborador->empresa_id;
+            // Saldos del ORIGEN: empresa propietaria + almacén elegidos.
+            $empresaInventarioId = $this->empresaInventarioId() ?? 0;
             $almacenId = $this->integer('almacen_id');
 
             // El snapshot de servicio se deriva del servicio operativo VIGENTE
@@ -582,7 +632,7 @@ class GuardarEntregaRequest extends FormRequest
             // el mismo activo+talla) — mismo criterio de consolidación que
             // `CrearEntregaUniforme::consolidarActivos()`.
             $saldosPorClave = SaldoInventario::query()
-                ->where('empresa_id', $empresaId)
+                ->where('empresa_id', $empresaInventarioId)
                 ->where('almacen_id', $almacenId)
                 ->whereIn('activo_id', $activoIdsSueltos)
                 ->get()
@@ -733,7 +783,7 @@ class GuardarEntregaRequest extends FormRequest
 
                 if ($clavesConDemandaMixta !== []) {
                     $saldosCombinados = SaldoInventario::query()
-                        ->where('empresa_id', $empresaId)
+                        ->where('empresa_id', $empresaInventarioId)
                         ->where('almacen_id', $almacenId)
                         ->get()
                         ->keyBy(fn (SaldoInventario $s): string => $s->activo_id.'-'.($s->talla_id ?? '0'));
