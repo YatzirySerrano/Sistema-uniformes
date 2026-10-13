@@ -24,7 +24,9 @@ final class EspecificacionUnidad
         'imei' => 'IMEI',
         'numero_telefonico' => 'Número telefónico',
         'operador' => 'Operador',
-        'plan' => 'Plan',
+        // Columna `plan` (nombre interno estable); de cara al usuario es
+        // texto libre opcional: "Observaciones".
+        'plan' => 'Observaciones',
         'clase_vehiculo' => 'Tipo de vehículo',
         'anio' => 'Año',
         'color' => 'Color',

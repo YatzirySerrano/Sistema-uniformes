@@ -42,8 +42,8 @@ const CAMPOS_VISIBLES: Record<PerfilTecnico, CampoEspecificacion[]> = {
         'operador',
         'plan',
     ],
-    computadora: ['marca', 'modelo'],
-    tablet: ['marca', 'modelo'],
+    computadora: ['marca', 'modelo', 'plan'],
+    tablet: ['marca', 'modelo', 'plan'],
     transporte: [
         'clase_vehiculo',
         'marca',

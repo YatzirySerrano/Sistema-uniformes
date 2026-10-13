@@ -50,6 +50,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -138,7 +139,18 @@ class UnidadActivoController extends Controller
     {
         $this->authorize('viewAny', UnidadActivo::class);
 
-        $filtros = $this->filtrosListado($request);
+        // Es una navegación directa (enlace), no una visita Inertia: un
+        // filtro inválido no debe acabar en un redirect mudo de vuelta al
+        // listado, sino avisar con el toast global.
+        try {
+            $filtros = $this->filtrosListado($request);
+        } catch (ValidationException $e) {
+            return back()->with('toast', [
+                'type' => 'error',
+                'message' => 'No se pudo exportar: '.collect($e->errors())->flatten()->first(),
+            ]);
+        }
+
         $empresaFiltro = $this->empresaDelFiltro($request);
         $unidades = $this->consultaUnidades($request, $filtros)->get();
 
@@ -166,6 +178,7 @@ class UnidadActivoController extends Controller
                 $esp?->imei,
                 $esp?->numero_telefonico,
                 $esp?->operador,
+                // Columna interna `plan`; se exporta bajo «Observaciones».
                 $esp?->plan,
             ];
         })->all();

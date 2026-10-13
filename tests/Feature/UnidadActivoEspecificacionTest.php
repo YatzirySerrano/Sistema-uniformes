@@ -1,6 +1,7 @@
 <?php
 
 use App\Acciones\RegistrarUnidadesActivo;
+use App\Enums\PerfilTecnicoUnidad;
 use App\Enums\RolSistema;
 use App\Excepciones\ExcepcionDeNegocioSimple;
 use App\Models\Activo;
@@ -10,6 +11,8 @@ use App\Models\CategoriaActivoPerfilTecnico;
 use App\Models\Empresa;
 use App\Models\UnidadActivo;
 use App\Models\UnidadActivoEspecificacion;
+use App\Soporte\EspecificacionUnidad;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -216,8 +219,124 @@ it('el detalle de la unidad expone perfil_tecnico y datos_equipo sólo de los ca
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('unidad.perfil_tecnico', 'computadora')
-            ->where('unidad.datos_equipo', fn ($datos) => collect($datos)->pluck('campo')->all() === ['marca', 'modelo']));
+            ->where('unidad.datos_equipo', fn ($datos) => collect($datos)->pluck('campo')->all() === ['marca', 'modelo', 'plan']));
 });
+
+/*
+ * Observaciones = columna interna `plan` (sin migración ni columna nueva):
+ * opcional en Celular, Computadora y Tablet; rotulada «Observaciones».
+ */
+it('el campo plan se rotula Observaciones y aplica a Celular, Computadora y Tablet sin volverse obligatorio', function () {
+    expect(EspecificacionUnidad::CAMPOS['plan'])->toBe('Observaciones');
+
+    foreach ([PerfilTecnicoUnidad::Celular, PerfilTecnicoUnidad::Computadora, PerfilTecnicoUnidad::Tablet] as $perfil) {
+        expect($perfil->camposVisibles())->toContain('plan')
+            ->and($perfil->camposRequeridos())->not->toContain('plan');
+    }
+
+    // Campos previos intactos.
+    expect(PerfilTecnicoUnidad::Celular->camposVisibles())->toBe(['marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan'])
+        ->and(PerfilTecnicoUnidad::Computadora->camposVisibles())->toBe(['marca', 'modelo', 'plan'])
+        ->and(PerfilTecnicoUnidad::Tablet->camposVisibles())->toBe(['marca', 'modelo', 'plan']);
+
+    // Misma columna de siempre; no existe una `observaciones` en la tabla técnica.
+    expect(Schema::hasColumn('unidad_activo_especificaciones', 'plan'))->toBeTrue()
+        ->and(Schema::hasColumn('unidad_activo_especificaciones', 'observaciones'))->toBeFalse();
+});
+
+it('el detalle de un Celular muestra el valor de plan bajo la etiqueta Observaciones', function () {
+    $activo = ($this->activoConPerfil)('CELULAR');
+    $unidad = ($this->registrar)($activo, 1, [[
+        'marca' => 'Apple', 'modelo' => 'iPhone 13', 'imei' => '353883568904728', 'plan' => 'Incluye cargador original',
+    ]])->first();
+
+    $this->actingAs($this->admin)
+        ->get("/activos/unidades/{$unidad->public_token}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('unidad.datos_equipo', fn ($datos) => collect($datos)->firstWhere('campo', 'plan') === [
+            'campo' => 'plan', 'etiqueta' => 'Observaciones', 'valor' => 'Incluye cargador original',
+        ]));
+});
+
+it('alta HTTP de :dataset con Observaciones vacío y luego capturado: guarda en plan, se edita y se vuelve a mostrar', function (string $perfil, string $marca, string $modelo) {
+    $cat = CategoriaActivo::factory()->create();
+    CategoriaActivoPerfilTecnico::query()->create(['categoria_activo_id' => $cat->id, 'perfil' => $perfil]);
+    $base = [
+        ...clasificacionActivo(),
+        'empresa_id' => $this->empresa->id,
+        'tipo_control' => 'individual',
+        'categoria_id' => $cat->id,
+        'almacen_id' => $this->almacen->id,
+        'cantidad_inicial' => 1,
+    ];
+
+    // Sin Observaciones (null): válido.
+    $this->actingAs($this->admin)
+        ->post('/activos', [...$base, 'nombre' => "Equipo {$perfil} sin obs", 'especificaciones' => [
+            ['marca' => $marca, 'modelo' => $modelo, 'plan' => null],
+        ]])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    $sinObs = UnidadActivo::query()->whereRelation('activo', 'nombre', "Equipo {$perfil} sin obs")->with('especificacion')->firstOrFail();
+    expect($sinObs->especificacion->plan)->toBeNull();
+
+    // Con Observaciones.
+    $this->actingAs($this->admin)
+        ->post('/activos', [...$base, 'nombre' => "Equipo {$perfil}", 'especificaciones' => [
+            ['marca' => $marca, 'modelo' => $modelo, 'plan' => 'Incluye cargador'],
+        ]])
+        ->assertRedirect()->assertSessionHasNoErrors();
+
+    $unidad = UnidadActivo::query()->whereRelation('activo', 'nombre', "Equipo {$perfil}")->with('especificacion')->firstOrFail();
+    expect($unidad->especificacion->plan)->toBe('Incluye cargador');
+
+    // Edición posterior.
+    $this->actingAs($this->admin)
+        ->patch("/activos/unidades/{$unidad->public_token}/especificacion", [
+            'marca' => $marca, 'modelo' => $modelo, 'plan' => 'Incluye cargador y mochila',
+        ])
+        ->assertSessionHasNoErrors();
+
+    expect($unidad->especificacion->refresh()->plan)->toBe('Incluye cargador y mochila');
+
+    // Vaciarlo también es válido (sigue siendo opcional).
+    $this->actingAs($this->admin)
+        ->patch("/activos/unidades/{$unidad->public_token}/especificacion", [
+            'marca' => $marca, 'modelo' => $modelo, 'plan' => '',
+        ])
+        ->assertSessionHasNoErrors();
+    expect($unidad->especificacion->refresh()->plan)->toBeNull();
+
+    $this->actingAs($this->admin)
+        ->patch("/activos/unidades/{$unidad->public_token}/especificacion", [
+            'marca' => $marca, 'modelo' => $modelo, 'plan' => 'Incluye cargador y mochila',
+        ])
+        ->assertSessionHasNoErrors();
+
+    $this->actingAs($this->admin)
+        ->get("/activos/unidades/{$unidad->public_token}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('unidad.especificacion.plan', 'Incluye cargador y mochila')
+            ->where('unidad.datos_equipo', fn ($datos) => collect($datos)->firstWhere('campo', 'plan') === [
+                'campo' => 'plan', 'etiqueta' => 'Observaciones', 'valor' => 'Incluye cargador y mochila',
+            ]));
+})->with([
+    'Computadora' => ['computadora', 'Dell', 'Latitude 5420'],
+    'Tablet' => ['tablet', 'Samsung', 'Galaxy Tab A8'],
+]);
+
+it('una unidad existente de :dataset sin plan sigue mostrándose con Observaciones vacío', function (string $perfil) {
+    $activo = ($this->activoConPerfil)($perfil);
+    $unidad = ($this->registrar)($activo, 1, [['marca' => 'Lenovo', 'modelo' => 'M10']])->first();
+
+    $this->actingAs($this->admin)
+        ->get("/activos/unidades/{$unidad->public_token}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('unidad.datos_equipo', fn ($datos) => collect($datos)->firstWhere('campo', 'plan') === [
+            'campo' => 'plan', 'etiqueta' => 'Observaciones', 'valor' => null,
+        ]));
+})->with(['Computadora' => 'computadora', 'Tablet' => 'tablet']);
 
 it('alta HTTP de un Activo Celular con 2 unidades exige y guarda los datos por unidad', function () {
     $cat = CategoriaActivo::factory()->create(['nombre' => 'Teléfono celular']);

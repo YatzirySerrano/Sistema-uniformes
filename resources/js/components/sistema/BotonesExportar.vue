@@ -7,6 +7,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { urlExportacion } from '@/lib/urlExportacion';
 
 /**
  * "Exportar" (Excel / PDF) para un listado, respetando los filtros activos:
@@ -29,15 +30,7 @@ const props = defineProps<{
 }>();
 
 function url(formato: 'xlsx' | 'pdf'): string {
-    const params = new URLSearchParams();
-    for (const [clave, valor] of Object.entries(props.filtros ?? {})) {
-        if (valor !== null && valor !== undefined && valor !== '') {
-            params.set(clave, String(valor));
-        }
-    }
-    params.set('formato', formato);
-
-    return `${props.endpoint}?${params.toString()}`;
+    return urlExportacion(props.endpoint, props.filtros, formato);
 }
 </script>
 

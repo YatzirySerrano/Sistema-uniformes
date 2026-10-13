@@ -55,7 +55,7 @@ enum PerfilTecnicoUnidad: string
     {
         return match ($this) {
             self::Celular => ['marca', 'modelo', 'imei', 'numero_telefonico', 'operador', 'plan'],
-            self::Computadora, self::Tablet => ['marca', 'modelo'],
+            self::Computadora, self::Tablet => ['marca', 'modelo', 'plan'],
             self::Transporte => ['clase_vehiculo', 'marca', 'modelo', 'anio', 'color', 'placas', 'numero_serie'],
             self::Electrodomestico => ['marca', 'modelo', 'color', 'numero_serie'],
         };
