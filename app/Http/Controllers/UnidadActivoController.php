@@ -191,7 +191,7 @@ class UnidadActivoController extends Controller
 
         return $this->respuestaExportacion($request->input('formato', 'xlsx'), $filas, [
             'Código', 'Activo', 'Almacén', 'Colaborador', 'Servicio', 'Estado', 'Posesión', 'Condición',
-            'Marca', 'Modelo', 'IMEI', 'Número', 'Operador', 'Plan',
+            'Marca', 'Modelo', 'IMEI', 'Número', 'Operador', 'Observaciones',
         ], $contexto);
     }
 

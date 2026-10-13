@@ -499,7 +499,7 @@ function confirmarEstado() {
                         />
                         <p class="text-muted-foreground text-xs">
                             Define qué datos se piden por unidad (Celular: IMEI,
-                            número, operador, plan; Computadora / Tablet: marca
+                            número, operador, observaciones; Computadora / Tablet: marca
                             y modelo). Se guarda como clave estable.
                         </p>
                         <button

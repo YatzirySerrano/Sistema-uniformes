@@ -82,7 +82,7 @@ export const ETIQUETA_CAMPO: Record<CampoEspecificacion, string> = {
     imei: 'IMEI',
     numero_telefonico: 'Número telefónico',
     operador: 'Operador',
-    plan: 'Plan',
+    plan: 'Observaciones',
     clase_vehiculo: 'Tipo de vehículo',
     anio: 'Año',
     color: 'Color',
