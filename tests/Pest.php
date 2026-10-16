@@ -329,7 +329,7 @@ function prevalidarWorkbookMaestro(TestCase $test, User $usuario, array $hojas):
  */
 function encabezadosImportacionColaboradores(): array
 {
-    return ['nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
+    return ['nombre_completo', 'curp', 'puesto', 'area_codigo', 'correo', 'sucursal_codigo', 'servicio_codigo'];
 }
 
 /**
@@ -361,9 +361,9 @@ function construirExcelColaboradores(array $filas, ?array $encabezados = null): 
 }
 
 /**
- * Envía el archivo a `/colaboradores/importar/analizar` como el usuario dado
- * y devuelve el prop `analisis` de la respuesta Inertia (mismo patrón que
- * `prevalidarWorkbookMaestro`).
+ * Envía el archivo a `/colaboradores/importar/analizar` como el usuario dado,
+ * sigue la redirección (Post/Redirect/Get) y devuelve el prop `analisis` de
+ * la pantalla de importación (mismo patrón que `prevalidarWorkbookMaestro`).
  *
  * @return array<string, mixed>
  */
@@ -371,6 +371,7 @@ function analizarImportacionColaboradores(TestCase $test, User $usuario, Empresa
 {
     $analisis = null;
     $test->actingAs($usuario)
+        ->followingRedirects()
         ->post('/colaboradores/importar/analizar', ['empresa_id' => $empresa->id, 'archivo' => $archivo])
         ->assertOk()
         ->assertInertia(function ($page) use (&$analisis): void {

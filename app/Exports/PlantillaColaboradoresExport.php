@@ -2,30 +2,36 @@
 
 namespace App\Exports;
 
+use App\Servicios\ServicioImportacionColaboradores;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithTitle;
 
 /**
- * Plantilla descargable para la importación masiva de colaboradores.
+ * Plantilla descargable para la importación masiva de colaboradores. Las
+ * filas de ejemplo usan códigos de la empresa elegida si existen; si no,
+ * códigos ficticios con el formato del sistema.
  */
 class PlantillaColaboradoresExport implements FromArray, WithHeadings, WithTitle
 {
-    /**
-     * @param  array<int, mixed>  $codigosSucursal
-     */
-    public function __construct(private readonly array $codigosSucursal = []) {}
+    public function __construct(
+        private readonly ?string $codigoArea = null,
+        private readonly ?string $codigoSucursal = null,
+        private readonly ?string $codigoServicio = null,
+    ) {}
 
     /**
      * @return array<int, array<int, string>>
      */
     public function array(): array
     {
-        $ejemploSucursal = (string) ($this->codigosSucursal[0] ?? 'MATRIZ');
+        $area = $this->codigoArea ?? 'ARE-0001';
+        $sucursal = $this->codigoSucursal ?? 'MATRIZ';
+        $servicio = $this->codigoServicio ?? 'SER-0001';
 
         return [
-            ['Juan Pérez López', 'PELJ850101HDFRZN08', 'Operador', 'Producción', 'juan.perez@example.test', $ejemploSucursal],
-            ['María García Ruiz', 'GARM900215MDFRZR03', 'Supervisora', 'Almacén', '', $ejemploSucursal],
+            ['Juan Pérez López', 'PELJ850101HDFRZN08', 'Operador', $area, 'juan.perez@example.test', $sucursal, $servicio],
+            ['María García Ruiz', 'GARM900215MQTRZR03', 'Supervisora', $area, '', $sucursal, $servicio],
         ];
     }
 
@@ -38,7 +44,7 @@ class PlantillaColaboradoresExport implements FromArray, WithHeadings, WithTitle
      */
     public function headings(): array
     {
-        return ['nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
+        return ServicioImportacionColaboradores::COLUMNAS;
     }
 
     public function title(): string

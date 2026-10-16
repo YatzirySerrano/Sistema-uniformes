@@ -10,6 +10,7 @@ use App\Excepciones\ExcepcionDeNegocio;
 use App\Excepciones\SimulacionImportacionMaestra;
 use App\Http\Controllers\Concerns\CreaConCodigoUnico;
 use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
+use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Http\Requests\Concerns\NormalizaEntrada;
 use App\Models\Activo;
 use App\Models\Almacen;
@@ -93,12 +94,6 @@ final class ServicioImportacionMaestra
     // duplica aquí siguiendo la misma convención ya usada en
     // App\Servicios\ServicioImportacionColaboradores para la CURP.
     private const REGEX_RFC = '/^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$/';
-
-    // Misma estructura que App\Http\Requests\Colaboradores\GuardarColaboradorRequest
-    // (sin verificar contra RENAPO ni recalcular el dígito verificador).
-    private const REGEX_CURP = '/^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM]'
-        .'(AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)'
-        .'[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/';
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
@@ -616,7 +611,7 @@ final class ServicioImportacionMaestra
                 continue;
             }
 
-            if (strlen($curp) !== 18 || ! preg_match(self::REGEX_CURP, $curp)) {
+            if (strlen($curp) !== 18 || ! preg_match(GuardarColaboradorRequest::REGEX_CURP, $curp)) {
                 $errores[] = $this->error('COLABORADORES', $numeroFila, 'curp', $curp, 'La CURP no tiene un formato válido.');
 
                 continue;

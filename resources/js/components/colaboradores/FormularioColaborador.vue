@@ -283,13 +283,15 @@ async function validarCurp(): Promise<void> {
             estadoCurp.value = 'error';
             return;
         }
+        // `null` = el backend (autoridad del catálogo de entidades) no
+        // reconoce el formato aunque pasó la prevalidación local.
         const data = (await res.json()) as { disponible: boolean | null };
         estadoCurp.value =
             data.disponible === true
                 ? 'disponible'
                 : data.disponible === false
                   ? 'duplicado'
-                  : 'idle';
+                  : 'invalido';
     } catch {
         if (miTurno === secuenciaCurp) estadoCurp.value = 'error';
     }

@@ -26,11 +26,23 @@ describe('formatoCurpValido', () => {
         expect(formatoCurpValido('HEGG560427MVZRRL044')).toBe(false); // 19
     });
 
-    it('rechaza mes/día/sexo/entidad fuera de catálogo aunque el resto tenga forma correcta', () => {
+    it('rechaza mes/día/sexo inválidos aunque el resto tenga forma correcta', () => {
         expect(formatoCurpValido('HEGG561327MVZRRL04')).toBe(false); // mes 13
         expect(formatoCurpValido('HEGG560432MVZRRL04')).toBe(false); // día 32
         expect(formatoCurpValido('HEGG560427XVZRRL04')).toBe(false); // sexo X
-        expect(formatoCurpValido('HEGG560427MXXRRL04')).toBe(false); // entidad XX no existe
+    });
+
+    it('no duplica el catálogo de entidades: la clave la decide el backend', () => {
+        // Querétaro con QT y QO, y una clave inexistente: las tres pasan la
+        // prevalidación local; `POST /colaboradores/validar-curp` (con
+        // `GuardarColaboradorRequest::REGEX_CURP`) es quien rechaza `XX`.
+        expect(formatoCurpValido('MASG901214HQTRRL04')).toBe(true);
+        expect(formatoCurpValido('HEGG560427MQORRL04')).toBe(true);
+        expect(formatoCurpValido('HEGG560427MXXRRL04')).toBe(true);
+    });
+
+    it('acepta X como 2.º carácter (apellido sin vocal interna)', () => {
+        expect(formatoCurpValido('CXCA780703HTSMSL09')).toBe(true);
     });
 });
 

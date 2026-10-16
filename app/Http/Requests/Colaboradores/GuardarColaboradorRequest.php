@@ -20,17 +20,21 @@ class GuardarColaboradorRequest extends FormRequest
     /**
      * Estructura de una CURP mexicana (18 caracteres), sin verificar contra
      * RENAPO ni recalcular el dígito verificador: 4 letras (2.º carácter
-     * vocal) + fecha de nacimiento AAMMDD + sexo H/M + entidad (2 letras, de
-     * un catálogo fijo de 32 claves) + 3 consonantes + 1 alfanumérico
+     * vocal, o `X` cuando el primer apellido no tiene vocal interna) + fecha de nacimiento AAMMDD + sexo H/M + entidad (2 letras, de
+     * un catálogo fijo: las 32 entidades + `NE`, nacido en el extranjero;
+     * Querétaro acepta `QO` y `QT`, ambas emitidas en CURP reales — `QR` es
+     * Quintana Roo) + 3 consonantes + 1 alfanumérico
      * (diferenciador) + 1 dígito (verificador). Rechaza longitudes o
      * caracteres claramente inválidos sin pretender validar la identidad real.
      *
      * Pública para que `ColaboradorController::validarCurp()` (comprobación
-     * anticipada de disponibilidad) reutilice exactamente el mismo formato,
-     * sin duplicar el patrón.
+     * anticipada de disponibilidad) y los importadores de Excel reutilicen
+     * exactamente el mismo formato, sin duplicar el patrón. El frontend sólo
+     * prevalida la estructura y delega el catálogo de entidades a ese
+     * endpoint.
      */
-    public const REGEX_CURP = '/^[A-Z][AEIOU][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM]'
-        .'(AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)'
+    public const REGEX_CURP = '/^[A-Z][AEIOUX][A-Z]{2}\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])[HM]'
+        .'(AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QO|QT|QR|SL|SP|SR|TC|TL|TS|VZ|YN|ZS|NE)'
         .'[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/';
 
     protected function prepareForValidation(): void

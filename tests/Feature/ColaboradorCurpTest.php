@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\RolSistema;
+use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Colaborador;
 use Illuminate\Support\Str;
 
@@ -314,4 +315,57 @@ it('el endpoint de validar-curp ya no responde a GET (la CURP no debe viajar en 
     $this->actingAs($admin)
         ->get('/colaboradores/validar-curp?curp='.curpDeQaValida())
         ->assertNotFound();
+});
+
+/*
+|--------------------------------------------------------------------------
+| Catálogo de entidades (Querétaro QT/QO)
+|--------------------------------------------------------------------------
+| Regresión: CURP reales de Querétaro emitidas con `QT` se rechazaban porque
+| el catálogo sólo traía `QO`. Ambas son válidas; `QR` sigue siendo Quintana
+| Roo y `NE` nacido en el extranjero.
+*/
+
+dataset('curp_por_entidad', [
+    'Querétaro QT' => ['HEGG560427MQTRRL04', true],
+    'Querétaro QO' => ['HEGG560427MQORRL04', true],
+    'Quintana Roo QR' => ['HEGG560427MQRRRL04', true],
+    'Extranjero NE' => ['HEGG560427MNERRL04', true],
+    'Tabasco TS' => ['CXCA780703HTSMSL09', true],
+    'Clave inexistente XX' => ['HEGG560427MXXRRL04', false],
+    'Clave inexistente QQ' => ['HEGG560427MQQRRL04', false],
+]);
+
+it('REGEX_CURP decide la clave de entidad', function (string $curp, bool $valida): void {
+    expect((bool) preg_match(GuardarColaboradorRequest::REGEX_CURP, $curp))->toBe($valida);
+})->with('curp_por_entidad');
+
+it('acepta las CURP reales de Querétaro con QT', function (string $curp): void {
+    expect($curp)->toMatch(GuardarColaboradorRequest::REGEX_CURP);
+})->with([
+    'MASG901214HQTRRL04', 'LUBR660213HQTNRB03', 'GALA740606HQTRPL04',
+    'HERP060608MQTRVRA5', 'MASB940520HQTLNR06', 'PETJ791023HQTRRL05',
+    'AARJ060506HQTRBSA4', 'VATA080618MQTZRNA6', 'NIHG771212HQTVRD01',
+]);
+
+it('POST validar-curp responde según la clave de entidad', function (string $curp, bool $valida): void {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+
+    $this->actingAs($admin)
+        ->postJson('/colaboradores/validar-curp', ['curp' => $curp])
+        ->assertOk()
+        ->assertExactJson(['disponible' => $valida ? true : null]);
+})->with('curp_por_entidad');
+
+it('da de alta manualmente un colaborador con CURP de Querétaro QT', function (): void {
+    $admin = usuarioCon(RolSistema::Administrador->value, [$this->datos['empresaA']]);
+
+    $this->actingAs($admin)->post('/colaboradores', [
+        'empresa_id' => $this->datos['empresaA']->id,
+        'nombre_completo' => 'Persona De Queretaro',
+        'curp' => 'MASG901214HQTRRL04',
+        'sucursal_id' => $this->datos['sucursalA']->id,
+    ])->assertSessionHasNoErrors();
+
+    expect(Colaborador::query()->where('curp', 'MASG901214HQTRRL04')->exists())->toBeTrue();
 });

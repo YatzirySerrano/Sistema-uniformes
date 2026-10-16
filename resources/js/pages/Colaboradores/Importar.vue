@@ -37,10 +37,10 @@ type ColumnasReporte = {
     correctas: string[];
     faltantes: string[];
     adicionales: string[];
+    desactualizada: boolean;
 };
 type AreasReporte = {
     existentes: string[];
-    nuevas: string[];
 };
 type Analisis = {
     token: string;
@@ -74,9 +74,10 @@ const ETIQUETAS_COLUMNA: Record<string, string> = {
     nombre_completo: 'Nombre completo',
     curp: 'CURP',
     puesto: 'Puesto',
-    area: 'Área',
+    area_codigo: 'Código de área',
     correo: 'Correo',
     sucursal_codigo: 'Código de sucursal',
+    servicio_codigo: 'Código de servicio',
 };
 
 function etiquetaColumna(col: string): string {
@@ -120,19 +121,26 @@ function confirmar(token: string) {
     confirmForm.post('/colaboradores/importar/confirmar');
 }
 
-const urlPlantilla = () =>
+// Sólo hay enlace con empresa elegida: un `<a href="#">` ignora `disabled`
+// y se veía habilitado sin descargar nada.
+const urlPlantilla = computed(() =>
     empresaId.value
         ? `/colaboradores/importar/plantilla?empresa_id=${empresaId.value}`
-        : '#';
+        : null,
+);
 
 const columnasFaltantes = computed(
     () => props.analisis?.columnas.faltantes ?? [],
 );
 const bloqueadoPorColumnas = computed(() => columnasFaltantes.value.length > 0);
-const problemas = computed<ErrorImportacion[]>(() => [
-    ...(props.analisis?.errores ?? []),
-    ...(props.analisis?.duplicados ?? []),
-]);
+// Ordenados por fila: una misma fila puede traer errores de campo y además
+// CURP duplicada, y deben verse juntos.
+const problemas = computed<ErrorImportacion[]>(() =>
+    [
+        ...(props.analisis?.errores ?? []),
+        ...(props.analisis?.duplicados ?? []),
+    ].sort((a, b) => a.fila - b.fila),
+);
 const puedeConfirmar = computed(
     () =>
         !!props.analisis &&
@@ -140,7 +148,6 @@ const puedeConfirmar = computed(
         problemas.value.length === 0 &&
         props.analisis.listos > 0,
 );
-const areasNuevas = computed(() => props.analisis?.areas.nuevas ?? []);
 
 function xsrf(): string {
     const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
@@ -194,10 +201,18 @@ async function descargarErrores() {
             descripcion="Elige la empresa destino. El número de empleado se genera automáticamente: no se captura en el archivo."
         >
             <template #acciones>
-                <Button variant="outline" as-child :disabled="!empresaId">
-                    <a :href="urlPlantilla()">
+                <Button v-if="urlPlantilla" variant="outline" as-child>
+                    <a :href="urlPlantilla" download>
                         <Download class="size-4" /> Descargar plantilla
                     </a>
+                </Button>
+                <Button
+                    v-else
+                    variant="outline"
+                    disabled
+                    title="Elige primero la empresa destino"
+                >
+                    <Download class="size-4" /> Descargar plantilla
                 </Button>
             </template>
         </EncabezadoPagina>
@@ -221,6 +236,11 @@ async function descargarErrores() {
                             placeholder-busqueda="Buscar empresa…"
                         />
                     </div>
+                    <p v-if="!empresaId" class="text-muted-foreground text-xs">
+                        Elige la empresa para descargar su plantilla y analizar
+                        el archivo. Los códigos de área, sucursal y servicio se
+                        buscan sólo dentro de esa empresa.
+                    </p>
                     <InputError :message="form.errors.empresa_id" />
                 </div>
                 <div class="text-muted-foreground text-sm">
@@ -256,9 +276,19 @@ async function descargarErrores() {
         <template v-if="analisis">
             <Alert v-if="bloqueadoPorColumnas" variant="destructive">
                 <TriangleAlert class="size-4" />
-                <AlertTitle>Faltan columnas en el archivo</AlertTitle>
+                <AlertTitle>{{
+                    analisis.columnas.desactualizada
+                        ? 'La plantilla está desactualizada'
+                        : 'Faltan columnas en el archivo'
+                }}</AlertTitle>
                 <AlertDescription>
-                    <p>
+                    <p v-if="analisis.columnas.desactualizada">
+                        El área ya no se indica por nombre: ahora se usa su
+                        código (<code>area_codigo</code>) y cada colaborador
+                        lleva su código de servicio (<code>servicio_codigo</code>).
+                        Descarga la plantilla actual y vuelve a intentarlo.
+                    </p>
+                    <p v-else>
                         No se puede analizar fila por fila hasta que el archivo
                         tenga las
                         {{ analisis.columnas.esperadas.length }} columnas de la
@@ -359,12 +389,7 @@ async function descargarErrores() {
                     </CardContent>
                 </Card>
 
-                <Card
-                    v-if="
-                        analisis.areas.existentes.length ||
-                        analisis.areas.nuevas.length
-                    "
-                >
+                <Card v-if="analisis.areas.existentes.length">
                     <CardHeader>
                         <CardTitle class="text-base"
                             >Áreas detectadas</CardTitle
@@ -379,22 +404,7 @@ async function descargarErrores() {
                             >
                                 ✓ {{ a }}
                             </Badge>
-                            <Badge
-                                v-for="a in analisis.areas.nuevas"
-                                :key="'area-nueva-'.concat(a)"
-                                variant="outline"
-                                class="border-emerald-500 text-emerald-600"
-                            >
-                                + {{ a }} (nueva)
-                            </Badge>
                         </div>
-                        <p
-                            v-if="areasNuevas.length"
-                            class="text-muted-foreground text-sm"
-                        >
-                            Las áreas nuevas se crearán automáticamente al
-                            confirmar la importación.
-                        </p>
                     </CardContent>
                 </Card>
 
@@ -507,21 +517,6 @@ async function descargarErrores() {
                             <strong>{{ analisis.listos }}</strong>
                             colaboradores listos para importar. El número de
                             empleado se generará automáticamente para cada uno.
-                            <template v-if="areasNuevas.length">
-                                Se
-                                {{
-                                    areasNuevas.length > 1
-                                        ? 'crearán'
-                                        : 'creará'
-                                }}
-                                {{ areasNuevas.length }}
-                                {{
-                                    areasNuevas.length > 1
-                                        ? 'áreas nuevas'
-                                        : 'área nueva'
-                                }}
-                                al confirmar la importación.
-                            </template>
                         </p>
                         <p v-else class="text-muted-foreground text-sm">
                             Corrige los errores y duplicados señalados arriba y

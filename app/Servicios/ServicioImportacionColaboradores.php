@@ -3,15 +3,13 @@
 namespace App\Servicios;
 
 use App\Excepciones\SimulacionImportacionColaboradores;
-use App\Http\Controllers\Concerns\CreaConCodigoUnico;
-use App\Http\Controllers\Concerns\ReconciliaSecuenciaCodigo;
 use App\Http\Requests\Colaboradores\GuardarColaboradorRequest;
 use App\Models\Area;
 use App\Models\Colaborador;
 use App\Models\Empresa;
+use App\Models\Servicio;
+use App\Models\Sucursal;
 use App\Soporte\GeneradorNumeroEmpleado;
-use App\Soporte\NormalizadorNombre;
-use App\Soporte\ServicioGeneradorCodigos;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -28,21 +26,27 @@ use Maatwebsite\Excel\Facades\Excel;
  * (misma fuente de verdad que el alta manual), dentro de la misma transacción
  * que crea al colaborador.
  *
+ * Área, sucursal y servicio se resuelven SÓLO por código exacto (sin
+ * distinguir mayúsculas) y SIEMPRE dentro de la empresa destino: nunca por
+ * nombre, nunca globalmente, nunca se crean. El servicio se liga con la misma
+ * relación que el resto del sistema (`colaboradores.servicio_actual_id`, ver
+ * `CambiarServicioColaboradorRequest`): activo, contrato activo y de la misma
+ * empresa. La sucursal del colaborador NO tiene que ser la sucursal
+ * responsable del servicio — el flujo manual tampoco lo exige.
+ *
  * `analizar()` y `importar()` comparten `procesar()`, que SIEMPRE ejecuta la
  * resolución/creación real dentro de una transacción: en análisis (o si la
  * confirmación detecta errores de último momento) se fuerza un rollback
  * lanzando `SimulacionImportacionColaboradores`, así el consecutivo que
- * reserva el generador — y cualquier área nueva que se haya creado (ver
- * `resolverOCrearArea()`) — nunca se consume/persiste salvo en una
- * confirmación exitosa. Todo o nada: si queda un solo error o duplicado, no
- * se crea ningún colaborador ni ningún área huérfana (mismo patrón que
+ * reserva el generador nunca se consume salvo en una confirmación exitosa.
+ * La confirmación reprocesa el archivo completo (nunca confía en ids del
+ * análisis previo), así que un área/sucursal/servicio que cambió entre
+ * ambos pasos se vuelve a detectar. Todo o nada: si queda un solo error o
+ * duplicado, no se crea ningún colaborador (mismo patrón que
  * `App\Servicios\ServicioImportacionMaestra`).
  */
 class ServicioImportacionColaboradores
 {
-    use CreaConCodigoUnico;
-    use ReconciliaSecuenciaCodigo;
-
     private const DISCO_TEMP = 'local';
 
     /**
@@ -51,22 +55,30 @@ class ServicioImportacionColaboradores
      *
      * @var list<string>
      */
-    private const COLUMNAS = ['nombre_completo', 'curp', 'puesto', 'area', 'correo', 'sucursal_codigo'];
+    public const COLUMNAS = ['nombre_completo', 'curp', 'puesto', 'area_codigo', 'correo', 'sucursal_codigo', 'servicio_codigo'];
 
     /**
      * @var list<string>
      */
-    private const COLUMNAS_OBLIGATORIAS = ['nombre_completo', 'curp', 'sucursal_codigo'];
+    private const COLUMNAS_OBLIGATORIAS = ['nombre_completo', 'curp', 'area_codigo', 'sucursal_codigo', 'servicio_codigo'];
 
     /**
      * @var list<string>
      */
-    private const COLUMNAS_OPCIONALES = ['puesto', 'area', 'correo'];
+    private const COLUMNAS_OPCIONALES = ['puesto', 'correo'];
+
+    /**
+     * Columnas que no existían en la plantilla anterior (que traía `area`
+     * como texto libre): si falta alguna, el archivo viene de una plantilla
+     * desactualizada.
+     *
+     * @var list<string>
+     */
+    private const COLUMNAS_NUEVAS = ['area_codigo', 'servicio_codigo'];
 
     public function __construct(
         private readonly ServicioAuditoria $auditoria,
         private readonly GeneradorNumeroEmpleado $generadorNumeroEmpleado,
-        private readonly ServicioGeneradorCodigos $codigos,
     ) {}
 
     /**
@@ -100,7 +112,18 @@ class ServicioImportacionColaboradores
 
         abort_unless(Storage::disk(self::DISCO_TEMP)->exists($ruta), 422, 'El archivo de importación ya no está disponible. Vuelve a cargarlo.');
 
-        $resultado = $this->procesar($ruta, $empresa, true);
+        try {
+            $resultado = $this->procesar($ruta, $empresa, true);
+        } catch (QueryException $e) {
+            // Carrera real: otra alta registró la misma CURP entre el
+            // reprocesamiento y el INSERT. El índice único de BD es la
+            // autoridad final; se responde en español, nunca un 500.
+            if ($e->getCode() !== '23000' || ! str_contains($e->getMessage(), 'curp')) {
+                throw $e;
+            }
+
+            abort(422, 'Otra captura registró una de estas CURP mientras se importaba. Vuelve a analizar el archivo.');
+        }
 
         if ($this->hayProblemas($resultado)) {
             abort(422, 'La importación no puede completarse: hay errores o duplicados pendientes. Vuelve a analizar el archivo.');
@@ -165,7 +188,7 @@ class ServicioImportacionColaboradores
         if ($filas === []) {
             return [
                 'columnas' => $this->analizarColumnas([]),
-                'areas' => ['existentes' => [], 'nuevas' => []],
+                'areas' => ['existentes' => []],
                 'total' => 0,
                 'listos' => 0,
                 'errores' => [$this->error(1, null, null, 'El archivo está vacío.')],
@@ -185,7 +208,7 @@ class ServicioImportacionColaboradores
         if ($columnas['faltantes'] !== []) {
             return [
                 'columnas' => $columnas,
-                'areas' => ['existentes' => [], 'nuevas' => []],
+                'areas' => ['existentes' => []],
                 'total' => 0,
                 'listos' => 0,
                 'errores' => [],
@@ -195,8 +218,7 @@ class ServicioImportacionColaboradores
             ];
         }
 
-        $sucursales = $empresa->sucursales()->pluck('id', 'codigo')
-            ->mapWithKeys(fn ($id, $codigo): array => [Str::lower((string) $codigo) => $id])->all();
+        $catalogos = $this->catalogosDeEmpresa($empresa);
 
         // La CURP es única a nivel PLATAFORMA (no por empresa, a diferencia
         // del número de empleado), así que la búsqueda de duplicados en BD
@@ -207,7 +229,7 @@ class ServicioImportacionColaboradores
         $errores = [];
         $duplicados = [];
         $vistosEnArchivoCurp = [];
-        $areasCtx = ['resueltas' => [], 'existentes' => [], 'nuevas' => []];
+        $areasUsadas = [];
         $total = 0;
         $listos = 0;
 
@@ -231,32 +253,39 @@ class ServicioImportacionColaboradores
                 $datos['curp'] = Str::upper($datos['curp']);
             }
 
-            $erroresFila = $this->validarFila($datos, $numeroFila, $sucursales);
+            $erroresFila = $this->validarFila($datos, $numeroFila, $catalogos);
+            array_push($errores, ...$erroresFila);
 
-            if ($erroresFila !== []) {
-                array_push($errores, ...$erroresFila);
+            // La duplicidad de CURP es independiente de los demás campos: se
+            // revisa aunque la fila ya tenga otro error (servicio, área,
+            // correo…), para reportar todo en una sola pasada. Sólo se omite
+            // si la propia CURP no pasó su validación de formato.
+            $duplicadoFila = null;
 
+            if (! in_array('curp', array_column($erroresFila, 'campo'), true)) {
+                $claveCurp = Str::lower((string) $datos['curp']);
+
+                if (isset($vistosEnArchivoCurp[$claveCurp])) {
+                    $duplicadoFila = $this->error($numeroFila, 'curp', $datos['curp'], 'La CURP se repite en la fila '.$vistosEnArchivoCurp[$claveCurp].' del archivo.');
+                } elseif (isset($existentesCurp[$claveCurp])) {
+                    $duplicadoFila = $this->error($numeroFila, 'curp', $datos['curp'], 'La CURP ya existe en el sistema.');
+                } else {
+                    $vistosEnArchivoCurp[$claveCurp] = $numeroFila;
+                }
+            }
+
+            if ($duplicadoFila !== null) {
+                $duplicados[] = $duplicadoFila;
+            }
+
+            if ($erroresFila !== [] || $duplicadoFila !== null) {
                 continue;
             }
 
-            $claveCurp = Str::lower((string) $datos['curp']);
-
-            if (isset($vistosEnArchivoCurp[$claveCurp])) {
-                $duplicados[] = $this->error($numeroFila, 'curp', $datos['curp'], 'La CURP se repite en la fila '.$vistosEnArchivoCurp[$claveCurp].' del archivo.');
-
-                continue;
-            }
-
-            if (isset($existentesCurp[$claveCurp])) {
-                $duplicados[] = $this->error($numeroFila, 'curp', $datos['curp'], 'La CURP ya existe en el sistema.');
-
-                continue;
-            }
-
-            $vistosEnArchivoCurp[$claveCurp] = $numeroFila;
-
-            $sucursalId = $sucursales[Str::lower((string) $datos['sucursal_codigo'])];
-            [$areaId, $areaNombre] = $this->resolverOCrearArea($empresa, $datos['area'], $areasCtx);
+            $area = $catalogos['areas'][Str::lower((string) $datos['area_codigo'])];
+            $sucursal = $catalogos['sucursales'][Str::lower((string) $datos['sucursal_codigo'])];
+            $servicio = $catalogos['servicios'][Str::lower((string) $datos['servicio_codigo'])];
+            $areasUsadas[$area->id] = $area->nombre;
 
             // El número de empleado NUNCA se toma del archivo: se reserva
             // atómicamente aquí, con la misma fuente de verdad del alta
@@ -265,13 +294,18 @@ class ServicioImportacionColaboradores
 
             Colaborador::query()->create([
                 'empresa_id' => $empresa->getKey(),
-                'sucursal_id' => $sucursalId,
+                'sucursal_id' => $sucursal->id,
                 'numero_empleado' => $numeroEmpleado,
                 'nombre_completo' => $datos['nombre_completo'],
                 'curp' => $datos['curp'],
                 'puesto' => $datos['puesto'],
-                'area' => $areaNombre,
-                'area_id' => $areaId,
+                // `area` es el espejo de texto de `area_id` (mismo criterio
+                // que `ColaboradorController`): el nombre del catálogo.
+                'area' => $area->nombre,
+                'area_id' => $area->id,
+                // Misma relación que "Cambiar servicio" / "Asignar
+                // colaboradores" y que `ServicioImportacionMaestra`.
+                'servicio_actual_id' => $servicio->id,
                 'correo' => $datos['correo'],
                 'activo' => true,
             ]);
@@ -282,8 +316,7 @@ class ServicioImportacionColaboradores
         return [
             'columnas' => $columnas,
             'areas' => [
-                'existentes' => array_values($areasCtx['existentes']),
-                'nuevas' => array_values($areasCtx['nuevas']),
+                'existentes' => array_values($areasUsadas),
             ],
             'total' => $total,
             'listos' => $listos,
@@ -295,15 +328,39 @@ class ServicioImportacionColaboradores
     }
 
     /**
-     * Valida los datos de una fila (formato + existencia de la sucursal en
-     * la empresa). No detiene el análisis en el primer error: junta todos
-     * los problemas de la fila antes de devolverlos.
+     * Áreas, sucursales y servicios de la empresa destino, indexados por
+     * código en minúsculas. Se leen dentro de la transacción de `procesar()`
+     * con candado compartido: en la confirmación, ninguno puede desactivarse
+     * ni cambiar de empresa entre la validación y el alta de los
+     * colaboradores. Los servicios se acotan a la empresa por su contrato
+     * (`servicios` no tiene `empresa_id` propio).
+     *
+     * @return array{areas: array<string, Area>, sucursales: array<string, Sucursal>, servicios: array<string, Servicio>}
+     */
+    private function catalogosDeEmpresa(Empresa $empresa): array
+    {
+        $porCodigo = fn ($modelos): array => $modelos
+            ->keyBy(fn ($modelo): string => Str::lower((string) $modelo->codigo))->all();
+
+        return [
+            'areas' => $porCodigo(Area::query()->where('empresa_id', $empresa->getKey())->sharedLock()->get()),
+            'sucursales' => $porCodigo(Sucursal::query()->where('empresa_id', $empresa->getKey())->sharedLock()->get()),
+            'servicios' => $porCodigo(Servicio::query()->with('contrato')
+                ->whereHas('contrato', fn ($q) => $q->where('empresa_id', $empresa->getKey()))
+                ->sharedLock()->get()),
+        ];
+    }
+
+    /**
+     * Valida los datos de una fila (formato + existencia de área, sucursal y
+     * servicio en la empresa destino). No detiene el análisis en el primer
+     * error: junta todos los problemas de la fila antes de devolverlos.
      *
      * @param  array<string, string|null>  $datos
-     * @param  array<string, int>  $sucursales  código de sucursal (lower) => id
+     * @param  array{areas: array<string, Area>, sucursales: array<string, Sucursal>, servicios: array<string, Servicio>}  $catalogos
      * @return list<array{fila: int, campo: string|null, valor: mixed, error: string}>
      */
-    private function validarFila(array $datos, int $numeroFila, array $sucursales): array
+    private function validarFila(array $datos, int $numeroFila, array $catalogos): array
     {
         // `bail` en cada campo: una fila puede tener varios campos con
         // problemas (se reportan todos), pero un mismo campo nunca acumula
@@ -315,16 +372,19 @@ class ServicioImportacionColaboradores
             // que pueda divergir de `GuardarColaboradorRequest::REGEX_CURP`.
             'curp' => ['bail', 'required', 'string', 'size:18', 'regex:'.GuardarColaboradorRequest::REGEX_CURP],
             'puesto' => ['bail', 'nullable', 'string', 'max:255'],
-            'area' => ['bail', 'nullable', 'string', 'max:255'],
+            'area_codigo' => ['bail', 'required', 'string'],
             'correo' => ['bail', 'nullable', 'email', 'max:255'],
             'sucursal_codigo' => ['bail', 'required', 'string'],
+            'servicio_codigo' => ['bail', 'required', 'string'],
         ], [
             'nombre_completo.required' => 'El nombre del colaborador es obligatorio.',
             'curp.required' => 'La CURP es obligatoria.',
             'curp.size' => 'La CURP debe tener exactamente 18 caracteres.',
             'curp.regex' => 'La CURP no tiene un formato válido.',
+            'area_codigo.required' => 'El código de área es obligatorio.',
             'correo.email' => 'El correo electrónico no es válido.',
             'sucursal_codigo.required' => 'La sucursal es obligatoria.',
+            'servicio_codigo.required' => 'El código de servicio es obligatorio.',
         ]);
 
         $errores = [];
@@ -335,11 +395,42 @@ class ServicioImportacionColaboradores
             }
         }
 
-        if ($datos['sucursal_codigo'] !== null && ! $validador->errors()->has('sucursal_codigo')
-            && ! isset($sucursales[Str::lower($datos['sucursal_codigo'])])) {
-            $errores[] = $this->error($numeroFila, 'sucursal_codigo', $datos['sucursal_codigo'],
-                'La sucursal '.$datos['sucursal_codigo'].' no existe en la empresa seleccionada.');
-        }
+        $resolver = function (string $campo, array $catalogo, callable $mensaje) use ($datos, $validador, $numeroFila, &$errores): void {
+            $codigo = $datos[$campo];
+
+            if ($codigo === null || $validador->errors()->has($campo)) {
+                return;
+            }
+
+            $problema = $mensaje($catalogo[Str::lower($codigo)] ?? null, $codigo);
+
+            if ($problema !== null) {
+                $errores[] = $this->error($numeroFila, $campo, $codigo, $problema);
+            }
+        };
+
+        $resolver('area_codigo', $catalogos['areas'], fn (?Area $area, string $codigo): ?string => match (true) {
+            $area === null => 'Área con código «'.$codigo.'» no encontrada en la empresa seleccionada.',
+            ! $area->activa => 'El área «'.$codigo.'» está inactiva.',
+            default => null,
+        });
+
+        $resolver('sucursal_codigo', $catalogos['sucursales'], fn (?Sucursal $sucursal, string $codigo): ?string => match (true) {
+            $sucursal === null => 'Sucursal con código «'.$codigo.'» no encontrada en la empresa seleccionada.',
+            ! $sucursal->activa => 'La sucursal «'.$codigo.'» está inactiva.',
+            default => null,
+        });
+
+        $resolver('servicio_codigo', $catalogos['servicios'], fn (?Servicio $servicio, string $codigo): ?string => match (true) {
+            // El código de servicio es único a nivel plataforma: si existe
+            // pero no está en la empresa destino, es de otra empresa (nunca
+            // se dice de cuál).
+            $servicio === null && Servicio::query()->where('codigo', $codigo)->exists() => 'El servicio «'.$codigo.'» pertenece a otra empresa.',
+            $servicio === null => 'Servicio con código «'.$codigo.'» no encontrado en la empresa seleccionada.',
+            ! $servicio->activo => 'El servicio «'.$codigo.'» está inactivo.',
+            ! $servicio->contrato->activo => 'El contrato del servicio «'.$codigo.'» está inactivo.',
+            default => null,
+        });
 
         return $errores;
     }
@@ -350,8 +441,8 @@ class ServicioImportacionColaboradores
      * cruce correctas/faltantes/adicionales. Una columna faltante —
      * obligatoria u opcional— bloquea la importación completa: se exige la
      * plantilla completa para que todo archivo tenga la misma estructura.
-     * Una columna adicional (p. ej. `numero_empleado` de una plantilla
-     * vieja) es sólo informativa: nunca se lee para poblar datos.
+     * Una columna adicional (p. ej. `numero_empleado` o `area` de una
+     * plantilla vieja) es sólo informativa: nunca se lee para poblar datos.
      *
      * @param  list<string>  $encabezados  ya normalizados (trim+lower+snake_case)
      * @return array<string, mixed>
@@ -368,122 +459,11 @@ class ServicioImportacionColaboradores
             'correctas' => array_values(array_intersect(self::COLUMNAS, $encontradas)),
             'faltantes' => array_values(array_diff(self::COLUMNAS, $encontradas)),
             'adicionales' => array_values(array_diff($encontradas, self::COLUMNAS)),
+            // Archivo de la plantilla anterior (traía `area` como texto, sin
+            // `area_codigo`/`servicio_codigo`): nunca se intenta resolver el
+            // área por nombre para "salvarlo"; se pide la plantilla actual.
+            'desactualizada' => $encontradas !== [] && array_diff(self::COLUMNAS_NUEVAS, $encontradas) !== [],
         ];
-    }
-
-    /**
-     * Área opcional: resuelve por nombre normalizado (case/espacio-insensible,
-     * vía `NormalizadorNombre` — mismo criterio que `Area::nombre_normalizado`)
-     * DENTRO de la empresa; si no existe todavía, la CREA (mismo patrón que
-     * `ServicioImportacionMaestra::resolverOCrearArea`, con el mismo generador
-     * de código `ARE-XXXX` que usa `AreaController::store`). La creación
-     * ocurre dentro de la transacción de `procesar()`: en un análisis esa
-     * transacción siempre hace rollback, así que "Analizar archivo" nunca
-     * deja un área huérfana — sólo `importar()` la persiste de verdad.
-     *
-     * `$areasCtx['resueltas']` cachea por nombre normalizado dentro del MISMO
-     * archivo, así "Compras" repetido en 40 filas resuelve una sola vez y
-     * comparte `area_id`; `existentes`/`nuevas` alimentan el reporte que ve
-     * el usuario en la prevalidación.
-     *
-     * @param  array{resueltas: array<string, Area>, existentes: array<string, string>, nuevas: array<string, string>}  $areasCtx
-     * @return array{0: int|null, 1: string|null}
-     */
-    private function resolverOCrearArea(Empresa $empresa, ?string $nombreArea, array &$areasCtx): array
-    {
-        if ($nombreArea === null) {
-            return [null, null];
-        }
-
-        $normalizado = NormalizadorNombre::catalogo($nombreArea);
-        $clave = $empresa->getKey().'|'.$normalizado;
-
-        if (isset($areasCtx['resueltas'][$clave])) {
-            $area = $areasCtx['resueltas'][$clave];
-
-            return [$area->id, $area->nombre];
-        }
-
-        $area = Area::query()->where('empresa_id', $empresa->getKey())
-            ->where('nombre_normalizado', $normalizado)
-            ->first();
-
-        if ($area !== null) {
-            $areasCtx['existentes'][$clave] = $area->nombre;
-        } else {
-            $area = $this->crearAreaSegura($empresa, $nombreArea, $normalizado);
-            $areasCtx['nuevas'][$clave] = $area->nombre;
-        }
-
-        $areasCtx['resueltas'][$clave] = $area;
-
-        return [$area->id, $area->nombre];
-    }
-
-    /**
-     * Crea el área con el mismo generador de código (`ARE-XXXX`) que
-     * `AreaController::store()`. Ante una carrera real (dos importaciones
-     * concurrentes de la MISMA empresa creando la misma área nueva a la vez),
-     * el índice único `areas_empresa_id_nombre_normalizado_unique` la
-     * rechaza: se reutiliza la fila que ganó la carrera en vez de duplicar o
-     * fallar con un 500. `CreaConCodigoUnico` cubre aparte una eventual
-     * colisión del CÓDIGO (evento distinto e independiente).
-     */
-    private function crearAreaSegura(Empresa $empresa, string $nombreOriginal, string $normalizado): Area
-    {
-        return $this->crearConCodigoUnico(function () use ($empresa, $nombreOriginal, $normalizado): Area {
-            try {
-                return Area::query()->create([
-                    'empresa_id' => $empresa->getKey(),
-                    'nombre' => $this->limpiarNombreArea($nombreOriginal),
-                    'codigo' => $this->generarCodigoArea($empresa),
-                    'activa' => true,
-                ]);
-            } catch (QueryException $e) {
-                if (! $this->esViolacionNombreAreaDuplicado($e)) {
-                    throw $e;
-                }
-
-                return Area::query()->where('empresa_id', $empresa->getKey())
-                    ->where('nombre_normalizado', $normalizado)
-                    ->firstOrFail();
-            }
-        });
-    }
-
-    /**
-     * Nombre canónico del área nueva: recorta y colapsa espacios múltiples
-     * (mismo colapso que `NormalizadorNombre::catalogo()`), pero conserva las
-     * mayúsculas/minúsculas tal como vinieron en la primera aparición válida
-     * — nunca se fuerza mayúsculas sólo porque una fila del Excel venga así.
-     */
-    private function limpiarNombreArea(string $nombreOriginal): string
-    {
-        return preg_replace('/\s+/u', ' ', trim($nombreOriginal)) ?? trim($nombreOriginal);
-    }
-
-    private function generarCodigoArea(Empresa $empresa): string
-    {
-        return $this->codigos->siguienteConPrefijo($empresa, 'area', 'ARE', semilla: fn (): int => $this->maximoSufijo(
-            Area::query()->where('empresa_id', $empresa->getKey())->where('codigo', 'like', 'ARE-%')->pluck('codigo'),
-            'ARE-',
-        ));
-    }
-
-    /**
-     * Distingue una violación del índice único de NOMBRE
-     * (`areas_empresa_id_nombre_normalizado_unique`) de cualquier otro error
-     * de integridad de `areas` (p. ej. el código, que ya cubre
-     * `CreaConCodigoUnico` con su propio criterio) — portátil entre
-     * MySQL/MariaDB (nombra el índice) y SQLite de testing (nombra
-     * tabla.columna), mismo criterio que `EmpresaController::store()` para
-     * distinguir el RFC de cualquier otro unique.
-     */
-    private function esViolacionNombreAreaDuplicado(QueryException $e): bool
-    {
-        return $e->getCode() === '23000'
-            && (str_contains($e->getMessage(), 'areas_empresa_id_nombre_normalizado_unique')
-                || str_contains($e->getMessage(), 'areas.nombre_normalizado'));
     }
 
     /**
