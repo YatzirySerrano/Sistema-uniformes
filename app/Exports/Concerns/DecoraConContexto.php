@@ -203,7 +203,7 @@ trait DecoraConContexto
 
             if ($administrativo) {
                 $this->ajustarColumnasYAlineacion($hoja, $numColumnas, $filaEncabezados, $ultimaFila);
-                $this->pintarPiePaginaAdministrativo($hoja, $contexto);
+                $this->pintarPiePaginaAdministrativo($hoja);
             }
         }
 
@@ -321,17 +321,24 @@ trait DecoraConContexto
     /**
      * Pie de página de IMPRESIÓN (sólo visible al imprimir/exportar a PDF
      * desde Excel, nunca en pantalla): nombre del sistema a la izquierda,
-     * "Página X de Y" al centro, fecha/hora de generación a la derecha.
+     * "Página X de Y" al centro. SIN fecha/hora: la fecha de generación ya
+     * vive en las celdas de metadata ("Generado:").
+     *
+     * En los códigos de header/footer de Excel, `&<n>` (tamaño de fuente)
+     * absorbe TODOS los dígitos que le siguen: `&8` + "02/11/2026" se leía
+     * como tamaño 802 pt y la fecha se imprimía gigante sobre la hoja. Por
+     * eso el texto nunca puede empezar con un dígito justo después del
+     * código (se separa con un espacio) y `&` literal se escapa como `&&`.
      */
-    private function pintarPiePaginaAdministrativo(Worksheet $hoja, ContextoExportacion $contexto): void
+    private function pintarPiePaginaAdministrativo(Worksheet $hoja): void
     {
-        // Nombre del sistema (config, controlado) y fecha ya formateada
-        // (`generadoEnLocal()`, controlada) — ninguno de los dos es texto
-        // libre de usuario, así que no requieren escapar `&`.
-        $nombreSistema = (string) config('app.name', 'Sistema');
-        $fecha = $contexto->generadoEnLocal();
+        $nombreSistema = str_replace('&', '&&', (string) config('app.name', 'Sistema'));
 
-        $hoja->getHeaderFooter()->setOddFooter("&L&8{$nombreSistema}&C&8Página &P de &N&R&8{$fecha}");
+        if (preg_match('/^\d/', $nombreSistema) === 1) {
+            $nombreSistema = ' '.$nombreSistema;
+        }
+
+        $hoja->getHeaderFooter()->setOddFooter("&L&8{$nombreSistema}&C&8Página &P de &N");
     }
 
     /**

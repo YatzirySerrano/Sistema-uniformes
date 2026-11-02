@@ -478,3 +478,64 @@ it('un usuario sin el permiso del módulo no puede exportarlo', function () {
     $this->actingAs($sinPermiso)->get('/empresas/exportar')->assertForbidden();
     $this->actingAs($sinPermiso)->get('/auditoria/exportar')->assertForbidden();
 });
+
+it('Excel real administrativo: el header/footer de impresión no lleva fecha/hora ni códigos que la vuelvan gigante, y la metadata sigue en celdas', function (string $titulo, array $encabezados, array $filas) {
+    config(['app.name' => 'Sistema de Uniformes']);
+    $contexto = new ContextoExportacion($titulo, null, ['Estado' => 'Activos'], count($filas), generadoPor: 'Ana Prueba');
+    $export = new ListadoExport($filas, $encabezados, $contexto);
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+    $hoja = IOFactory::load($temporal)->getSheetByName('Datos');
+    @unlink($temporal);
+
+    $headerFooter = $hoja->getHeaderFooter();
+    $fechaGeneracion = $contexto->generadoEnLocal();
+    $soloFecha = $contexto->generadoEnLocal('d/m/Y');
+
+    foreach ([$headerFooter->getOddHeader(), $headerFooter->getEvenHeader(), $headerFooter->getEvenFooter(), $headerFooter->getFirstHeader(), $headerFooter->getFirstFooter()] as $seccion) {
+        expect($seccion)->toBe('');
+    }
+
+    $pie = $headerFooter->getOddFooter();
+    expect($pie)->not->toContain($fechaGeneracion)
+        ->not->toContain($soloFecha)
+        ->not->toMatch('/&[DT]/')
+        ->not->toMatch('/\d{1,2}\/\d{1,2}\/\d{4}/')
+        // Un código de tamaño de fuente (`&<n>`) nunca debe ir pegado a más
+        // dígitos: Excel los absorbe como tamaño (p. ej. `&802` = 802 pt).
+        ->not->toMatch('/&\d+\d{2,}/')
+        ->toContain('Sistema de Uniformes')
+        ->toContain('&P')
+        ->toContain('&N');
+
+    // La metadata normal (incluida la fecha de generación) sigue en las celdas.
+    $etiquetas = array_map(fn (int $fila): mixed => $hoja->getCell("A{$fila}")->getValue(), range(1, 6));
+    expect($etiquetas)->toBe(['Reporte:', 'Empresa:', 'Estado:', 'Generado por:', 'Generado:', 'Registros:']);
+    expect($hoja->getCell('B1')->getValue())->toBe($titulo);
+    expect($hoja->getCell('B5')->getValue())->toBe($fechaGeneracion);
+
+    // Configuración de impresión intacta.
+    $pageSetup = $hoja->getPageSetup();
+    expect($pageSetup->getOrientation())->toBe(PageSetup::ORIENTATION_LANDSCAPE);
+    expect($pageSetup->getFitToWidth())->toBe(1);
+    expect($pageSetup->getRowsToRepeatAtTop())->toBe(['8', '8']);
+    expect($hoja->getFreezePane())->toBe('A9');
+    expect($hoja->getAutoFilter()->getRange())->not->toBe('');
+})->with([
+    'Contratos' => ['Contratos', ['Folio', 'Cliente', 'Inicio'], [['CON-0001', 'Cliente A', '01/10/2026'], ['CON-0002', 'Cliente B', '15/10/2026']]],
+    'Servicios' => ['Servicios', ['Código', 'Nombre', 'Estado'], [['SRV-0001', 'Limpieza', 'Activo'], ['SRV-0002', 'Vigilancia', 'Activo']]],
+]);
+
+it('el pie de impresión escapa `&` y no pega dígitos al código de tamaño cuando el nombre del sistema empieza con número', function () {
+    config(['app.name' => '3M & Asociados']);
+    $contexto = new ContextoExportacion('Servicios', null, [], 1);
+    $export = new ListadoExport([['SRV-0001', 'Limpieza']], ['Código', 'Nombre'], $contexto);
+
+    $temporal = tempnam(sys_get_temp_dir(), 'xlsx_test_');
+    file_put_contents($temporal, Excel::raw($export, ExcelFormatos::XLSX));
+    $pie = IOFactory::load($temporal)->getSheetByName('Datos')->getHeaderFooter()->getOddFooter();
+    @unlink($temporal);
+
+    expect($pie)->toContain('3M && Asociados')->not->toMatch('/&\d+3M/');
+});
